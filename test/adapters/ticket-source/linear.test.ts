@@ -1328,6 +1328,27 @@ test('the definition with pickUp, with Linear answering the team read with a 401
   }
 });
 
+test('the definition with a wrong pickUp, created unchecked while Linear was unavailable, refuses the name once Linear answers', async () => {
+  const world = createLinearWorld(PICK_UP_SEED);
+  world.failNext('SailTeam', { status: 503, body: 'Service Unavailable' });
+  const served = world.serve();
+  try {
+    const env = { LINEAR_API_KEY: KEY, SAIL_LINEAR_API_URL: served.url };
+    const adapter = await linearTicketSource.create({ team: 'ADW', pickUp: ['Tood'] }, context(env));
+    const listed = await rejection(adapter.listDesignated('sail'));
+    const moved = await rejection(adapter.update('ADW-2', { state: 'unstarted' }));
+    const problem = "option pickUp: 'Tood' is no state of team ADW";
+    expect([portFailure(listed), messageOf(listed), portFailure(moved), messageOf(moved)]).toEqual([
+      { port: 'ticketSource', op: 'listDesignated', code: 'invalid' },
+      `ticketSource.listDesignated: ${problem}`,
+      { port: 'ticketSource', op: 'update', code: 'invalid' },
+      `ticketSource.update: ${problem}`,
+    ]);
+  } finally {
+    served.stop();
+  }
+});
+
 test.each<[unknown, string]>([
   [[], 'linear ticketSource: option pickUp: Too small: expected array to have >=1 items'],
   [[''], 'linear ticketSource: option pickUp.0: Too small: expected string to have >=1 characters'],
