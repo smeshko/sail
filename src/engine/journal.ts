@@ -9,7 +9,7 @@
 // the keys the workflow asks for. A `group` that doesn't hold its own line's key was written by something else, or by a
 // bug in sail: reading it throws, and so does appending it.
 //
-// A call's line may carry `bindings`, the fingerprints of what the workflow supplied (see fingerprint.ts), which the
+// A call's line, and each of its steps' lines, may carry `bindings`, the fingerprints of what the workflow supplied (see fingerprint.ts), which the
 // determinism guard compares on replay. A line without them is an older run's.
 //
 // A step of a multi-step call is journaled as it finishes, under `stage#call/step`, before its call's own line. A line's
@@ -36,7 +36,7 @@ export interface JournalEntry {
   resultPath: string;
   /** The keys of the group the call belongs to, in declaration order: present only on a group's calls. */
   group?: string[];
-  /** One short hash per value or file binding the workflow supplied, by name: present on a call's line, never a step's. */
+  /** One short hash per value or file binding the workflow supplied, by name: present on a call's line and its steps'. */
   bindings?: Record<string, string>;
   recordedAt: string;
 }

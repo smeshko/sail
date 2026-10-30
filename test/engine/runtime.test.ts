@@ -2654,6 +2654,28 @@ test.each<[string, (sail: string) => void, string]>([
   60_000,
 );
 
+test('a resume that asks for a call with other bindings than its journaled steps ran with fails with determinism_violation and runs nothing (review R2)', async () => {
+  await withTempRepo(async (repo) => {
+    const stopped = await stoppedTwoStep(repo.dir, afterDescribe);
+    edit(
+      join(repo.dir, '.sail'),
+      WORKFLOW_FILE,
+      "run.stage(publish, { spec: s.files['spec.md'] })",
+      "run.stage(publish, { spec: b.files['brief.md'] })",
+    );
+    const before = readFileSync(join(stopped.dir, 'journal.ndjson'), 'utf8');
+    const end = await resumeWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), runId: stopped.runId });
+    expect(end).toMatchObject({
+      status: 'failed',
+      stopReason: 'determinism_violation',
+      message: "the journal has 'publish#1/describe' with other bindings than the workflow asks for: 'spec' changed",
+    });
+    expect(readFileSync(join(stopped.dir, 'journal.ndjson'), 'utf8')).toBe(before);
+    expect(stubExecutions(repo.dir)).toEqual(['brief#1']);
+    expect(sessionsOf(events(stopped.dir), 'publish#1/describe')).toBe(1);
+  });
+}, 60_000);
+
 test("a resume with publish's first step renamed after publish#1 is journaled whole fails with determinism_violation and runs nothing (review R1-2)", async () => {
   await withTempRepo(async (repo) => {
     const stopped = await stoppedTwoStep(repo.dir, (_, controller) => ({
@@ -2804,15 +2826,15 @@ test('a run journals each call line with its bindings fingerprints, {} for a cal
   expect(lines.flatMap((line) => validateDocument('sail.journal.v1', JSON.parse(line))).map(formatIssue)).toEqual([]);
 });
 
-test("a multi-step call's line carries its bindings and its step lines none", async () => {
+test("a multi-step call's line and its step lines carry its bindings", async () => {
   await withTempRepo(async (repo) => {
     writeTwoStep(repo.dir);
     const end = await ranAgent(repo.dir);
-    expect(entryOf(end.dir, 'publish#1/describe')?.bindings).toBeUndefined();
-    expect(entryOf(end.dir, 'publish#1/open')?.bindings).toBeUndefined();
     const call = entryOf(end.dir, 'publish#1')?.bindings ?? {};
     expect(Object.keys(call)).toEqual(['spec']);
     expect(call.spec).toMatch(/^[0-9a-f]{16}$/);
+    expect(entryOf(end.dir, 'publish#1/describe')?.bindings).toEqual(call);
+    expect(entryOf(end.dir, 'publish#1/open')?.bindings).toEqual(call);
   });
 }, 60_000);
 

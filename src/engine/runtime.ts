@@ -11,8 +11,9 @@
 // and only the call's line is journaled: its steps' results are in the call directory, and a call interrupted before
 // it ended runs again from its first step.
 //
-// A call's line carries the fingerprints of the bindings the workflow supplied, which the determinism guard compares on
-// replay. The intake's line and a step's carry none.
+// A call's line and its steps' lines carry the fingerprints of the bindings the workflow supplied, which the determinism
+// guard compares on replay, so a resume can't hand a call steps that ran with other bindings. The intake's line carries
+// none.
 //
 // A group, `run.all()`, ends the replay with its unjournaled calls, which run at once, each in its own call directory.
 // Each is journaled as it completes, carrying the group's keys, so the journal holds them in completion order, and
@@ -109,6 +110,7 @@ import { type AgentExecution, asStep, callProblems, type Ran, runCall } from './
 import { type CallPaths, nextTry, runRelative } from './call-dir';
 import { type Clock, systemClock } from './clock';
 import { takeControl } from './control';
+import { bindingChanges } from './fingerprint';
 import {
   INTAKE_INDEX,
   INTAKE_KEY,
@@ -306,11 +308,12 @@ const callKeyOf = (key: string): string => key.split('/')[0] ?? key;
 
 /**
  * The step lines of `call` the journal holds, which must be its stage's first steps in order, none after one that
- * stopped the stage, or why they aren't. A one-step definition has none, and any line of one is a change. A call the
- * journal holds is checked as one still to run is: its stage may have changed since.
+ * stopped the stage, each with the call's binding fingerprints where both have them, or why they aren't. A one-step
+ * definition has none, and any line of one is a change. A call the journal holds is checked as one still to run is: its
+ * stage may have changed since.
  */
 function finishedSteps(
-  call: Pick<PendingCall, 'key' | 'stage' | 'definition'>,
+  call: Pick<PendingCall, 'key' | 'stage' | 'definition'> & { fingerprints?: Record<string, string> },
   entries: readonly JournalEntry[],
 ): JournalEntry[] | { failed: string } {
   const lines = entries.filter((entry) => entry.step !== undefined && callKeyOf(entry.key) === call.key);
@@ -328,6 +331,14 @@ function finishedSteps(
       return {
         failed: `the journal has '${line.key}' after '${before.key}', which ended ${call.stage} ${before.outcome}`,
       };
+    }
+    // A step line without fingerprints is an older run's: it keeps the step-name check alone.
+    const changes =
+      line.bindings === undefined || call.fingerprints === undefined
+        ? undefined
+        : bindingChanges(line.bindings, call.fingerprints);
+    if (changes !== undefined) {
+      return { failed: `the journal has '${line.key}' with other bindings than the workflow asks for: ${changes}` };
     }
   }
   return lines;
@@ -649,7 +660,7 @@ async function drive(
         // has used it up, the next doesn't start, and the boundary before the call suspends the run.
         onStep: (result, paths) => {
           if (callSignal?.aborted || ranOut(result) || limitedOf(result) !== undefined) return false;
-          journal(result, paths);
+          journal(result, paths, undefined, call.fingerprints);
           if (callSignal?.aborted) return false;
           return !(
             PASSED.has(String(result.outcome)) &&
@@ -835,7 +846,13 @@ async function drive(
       // replays against lines its stage no longer has.
       for (const entry of entries) {
         const definition = loaded.stages.find((each) => each.definition.name === entry.stage)?.definition;
-        const checked = definition === undefined ? [] : finishedSteps({ ...entry, definition }, lines);
+        const checked =
+          definition === undefined
+            ? []
+            : finishedSteps(
+                { ...entry, definition, ...(entry.bindings === undefined ? {} : { fingerprints: entry.bindings }) },
+                lines,
+              );
         if ('failed' in checked) return await failed('determinism_violation', checked.failed);
       }
       // A seeded run's first call of its own is the stage it was seeded for: an edited workflow that asks for another

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/smeshko/sail/main/schemas/sail.journal.v1.json",
   "title": "sail journal line: one completed call or step",
-  "description": "One NDJSON line in journal.ndjson: the append-only record a resume replays from. One line per completed call, per completed intake, and per step inside a multi-step stage. A call of a group carries the group's keys, and a call line may carry a short hash per binding the workflow supplied.",
+  "description": "One NDJSON line in journal.ndjson: the append-only record a resume replays from. One line per completed call, per completed intake, and per step inside a multi-step stage. A call of a group carries the group's keys, and a call line and its step lines may carry a short hash per binding the workflow supplied.",
   "type": "object",
   "properties": {
     "seq": { "type": "integer", "minimum": 1 },
@@ -30,7 +30,7 @@
       "uniqueItems": true
     },
     "bindings": {
-      "description": "one short hash per value or file binding the workflow supplied to this call, by binding name: what the determinism guard compares on replay. Absent on a line written without them.",
+      "description": "one short hash per value or file binding the workflow supplied to this call, or to the call this step belongs to, by binding name: what the determinism guard compares on replay. Absent on a line written without them.",
       "type": "object",
       "patternProperties": { ".": { "type": "string", "pattern": "^[0-9a-f]{16}$" } },
       "additionalProperties": false
