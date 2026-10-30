@@ -107,7 +107,8 @@ export const createPiSession: PiSessionFactory = async (params) => {
   try {
     const settingsManager = sdk.SettingsManager.inMemory({
       compaction: { enabled: false },
-      retry: { enabled: false },
+      // pi retries a throttle or an overload itself, 2, 4 and 8 s apart; a limit still refused after that suspends the run.
+      retry: { enabled: true },
     });
     const resourceLoader = new sdk.DefaultResourceLoader({
       cwd: params.cwd,
