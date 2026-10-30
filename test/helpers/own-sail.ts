@@ -13,7 +13,6 @@ const FAKE_ADAPTERS = [
   '  codeHost: { use: fake, seed: ./fake/prs.json }',
   '  harness: { use: fake }',
   '  workspace: { use: fake }',
-  '  harnesses: { codex: { use: fake } }',
   '',
 ].join('\n');
 

@@ -25,7 +25,7 @@ export const implement = agent('implement', {
     feedback: value(PassFeedback).optional(),
   },
   output: Implemented,
-  model: 'sol',
+  model: 'default',
   permissions: withTools(builder, ['WebFetch']),
   budget: { maxTurns: 250, maxUsd: 10, maxMinutes: 90 },
 });

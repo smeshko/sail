@@ -15,7 +15,7 @@ export const fix = agent('fix', {
     base: value(z.string()),
   },
   output: Fixed,
-  model: 'sol',
+  model: 'deep',
   permissions: builder,
   budget: { maxTurns: 150, maxUsd: 6, maxMinutes: 90 },
 });
