@@ -144,13 +144,13 @@ test('the messages of one turn share an id: the turn is counted once, when the n
         type: 'usage:update',
         turn: 1,
         tokens: { input: 10, cacheRead: 300, cacheWrite: 40, output: 9 },
-        costUsdSoFar: 0,
+        costUsdSoFar: 0.00033,
       },
     ],
   });
 });
 
-test('parallel tool calls of one turn close it once, and each update is the running total of the closed turns, at no cost yet', () => {
+test('parallel tool calls of one turn close it once, and each update is the running total of the closed turns, at the priced estimate', () => {
   const { reader: r } = reader();
   const events = readAll(r, [
     assistantToolUse('m1', 'a', 'Read', { file_path: 'a.ts' }, { usage: { input: 10, output: 4, cacheRead: 100 } }),
@@ -161,12 +161,17 @@ test('parallel tool calls of one turn close it once, and each update is the runn
     assistantText('m3', 'Done.', { usage: { input: 1, output: 1 } }),
   ]);
   expect(updates(events)).toEqual([
-    { type: 'usage:update', turn: 1, tokens: { input: 10, cacheRead: 100, cacheWrite: 0, output: 8 }, costUsdSoFar: 0 },
+    {
+      type: 'usage:update',
+      turn: 1,
+      tokens: { input: 10, cacheRead: 100, cacheWrite: 0, output: 8 },
+      costUsdSoFar: 0.00012,
+    },
     {
       type: 'usage:update',
       turn: 2,
       tokens: { input: 15, cacheRead: 100, cacheWrite: 20, output: 14 },
-      costUsdSoFar: 0,
+      costUsdSoFar: 0.00027,
     },
   ]);
   expect(r.state().spent).toEqual({
@@ -174,7 +179,7 @@ test('parallel tool calls of one turn close it once, and each update is the runn
     cacheReadTokens: 100,
     cacheWriteTokens: 20,
     outputTokens: 14,
-    costUsd: 0,
+    costUsd: 0.00027,
   });
 });
 
@@ -192,9 +197,9 @@ test("a tool result between two messages of one turn doesn't count the turn twic
   const settled = r.settle(undefined);
   const tokens = (input: number, output: number) => ({ input, cacheRead: 100, cacheWrite: 0, output });
   expect([...updates(events), ...updates(settled)]).toEqual([
-    { type: 'usage:update', turn: 1, tokens: tokens(10, 4), costUsdSoFar: 0 },
-    { type: 'usage:update', turn: 1, tokens: tokens(10, 8), costUsdSoFar: 0 },
-    { type: 'usage:update', turn: 2, tokens: tokens(15, 14), costUsdSoFar: 0 },
+    { type: 'usage:update', turn: 1, tokens: tokens(10, 4), costUsdSoFar: 0.00008 },
+    { type: 'usage:update', turn: 1, tokens: tokens(10, 8), costUsdSoFar: 0.00012 },
+    { type: 'usage:update', turn: 2, tokens: tokens(15, 14), costUsdSoFar: 0.00019 },
   ]);
   expect({ turns: r.state().turns, input: r.state().spent.inputTokens }).toEqual({ turns: 2, input: 15 });
 });
@@ -212,7 +217,12 @@ test("settling on a result closes the open turn, then gives the result's totals 
   });
   const settled = r.settle(result);
   expect(settled).toEqual([
-    { type: 'usage:update', turn: 1, tokens: { input: 3, cacheRead: 0, cacheWrite: 0, output: 7 }, costUsdSoFar: 0 },
+    {
+      type: 'usage:update',
+      turn: 1,
+      tokens: { input: 3, cacheRead: 0, cacheWrite: 0, output: 7 },
+      costUsdSoFar: 0.000076,
+    },
     {
       type: 'usage:update',
       turn: 5,
@@ -248,8 +258,18 @@ test("a subagent's messages are no turns of the session: their tokens count only
   ]);
   const settled = r.settle(undefined);
   expect(updates([...events, ...settled])).toEqual([
-    { type: 'usage:update', turn: 1, tokens: { input: 10, cacheRead: 0, cacheWrite: 0, output: 10 }, costUsdSoFar: 0 },
-    { type: 'usage:update', turn: 2, tokens: { input: 30, cacheRead: 0, cacheWrite: 0, output: 30 }, costUsdSoFar: 0 },
+    {
+      type: 'usage:update',
+      turn: 1,
+      tokens: { input: 10, cacheRead: 0, cacheWrite: 0, output: 10 },
+      costUsdSoFar: 0.00012,
+    },
+    {
+      type: 'usage:update',
+      turn: 2,
+      tokens: { input: 30, cacheRead: 0, cacheWrite: 0, output: 30 },
+      costUsdSoFar: 0.00036,
+    },
   ]);
   expect(r.state().turns).toBe(2);
 });
@@ -291,7 +311,12 @@ test('a stream event, a status, an API retry, a hook or a result between the mes
   expect(events).toEqual([
     { type: 'harness:session_start', adapter: 'claude-code', sessionId: SESSION_ID, model: MODEL },
     { type: 'agent:message', text: 'Working.' },
-    { type: 'usage:update', turn: 1, tokens: { input: 0, cacheRead: 0, cacheWrite: 0, output: 3 }, costUsdSoFar: 0 },
+    {
+      type: 'usage:update',
+      turn: 1,
+      tokens: { input: 0, cacheRead: 0, cacheWrite: 0, output: 3 },
+      costUsdSoFar: 0.00003,
+    },
     { type: 'agent:message', text: 'Done.' },
   ]);
   readAll(plain, said);
@@ -348,7 +373,12 @@ test('settling with no result closes the open turn and fails every open tool, wi
   ]);
   at(160);
   expect(r.settle(undefined)).toEqual([
-    { type: 'usage:update', turn: 1, tokens: { input: 0, cacheRead: 0, cacheWrite: 0, output: 6 }, costUsdSoFar: 0 },
+    {
+      type: 'usage:update',
+      turn: 1,
+      tokens: { input: 0, cacheRead: 0, cacheWrite: 0, output: 6 },
+      costUsdSoFar: 0.00006,
+    },
     { type: 'tool:end', callId: 't1', status: 'failed', durationMs: 60 },
     { type: 'tool:end', callId: 't2', status: 'failed', durationMs: 60 },
   ]);
@@ -447,4 +477,24 @@ test("settling emits a held denial ahead of its call's failed end, and one for a
     },
   ]);
   expect(r.state().denials).toBe(2);
+});
+
+test("a turn is priced by the model its own message names, and the reader's spent carries the estimate until the result replaces it", () => {
+  const { reader: r } = reader();
+  const opus = assistantText('m1', 'a', { usage: { input: 1000, output: 1000 } });
+  opus.message.model = 'claude-opus-5-5';
+  const events = readAll(r, [opus, assistantText('m2', 'b', { usage: { input: 1000, output: 1000 } })]);
+  const settled = r.settle(undefined);
+  const estimate = updates([...events, ...settled]).at(-1);
+  expect(estimate?.type === 'usage:update' ? estimate.costUsdSoFar : undefined).toBe(0.036);
+  expect(r.state().spent.costUsd).toBe(0.036);
+  const result = r.settle(resultSuccess({ cost: 0.5 }));
+  const last = result.at(-1);
+  expect({
+    last: last?.type === 'usage:update' ? last.costUsdSoFar : undefined,
+    spent: r.state().spent.costUsd,
+  }).toEqual({
+    last: 0.5,
+    spent: 0.5,
+  });
 });

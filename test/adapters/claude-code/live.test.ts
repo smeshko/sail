@@ -9,7 +9,8 @@
 // The guardrail cases (7.3), each under $0.10 on the default model: a denied command the session recovers from, no MCP
 // tool, a write outside the workspace, the credential scrub (`printenv`), the dollar, turn and minute budgets, and an
 // abort, before a tool call and during one. The minute and abort cases also check that no process of the session is
-// left, by its workspace path, and those that run a command check that its shell is gone too.
+// left, by its workspace path, and those that run a command check that its shell is gone too. A process killed outright
+// (SIGKILL, a crash) has no result to give, so its cost stays the estimate of its last usage update: a known gap.
 import { describe, expect, setDefaultTimeout, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -259,6 +260,9 @@ describe.skipIf(!LIVE)('claude-code live', () => {
       'budget exceeded: maxMinutes 0.25',
     );
     expect(events.some((event) => event.type === 'tool:start' && event.tool === 'Bash')).toBe(true);
+    // The session was interrupted, so its result's own total is recorded, not the $0 an abort once left.
+    expect(result.usage.costUsd ?? 0).toBeGreaterThan(0);
+    expect(result.usage.costUsd).toBe((result.raw as { total_cost_usd: number }).total_cost_usd);
     expect([...processesOf(dirname(req.cwd)), ...processesOf(SLEEP)]).toEqual([]);
   }, 600_000);
 

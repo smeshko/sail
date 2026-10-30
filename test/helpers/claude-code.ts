@@ -273,6 +273,8 @@ export type Act =
   | { readonly act: 'spawn'; readonly command: string; readonly args: readonly string[] }
   /** Waits until the session's controller aborts, then throws as the SDK does. */
   | { readonly act: 'waitForAbort' }
+  /** Waits until the session's interrupt() is called, then plays on; an abort ends the wait with a throw. */
+  | { readonly act: 'waitForInterrupt' }
   /** Throws, as a broken stream does. */
   | { readonly act: 'throw'; readonly message: string };
 
@@ -286,6 +288,8 @@ export interface ScriptedQuery extends QueryFunction {
   readonly verdicts: unknown[];
   /** The pid of each process a `spawn` act started. */
   readonly pids: number[];
+  /** How many times a session's interrupt() was called. */
+  readonly interrupts: number;
 }
 
 const isAct = (step: Step): step is Act => 'act' in step;
@@ -295,7 +299,12 @@ export function scriptedQuery(streams: readonly Stream[]): ScriptedQuery {
   const calls: { prompt: string; options: Options }[] = [];
   const verdicts: unknown[] = [];
   const pids: number[] = [];
-  const play = async function* (stream: Stream, options: Options): AsyncGenerator<SDKMessage, void> {
+  let interrupts = 0;
+  const play = async function* (
+    stream: Stream,
+    options: Options,
+    interrupted: { done: boolean; release?: () => void },
+  ): AsyncGenerator<SDKMessage, void> {
     for (const step of stream) {
       if (!isAct(step)) {
         yield step;
@@ -352,6 +361,17 @@ export function scriptedQuery(streams: readonly Stream[]): ScriptedQuery {
           }
           throw new Error('Claude Code process aborted by user');
         }
+        case 'waitForInterrupt': {
+          const signal = options.abortController?.signal;
+          if (!interrupted.done) {
+            await new Promise<void>((settle) => {
+              interrupted.release = settle;
+              signal?.addEventListener('abort', () => settle(), { once: true });
+            });
+          }
+          if (signal?.aborted) throw new Error('Claude Code process aborted by user');
+          break;
+        }
         case 'throw':
           throw new Error(step.message);
       }
@@ -360,9 +380,20 @@ export function scriptedQuery(streams: readonly Stream[]): ScriptedQuery {
   const query = (params: { prompt: string; options: Options }) => {
     calls.push(params);
     const stream = streams[Math.min(calls.length, streams.length) - 1] ?? [];
-    return play(stream, params.options);
+    const interrupted: { done: boolean; release?: () => void } = { done: false };
+    const playing = play(stream, params.options, interrupted);
+    if (!stream.some((step) => isAct(step) && step.act === 'waitForInterrupt')) return playing;
+    return Object.assign(playing, {
+      interrupt: async () => {
+        interrupts++;
+        interrupted.done = true;
+        interrupted.release?.();
+      },
+    });
   };
-  return Object.assign(query, { calls, verdicts, pids });
+  return Object.defineProperty(Object.assign(query, { calls, verdicts, pids }), 'interrupts', {
+    get: () => interrupts,
+  }) as unknown as ScriptedQuery;
 }
 
 /** A session that writes `spec.md`, says one thing over two turns, and submits `output`. */
