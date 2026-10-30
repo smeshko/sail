@@ -246,6 +246,63 @@ test('seeding self-review journals every call of the source before self-review#1
   });
 }, 60_000);
 
+const MINTED = 'FAKE-1-01HZX3Y4Z5A6B7C8D9E0F1G2H3';
+
+test('a seeded run given a run id runs under exactly that id, with fromRun in its header', async () => {
+  await withTempRepo(async (repo) => {
+    const from = await source.copyInto(repo.dir);
+    const opened = openedFrom(await seed(repo, { fromRun: from.runId, runId: MINTED }));
+    expect({
+      runId: opened.runId,
+      dir: opened.dir,
+      header: [readRunHeader(opened.dir).runId, readRunHeader(opened.dir).fromRun],
+      ids: runIds(repo.dir),
+    }).toEqual({
+      runId: MINTED,
+      dir: join(repo.dir, '.sail-runs', MINTED),
+      header: [MINTED, from.runId],
+      ids: [from.runId, MINTED].sort(),
+    });
+  });
+}, 60_000);
+
+test.each<[string, (sourceId: string) => string, (sourceId: string) => string]>([
+  [
+    'an id of another ticket',
+    () => 'FAKE-2-01HZX3Y4Z5A6B7C8D9E0F1G2H3',
+    () =>
+      "--run-id takes the id of a new run of FAKE-1, FAKE-1-<26 Crockford characters>: 'FAKE-2-01HZX3Y4Z5A6B7C8D9E0F1G2H3' is not one",
+  ],
+  [
+    'a malformed id',
+    () => 'FAKE-1-nope',
+    () => "--run-id takes the id of a new run of FAKE-1, FAKE-1-<26 Crockford characters>: 'FAKE-1-nope' is not one",
+  ],
+  [
+    "an existing run's id",
+    (sourceId) => sourceId,
+    (sourceId) => `--run-id names run ${sourceId}, which already exists in .sail-runs: a seeded run is a new run`,
+  ],
+])(
+  'a seeded run given %s is refused, leaving no run directory, lease or workspace',
+  async (_, id, refusal) => {
+    await withTempRepo(async (repo) => {
+      const from = await source.copyInto(repo.dir);
+      const before = runIds(repo.dir);
+      const leases = join(repo.dir, '.sail-runs', 'fake', 'leases');
+      const leased = () => (existsSync(leases) ? readdirSync(leases) : []);
+      const held = leased();
+      const result = await seed(repo, { fromRun: from.runId, runId: id(from.runId) });
+      expect({ result, runs: runIds(repo.dir), leases: leased() }).toEqual({
+        result: { refused: refusal(from.runId) },
+        runs: before,
+        leases: held,
+      });
+    });
+  },
+  60_000,
+);
+
 test('a seeded run masks its secrets in run.json and hands on a redactor of them', async () => {
   await withTempRepo(async (repo) => {
     const from = await source.copyInto(repo.dir);

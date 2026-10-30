@@ -15,7 +15,8 @@
 //      included: a seed never splits a group, so the seeded run runs the whole group again. A stage with only step lines
 //      and no recorded group is refused if another call is incomplete too: they may be grouped. Each entry must point inside its own
 //      call directory, at regular files, since that is what a run writes and all the copy takes.
-// Then the run id is minted and the header built and checked, with `fromRun`, `reused` (the seed's length, the boundary a
+// Then the run id is minted, or the one the caller minted is taken, refused unless it is a new run's id of the source's
+// ticket, and the header built and checked, with `fromRun`, `reused` (the seed's length, the boundary a
 // resume restores the reused calls' reports by) and no claim: a seeded run reads no
 // ticket and claims nothing: the source's ticket, as its events name it, is carried for the summary. An abort seen by
 // then refuses. Then, as a start does, the branch is leased and the run directory and the workspace made, each undone
@@ -64,7 +65,7 @@ import {
   workspaceFields,
   writeRunHeader,
 } from './run-header';
-import { newRunId } from './run-id';
+import { isRunIdOf, newRunId } from './run-id';
 
 export interface SeededRunOptions {
   secrets?: readonly string[];
@@ -82,6 +83,8 @@ export interface SeededRunOptions {
   clock?: Clock;
   /** Fills the run id's random part. */
   random?: (bytes: Uint8Array) => Uint8Array;
+  /** The id the caller minted for the run, `<ticket key>-<26 Crockford characters>`, of no existing run. */
+  runId?: string;
   /** Refuses the run when it has aborted by the time the run would be opened. */
   signal?: AbortSignal;
 }
@@ -260,7 +263,21 @@ export async function openSeededRun(options: SeededRunOptions): Promise<OpenedRu
   if ('refused' in copied) return copied;
   const ticket = sourceTicket(source.dir);
 
-  const runId = newRunId(ticketKey, now.getTime(), options.random);
+  const minted = options.runId;
+  if (minted !== undefined) {
+    if (!isRunIdOf(ticketKey, minted)) {
+      return {
+        refused: `--run-id takes the id of a new run of ${ticketKey}, ${ticketKey}-<26 Crockford characters>: '${minted}' is not one`,
+      };
+    }
+    const runs = runsDir(found.dir);
+    if (existsSync(join(runs, minted))) {
+      return {
+        refused: `--run-id names run ${minted}, which already exists in ${relative(dirname(found.dir), runs)}: a seeded run is a new run`,
+      };
+    }
+  }
+  const runId = minted ?? newRunId(ticketKey, now.getTime(), options.random);
   const branch = `${sourceBranch}-seeded-${runId.slice(-8).toLowerCase()}`;
   const runSource: Source = { kind: 'ticket', ticketKey, via: 'cli', forced: [] };
   const unopened = buildRunHeader({

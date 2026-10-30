@@ -48,7 +48,8 @@ Usage:
   sail login codex [--device]                                Log in to a ChatGPT subscription for pi's openai-codex models
   sail resume <run> [-q|-v|-vv]                              Resume a suspended or crashed run
   sail stop <run> [--now]                                    Stop at the next call boundary, or end the running call now
-  sail run --from-run <run> --stage <stage> [--continue]     Rerun one stage on another run's earlier calls: a seeded run
+  sail run --from-run <run> --stage <stage> [--continue] [--run-id <id>]
+                                                             Rerun one stage on another run's earlier calls: a seeded run
   sail runs                                                  List the runs in .sail-runs/
   sail show <run> [--events|--follow|--rebuild] [-q|-v|-vv]  Show a run's calls, loops, routes and totals
   sail stage run <stage-dir> [--bind name=value]...          Run one stage in isolation
@@ -95,6 +96,7 @@ Resuming a run:
 
 A seeded run:
   --continue  Runs the rest of the workflow after the stage, not just the stage
+  --run-id    Names the new run, ready to be told before it exists: <ticket key>-<26 Crockford characters>, of no existing run
 
 Output of a run and a resume:
   -q, --quiet    Only the run's start, its errors and the final block
@@ -209,6 +211,7 @@ const commands = new Map<string, CommandSpec>([
     {
       options: {
         'from-run': { type: 'string' },
+        'run-id': { type: 'string' },
         stage: { type: 'string' },
         continue: { type: 'boolean' },
         ...VERBOSITY_OPTIONS,
