@@ -124,10 +124,10 @@ for (const [port, use, expected] of [
   });
 }
 
-test('portVariables names unconfigured jev', async () => {
+test('portVariables gives unconfigured jev no names, as the config may leave it out', async () => {
   expect(
     await portVariables({ sailDir: repo().sailDir, config: configOf({}), builtins: BUILTINS, env: {} }, 'jev'),
-  ).toEqual({ problem: 'jev is not configured in project.yaml' });
+  ).toEqual([]);
 });
 
 test('portVariables reports a module whose requires throws without creating it', async () => {

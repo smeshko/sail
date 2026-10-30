@@ -155,7 +155,8 @@ export async function portVariables(
   port: Port,
 ): Promise<readonly string[] | { problem: string }> {
   const config = options.config.adapters[port];
-  if (config === undefined) return { problem: `${port} is not configured in project.yaml` };
+  // Only Jev may be left out of the config: a step that declares it then gets none, and its `sail port jev` refuses.
+  if (config === undefined) return port === 'jev' ? [] : { problem: `${port} is not configured in project.yaml` };
   try {
     const found = await find(port, config.use, options);
     if (typeof found === 'string') return { problem: `${port}: ${found}` };

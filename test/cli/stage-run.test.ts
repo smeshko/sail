@@ -71,7 +71,7 @@ function writeScript(path: string, body: string): void {
   chmodSync(path, 0o755);
 }
 
-test('a stage declaring unconfigured jev ends not_started without running its script', async () => {
+test('a stage declaring unconfigured jev runs its script with no Jev variables, as Jev is optional', async () => {
   await withTempRepo(async (repo) => {
     const dir = join(fixtureCopy(repo), 'stages', 'jev-less');
     mkdirSync(dir);
@@ -82,15 +82,10 @@ export const jevLess = script('jev-less', { run: './run.sh', output: z.object({}
     );
     writeScript(join(dir, 'run.sh'), 'touch "$STAGE_OUT/ran"\necho "{}"');
     const { code, stdout } = await runCaptured(['stage', 'run', '.sail/stages/jev-less'], repo.dir);
-    expect(code).toBe(EXIT_FAILED);
+    expect(code).toBe(EXIT_OK);
     const callDir = callDirOf(stdout, repo.dir);
-    expect(readResult(callDir)).toMatchObject({
-      outcome: 'error',
-      errors: [
-        { reason: 'not_started', message: 'the step declares the port jev, but jev is not configured in project.yaml' },
-      ],
-    });
-    expect(existsSync(join(callDir, 'ran'))).toBe(false);
+    expect(readResult(callDir)).toMatchObject({ outcome: 'passed' });
+    expect(existsSync(join(callDir, 'ran'))).toBe(true);
   });
 });
 
