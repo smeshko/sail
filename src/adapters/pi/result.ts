@@ -1,12 +1,13 @@
 // How a pi session ended, as one HarnessResult, in the words claude-code's result uses. A submission is `done` or
 // `blocked`; everything else is `error`, with the provider's text kept: an overrun budget, an abort, a throw, a
-// provider failure, no usage, no submission. A failure whose text is the usage limit is `usage_limit`, with `resetsAt`
-// when the text gave one. A session that reports no tokens never counts as a success, whatever it submitted (ADR-0008).
+// provider failure, no usage, no submission. A failure whose text is a provider's limit is `usage_limit`, with
+// `resetsAt` when the text gave one; of the failures read before the end, the last one decides, since pi's auto-retry
+// may have got past the earlier ones. A session that reports no tokens never counts as a success, whatever it submitted (ADR-0008).
 import type { Budget, HarnessFailure } from '../../ports/types';
 import type { ReaderState } from '../claude-code/messages';
 import type { Ended } from '../claude-code/result';
-import { limitText, resetsFromText } from '../claude-code/usage-limit';
 import type { Submitted } from './submission';
+import { limitText, resetsFromText } from './usage-limit';
 
 export interface PiResultInput {
   readonly reader: ReaderState;
@@ -63,8 +64,7 @@ export function toHarnessResult(input: PiResultInput): Ended {
     (spent.inputTokens ?? 0) + (spent.cacheReadTokens ?? 0) + (spent.cacheWriteTokens ?? 0) + (spent.outputTokens ?? 0);
   if (submission === undefined) {
     if (reader.failures.length > 0) {
-      const said = reader.failures.join('; ');
-      return failure(`the session failed: ${said}`, said);
+      return failure(`the session failed: ${reader.failures.join('; ')}`, reader.failures.at(-1) ?? '');
     }
     return failed(tokens === 0 ? 'the session reported no usage' : 'the session ended without submitting', 'failed');
   }

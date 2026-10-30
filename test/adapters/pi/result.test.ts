@@ -78,6 +78,31 @@ test('provider failures read before the end are the error when nothing was submi
   expect(limited.result).toMatchObject({ outcome: 'error', reason: 'usage_limit' });
 });
 
+test("Codex's limit is usage_limit with its try-again time, and only the last failure read decides", () => {
+  const now = new Date('2026-10-30T01:00:00.000Z');
+  const codex = end({ reader: state({ failures: ['Codex error: The usage limit has been reached'] }), now });
+  const timed = end({
+    reader: state({ failures: ['You have hit your ChatGPT usage limit (plus plan). Try again in ~42 min.'] }),
+    now,
+  });
+  const retried = end({ reader: state({ failures: ['429 Too Many Requests', 'connect ECONNREFUSED'] }) });
+  expect(
+    [codex, timed, retried].map(({ result, endReason }) => [
+      result.outcome,
+      endReason,
+      'resetsAt' in result ? result.resetsAt : null,
+    ]),
+  ).toEqual([
+    ['error', 'usage_limit', null],
+    ['error', 'usage_limit', '2026-10-30T01:42:00.000Z'],
+    ['error', 'failed', null],
+  ]);
+  expect(retried.result).toMatchObject({
+    reason: 'harness',
+    message: 'the session failed: 429 Too Many Requests; connect ECONNREFUSED',
+  });
+});
+
 test('a session that ended without submitting is an error', () => {
   const ended = end();
   expect(ended.result).toMatchObject({

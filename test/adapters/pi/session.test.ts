@@ -239,6 +239,31 @@ test("a session's events reach its listener, and an abort after its prompt resol
   });
 });
 
+test('a provider throttle is retried by pi inside the session, so the answer after it is the one read', async () => {
+  const faux = fauxProvider({ provider: 'faux', models: [{ id: 'scripted' }] });
+  faux.setResponses([
+    fauxAssistantMessage('', { stopReason: 'error', errorMessage: '429 Too Many Requests' }),
+    fauxAssistantMessage('done'),
+  ]);
+  const ends: string[] = [];
+  try {
+    const session = await createPiSession(params({ ...FAUX, providers: [faux.provider] }));
+    try {
+      const stop = session.subscribe((event) => {
+        const message = (event as { message?: { role?: string; stopReason?: string } }).message;
+        if (event.type === 'message_end' && message?.role === 'assistant') ends.push(message.stopReason ?? '');
+      });
+      await session.prompt('answer');
+      stop();
+    } finally {
+      await session.dispose();
+    }
+  } finally {
+    faux.setResponses([]);
+  }
+  expect(ends).toEqual(['error', 'stop']);
+});
+
 test('a session puts pi offline, so its grep and find never download a binary', async () => {
   const env: Record<string, string | undefined> = process.env;
   delete process.env.PI_OFFLINE;
