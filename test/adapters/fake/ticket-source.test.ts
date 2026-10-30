@@ -389,3 +389,41 @@ test("a ticket's raw leaves out its answers and reads", async () => {
   const listed = (await source.list({ label: 'sail' }))[0];
   expect(Object.keys(listed?.raw as object)).not.toContain('answers');
 });
+
+test('a scripted removeLabel answer of unavailable refuses the call, keeps the label and emits nothing, then ok removes it', async () => {
+  const { events, emit } = captureEvents();
+  const source = createFakeTicketSource({
+    ...scriptedSeed({ answers: { removeLabel: ['unavailable', 'ok'] } }),
+    emit,
+  });
+  expect(portFailure(await rejection(source.removeLabel('FAKE-1', 'sail')))).toEqual({
+    port: 'ticketSource',
+    op: 'removeLabel',
+    code: 'unavailable',
+  });
+  expect((await source.get('FAKE-1')).labels).toEqual(['sail']);
+  expect(events.filter((event) => event.type === 'ticket:unlabelled')).toHaveLength(0);
+  await source.removeLabel('FAKE-1', 'sail');
+  expect((await source.get('FAKE-1')).labels).toEqual([]);
+  expect(events.filter((event) => event.type === 'ticket:unlabelled')).toHaveLength(1);
+});
+
+test('a scripted addLabel answer of unavailable refuses every call, the last repeating, and the count carries to a new instance', async () => {
+  const world = scriptedSeed({ answers: { addLabel: ['unavailable'] } });
+  for (const source of [createFakeTicketSource(world), createFakeTicketSource(world)]) {
+    expect(portFailure(await rejection(source.addLabel('FAKE-1', 'sail')))).toEqual({
+      port: 'ticketSource',
+      op: 'addLabel',
+      code: 'unavailable',
+    });
+  }
+  expect((await createFakeTicketSource(world).get('FAKE-1')).labels).toEqual(['sail']);
+});
+
+test("a label answer script leaves the ticket's other calls and its raw untouched", async () => {
+  const source = createFakeTicketSource(scriptedSeed({ answers: { removeLabel: ['unavailable'] } }));
+  await source.comment('FAKE-1', 'first');
+  const ticket = await source.get('FAKE-1');
+  expect(ticket.comments.map((each) => each.body)).toEqual(['first']);
+  expect(Object.keys(ticket.raw as object)).not.toContain('answers');
+});
