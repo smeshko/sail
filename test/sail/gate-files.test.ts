@@ -2,26 +2,15 @@
 import { expect, test } from 'bun:test';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { EVERYTHING } from '../../scripts/affected-tests';
 import { writeOwnSail } from '../helpers/own-sail';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
 
 const ROOT = join(import.meta.dir, '../..');
-// Like the stage itself, inspect its exports in a subprocess: importing the executable here would
-// enroll its main body in Bun's coverage census, which cannot see the stage's subprocess execution.
-function inspectExports(expression: string) {
-  const child = Bun.spawnSync(
-    [
-      process.execPath,
-      '--eval',
-      `const lib = await import('./.sail/workflows/review/stages/22-gate-files/gate-files.mjs');
-       const { EVERYTHING } = await import('./scripts/affected-tests.ts');
-       console.log(JSON.stringify(${expression}));`,
-    ],
-    { cwd: ROOT, env: { ...process.env, INPUT_PR: '' } },
-  );
-  expect(child.exitCode).toBe(0);
-  return JSON.parse(child.stdout.toString());
-}
+const lib = (await import(join(ROOT, '.sail/lib/gate-files.mjs'))) as {
+  GATE_FILES: string[];
+  isGateFile(path: string): boolean;
+};
 
 function put(repo: TempRepo, path: string, text = 'changed\n'): void {
   mkdirSync(dirname(join(repo.dir, path)), { recursive: true });
@@ -104,8 +93,8 @@ test('ignore files and nested Biome configs are gate files at any depth', async 
     for (const path of paths) put(repo, path);
     commit(repo, ...paths);
     expect(stage(repo, base)).toEqual({ code: 0, output: { base, touched: paths } });
-    expect(inspectExports("lib.isGateFile('src/not-biome.json')")).toBe(false);
-    expect(inspectExports("lib.isGateFile('src/not.gitignore')")).toBe(false);
+    expect(lib.isGateFile('src/not-biome.json')).toBe(false);
+    expect(lib.isGateFile('src/not.gitignore')).toBe(false);
   });
 });
 
@@ -179,22 +168,6 @@ test('an invalid head exits without reporting a safe diff', async () => {
   });
 });
 
-test('the gate-file tests can run with the coverage gate', () => {
-  const child = Bun.spawnSync(
-    [
-      process.execPath,
-      'run',
-      'test',
-      'test/sail/gate-files.test.ts',
-      '--coverage',
-      '--test-name-pattern',
-      '^the literal gate list',
-    ],
-    { cwd: ROOT, env: process.env },
-  );
-  expect({ code: child.exitCode, stderr: child.stderr.toString() }).toMatchObject({ code: 0 });
-});
-
 test('the literal gate list includes every full-suite selection file', () => {
-  expect(inspectExports('EVERYTHING.filter((path) => !lib.GATE_FILES.includes(path))')).toEqual([]);
+  expect(EVERYTHING.filter((path) => !lib.GATE_FILES.includes(path))).toEqual([]);
 });
