@@ -24,6 +24,10 @@ Run sail only through `.sail/lib/demo.sh`. It runs this branch's `sail` in a scr
   `--from <dir>` copies another `.sail/` instead, such as one you wrote under `$STAGE_OUT`. Every port must be `fake`.
   `--own` copies this branch's own `.sail/` instead, with every adapter put on `fake` and its seeds the ones under
   `.sail/fake/`: use it when the change is to sail's own workflows, such as `groom`, `factory` or `review`.
+- `new … --runs <folder>` seeds the demo repository's `.sail-runs/` with recorded runs, and may be repeated. A folder
+  holding `run.json` is copied in under its run id; any other folder's entries are copied as they are.
+  `test/fixtures/playback/fake-1-claude-code` is a recorded run with long tool call inputs, and
+  `test/fixtures/dashboard/beta` holds two runs and a queue (`queue/ticket-to-pr`).
 - `.sail/lib/demo.sh run $STAGE_OUT/demo <command> [args…]` commits what changed in the demo repository, runs the
   command there, prints its output and its exit code, and appends both to `$STAGE_OUT/demo/transcript.txt`. It exits
   with the command's code. Run `sail` by name: `.sail/lib/demo.sh run $STAGE_OUT/demo sail FAKE-1`.
@@ -49,6 +53,18 @@ Run sail only through `.sail/lib/demo.sh`. It runs this branch's `sail` in a scr
   the page to settle, and writes `$STAGE_OUT/demo/<name>.png` and the page's DOM to `$STAGE_OUT/demo/<name>.html`.
   Without a run it opens the newest. Read the PNG to see what a user sees, and `grep` the DOM for the elements and
   text the scenario names: the DOM is the evidence, the screenshot is what you looked at.
+  The dashboard lists a repository only after a run there: run `sail FAKE-1` in the demo repository first, or use
+  `live=`.
+  A view that needs interaction takes `steps=<file>`: write a JSON list with your file tools, such as
+  `[{"wait":"[data-action=\"select-queue\"]"},{"click":"[data-action=\"select-queue\"]"},{"shot":"queue"}]`.
+  The steps are `{"click": css}`, `{"scroll": css, "top": px}`, `{"wait": css}` or `{"wait": ms}`, and `{"shot": name}`,
+  run in order on one page load. Wait on a selector before you click it. Each shot writes
+  `$STAGE_OUT/demo/<name>-<shot>.png` and `.html`, and the transcript prints every step with what it did, and a
+  `scrolled <box> <px>` line for each box left scrolled down, which is how you check it stayed scrolled. A selector
+  that matches nothing exits 1 and names the step; the shots before it are kept.
+  `live=<ticket key>` starts that run in the demo repository, opens the page on it unless `run=` names another, and
+  interrupts it when the steps end, so the transcript shows `live <run id>: suspended`. Pace the run with a
+  `"delayMs"` on its `done` answers in `fake/harness.json`, or it ends before anything arrives.
 
 ## Report what you saw
 

@@ -11,13 +11,20 @@
 //   run <dir> sail [args…]         commits what changed in <dir>/repo, runs this checkout's sail there, prints what
 //                                  it printed and appends it to <dir>/transcript.txt; exits with sail's code. Only
 //                                  sail runs, so a stage allowed this harness runs nothing else through it
-//   dashboard <dir> <name> [repo=… run=… key=… tab=…]
+//   dashboard <dir> <name> [repo=… run=… key=… tab=… steps=… live=…]
 //                                  serves <dir>'s runs with this checkout's `sail dashboard`, opens it in headless
 //                                  Chrome on the run, call and tab named, writes what Chrome drew to <dir>/<name>.png
 //                                  and the page's DOM to <dir>/<name>.html, and stops the dashboard whatever happens.
 //                                  Each selection is a word of its own, not a query: a command gate reads a quoted
 //                                  `&` as a background job. Chrome is found where it installs, or named by
 //                                  SAIL_DEMO_CHROME
+//     steps=<file>                 a JSON list of steps run in order on one page load, each shot written to
+//                                  <name>-<shot>.png and .html: {"click": css}, {"scroll": css, "top": px},
+//                                  {"wait": css} (up to 20s) or {"wait": ms}, and {"shot": name}. The transcript
+//                                  prints each step, and a `scrolled` line per box left scrolled down. A selector
+//                                  that matches nothing exits 1 and names the step; earlier shots stay
+//     live=<ticket key>            starts `sail <ticket key>` in <dir>/repo, opens the page on that run unless run=
+//                                  names another, and interrupts it once the steps end, leaving it suspended
 // The environment a command gets is built from nothing: no SAIL_CONFIG, SAIL_EVENTS or SAIL_BUN from a step around
 // it, no keys, and a HOME, SAIL_HOME and git identity of its own. A repository whose ports aren't all fake is refused.
 import { spawn, spawnSync } from 'node:child_process';
@@ -573,7 +580,7 @@ if (command === 'new') {
   await runIn(dir, rest);
 } else if (command === 'dashboard') {
   const [name, ...picks] = rest;
-  if (name === undefined) refuse('usage: demo.sh dashboard <dir> <name> [repo=… run=… key=… tab=… steps=…]');
+  if (name === undefined) refuse('usage: demo.sh dashboard <dir> <name> [repo=… run=… key=… tab=… steps=… live=…]');
   const query = new URLSearchParams();
   let stepsFile;
   let live;
