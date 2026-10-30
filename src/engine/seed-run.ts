@@ -174,13 +174,24 @@ function callDirs(sourceDir: string, runId: string, entries: readonly JournalEnt
   return [...dirs];
 }
 
+/** Why a seeded run can't start from the pull-request run `fromRun`, as a refusal words it. */
+export const notTicketRun = (fromRun: string, number: number) =>
+  `a seeded run starts from a ticket run: run ${fromRun} started from pull request #${number}`;
+
+/** Why a seeded run can't start from the run `fromRun` that started before runs had workspaces. */
+export const noWorkspaceRun = (fromRun: string) =>
+  `run ${fromRun} started before runs had workspaces: it can't seed a run`;
+
+/** Why a seeded run can't start from the run `fromRun` whose intake didn't pass. */
+export const noIntakeRun = (fromRun: string) => `run ${fromRun}'s intake didn't pass: there is nothing to reuse`;
+
 /**
  * The seed's cut before stage's first call or any line of its group. Step lines carry no group, so read the group
  * from call lines, then include every member's step lines when finding its start. No line of stage means -1.
  * With only steps and no group-bearing call, refuse if another call is incomplete too: they may be grouped.
  * A lone incomplete call is safe: the cut excludes all its steps, and no other incomplete call can be reused.
  */
-function seedEnd(entries: readonly JournalEntry[], stage: string): number | { incomplete: string } {
+export function seedEnd(entries: readonly JournalEntry[], stage: string): number | { incomplete: string } {
   const first = entries.findIndex((entry) => entry.stage === stage);
   if (first === -1) return -1;
   const own = `${stage}#${entries[first]?.call}`;
@@ -217,14 +228,12 @@ export async function openSeededRun(options: SeededRunOptions): Promise<OpenedRu
   if ('refused' in source) return source;
   const from = source.header.source;
   if (from.kind !== 'ticket') {
-    return {
-      refused: `a seeded run starts from a ticket run: run ${fromRun} started from pull request #${from.number}`,
-    };
+    return { refused: notTicketRun(fromRun, from.number) };
   }
   const { ticketKey } = from;
   const { branch: sourceBranch, repository } = source.header;
   if (sourceBranch === undefined || repository === undefined) {
-    return { refused: `run ${fromRun} started before runs had workspaces: it can't seed a run` };
+    return { refused: noWorkspaceRun(fromRun) };
   }
   const loaded = await loadWorkflow(found.dir, source.header.workflow.name);
   if ('refused' in loaded) return loaded;
@@ -249,7 +258,7 @@ export async function openSeededRun(options: SeededRunOptions): Promise<OpenedRu
   }
   const [intake] = entries;
   if (intake?.key !== INTAKE_KEY || intake.outcome !== 'passed') {
-    return { refused: `run ${fromRun}'s intake didn't pass: there is nothing to reuse` };
+    return { refused: noIntakeRun(fromRun) };
   }
   const at = seedEnd(entries, stage);
   if (typeof at !== 'number') {

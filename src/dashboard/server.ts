@@ -20,6 +20,7 @@ import { z } from 'zod';
 import { runsDir } from '../engine/run-dir';
 import { dropCommand } from '../watch/inbox';
 import { liveSet, liveWatcher } from '../watch/registry';
+import { runActions } from './actions';
 import { callFile, containedFile, findRepo, findRunDir, repos, runItems } from './files';
 import { renderMarkdown } from './markdown';
 import { createPage } from './page';
@@ -34,6 +35,10 @@ export interface DashboardOptions {
   followPollMs?: number;
   /** How often the index stream rereads the registry. 1000 ms by default. */
   indexPollMs?: number;
+  /** The environment the leases are found by. */
+  env?: Readonly<Record<string, string | undefined>>;
+  /** Where branch leases are looked up, instead of the fake workspace's or the machine's. */
+  leasesDir?: string;
 }
 
 export interface Dashboard {
@@ -160,7 +165,8 @@ function file(runDir: string, path: string, type: string): Response {
 }
 
 /** The answer to a GET of `/api/…`, from the path's decoded segments. */
-function route(registryDir: string, segments: string[], url: URL): Response {
+function route(options: DashboardOptions, segments: string[], url: URL): Response {
+  const { registryDir } = options;
   const [api, reposWord, name, kind, runId, part, key, what, ...rest] = segments;
   if (api !== 'api' || reposWord !== 'repos') return error(404, 'no such route');
   if (name === undefined) return Response.json(repos(registryDir));
@@ -171,6 +177,9 @@ function route(registryDir: string, segments: string[], url: URL): Response {
   if (runId === undefined) return Response.json(runItems(entry));
   const runDir = findRunDir(entry, runId);
   if (typeof runDir !== 'string') return error(404, runDir.missing);
+  if (part === 'actions' && key === undefined) {
+    return Response.json(runActions(entry, runId, { leasesDir: options.leasesDir, env: options.env }));
+  }
   if (part === 'summary' && key === undefined) return file(runDir, join(runDir, 'summary.json'), 'application/json');
   if (part === 'events' && key === undefined) {
     return file(runDir, join(runDir, 'events.ndjson'), 'application/x-ndjson');
@@ -256,7 +265,7 @@ export function startDashboard(options: DashboardOptions): Dashboard | { refused
         const segments = segmentsOf(url);
         if (segments === undefined) return error(400, 'the path is not percent-encoded properly');
         if (request.method === 'POST') return moveRoute(registryDir, segments, request);
-        return route(registryDir, segments, url);
+        return route(options, segments, url);
       },
       websocket: {
         open(ws) {

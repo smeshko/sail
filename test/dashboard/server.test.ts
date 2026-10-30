@@ -19,6 +19,7 @@ import { type Dashboard, guard, startDashboard } from '../../src/dashboard/serve
 import {
   appendStageEnd,
   entryOf,
+  FAKE_2_ID,
   GOLDEN_RUN,
   GOLDEN_RUN_ID,
   type Machine,
@@ -171,6 +172,39 @@ test("a repository's queues: beta's one view, whose queue is its queue.json, and
     ]);
     const alpha = await get(started, '/api/repos/alpha/queues');
     expect([alpha.status, JSON.parse(alpha.body)]).toEqual([200, []]);
+    expect(treeHash(seeded.root)).toBe(before);
+  } finally {
+    seeded.remove();
+  }
+});
+
+test("a run's actions route answers what the run offers as JSON, 404 for an unknown run, and reads without writing", async () => {
+  const seeded = seedFixtures();
+  try {
+    const leasesDir = join(seeded.root, 'leases');
+    mkdirSync(leasesDir);
+    const started = startDashboard({ registryDir: seeded.registryDir, port: 0, leasesDir });
+    if ('refused' in started) throw new Error(started.refused);
+    servers.push(started);
+    const before = treeHash(seeded.root);
+    const failed = await get(started, `/api/repos/alpha/runs/${FAKE_2_ID}/actions`);
+    const unknown = await get(started, '/api/repos/alpha/runs/FAKE-0-NOPE/actions');
+    expect([failed.status, failed.type, JSON.parse(failed.body)]).toEqual([
+      200,
+      'application/json;charset=utf-8',
+      {
+        restart: {
+          enabled: true,
+          stages: [
+            { stage: 'spec', runsAgain: 'spec#1 and everything after it' },
+            { stage: 'implement', runsAgain: 'implement#1 and everything after it, in loop fix from iteration 1' },
+          ],
+          stage: 'implement',
+          budget: { maxUsd: 25, maxMinutes: 90 },
+        },
+      },
+    ]);
+    expect(unknown.status).toBe(404);
     expect(treeHash(seeded.root)).toBe(before);
   } finally {
     seeded.remove();
