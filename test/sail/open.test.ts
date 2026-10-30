@@ -48,8 +48,11 @@ function env(repo: TempRepo, extra: Record<string, string> = {}): Record<string,
 }
 
 /** Runs the open stage's run.sh in `repo`: its exit code, stderr, and its last stdout line parsed. */
-function runOpen(repo: TempRepo): { code: number; stderr: string; output: Opened; out: string } {
-  const out = join(repo.home, `stage-out-${Date.now()}`);
+function runOpen(
+  repo: TempRepo,
+  name = `stage-out-${Date.now()}`,
+): { code: number; stderr: string; output: Opened; out: string } {
+  const out = join(repo.home, name);
   mkdirSync(out);
   const real = realpathSync(out);
   const inputs: Record<string, string> = {};
@@ -111,6 +114,24 @@ test('a comment refused three times leaves the step passing, commented false, an
       cwd: repo.dir,
       env: env(repo),
     });
+    expect(backfill.exitCode).toBe(0);
+    expect(ticket(repo).comments.map((each) => each.body)).toEqual([`sail run FAKE-1-RUN opened ${output.url}`]);
+  });
+}, 60_000);
+
+test("a comment backfill names its body file for the shell when the stage output's path holds a single quote", async () => {
+  await withTempRepo(async (repo) => {
+    prepare(repo, { comment: ['unavailable', 'unavailable', 'unavailable', 'ok'] });
+    const { code, output } = runOpen(repo, "Ivo's stage-out");
+    expect(code).toBe(0);
+    const [command] = output.ticket.backfill;
+    const backfill = Bun.spawnSync(
+      ['bash', '-c', `${command}`.replace('sail port', `${join(ROOT, 'bin', 'sail')} port`)],
+      {
+        cwd: repo.dir,
+        env: env(repo),
+      },
+    );
     expect(backfill.exitCode).toBe(0);
     expect(ticket(repo).comments.map((each) => each.body)).toEqual([`sail run FAKE-1-RUN opened ${output.url}`]);
   });

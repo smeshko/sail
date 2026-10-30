@@ -33,7 +33,9 @@ moved=true
 backfill=()
 if ! retry sail port ticket-source comment "$ticket" --body-file "$comment"; then
   commented=false
-  command="sail port ticket-source comment $ticket --body-file '$comment'"
+  # Single-quoted for the shell, each quote in the path closed, escaped and reopened.
+  quote="'\\''"
+  command="sail port ticket-source comment $ticket --body-file '${comment//\'/$quote}'"
   backfill+=("$command")
   printf 'the ticket comment failed; backfill it with: %s\n' "$command" >&2
 fi
