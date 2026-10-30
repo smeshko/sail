@@ -59,6 +59,8 @@ const CHROMES = [
 const SETTLE_MS = 1500;
 /** How long Chrome may take to start, and a page to settle. */
 const CAPTURE_SECONDS = 60;
+/** How long a click's redraw may take to settle before the next step runs anyway. */
+const CLICK_SECONDS = 5;
 /** How long a step may wait for a selector to appear. */
 const WAIT_SECONDS = 20;
 
@@ -264,6 +266,26 @@ async function evaluate(session, expression) {
 }
 
 /**
+ * Waits for the page's DOM to go SETTLE_MS without a change. A page that keeps changing for `seconds` fails, unless
+ * `lenient`: a live run's page may never settle.
+ */
+async function settle(session, lenient, seconds = CAPTURE_SECONDS) {
+  const until = Date.now() + seconds * 1000;
+  let last = -1;
+  let since = Date.now();
+  for (;;) {
+    if (Date.now() > until) {
+      if (lenient) return;
+      throw new Error(`the page kept changing for ${seconds}s`);
+    }
+    await Bun.sleep(250);
+    const now = await evaluate(session, 'document.documentElement.outerHTML.length');
+    if (now !== last) [last, since] = [now, Date.now()];
+    else if (Date.now() - since >= SETTLE_MS) return;
+  }
+}
+
+/**
  * Starts headless Chrome and opens `page` over its DevTools protocol, then waits for its DOM to settle: a screenshot
  * taken at load would show the page empty, since it draws from its sockets. A page that keeps changing fails the
  * capture, unless `lenient`: a live run's page may never settle, and the steps carry on after CAPTURE_SECONDS.
@@ -316,19 +338,7 @@ async function openPage(browser, profile, page, lenient) {
     session = await devtools(target.webSocketDebuggerUrl);
     await session.send('Page.enable');
     await session.send('Page.navigate', { url: page });
-    const until = Date.now() + CAPTURE_SECONDS * 1000;
-    let last = -1;
-    let since = Date.now();
-    for (;;) {
-      if (Date.now() > until) {
-        if (lenient) break;
-        throw new Error(`the page kept changing for ${CAPTURE_SECONDS}s`);
-      }
-      await Bun.sleep(250);
-      const now = await evaluate(session, 'document.documentElement.outerHTML.length');
-      if (now !== last) [last, since] = [now, Date.now()];
-      else if (Date.now() - since >= SETTLE_MS) break;
-    }
+    await settle(session, lenient);
   } catch (error) {
     close();
     throw error;
@@ -394,6 +404,9 @@ async function runSteps(session, steps, dir, name, out) {
         `(() => { const e = document.querySelector(${JSON.stringify(step.click)}); if (e === null) return false; e.click(); return true; })()`,
       );
       if (!hit) throw miss();
+      // The page redraws a moment after a click, so a shot straight after it would show the page before it. A live
+      // run's page, redrawn each second, never settles: it is given CLICK_SECONDS.
+      await settle(session, true, CLICK_SECONDS);
       out.push(`${head}: clicked`);
     } else if ('scroll' in step) {
       const top = await evaluate(

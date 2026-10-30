@@ -169,8 +169,9 @@ test.skipIf(chrome === undefined)(
         { wait: scroller },
         { scroll: scroller, top: 120 },
         { shot: 'one' },
-        { click: '[data-action="toggle-filter"]' },
-        { click: '[data-action="toggle-filter"]' },
+        // Two redraws that keep the tool call's box: the tools filter would hide it.
+        { click: '[data-action="toggle-filter"][data-filter="errors"]' },
+        { click: '[data-action="toggle-filter"][data-filter="errors"]' },
         { shot: 'two' },
       ];
       const file = join(repo.dir, 'steps.json');
@@ -223,6 +224,35 @@ test.skipIf(chrome === undefined)(
         before: existsSync(join(dir, 'miss-before.png')),
         after: existsSync(join(dir, 'miss-after.png')),
       }).toEqual({ code: 1, shot: true, named: true, before: true, after: false });
+    });
+  },
+  120_000,
+);
+
+test.skipIf(chrome === undefined)(
+  'dashboard shoots what a click redrew, with no wait between them',
+  async () => {
+    await withTempRepo(async (repo) => {
+      const dir = await seededDemo(repo);
+      const card = '[data-action="select-card"][data-key="self-review#1"]';
+      const file = join(repo.dir, 'steps.json');
+      await Bun.write(file, JSON.stringify([{ wait: card }, { click: card }, { shot: 'opened' }]));
+      const { code } = await demo(
+        repo.env,
+        'dashboard',
+        dir,
+        'redraw',
+        'repo=fixture',
+        `run=${RECORDED_RUN}`,
+        `steps=${file}`,
+      );
+      expect({
+        code,
+        timeline: readFileSync(join(dir, 'redraw-opened.html'), 'utf8').includes(`data-call="${TOOL}"`),
+      }).toEqual({
+        code: 0,
+        timeline: true,
+      });
     });
   },
   120_000,
