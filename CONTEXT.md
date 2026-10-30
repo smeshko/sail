@@ -291,8 +291,12 @@ The status of a run that has exited with nothing running and a resume expected, 
 _Avoid_: paused, waiting, blocked, pending
 
 **Control file**:
-A run's `CONTROL` file in its run directory, a request to stop at its next call boundary: `unwatched`, which the watcher writes when the run's workflow is unwatched and which suspends the run, or `stopped`, which `sail stop` writes and which fails it. `sail stop --now` writes `stopped now`, ending the running call through its abort signal rather than waiting for the boundary. The run takes the request before its intake and before each call.
+A run's `CONTROL` file in its run directory, a request to stop at its next call boundary: `unwatched`, which the watcher writes when the run's workflow is unwatched and which suspends the run, or `stopped`, which `sail stop` writes and which fails it. `sail stop --now` writes `stopped now`, ending the running call through its abort signal rather than waiting for the boundary. The run takes the request before its intake and before each call. A dispatched run with no run directory yet gets its request as a hand-off file, which it moves in as `CONTROL` once its run directory exists.
 _Avoid_: signal file, kill file, flag
+
+**Hand-off file**:
+`.sail-runs/<run id>.control`, a control file's request for a dispatched run that has no run directory yet. The run moves it in as `CONTROL` once its run directory exists, and the watcher deletes one the run never took when it settles the item.
+_Avoid_: pending control, mailbox
 
 **Resume**:
 Continuing a suspended or interrupted run from its journal. Every journaled call is replayed, and the first one that is not journaled runs.

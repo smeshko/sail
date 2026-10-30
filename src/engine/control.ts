@@ -10,10 +10,18 @@
 // and a request written after the take is a new file the next boundary sees. A file holding anything else is removed
 // and ignored: a request that can't be read stops nothing.
 //
+// A dispatched run has no run directory until it starts, so a request for it waits in its hand-off file,
+// `.sail-runs/<run id>.control`, written like `CONTROL` (`askToSuspend()`, `askToStop()`). The run moves it into
+// `CONTROL` right after it makes its directory (`takeHandOff()`), and a writer that finds the directory there once it has
+// written does the same, so a request written at either side of the directory's creation is moved in exactly once. The
+// watcher deletes a hand-off the run never took when it settles the item (`dropHandOff()`). A start refused once its
+// directory exists gives a stop back to the hand-off before it removes the directory (`returnStop()`), so a stop sent to
+// a start that is then refused is still there for the watcher, which parks the item (`handOffStops()`).
+//
 // The watcher takes back an `unwatched` a dead run never took before it resumes the run, its workflow watched again
 // (`cancelUnwatch()`). It takes only a file that reads `unwatched`, and only a dead run's: a live run's file may be
 // replaced by a stop between the read and the take, and nothing writes to a dead run's, since `sail stop` ends one.
-import { linkSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, linkSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { replaceFile } from './durable';
 
@@ -48,12 +56,11 @@ export function stopNowRequested(runDir: string): boolean {
   }
 }
 
-/** Asks the run in `runDir` to suspend, unless a request is already there. True when it wrote the request. */
-export function requestUnwatch(runDir: string): boolean {
-  const tmp = own(runDir, 'tmp');
+/** Creates `file` holding an `unwatched` through a temp file in `dir`, unless it exists. True when it wrote it. */
+function createUnwatch(file: string, tmp: string): boolean {
   writeFileSync(tmp, 'unwatched\n');
   try {
-    linkSync(tmp, join(runDir, CONTROL_FILE));
+    linkSync(tmp, file);
     return true;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false;
@@ -63,11 +70,15 @@ export function requestUnwatch(runDir: string): boolean {
   }
 }
 
-/** Takes the run's request, once: the request, or undefined when there is none or it can't be read. */
-export function takeControl(runDir: string): ControlRequest | undefined {
-  const taken = own(runDir, 'taken');
+/** Asks the run in `runDir` to suspend, unless a request is already there. True when it wrote the request. */
+export function requestUnwatch(runDir: string): boolean {
+  return createUnwatch(join(runDir, CONTROL_FILE), own(runDir, 'tmp'));
+}
+
+/** Moves `file` aside under `taken`, reads it and removes it: the request, or undefined when none or unreadable. */
+function takeFile(file: string, taken: string): ControlRequest | undefined {
   try {
-    renameSync(join(runDir, CONTROL_FILE), taken);
+    renameSync(file, taken);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
     throw error;
@@ -78,6 +89,11 @@ export function takeControl(runDir: string): ControlRequest | undefined {
   } finally {
     rmSync(taken, { force: true });
   }
+}
+
+/** Takes the run's request, once: the request, or undefined when there is none or it can't be read. */
+export function takeControl(runDir: string): ControlRequest | undefined {
+  return takeFile(join(runDir, CONTROL_FILE), own(runDir, 'taken'));
 }
 
 /**
@@ -95,4 +111,90 @@ export function cancelUnwatch(runDir: string): void {
   }
   if (text !== 'unwatched\n') return;
   if (takeControl(runDir) === 'stopped') requestStop(runDir);
+}
+
+/** Where a dispatched run's request waits until its run directory exists: `.sail-runs/<run id>.control`. */
+export const handOffFile = (runsDir: string, runId: string) => join(runsDir, `${runId}.control`);
+
+const handOffName = (runsDir: string, runId: string, suffix: string) =>
+  join(runsDir, `${runId}.control.${process.pid}.${Math.random().toString(16).slice(2, 10)}.${suffix}`);
+
+/**
+ * Writes a request to the run `runId` in `runsDir`: into `CONTROL` when its directory exists, otherwise into its
+ * hand-off. The hand-off is written first and the directory checked after, as the run makes the directory first and
+ * takes the hand-off after, so one side sees the other's write.
+ */
+function ask(runsDir: string, runId: string, request: 'stop' | 'suspend'): boolean {
+  const runDir = join(runsDir, runId);
+  const write = (): boolean => {
+    if (request === 'stop') {
+      requestStop(runDir);
+      return true;
+    }
+    return requestUnwatch(runDir);
+  };
+  if (existsSync(runDir)) {
+    try {
+      takeHandOff(runsDir, runId);
+      return write();
+    } catch (error) {
+      // The directory went, as a refused start removes it: the request waits in the hand-off instead.
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+  }
+  const file = handOffFile(runsDir, runId);
+  let wrote = true;
+  if (request === 'stop') replaceFile(file, 'stopped\n', handOffName(runsDir, runId, 'tmp'));
+  else wrote = createUnwatch(file, handOffName(runsDir, runId, 'tmp'));
+  if (existsSync(runDir)) takeHandOff(runsDir, runId);
+  return wrote;
+}
+
+/** Asks the run `runId` to suspend, unless a request is already waiting. True when it wrote the request. */
+export const askToSuspend = (runsDir: string, runId: string): boolean => ask(runsDir, runId, 'suspend');
+
+/** Asks the run `runId` to stop, replacing any request. */
+export const askToStop = (runsDir: string, runId: string): void => void ask(runsDir, runId, 'stop');
+
+/** Moves the run's hand-off into its `CONTROL`, once, keeping a stop over an unwatch. Call it once the run directory exists. */
+export function takeHandOff(runsDir: string, runId: string): void {
+  const request = takeFile(handOffFile(runsDir, runId), handOffName(runsDir, runId, 'taken'));
+  if (request === undefined) return;
+  const runDir = join(runsDir, runId);
+  try {
+    if (request === 'stopped') requestStop(runDir);
+    else requestUnwatch(runDir);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+}
+
+/**
+ * Gives a stop the run took back to its hand-off, as its start is refused and its run directory is about to go: the
+ * watcher finds it there and parks the item rather than retrying it. Anything else in `CONTROL` goes with the directory.
+ */
+export function returnStop(runsDir: string, runId: string): void {
+  let text: string;
+  try {
+    text = readFileSync(join(runsDir, runId, CONTROL_FILE), 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw error;
+  }
+  if (text === 'stopped\n') replaceFile(handOffFile(runsDir, runId), text, handOffName(runsDir, runId, 'tmp'));
+}
+
+/** Whether the run's hand-off asks it to stop: a stop sent to a start that was refused before it took it. */
+export function handOffStops(runsDir: string, runId: string): boolean {
+  try {
+    return readFileSync(handOffFile(runsDir, runId), 'utf8') === 'stopped\n';
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
+/** Removes the run's hand-off, a request it never took. */
+export function dropHandOff(runsDir: string, runId: string): void {
+  rmSync(handOffFile(runsDir, runId), { force: true });
 }
