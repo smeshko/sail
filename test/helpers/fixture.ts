@@ -59,6 +59,7 @@ export function holdAfterOpen(sail: string): string {
     file,
     text.replace(OPENED, () => `${OPENED}${hold}`),
   );
+  passToOpen(sail, 'HOLD_AFTER_OPEN');
   return file;
 }
 
@@ -81,7 +82,20 @@ export function holdBeforeOpen(sail: string): string {
     file,
     text.replace(STRICT, () => `${STRICT}${hold}`),
   );
+  passToOpen(sail, 'HOLD_BEFORE_OPEN');
   return file;
+}
+
+const PUBLISH_STAGE = 'workflows/ticket-to-pr/stages/publish/stage.ts';
+const OPEN_RUN = "run: './open.sh',\n";
+
+/** Declares `name` in the `env` of a copy's `open` step, which gets no variable of the run's it doesn't declare. */
+function passToOpen(sail: string, name: string): void {
+  const file = join(sail, PUBLISH_STAGE);
+  const text = readFileSync(file, 'utf8');
+  const declared = /\n {2}env: \[([^\]]*)\],\n/.exec(text);
+  if (declared) writeFileSync(file, text.replace(declared[0], `\n  env: [${declared[1]}, '${name}'],\n`));
+  else edit(sail, PUBLISH_STAGE, OPEN_RUN, `${OPEN_RUN}  env: ['${name}'],\n`);
 }
 
 /**

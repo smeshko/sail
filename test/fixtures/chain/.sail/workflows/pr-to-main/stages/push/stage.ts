@@ -6,6 +6,7 @@ export const Pushed = z.object({ headSha: z.string(), files: z.array(z.string())
 
 export const push = script('push', {
   run: './run.sh',
+  ports: ['codehost'],
   consumes: { since: value(z.string()) },
   output: Pushed,
   // A refusal exits 1. A port call that failed has no exit code to map: an error.

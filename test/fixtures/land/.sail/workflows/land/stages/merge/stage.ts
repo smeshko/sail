@@ -9,6 +9,7 @@ export const Merged = z.object({
 
 export const merge = script('merge', {
   run: './run.sh',
+  ports: ['codehost'],
   consumes: { pr: value(z.number().int()), headSha: value(z.string()) },
   output: Merged,
   exitCodes: { passed: [0], failed: [] },
