@@ -1,8 +1,8 @@
-// The script kind: any executable, run with the script environment in its own process group.
-// Credentials are never given unless declared. Its exit code maps to
-// `passed` or `failed` through `exitCodes`, its last stdout line is its JSON output, and it must leave every declared
-// file in `$STAGE_OUT`. Every broken promise is collected as an error. It reports the facts only it knows as events:
-// how the process ran and ended, whether the output was read and held its schema, and which files it recorded.
+// The script kind: any executable, run with the script environment in its own process group. Credentials are never
+// given unless declared. Its exit code maps to `passed` or `failed` through `exitCodes`, its last stdout line is its
+// JSON output, and it must leave every declared file in `$STAGE_OUT`. Every broken promise is collected as an error. It
+// reports the facts only it knows as events: how the process ran and ended, whether the output was read and held its
+// schema, and which files it recorded.
 //
 // `sail` inside a script is the sail that runs it: `PATH` starts with this package's `bin/`, and `SAIL_BUN` names the
 // running Bun, which `bin/sail` executes. Both name this machine, so neither is recorded.
@@ -271,7 +271,6 @@ async function runScript(step: ScriptStep, context: StepContext): Promise<StepRu
   const at = (path: string) => relative(context.root, path) || '.';
   const env = Object.fromEntries(variables.map(({ name, value, path }) => [name, path ? at(value) : value]));
   const recorded = { command: checkoutPath(context.root, context.runDir, command), env };
-  // A step in a run's workspace must not have its git point at the clone. A step in the clone keeps what a hook set.
   const source = context.env ?? process.env;
   const declared = [...(step.env ?? [])];
   for (const port of step.ports ?? []) {
@@ -289,6 +288,7 @@ async function runScript(step: ScriptStep, context: StepContext): Promise<StepRu
     declared.push(...names);
   }
   const picked = scriptEnv(source, declared);
+  // A step in a run's workspace must not have its git point at the clone. A step in the clone keeps what a hook set.
   const inherited = { ...picked.env, ...(context.inClone ? repositoryVariables(source) : {}) };
 
   emit({
