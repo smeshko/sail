@@ -22,6 +22,7 @@ import { type CallPaths, callPaths, createCallDir, existingTries, runRelative } 
 import { type Clock, systemClock } from './clock';
 import type { ContractError } from './contract';
 import type { JournalEntry } from './journal';
+import type { Redactor } from './redact';
 import { buildResult, writeResult } from './result';
 import { formatIssue, validateDocument } from './schemas';
 import { runStageCall, type StageHooks } from './stage-call';
@@ -45,6 +46,7 @@ export interface AgentExecution {
 }
 
 export interface CallRequest {
+  redact?: Redactor;
   runDir: string;
   runId: string;
   /** The stage's `NN` in the run directory. */
@@ -216,6 +218,7 @@ export async function runScriptTry(
   const clock = request.clock ?? systemClock;
   const startedAt = clock();
   const run = await KINDS.script.run(definition, {
+    ...(request.redact === undefined ? {} : { redact: request.redact }),
     runId,
     runDir,
     stage: request.definition.name,
@@ -247,7 +250,7 @@ export async function runScriptTry(
     startedAt,
     finishedAt,
   });
-  writeResult(paths.result, result);
+  writeResult(paths.result, result, request.redact === undefined ? {} : { redact: request.redact });
   emit(at.end(result, runRelative(runDir, paths.result)));
   return { result, paths };
 }
@@ -478,6 +481,7 @@ export async function runAgentTries(
     }
     const startedAt = clock();
     const ran = await KINDS.agent.run(definition, {
+      ...(request.redact === undefined ? {} : { redact: request.redact }),
       runId,
       runDir,
       stage,
@@ -522,7 +526,10 @@ export async function runAgentTries(
       finishedAt,
     });
     // On disk, whole and synced, before another session starts: it is what a resume reads the call's place from.
-    writeResult(paths.result, result, { durable: true });
+    writeResult(paths.result, result, {
+      durable: true,
+      ...(request.redact === undefined ? {} : { redact: request.redact }),
+    });
     emit(site.end(tryNumber, result, runRelative(runDir, paths.result)));
     // Checked again now that the try has ended: whoever heard its end may have aborted the call.
     if (!corrected || request.signal?.aborted === true) return { result, paths };

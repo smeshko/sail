@@ -3,7 +3,7 @@
 // test/adapters/workspace/git-worktree.test.ts, over a clone of a local bare origin. Each case starts from a fresh
 // make(), and every event it captures must validate against sail.event.v1 with no key.
 import { expect, test } from 'bun:test';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Status } from '../../src/engine/run-dir';
 import type { ProviderEmit, ProviderEvent } from '../../src/events/types';
@@ -300,8 +300,38 @@ export function workspaceSuite(label: string, make: MakeWorkspace): void {
     const swept = await adapter.sweep(world.runsDir);
     expect(parseIssues(Swept, swept)).toEqual([]);
     expect(swept.paths).toEqual(paths.slice(0, 2).sort());
+    expect(swept.failed).toEqual([]);
     expect(paths.map((path) => existsSync(path))).toEqual([false, false, true, true, true]);
   });
+
+  test.skipIf(process.getuid?.() === 0)(
+    `${label}: a workspace a sweep can't remove is left in failed with why, and every other ended run's is still removed`,
+    async () => {
+      const { adapter, world } = await start();
+      const r1 = await world.run('r1', 'completed');
+      const r2 = await world.run('r2', 'completed');
+      const r3 = await world.run('r3', 'completed');
+      const paths: string[] = [];
+      for (const run of [r1, r2, r3]) {
+        paths.push((await adapter.create(run, { base: world.base, branch: BRANCH })).path);
+      }
+      chmodSync(r2.runDir, 0o555);
+      try {
+        const swept = await settle(adapter.sweep(world.runsDir));
+        expect('rejected' in swept).toBe(false);
+        if ('rejected' in swept) return;
+        expect(parseIssues(Swept, swept)).toEqual([]);
+        expect(swept.paths).toEqual([join(r1.runDir, 'workspace'), join(r3.runDir, 'workspace')]);
+        expect(swept.failed).toHaveLength(1);
+        expect(swept.failed[0]?.path).toBe(paths[1]);
+        expect(typeof swept.failed[0]?.reason).toBe('string');
+        expect(swept.failed[0]?.reason.length).toBeGreaterThan(0);
+        expect(paths.map((path) => existsSync(path))).toEqual([false, true, false]);
+      } finally {
+        chmodSync(r2.runDir, 0o755);
+      }
+    },
+  );
 
   test(`${label}: repository() names the remote that keys the leases, and the default branch`, async () => {
     const { adapter, world } = await start();

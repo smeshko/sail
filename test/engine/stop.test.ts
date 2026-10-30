@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { type RunEnd, resumeWorkflow, runWorkflow } from '../../src/engine/runtime';
 import { validateRunDir } from '../../src/engine/schemas';
 import { stopRun } from '../../src/engine/stop';
+import { PortError } from '../../src/ports/errors';
 import { fakeAdapters } from '../helpers/adapters';
 import { writeStub } from '../helpers/stub-workflow';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
@@ -198,6 +199,31 @@ test('a run whose lease another run took over is stopped with no lease to releas
       status: 'failed stopped\n',
       workspace: false,
       issues: [],
+    });
+  });
+});
+
+test("a stopped run's events and summary mask a credential a release's error carries", async () => {
+  await withTempRepo(async (repo) => {
+    const end = await suspendedRun(repo);
+    const secret = 'ghp_STOP_MARKER_4b2e9d';
+    const adapters = await fakeAdapters(repo.dir);
+    const workspace = adapters.ports.workspace;
+    adapters.ports.workspace = Object.assign(Object.create(workspace), {
+      release: () =>
+        Promise.reject(new PortError('workspace', 'release', 'unavailable', `denied https://x:${secret}@h/r`)),
+    });
+    const stopped = await stopRun({ sailDir: join(repo.dir, '.sail'), runId: end.runId, adapters, secrets: [secret] });
+    expect(stopped).toMatchObject({ ended: { status: 'failed', stopReason: 'stopped' } });
+    expect({
+      events: readFileSync(join(end.dir, 'events.ndjson'), 'utf8').includes(secret),
+      summary: readFileSync(join(end.dir, 'summary.json'), 'utf8').includes(secret),
+      message: events(end.dir).at(-1)?.message,
+    }).toEqual({
+      events: false,
+      summary: false,
+      message:
+        'stopped by sail stop; its workspace was not released: workspace.release: denied https://x:[redacted]@h/r',
     });
   });
 });

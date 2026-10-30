@@ -171,10 +171,10 @@ test('the usage lists sail queue: ls and poll, add with --force, requeue and dro
 test("the usage lists sail watch and sail unwatch, and not --dispatch, which is the watcher's", async () => {
   const { stdout } = await runCaptured(['--help']);
   expect(stdout).toMatch(
-    /^ {2}sail watch <workflow>\.\.\. {2,}Watch these workflows: start this repository's watcher, or add them to it$/m,
+    /^ {2}sail watch \[<workflow>\.\.\.\] {2,}Watch these workflows, or every watched one: start this repository's watcher, or add them to it$/m,
   );
   expect(stdout).toMatch(
-    /^ {2}sail unwatch <workflow>\.\.\. {2,}Stop watching them\. The watcher exits when it watches none$/m,
+    /^ {2}sail unwatch \[<workflow>\.\.\.\] {2,}Stop watching them, or every watched one\. The watcher exits when it watches none$/m,
   );
   expect(stdout).not.toContain('--dispatch');
 });

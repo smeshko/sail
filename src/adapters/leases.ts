@@ -1,18 +1,19 @@
 // Branch leases (ADR-0018, D9): one pid-held file per remote and branch in the selected machine directory's `leases/`
 // (`$SAIL_HOME/leases/`, or `~/.sail/leases/`), so manual and watched runs sharing that directory never hold the same branch.
+// Keys ignore scheme, user and port, and normalise host and path case, `.git` and trailing slashes.
 // Different machine directories have independent leases. The shared primitive serialises removals under drop tokens.
 // Every built-in Workspace adapter takes its leases here. A run resumed under another `SAIL_HOME` finds no lease
 // of its own there.
 //
 // A lease is taken before its run directory exists, since a leased branch is a refusal, and a refusal leaves no run
 // directory. So a lease is stale once its run has ended, or once its pid is dead while the run is running or has no
-// STATUS yet. A suspended run holds its lease whatever its pid. Accepted risk: a reused pid reads as alive.
+// STATUS yet. A suspended run holds its lease whatever its pid.
 //
 // A renewal is the same run taking its lease again: a resume, with its own pid. It is refused while the pid on the lease
 // is alive and isn't the renewing one, whatever STATUS says: a run's STATUS reads `suspended` both while another
 // resume is starting it and while its own process is suspending it. So a resume can't run a run that is still running,
-// and two resumes of one run can't both go ahead. A reused pid refuses a resume until that process ends: the same
-// accepted risk.
+// and two resumes of one run can't both go ahead. A renewal takes a lease its run marked as it suspended.
+// Only after a crash or kill can a reused pid refuse a resume until that process ends.
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { machineDir } from '../engine/machine-dir';
@@ -35,15 +36,54 @@ export function defaultLeasesDir(env: Readonly<Record<string, string | undefined
   return join(machineDir(env), 'leases');
 }
 
-/** The lease file for `remote` and `branch`: the first 16 hex of sha256(`<remote>\n<branch>`), plus `.json`. */
+/**
+ * A remote's host/path key: `git@github.com:o/r.git`, `ssh://github.com:2222/O/R/` and
+ * `https://user:token@GitHub.com/o/r.git/` all name `github.com/o/r`. Hostless remotes pass through.
+ */
+export function leaseKey(remote: string): string {
+  const url = /^[^/]+:\/\/([^/]*)(\/.*)?$/.exec(remote);
+  let host: string;
+  let path: string;
+  if (url) {
+    const authority = (url[1] ?? '').split('@').at(-1) ?? '';
+    host = authority.startsWith('[') ? authority.slice(0, authority.indexOf(']') + 1) : (authority.split(':')[0] ?? '');
+    path = url[2] ?? '';
+  } else {
+    if (remote.includes('://')) return remote;
+    const scp = /^((?:[^/@:]+@)?\[[^\]]+\]|[^/:]+):(.*)$/.exec(remote);
+    if (!scp) return remote;
+    host = (scp[1] ?? '').split('@').at(-1) ?? '';
+    path = scp[2] ?? '';
+  }
+  if (!host) return remote;
+  path = path
+    .toLowerCase()
+    .replace(/^\/+/, '')
+    .replace(/\/+$/, '')
+    .replace(/\.git$/, '')
+    .replace(/\/+$/, '');
+  return `${host.toLowerCase()}/${path}`;
+}
+
+/** The lease file: first 16 hex of sha256(`<leaseKey(remote)>\n<branch>`), plus `.json`. */
 export function leaseFile(dir: string, remote: string, branch: string): string {
-  const hex = new Bun.CryptoHasher('sha256').update(`${remote}\n${branch}`).digest('hex');
+  const hex = new Bun.CryptoHasher('sha256').update(`${leaseKey(remote)}\n${branch}`).digest('hex');
   return join(dir, `${hex.slice(0, 16)}.json`);
+}
+
+// Bridge for one release (ADW-175): drop with the next release.
+function legacyLeaseFile(dir: string, remote: string, branch: string): string | undefined {
+  const hex = new Bun.CryptoHasher('sha256').update(`${remote}\n${branch}`).digest('hex');
+  const file = join(dir, `${hex.slice(0, 16)}.json`);
+  return file === leaseFile(dir, remote, branch) ? undefined : file;
 }
 
 /** The lease on `remote` and `branch`, or undefined when there is none. Invalid or unreadable files throw. */
 export function readLease(dir: string, remote: string, branch: string): Lease | undefined {
-  return readRecord(leaseFile(dir, remote, branch), leaseKind);
+  const lease = readRecord(leaseFile(dir, remote, branch), leaseKind);
+  if (lease) return lease;
+  const legacy = legacyLeaseFile(dir, remote, branch);
+  return legacy === undefined ? undefined : readRecord(legacy, leaseKind);
 }
 
 /** Whether `lease`'s run no longer holds it: its run has ended, or it isn't suspended and its pid is dead. */
@@ -68,7 +108,7 @@ export function heldLease(dir: string, remote: string, branch: string): Lease | 
 
 /** Whether `lease`'s run is alive in a process other than `pid`: its pid is alive and isn't `pid`. */
 function stillRunning(lease: Lease, pid: number): boolean {
-  return lease.pid !== pid && isAlive(lease.pid);
+  return !lease.suspended && lease.pid !== pid && isAlive(lease.pid);
 }
 
 /**
@@ -89,6 +129,13 @@ export function takeLease(
     const [issue] = checked.error.issues;
     throw new PortError('workspace', 'lease', 'invalid', `holder: ${issue?.path.join('.')} ${issue?.message}`);
   }
+  if (checked.data.suspended) {
+    const result = markLease(dir, remote, branch, checked.data, now);
+    const lease: Lease = { remote, branch, ...checked.data, takenAt: now.toISOString() };
+    return result.marked
+      ? { leased: true, lease: result.lease, raw: result.lease }
+      : { leased: false, holder: result.held ?? lease, file: leaseFile(dir, remote, branch), raw: result.held ?? null };
+  }
   try {
     mkdirSync(dir, { recursive: true });
   } catch (error) {
@@ -97,23 +144,65 @@ export function takeLease(
   const file = leaseFile(dir, remote, branch);
   const { runId, runDir, pid } = checked.data;
   const lease: Lease = { remote, branch, runId, runDir, pid, takenAt: now.toISOString() };
-  const result = takeRecord(file, lease, leaseKind, (held) =>
-    held.runId === runId ? stillRunning(held, pid) : !isStale(held),
-  );
+  const blocks = (held: Lease) => (held.runId === runId ? stillRunning(held, pid) : !isStale(held));
+  const legacy = legacyLeaseFile(dir, remote, branch);
+  const old = legacy === undefined ? undefined : readRecord(legacy, leaseKind);
+  if (old && legacy) {
+    if (blocks(old)) return { leased: false, holder: old, file: legacy, raw: old };
+    if (!dropRecord(legacy, old, leaseKind) && readRecord(legacy, leaseKind) !== undefined) {
+      throw new PortError('workspace', 'lease', 'conflict', `${remote} ${branch}: the lease kept changing hands`);
+    }
+  }
+  const result = takeRecord(file, lease, leaseKind, blocks);
   if (result.taken) {
-    return result.took && result.took.runId !== runId
-      ? { leased: true, lease, took: result.took.runId, raw: lease }
+    const took = result.took ?? old;
+    return took && took.runId !== runId
+      ? { leased: true, lease, took: took.runId, raw: lease }
       : { leased: true, lease, raw: lease };
   }
-  if ('holder' in result) return { leased: false, holder: result.holder, raw: result.holder };
+  if ('holder' in result) return { leased: false, holder: result.holder, file, raw: result.holder };
+  throw new PortError('workspace', 'lease', 'conflict', `${remote} ${branch}: the lease kept changing hands`);
+}
+
+/** Marks only this run and pid's existing lease; never takes a free branch. */
+export function markLease(
+  dir: string,
+  remote: string,
+  branch: string,
+  holder: LeaseHolder,
+  now = new Date(),
+): { marked: true; lease: Lease } | { marked: false; held: Lease | undefined } {
+  const checked = LeaseHolder.safeParse(holder);
+  if (!checked.success) {
+    const [issue] = checked.error.issues;
+    throw new PortError('workspace', 'lease', 'invalid', `holder: ${issue?.path.join('.')} ${issue?.message}`);
+  }
+  const { runId, pid } = checked.data;
+  const file = leaseFile(dir, remote, branch);
+  const held = readRecord(file, leaseKind);
+  if (!held || held.runId !== runId || held.pid !== pid) return { marked: false, held };
+  const lease: Lease = { remote, branch, ...checked.data, suspended: true, takenAt: now.toISOString() };
+  // If the second round finds no file after dropping our own lease, create restores it marked.
+  const result = takeRecord(file, lease, leaseKind, (current) => current.runId !== runId || current.pid !== pid);
+  if (result.taken) return { marked: true, lease };
+  if ('holder' in result) return { marked: false, held: result.holder };
   throw new PortError('workspace', 'lease', 'conflict', `${remote} ${branch}: the lease kept changing hands`);
 }
 
 /** Removes the lease, only when `runId` holds it: a lease taken over since it was read is left to its new holder. */
 export function releaseLease(dir: string, remote: string, branch: string, runId: string): Released {
-  const file = leaseFile(dir, remote, branch);
-  const held = readRecord(file, leaseKind);
-  if (held === undefined || held.runId !== runId) return { released: false, raw: held ?? null };
-  if (dropRecord(file, held, leaseKind)) return { released: true, raw: held };
-  return { released: false, raw: readRecord(file, leaseKind) ?? null };
+  const files = [leaseFile(dir, remote, branch), legacyLeaseFile(dir, remote, branch)];
+  let released: Lease | undefined;
+  let remaining: Lease | undefined;
+  for (const file of files) {
+    if (file === undefined) continue;
+    const held = readRecord(file, leaseKind);
+    if (held?.runId === runId) {
+      if (dropRecord(file, held, leaseKind)) released = held;
+      else remaining ??= readRecord(file, leaseKind);
+    } else {
+      remaining ??= held;
+    }
+  }
+  return released ? { released: true, raw: released } : { released: false, raw: remaining ?? null };
 }

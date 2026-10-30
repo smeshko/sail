@@ -339,7 +339,8 @@ async function run(step: AgentStep, context: StepContext): Promise<StepRun> {
       harness: { ...on, ...(sessionId === undefined ? {} : { sessionId }), ...counters },
       usage,
     };
-    const transcript = reported.transcript ?? seen.messages.map((text) => `assistant: ${text}`).join('\n');
+    const rawTranscript = reported.transcript ?? seen.messages.map((text) => `assistant: ${text}`).join('\n');
+    const transcript = context.redact?.text(rawTranscript) ?? rawTranscript;
     // The session has had the directory to write in, so the transcript is made a new file, whatever it left by the name.
     writeOwnFile(sessionLog, transcript === '' ? '' : `${transcript}\n`);
 

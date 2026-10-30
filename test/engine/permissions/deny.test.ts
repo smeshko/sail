@@ -6,9 +6,24 @@ import {
   deniedAssignment,
   deniedPipeline,
   gitInvocation,
+  optionValues,
 } from '../../../src/engine/permissions/deny';
 
 const words = (text: string): string[] => text.split(' ');
+
+test.each([
+  ['--exec cmd', [{ option: '--exec', value: 'cmd' }]],
+  ['--ex=cmd', [{ option: '--exec', value: 'cmd' }]],
+  ['--exec=', [{ option: '--exec', value: '' }]],
+  ['-ixcmd', [{ option: '-x', value: 'cmd' }]],
+  ['-ix cmd', [{ option: '-x', value: 'cmd' }]],
+  ['--exec', [{ option: '--exec' }]],
+  ['-x', [{ option: '-x' }]],
+  ['-- --exec cmd', []],
+  ['--other x', []],
+])('optionValues reads %j', (text, expected) => {
+  expect(optionValues(words(text as string), ['--exec'], 'x')).toEqual(expected);
+});
 
 test.each([
   ['git -C . checkout x', { globals: [{ name: '-C', value: '.' }], subcommand: 'checkout', args: ['x'] }],
@@ -42,6 +57,25 @@ test.each([
 });
 
 test.each([
+  ['git push --receive-pack=x origin', 'git program option'],
+  ['git push --exec x origin', 'git program option'],
+  ['git fetch --upload-pack x origin', 'git program option'],
+  ['git fetch --upl=x origin', 'git program option'],
+  ['git pull --upload-pack=x', 'git program option'],
+  ['git clone -u x u d', 'git program option'],
+  ['git clone --upload-pack=x u', 'git program option'],
+  ['git clone --template=t u', 'git program option'],
+  ['git init --template t', 'git program option'],
+  ['git ls-remote --exec=x origin', 'git program option'],
+  ['git ls-remote --upload-pack=x origin', 'git program option'],
+  ['git archive --exec=x --remote=o HEAD', 'git program option'],
+  ['git grep -O x', 'git program option'],
+  ['git grep --open-files-in-pager=vim x', 'git program option'],
+  ['git instaweb --httpd=x', 'git program option'],
+  ['git instaweb -d x', 'git program option'],
+  ['git send-email --smtp-server=/tmp/x a.patch', 'git program option'],
+  ['git clone -c core.sshCommand=x u', 'git -c'],
+  ['git clone --config=core.sshCommand=x u', 'git -c'],
   ['rm -rf x', 'rm -rf'],
   ['rm -fr x', 'rm -rf'],
   ['rm -r -f x', 'rm -rf'],
@@ -88,6 +122,10 @@ test.each([
 });
 
 test.each([
+  'git fetch -u origin',
+  'git send-email --smtp-server=smtp.example.com a.patch',
+  'git push origin -- --exec=x',
+  'git grep -n x',
   'rm a.txt',
   'rm -r dir',
   'rm -f a.txt',
@@ -188,6 +226,8 @@ test('an assignment that changes which program runs, or makes one run another, i
 
 test('the deny set holds its entries in order, each with one readable clause of why', () => {
   expect(DENY_SET.map((entry) => entry.name)).toEqual([
+    'git remote-ext',
+    'git program option',
     'rm -rf',
     'find -delete',
     'git push --force',

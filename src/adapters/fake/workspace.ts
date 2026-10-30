@@ -50,7 +50,7 @@ export function createFakeWorkspace(options: FakeWorkspaceOptions): WorkspacePor
     },
     async lease(remote, branch, holder) {
       const result = takeLease(leasesDir(), remote, branch, holder, now());
-      if (result.leased) {
+      if (result.leased && !holder.suspended) {
         emit({ type: 'workspace:leased', remote, branch, ...(result.took === undefined ? {} : { took: result.took }) });
       }
       return result;
@@ -89,10 +89,10 @@ export function createFakeWorkspace(options: FakeWorkspaceOptions): WorkspacePor
       return { path, kept: keep, ...commits, raw };
     },
     async sweep(runsDir) {
-      const paths = sweepEnded(runsDir, (runDir) =>
+      const swept = sweepEnded(runsDir, (runDir) =>
         releaseWorktree(repo, { runId: basename(runDir), runDir }, 'sweep', env),
       );
-      return { paths, raw: null };
+      return { ...swept, raw: null };
     },
     capabilities: () => ({ keep: true, sweep: true }),
   };

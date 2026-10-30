@@ -1,13 +1,13 @@
-// `sail watch <workflow>...` and `sail unwatch <workflow>...`: the watch set of this repository's watcher (ADR-0019).
+// `sail watch [<workflow>...]` and `sail unwatch [<workflow>...]`: the watch set of this repository's watcher (ADR-0019).
 //
 // | | No live watcher here | A live watcher here |
 // |---|---|---|
-// | `sail watch` | starts the watcher in the foreground, watching the workflows named | hands it a `watch` command, waits for it, and prints the set |
-// | `sail unwatch` | refused: nothing to unwatch | hands it an `unwatch` command, waits for it, and prints the set, or that the watcher stops |
+// | `sail watch` | starts the watcher in the foreground, watching the workflows named, or with none named every workflow that declares a watch | hands it a `watch` command, waits for it, and prints the set |
+// | `sail unwatch` | refused: nothing to unwatch | hands it an `unwatch` command, with no names for every workflow it watches, waits for it, and prints the set, or that the watcher stops |
 //
 // A live watcher is one the registry records for this repository's `name` with a pid that is alive. One recorded for
 // the same `name` in another clone refuses both commands. Every refusal is exit code 3: no `.sail/project.yaml`, no
-// names, a name that isn't a watched workflow, two workflows on one label (the live set's included), a live watcher
+// workflow that declares a watch (`sail watch` with no names), a name or a workflow that isn't a watched workflow or won't load, two workflows on one label (the live set's included), a live watcher
 // in the way, named with its clone and pid, or a model alias whose harness can't run its model.
 //
 // A watcher starts only when every model alias's harness can run its model, and pauses its dispatch while an edit of
@@ -31,7 +31,7 @@ import { runsDir as runsDirOf } from '../../engine/run-dir';
 import { formatIssue } from '../../engine/schemas';
 import { sameLabel } from '../../ports/labels';
 import { dropCommand } from '../../watch/inbox';
-import { readWatch, systemTimers, type Timers, type WatchDeclaration } from '../../watch/poll';
+import { readWatch, readWatches, systemTimers, type Timers, type WatchDeclaration } from '../../watch/poll';
 import {
   findHolder,
   type Holder,
@@ -103,14 +103,29 @@ export async function findWatcher(
   return { entry, registryDir, holder: findHolder(readRegistry(registryDir).entries, me, isAlive) };
 }
 
-/** `.sail/`, the names, and the live watcher, or a refusal: no names, or a watcher of this name in another clone. */
-async function locate(io: Io, command: string, args: Parsed, isAlive: IsAlive): Promise<Located | ExitCode> {
+/** The names to act on when none are typed, or why there are none. */
+type ResolveNames = (project: Located['project']) => Promise<string[] | { refused: string }>;
+
+/**
+ * `.sail/`, the names, and the live watcher, or a refusal: no names `resolve` can supply, or a watcher of this name in
+ * another clone. With no `resolve`, an empty list of names passes through.
+ */
+async function locate(
+  io: Io,
+  command: string,
+  args: Parsed,
+  isAlive: IsAlive,
+  resolve?: ResolveNames,
+): Promise<Located | ExitCode> {
   const refuse = refuseAs(io, command);
   const project = await findProject(io, command);
   if (typeof project === 'number') return project;
-  const names = [...new Set(args.positionals)];
-  if (names.length === 0)
-    return refuse(`name at least one workflow to ${command === 'sail watch' ? 'watch' : 'unwatch'}`);
+  let names = [...new Set(args.positionals)];
+  if (names.length === 0 && resolve !== undefined) {
+    const resolved = await resolve(project);
+    if ('refused' in resolved) return refuse(resolved.refused);
+    names = resolved;
+  }
   const { entry, registryDir, holder } = await findWatcher(io, project, isAlive);
   if (holder?.kind === 'name') return refuse(holderRefusal(holder, entry.name));
   return { project, names, registryDir, entry, live: holder?.kind === 'here' ? holder : undefined };
@@ -159,7 +174,12 @@ export function watchCommand(deps: WatchDeps = {}): Command {
     const command = 'sail watch';
     const refuse = refuseAs(io, command);
     const isAlive = deps.isAlive ?? processIsAlive;
-    const located = await locate(io, command, args, isAlive);
+    const located = await locate(io, command, args, isAlive, async ({ sailDir, config }) => {
+      const read = await readWatches({ sailDir, config });
+      if ('refused' in read) return read;
+      if (read.watches.length === 0) return { refused: 'no workflow declares a watch' };
+      return read.watches.map((each) => each.workflow);
+    });
     if (typeof located === 'number') return located;
     const { project, names, entry, live } = located;
     const { sailDir, config } = project;
@@ -256,7 +276,9 @@ export function unwatchCommand(deps: WatchDeps = {}): Command {
     }
     const { pid } = live.watcher;
     const watcher = `the watcher of '${entry.name}' (pid ${pid})`;
-    const file = dropCommand(runsDirOf(project.sailDir), { op: 'unwatch', workflows: names });
+    const workflows = names.length > 0 ? names : liveSet(project.sailDir, pid).map((each) => each.workflow);
+    if (workflows.length === 0) return refuseAs(io, command)(`${watcher} watches nothing: nothing to unwatch`);
+    const file = dropCommand(runsDirOf(project.sailDir), { op: 'unwatch', workflows });
     if (!(await taken(file, deps))) {
       io.stdout(`${command}: ${watcher} has not taken the command yet: it waits in ${at(io, file)}\n`);
       return EXIT_OK;

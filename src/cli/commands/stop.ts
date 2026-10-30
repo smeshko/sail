@@ -9,6 +9,8 @@
 // - A run that has ended, and a run id that names no run, are refused with exit 3.
 //
 // It resolves only the Workspace port, so no ticket source is asked for its credentials, and loads no workflow.
+
+import { credentialValues } from '../../engine/redact';
 import { stopRun } from '../../engine/stop';
 import { EXIT_OK, type ExitCode } from '../exit-codes';
 import type { Io, Parsed } from '../index';
@@ -27,6 +29,7 @@ export async function stop(args: Parsed, io: Io): Promise<ExitCode> {
     runId,
     adapters: project.adapters,
     now: args.values.now === true,
+    secrets: credentialValues(io.env ?? process.env),
   });
   if ('refused' in stopped) return refuse(stopped.refused);
   if ('requested' in stopped) {

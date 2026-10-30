@@ -108,7 +108,11 @@ const workspace: Workspace = {
 };
 const diff: Diff = { patch: 'diff --git a/README.md b/README.md\n', raw: RAW };
 const workspaceReleased: WorkspaceReleased = { path: workspace.path, kept: false, raw: RAW };
-const swept: Swept = { paths: [workspace.path], raw: RAW };
+const swept: Swept = {
+  paths: [workspace.path],
+  failed: [{ path: '/r/.sail-runs/left/workspace', reason: 'permission denied' }],
+  raw: RAW,
+};
 const goldenUsage: Usage = JSON.parse(readFileSync(join(GOLDEN, '01-spec', 'call-1', 'result.json'), 'utf8')).usage;
 const done: HarnessResult = {
   outcome: 'done',

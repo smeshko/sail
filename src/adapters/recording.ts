@@ -239,24 +239,17 @@ export interface RecordingOptions {
 
 /**
  * Each secret with the forms of it that `redactor()` doesn't know, for a recording that may hold any text a session saw:
- * - JSON-escaped, as it reads inside a JSON text a tool returned or a session wrote, with and without `/` escaped;
- * - base64 inside a longer encoding, such as a Basic header's `user:<secret>`, at each of the three byte offsets: the
- *   characters that depend only on the secret's own bytes, so a byte before or after it can't hide it.
+ * - JSON-escaped with `/` escaped too, as some JSON writers emit it;
+ * - base64 at offset 0 inside a longer encoding: the characters that depend only on the secret's own bytes, so a byte
+ *   after it can't hide it. `redactor()` masks the cores behind a one- and two-byte lead itself.
  */
 export function secretForms(secrets: readonly string[]): string[] {
   const forms: string[] = [];
   for (const secret of secrets) {
-    const escaped = JSON.stringify(secret).slice(1, -1);
-    forms.push(secret, escaped, escaped.replaceAll('/', '\\/'));
+    forms.push(secret, JSON.stringify(secret).slice(1, -1).replaceAll('/', '\\/'));
     const bytes = Buffer.from(secret, 'utf8');
-    for (const lead of [0, 1, 2]) {
-      const whole = Math.floor((lead + bytes.length) / 3);
-      const from = lead === 0 ? 0 : 4;
-      const core = Buffer.concat([Buffer.alloc(lead), bytes])
-        .toString('base64')
-        .slice(from, whole * 4);
-      if (core.length >= 8) forms.push(core);
-    }
+    const core = bytes.toString('base64').slice(0, Math.floor(bytes.length / 3) * 4);
+    if (core.length >= 8) forms.push(core);
   }
   return [...new Set(forms)];
 }

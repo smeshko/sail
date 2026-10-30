@@ -3,7 +3,8 @@
 // Jev. The first cases are about check-fix: Jev's clear yes on every targeted finding ends a fix round without an agent
 // session, anything else leaves it to the agent, with Jev's answers as its hint. One is about the tickets it files. The
 // rest are about landing: a check still red after its rerun goes to fix, a rejected merge merges the base in, and both
-// take the fix passes left. Triage cases show Jev decisions surviving omissions and judge overrides winning.
+// take the fix passes left. Every merge is preceded by gate-files; a gate change is handed to a human instead.
+// Triage cases show Jev decisions surviving omissions and judge overrides winning.
 import { expect, test } from 'bun:test';
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -28,7 +29,7 @@ const seed = (overrides: Record<string, number> = {}) =>
   });
 
 /** The repository's own `.sail/` on fakes, with fake pull request #7 pointed at commits the repository holds. */
-function setUp(repo: TempRepo, jev?: object, glossary?: string): void {
+function setUp(repo: TempRepo, jev?: object, glossary?: string, gateFile = false): void {
   writeOwnSail(repo, jev === undefined ? {} : { jev });
   if (glossary !== undefined) {
     writeFileSync(join(repo.dir, 'CONTEXT.md'), glossary);
@@ -38,6 +39,10 @@ function setUp(repo: TempRepo, jev?: object, glossary?: string): void {
   const base = repo.git('rev-parse', 'HEAD').trim();
   writeFileSync(join(repo.dir, 'notes.txt'), 'a change\n');
   repo.git('add', 'notes.txt');
+  if (gateFile) {
+    writeFileSync(join(repo.dir, 'bunfig.toml'), '# a gate change\n');
+    repo.git('add', 'bunfig.toml');
+  }
   repo.git('commit', '-m', 'the pull request');
   const head = repo.git('rev-parse', 'HEAD').trim();
   const prs = join(repo.dir, '.sail', 'fake', 'prs.json');
@@ -350,6 +355,24 @@ test('a low-severity finding the judge sends to a ticket is not filed, and a med
   });
 }, 120_000);
 
+test('a pull request that changes a gate file is handed to a human before any merge', async () => {
+  await withTempRepo(async (repo) => {
+    const answers = seed() as { answers: Record<string, unknown> };
+    answers.answers['leak-3'] = { type: 'noul', noul: 0 };
+    setUp(repo, answers, undefined, true);
+    const { code, keys } = await review(repo);
+    expect(code).toBe(1);
+    expect(keys.filter((key) => key.startsWith('merge#'))).toEqual([]);
+    expect(keys.slice(-2)).toEqual(['gate-files#1', 'hand-over#1']);
+    const pr = await pullRequest(repo);
+    expect(pr.labels.includes('factory')).toBe(false);
+    expect(pr.labels.includes('needs-human')).toBe(true);
+    expect(pr.comments.at(-1)).toContain(
+      'The review stopped: the pull request changes gate files: bunfig.toml; a person merges it',
+    );
+  });
+}, 120_000);
+
 test('a check still red after its rerun goes to fix as a finding, then validate, push and merge again', async () => {
   await withTempRepo(async (repo) => {
     setUp(repo, seed());
@@ -359,7 +382,16 @@ test('a check still red after its rerun goes to fix as a finding, then validate,
     const { code, stderr, keys, dir } = await review(repo);
     expect({ code, stderr }).toEqual({ code: 0, stderr: '' });
 
-    expect(landing(keys)).toEqual(['merge#1', 'sync-base#1', 'fix#2', 'validate#3', 'push#2', 'merge#2']);
+    expect(keys.slice(keys.indexOf('merge#1') - 1, keys.indexOf('merge#1') + 1)).toEqual(['gate-files#1', 'merge#1']);
+    expect(landing(keys)).toEqual([
+      'merge#1',
+      'sync-base#1',
+      'fix#2',
+      'validate#3',
+      'push#2',
+      'gate-files#2',
+      'merge#2',
+    ]);
     const findings = JSON.parse(
       readFileSync(
         join(dir, readdirSync(dir).find((name) => /^\d+-fix$/.test(name)) ?? '', 'call-2', 'in', 'findings.json'),
@@ -392,7 +424,7 @@ test('a merge the host rejects after the base moved merges the base in, then val
     const { code, stderr, keys } = await review(repo);
     expect({ code, stderr }).toEqual({ code: 0, stderr: '' });
 
-    expect(landing(keys)).toEqual(['merge#1', 'sync-base#1', 'validate#3', 'push#2', 'merge#2']);
+    expect(landing(keys)).toEqual(['merge#1', 'sync-base#1', 'validate#3', 'push#2', 'gate-files#2', 'merge#2']);
     const pr = await pullRequest(repo);
     expect(repo.git('log', '-1', '--format=%P', pr.headSha).trim().split(' ')).toContain(moved);
     expect(pr.comments.at(-1)).toBe('## sail review\n\nMerged after the review:\n\n- merged the base in\n');
@@ -414,11 +446,13 @@ test('a base that conflicts is caught before any check is read and goes to resol
       'resolve-conflicts#1',
       'validate#3',
       'push#2',
+      'gate-files#2',
       'merge#2',
       'sync-base#2',
       'resolve-conflicts#2',
       'validate#4',
       'push#3',
+      'gate-files#3',
       'merge#3',
     ]);
     expect(readEvents(dir).filter((event) => event.type === 'codehost:checks')).toEqual([]);
@@ -437,7 +471,15 @@ test('a red check whose base has moved merges the base in before the fix, so the
     const { code, keys } = await review(repo);
     expect(code).not.toBe(0);
 
-    expect(landing(keys).slice(0, 6)).toEqual(['merge#1', 'sync-base#1', 'fix#2', 'validate#3', 'push#2', 'merge#2']);
+    expect(landing(keys).slice(0, 7)).toEqual([
+      'merge#1',
+      'sync-base#1',
+      'fix#2',
+      'validate#3',
+      'push#2',
+      'gate-files#2',
+      'merge#2',
+    ]);
     const pr = await pullRequest(repo);
     expect(repo.git('log', '-1', '--format=%P', pr.headSha).trim().split(' ')).toContain(moved);
     expect(pr.comments.at(-1)).toContain(
@@ -454,7 +496,15 @@ test('landing shares the three fix passes: after two review rounds, one fix for 
     expect(code).not.toBe(0);
 
     expect(keys.filter((key) => key.startsWith('fix#'))).toEqual(['fix#1', 'fix#2', 'fix#3']);
-    expect(landing(keys)).toEqual(['merge#1', 'sync-base#1', 'fix#3', 'validate#4', 'push#2', 'merge#2']);
+    expect(landing(keys)).toEqual([
+      'merge#1',
+      'sync-base#1',
+      'fix#3',
+      'validate#4',
+      'push#2',
+      'gate-files#2',
+      'merge#2',
+    ]);
     const pr = await pullRequest(repo);
     expect(pr.labels).not.toContain('factory');
     expect(pr.labels).toContain('needs-human');
@@ -475,7 +525,7 @@ test('a fix that blocks while landing blocks the next merge, which comments why,
     const { code, keys } = await review(repo);
     expect(code).not.toBe(0);
 
-    expect(landing(keys)).toEqual(['merge#1', 'sync-base#1', 'fix#2', 'merge#2']);
+    expect(landing(keys)).toEqual(['merge#1', 'sync-base#1', 'fix#2', 'gate-files#2', 'merge#2']);
     const pr = await pullRequest(repo);
     expect(pr.labels).not.toContain('factory');
     expect(pr.comments.at(-1)).toStartWith(

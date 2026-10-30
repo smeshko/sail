@@ -25,6 +25,7 @@ import { type RunEnd, type RunWorkflowOptions, resumeWorkflow, runWorkflow } fro
 import { formatIssue, validateDocument, validateRunDir } from '../../src/engine/schemas';
 import { readEvents } from '../../src/events/consumers/ndjson';
 import { rebuildSummary } from '../../src/events/consumers/summary';
+import { terminalConsumer } from '../../src/events/consumers/terminal';
 import type { Summary } from '../../src/events/summary';
 import type { Consumer, ProviderEvent, SailEvent } from '../../src/events/types';
 import { fakeAdapters, spyBuiltins } from '../helpers/adapters';
@@ -153,6 +154,81 @@ function completed(): Promise<Completed> {
   })();
   return completedOnce;
 }
+
+test('run credentials are masked in events, summary, journal and header', async () => {
+  await withTempRepo(async (repo) => {
+    const marker = 'ghp_RUNTIME_MARKER_0123456789';
+    writeAgentFixture(repo.dir, [submits({ ...SPEC, summary: marker }, 0.125, { messages: [`echo ${marker}`] })]);
+    edit(
+      join(repo.dir, '.sail'),
+      WORKFLOW_FILE,
+      "return run.stage(publish, { spec: s.files['spec.md'] });",
+      'return s;',
+    );
+    const adapters = await fakeAdapters(repo.dir);
+    adapters.entries.harness.versions = { marker };
+    const end = await ran(repo.dir, { workflow: AGENT_WORKFLOW, adapters, secrets: [marker] });
+    expect(end.status).toBe('completed');
+    for (const file of ['events.ndjson', 'summary.json', 'journal.ndjson', 'run.json']) {
+      const text = readFileSync(join(end.dir, file), 'utf8');
+      expect(text.includes(marker)).toBe(false);
+      expect(text.includes('[redacted]')).toBe(true);
+    }
+    expect(readJournal(end.dir).entries.find((entry) => entry.key === 'spec#1')?.output).toEqual({
+      ...SPEC,
+      summary: '[redacted]',
+    });
+  });
+});
+
+test('completed calls leave no credential in run files and terminal tails', async () => {
+  await withTempRepo(async (repo) => {
+    const marker = 'ghp_CALL_MARKER_0123456789';
+    const sail = writeAgentFixture(repo.dir, [
+      submits({ ...SPEC, summary: marker }, 0.125, { messages: [`echo ${marker}`] }),
+    ]);
+    const stage = `workflows/${AGENT_WORKFLOW}/stages/publish`;
+    edit(sail, `${stage}/stage.ts`, 'bytes: z.number().int()', 'bytes: z.number().int(), token: z.string()');
+    write(
+      sail,
+      `${stage}/run.sh`,
+      `#!/bin/bash\ntoken='ghp_CALL_''MARKER_0123456789'\necho "token $token"\necho "stderr token $token" >&2\nprintf '{"published":true,"bytes":1,"token":"%s"}\\n' "$token"\n`,
+    );
+    let terminal = '';
+    const end = await ran(repo.dir, {
+      workflow: AGENT_WORKFLOW,
+      secrets: [marker],
+      consumers: [
+        terminalConsumer({
+          verbosity: 'verbose',
+          runsDir: join(repo.dir, '.sail-runs'),
+          shownRunsDir: '.sail-runs',
+          write: (text) => {
+            terminal += text;
+          },
+        }),
+      ],
+    });
+    expect(end.status).toBe('completed');
+    const files = readdirSync(end.dir, { recursive: true, withFileTypes: true }).filter((file) => file.isFile());
+    expect(files.length > 10).toBe(true);
+    expect(
+      files
+        .filter((file) => readFileSync(join(file.parentPath, file.name), 'utf8').includes(marker))
+        .map((file) => file.name),
+    ).toEqual([]);
+    expect(terminal.includes(marker)).toBe(false);
+    expect(terminal.includes('│ token [redacted]')).toBe(true);
+    expect(terminal.includes('│ stderr token [redacted]')).toBe(true);
+    expect(readJournal(end.dir).entries.find((entry) => entry.key === 'publish#1')?.output).toEqual({
+      published: true,
+      bytes: 1,
+      token: '[redacted]',
+    });
+    expect(specFile(end.dir, 'session.log')).toBe('assistant: echo [redacted]\n');
+    expect(specResult(end.dir).output).toEqual({ ...SPEC, summary: '[redacted]' });
+  });
+});
 
 test('the stub runs to completion through its fix loop, and every call ran once', async () => {
   const { repoDir, end, journaled, header } = await completed();
