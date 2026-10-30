@@ -172,9 +172,9 @@ async function bodyOf<T>(request: Request, schema: z.ZodType<T>, what: string): 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
- * Waits for the start `spawned` made: until `started()` holds, which is 202, or the child exits. An exit with code 3 is
- * a refusal, answered 409 with the last line it printed; any other exit is 202, since the run is on its own. A start
- * that takes longer than `startWaitMs` is 202 too: the run is detached and on its way.
+ * Waits for the start `spawned` made: until `has()` holds, which is 202, or the child exits. An exit before `has()`
+ * holds, a refusal's code 3, an internal error's or a signal's, is answered 409 with the last line it printed. A start
+ * that takes longer than `startWaitMs` is 202: the run is detached and on its way.
  */
 async function started(
   spawned: SpawnedRun,
@@ -192,8 +192,8 @@ async function started(
     if (has() || Date.now() >= deadline) return Response.json({ runId }, { status: 202 });
     await Promise.race([sleep(100), spawned.exited]);
   }
-  if (exit === 3) return error(409, lastLine(log, spawned.logFrom) ?? 'the start was refused');
-  return Response.json({ runId }, { status: 202 });
+  if (has()) return Response.json({ runId }, { status: 202 });
+  return error(409, lastLine(log, spawned.logFrom) ?? `the start exited ${exit ?? 'on a signal'}`);
 }
 
 /** The run the request names, with its repository, or the answer that refuses it. */

@@ -638,6 +638,20 @@ test('a start the sail refuses with exit code 3 is 409 with the last line it pri
   expect([response.status, await response.json()]).toEqual([409, { error: 'run is not suspended: nothing to resume' }]);
 });
 
+test.each([
+  ['an internal error', 'exit 4', 'sail: the worktree could not be made'],
+  ['a signal', 'kill -9 $$', 'sail: killed before it opened'],
+])(
+  'a start that ends on %s before the run has started is 409 with the last line it printed (review R8)',
+  async (_, end, line) => {
+    m = seedFixtures();
+    settleQueue();
+    const server = startWith(stubSail(`echo '${line}' >&2\n${end}`).cli);
+    const response = await post(server, RESUME, startedBy('{"raise":{"usd":5}}'));
+    expect([response.status, await response.json()]).toEqual([409, { error: line }]);
+  },
+);
+
 test('a start still going when the wait ends is answered 202 anyway', async () => {
   m = seedFixtures();
   settleQueue();
@@ -664,7 +678,7 @@ test('an action the run does not offer is 409 with the reason, and the sail neve
 test('a second start of a run while the first is under way is 409, and only one sail runs', async () => {
   m = seedFixtures();
   settleQueue();
-  const stub = stubSail('sleep 1');
+  const stub = stubSail(`sleep 1\nprintf 'running\\n' > '${join(betaRun(), 'STATUS')}'`);
   const server = startWith(stub.cli);
   const first = post(server, RESUME, startedBy('{"raise":{"usd":5}}'));
   await Bun.sleep(300);
