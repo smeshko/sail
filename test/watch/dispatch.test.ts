@@ -2,7 +2,7 @@
 // cap, skipping a leased branch without a slot or an attempt, and dropping an item no longer eligible. On the stub's
 // file-backed fakes in a temp repository, a hand-moved clock and a fake spawner.
 import { afterAll, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createFakeTicketSource } from '../../src/adapters/fake/ticket-source';
 import { branchFor } from '../../src/engine/branch';
@@ -17,8 +17,9 @@ import type { PullRequestDetails } from '../../src/ports/types';
 import type { WorkspacePort } from '../../src/ports/workspace';
 import { createDispatcher, type Settled } from '../../src/watch/dispatch';
 import { openQueue, type QueueStore, queueDir } from '../../src/watch/queue-store';
-import { dispatchLog, spawnRun } from '../../src/watch/spawn';
+import { dispatchLog, spawnResume, spawnRun } from '../../src/watch/spawn';
 import { fakeAdapters } from '../helpers/adapters';
+import { copyFixture } from '../helpers/fixture';
 import { writeLiveRun } from '../helpers/live-run';
 import { commitBranch, seedPullRequests } from '../helpers/pr-workflow';
 import { manualClock, queueEventIssues, queueEvents, sourceKey, ticket } from '../helpers/queue';
@@ -30,6 +31,7 @@ import { FAKE_PID, type FakeSpawner, fakeSpawner, writeTickets } from '../helper
 const START = '2026-10-15T09:00:00.000Z';
 const FIVE_MINUTES = 5 * 60_000;
 const BACKOFF = 15 * 60_000;
+const PORT_BACKOFF = [1, 2, 5, 10, 30].map((minutes) => minutes * 60_000);
 
 /** FAKE-1 to FAKE-n, designated and Todo. */
 const designated = (count: number) =>
@@ -94,6 +96,7 @@ async function world(
       env: repo.env,
       now: clock,
       usageLimitBackoffMs: BACKOFF,
+      portUnavailableBackoffMs: PORT_BACKOFF,
       spawn: spawner.spawn,
       resume: spawner.resume,
       isAlive: spawner.isAlive,
@@ -923,6 +926,7 @@ test('a dispatcher whose cap was lowered resumes dead runs within it: one at a t
       env: repo.env,
       now: w.clock,
       usageLimitBackoffMs: BACKOFF,
+      portUnavailableBackoffMs: PORT_BACKOFF,
       spawn: w.spawner.spawn,
       resume: w.spawner.resume,
       isAlive: w.spawner.isAlive,
@@ -1118,6 +1122,7 @@ async function prWorld(repo: TempRepo) {
     env: repo.env,
     now: clock,
     usageLimitBackoffMs: BACKOFF,
+    portUnavailableBackoffMs: PORT_BACKOFF,
     spawn: spawner.spawn,
     resume: spawner.resume,
     isAlive: spawner.isAlive,
@@ -1414,3 +1419,145 @@ test('a dispatched rerun of a ticket whose branch is pushed starts from it, and 
     expect({ code, base: created?.baseSha, pushed: pushed?.headSha }).toEqual({ code: 0, base: tip, pushed: tip });
   });
 }, 90_000);
+
+/** Appends to run `runId`'s events a `run:suspended` on an unavailable port at the clock's time, after a port error. */
+function suspendOnPort(w: World, runId: string) {
+  const file = join(w.runs, runId, 'events.ndjson');
+  const seq = existsSync(file) ? readFileSync(file, 'utf8').trim().split('\n').length : 0;
+  const base = { ts: w.clock().toISOString(), runId };
+  const lines = [
+    {
+      ...base,
+      seq: seq + 1,
+      type: 'error:port',
+      key: 'publish#1',
+      port: 'codeHost',
+      op: 'push',
+      code: 'unavailable',
+      message: 'the fake code host is unreachable',
+    },
+    { ...base, seq: seq + 2, type: 'run:suspended', stopReason: 'port_unavailable', key: 'publish#1' },
+  ];
+  mkdirSync(join(w.runs, runId), { recursive: true });
+  appendFileSync(file, lines.map((line) => `${JSON.stringify(line)}\n`).join(''));
+}
+
+test('a run suspended on an unavailable port holds the workflow for a minute, is resumed once queue:released, and a second suspension holds it for two', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 2, 2);
+    const dispatcher = w.dispatcher();
+    await dispatcher.tick();
+    const runId = w.spawner.run('FAKE-1').runId;
+    suspendOnPort(w, runId);
+    await w.spawner.end('FAKE-1', { status: 'suspended', stopReason: 'port_unavailable' });
+    await dispatcher.tick();
+    const reason = 'publish#1 could not reach a provider: codeHost.push: the fake code host is unreachable';
+    const first = {
+      held: eventsOf(w.runs, 'queue:held').map(({ until, run, reason }) => ({ until, run, reason })),
+      resumes: w.spawner.resumes.length,
+    };
+    w.clock.advance(61_000);
+    await dispatcher.tick();
+    const second = {
+      released: eventsOf(w.runs, 'queue:released').length,
+      resumed: eventsOf(w.runs, 'run:resumed').map(({ dedupKey, from }) => [dedupKey, from]),
+    };
+    w.clock.advance(1000);
+    suspendOnPort(w, runId);
+    w.spawner.endResume(runId, { status: 'suspended', stopReason: 'port_unavailable' });
+    await dispatcher.tick();
+    expect({
+      first,
+      second,
+      held: eventsOf(w.runs, 'queue:held').map(({ until }) => until),
+      items: states(w.store).slice(0, 1),
+      issues: queueEventIssues(queueDir(w.runs, 'a')),
+    }).toEqual({
+      first: { held: [{ until: '2026-10-15T09:01:00.000Z', run: runId, reason }], resumes: 0 },
+      second: { released: 1, resumed: [['ticket:FAKE-1', { status: 'suspended', stopReason: 'port_unavailable' }]] },
+      held: ['2026-10-15T09:01:00.000Z', '2026-10-15T09:03:02.000Z'],
+      items: ['FAKE-1 dispatched 1'],
+      issues: [],
+    });
+  });
+});
+
+test('a fixture run whose push is unavailable once is suspended, resumed by the dispatcher past the back-off, and completes with its item done', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = copyFixture(repo.dir);
+    const prs = join(sail, 'fake', 'prs.json');
+    writeFileSync(prs, JSON.stringify({ ...JSON.parse(readFileSync(prs, 'utf8')), unavailable: { push: 1 } }));
+    repo.git('add', '.sail');
+    repo.git('commit', '-q', '-m', 'definitions');
+    const adapters = await fakeAdapters(repo.dir);
+    const runs = join(repo.dir, '.sail-runs');
+    const clock = manualClock(new Date().toISOString());
+    const store = openQueue({ runsDir: runs, workflow: 'ticket-to-pr', label: 'sail', now: clock });
+    if ('refused' in store) throw new Error(store.refused);
+    store.add((await adapters.ports.ticketSource.listDesignated('sail')).filter((each) => each.ticketKey === 'FAKE-1'));
+    const exits: Promise<number | null>[] = [];
+    const track = <T extends { exited: Promise<number | null> }>(started: T): T => {
+      exits.push(started.exited);
+      return started;
+    };
+    const settled: Settled[] = [];
+    const dispatcher = createDispatcher({
+      workflow: 'ticket-to-pr',
+      label: 'sail',
+      maxConcurrentRuns: 1,
+      branchPrefix: 'sail/',
+      runsDir: runs,
+      root: repo.dir,
+      store,
+      ticketSource: adapters.ports.ticketSource,
+      codeHost: adapters.ports.codeHost,
+      workspace: adapters.ports.workspace,
+      env: repo.env,
+      now: clock,
+      usageLimitBackoffMs: BACKOFF,
+      portUnavailableBackoffMs: PORT_BACKOFF,
+      spawn: (options) => track(spawnRun(options)),
+      resume: (options) => track(spawnResume(options)),
+      isAlive: (pid) => {
+        try {
+          process.kill(pid, 0);
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      onSettled: (each) => settled.push(each),
+    });
+    const settleProcess = async () => {
+      await Promise.all(exits);
+    };
+    await dispatcher.tick();
+    await settleProcess();
+    const runId = store.snapshot().items[0]?.runId ?? '';
+    await dispatcher.tick();
+    const suspended = {
+      status: readFileSync(join(runs, runId, 'STATUS'), 'utf8').trim(),
+      held: store.snapshot().held?.reason,
+    };
+    clock.advance(2 * 60_000);
+    await dispatcher.tick();
+    await settleProcess();
+    await dispatcher.tick();
+    const events = readEvents(join(runs, runId));
+    expect({
+      suspended,
+      stops: events.filter((event) => event.type === 'run:suspended').map((event) => event.stopReason),
+      end: events.findLast((event) => event.type === 'run:end')?.status,
+      states: states(store),
+      settled: settled.map((each) => each.outcome),
+      issues: queueEventIssues(queueDir(runs, 'ticket-to-pr')),
+    }).toEqual({
+      suspended: { status: 'suspended port_unavailable', held: expect.stringContaining('publish#1 could not reach') },
+      stops: ['port_unavailable'],
+      end: 'completed',
+      states: ['FAKE-1 done 1'],
+      settled: ['done'],
+      issues: [],
+    });
+  });
+}, 120_000);
