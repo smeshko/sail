@@ -103,6 +103,7 @@ import { summaryConsumer } from '../events/consumers/summary';
 import type { Consumer, Emit, NewEvent, ProviderEvent, SailEvent } from '../events/types';
 import { PortError } from '../ports/errors';
 import type { Harness } from '../ports/harness';
+import type { Usage } from '../ports/types';
 import type { StageDefinition } from '../sdk/steps';
 import type { Supplied } from './bindings';
 import { DEFAULT_BRANCH_PREFIX } from './branch';
@@ -110,6 +111,7 @@ import { type BudgetTracker, recordIn, suspension, trackBudget } from './budget'
 import { type AgentExecution, asStep, callProblems, type Ran, runCall } from './call';
 import { type CallPaths, nextTry, runRelative } from './call-dir';
 import { type Clock, systemClock } from './clock';
+import type { ContractError } from './contract';
 import { stopNowRequested, takeControl } from './control';
 import {
   INTAKE_INDEX,
@@ -247,6 +249,15 @@ function entryFrom(
     files: Object.fromEntries(Object.entries(files).map(([name, file]) => [name, file.path])),
     resultPath: runRelative(runDir, paths.result),
     ...(group === undefined ? {} : { group }),
+    ...(typeof result.step === 'string'
+      ? {
+          ...(result.usage === undefined ? {} : { usage: result.usage as Usage }),
+          startedAt: result.startedAt as string,
+          finishedAt: result.finishedAt as string,
+          durationMs: result.durationMs as number,
+          ...(result.outcome === 'error' ? { errors: result.errors as ContractError[] } : {}),
+        }
+      : {}),
   };
 }
 

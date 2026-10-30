@@ -2682,6 +2682,21 @@ test('a two-step stage journals each step as it finishes, then its call, and run
       step: 'open',
       resultPath: `${PUBLISH_CALL}/steps/2-open/result.json`,
     });
+    const describeResult = JSON.parse(
+      readFileSync(join(end.dir, `${PUBLISH_CALL}/steps/1-describe/result.json`), 'utf8'),
+    );
+    expect(entryOf(end.dir, 'publish#1/describe')).toMatchObject({
+      usage: describeResult.usage,
+      startedAt: describeResult.startedAt,
+      finishedAt: describeResult.finishedAt,
+      durationMs: describeResult.durationMs,
+    });
+    expect(entryOf(end.dir, 'publish#1/describe')?.usage?.costUsd).toBeGreaterThan(0);
+    expect(entryOf(end.dir, 'publish#1/describe')).not.toHaveProperty('errors');
+    for (const key of ['publish#1', 'spec#1']) {
+      const call = entryOf(end.dir, key) as unknown as Record<string, unknown>;
+      expect(['usage', 'startedAt', 'finishedAt', 'durationMs', 'errors'].filter((field) => field in call)).toEqual([]);
+    }
     expect(validateRunDir(end.dir).issues.map(formatIssue)).toEqual([]);
   });
 }, 60_000);

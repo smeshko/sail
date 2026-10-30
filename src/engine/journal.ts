@@ -10,9 +10,12 @@
 // bug in sail: reading it throws, and so does appending it.
 //
 // A step of a multi-step call is journaled as it finishes, under `stage#call/step`, before its call's own line. A line's
-// key is what its `stage`, `call` and `step` say: one that isn't throws, read or appended.
+// key is what its `stage`, `call` and `step` say: one that isn't throws, read or appended. A step's line also records its
+// usage, times and, when it ended `error`, its errors, so a resume rebuilds the step from the line alone.
 import { readFileSync, truncateSync } from 'node:fs';
 import { join } from 'node:path';
+import type { Usage } from '../ports/types';
+import type { ContractError } from './contract';
 import { appendLine, createFileOnce } from './durable';
 import { formatIssue, validateDocument } from './schemas';
 
@@ -34,6 +37,14 @@ export interface JournalEntry {
   /** The keys of the group the call belongs to, in declaration order: present only on a group's calls. */
   group?: string[];
   recordedAt: string;
+  /** What the step spent: on a step's line only. */
+  usage?: Usage;
+  /** When the step started and ended, and for how long: on a step's line only. */
+  startedAt?: string;
+  finishedAt?: string;
+  durationMs?: number;
+  /** Why the step ended `error`: on a step's line only. */
+  errors?: ContractError[];
 }
 
 /** What the engine appends. The journal numbers the entry and stamps its time. */

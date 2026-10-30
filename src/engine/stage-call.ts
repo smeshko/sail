@@ -14,7 +14,6 @@
 //
 // The caller journals: it hands the call the steps already journaled, which are skipped, and hears of each step as it
 // finishes. The runtime journals them, and `sail stage run`, which has no journal, passes nothing.
-import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { z } from 'zod';
 import type { CallEvent, NewEvent } from '../events/types';
@@ -40,11 +39,10 @@ import {
   stageOut,
   stepPaths,
 } from './call-dir';
-import { type ContractError, recordFiles } from './contract';
+import { type ContractError, type ErrorReason, recordFiles } from './contract';
 import type { JournalEntry } from './journal';
 import { buildResult, buildStageResult, type StepEntry, writeResult } from './result';
 import { checkoutPath } from './run-dir';
-import { validateDocument } from './schemas';
 import { type Def, WRAPPERS } from './untrusted';
 
 /** What a multi-step call is told by the one who runs it, and tells it back. */
@@ -239,30 +237,42 @@ function pick(runDir: string, source: Done, binding: FromStepBinding): Supplied 
     : { kind: 'fromStep', value: field, from: `${source.resultPath}#/output/${binding.key}` };
 }
 
+const REASONS: readonly ErrorReason[] = [
+  'invalid_output',
+  'missing_file',
+  'timeout',
+  'exit_code',
+  'not_started',
+  'budget_exceeded',
+  'harness',
+  'usage_limit',
+  'port',
+];
+const REASON_START = new RegExp(`(?:^|; )(?=(?:${REASONS.join('|')}): )`);
+
+/** A step's errors: the line's own, or, for a line without them, its `reason` parsed back, or kept whole as a `harness` error. */
+function errorsOf(entry: JournalEntry): ContractError[] {
+  if (entry.errors !== undefined) return entry.errors;
+  const reason = entry.reason ?? '';
+  if (!REASONS.some((each) => reason.startsWith(`${each}: `))) {
+    return [{ reason: 'harness', message: reason === '' ? 'the step ended in error' : reason }];
+  }
+  return reason.split(REASON_START).map((part) => {
+    const at = part.indexOf(': ');
+    return { reason: part.slice(0, at) as ErrorReason, message: part.slice(at + 2) };
+  });
+}
+
 /**
- * A step journaled before this process, as the stage's result lists it. The journal line says what later steps read
- * and what the stage records of it: its outcome, output, reason and files, hashed afresh where the journal puts them.
- * Its `result.json`, when it is one, says only what it spent and when it ran, since a later session may have rewritten
- * it. One rewritten past reading is listed with nothing spent and the journal's time.
+ * A step journaled before this process, as the stage's result lists it, built from its journal line alone: its
+ * outcome, output and reason, what it spent and when it ran, and its errors, with its files hashed afresh. Its
+ * `result.json` is never read, since a later session may have rewritten it. A line without usage or times, from before
+ * the line held them, lists nothing spent and the journal's time.
  */
 function journaledStep(request: CallRequest, step: Step, index: number, entry: JournalEntry): Done {
-  const path = join(request.runDir, entry.resultPath);
-  let read: Record<string, unknown> | undefined;
-  try {
-    const data = JSON.parse(readFileSync(path, 'utf8'));
-    if (validateDocument('sail.result.v1', data).length === 0 && data.key === entry.key) read = data;
-  } catch {
-    read = undefined;
-  }
   const out = stageOut(
     stepPaths(request.runDir, request.stageIndex, request.definition.name, request.call, index, step.name),
   );
-  const { reason: _rewritten, ...spent } = read ?? {
-    usage: { costUsd: 0 },
-    startedAt: entry.recordedAt,
-    finishedAt: entry.recordedAt,
-    durationMs: 0,
-  };
   const produced = Object.fromEntries(Object.keys(entry.files).map((name) => [name, 'file']));
   return {
     step,
@@ -272,11 +282,15 @@ function journaledStep(request: CallRequest, step: Step, index: number, entry: J
     files: entry.files,
     resultPath: entry.resultPath,
     result: {
-      ...spent,
+      usage: entry.usage ?? { costUsd: 0 },
+      startedAt: entry.startedAt ?? entry.recordedAt,
+      finishedAt: entry.finishedAt ?? entry.recordedAt,
+      durationMs: entry.durationMs ?? 0,
       outcome: entry.outcome,
       output: entry.output,
       files: recordFiles(produced, out, request.runDir).files,
       ...(entry.outcome === 'blocked' ? { reason: entry.reason } : {}),
+      ...(entry.outcome === 'error' ? { errors: errorsOf(entry) } : {}),
     },
   };
 }

@@ -343,7 +343,7 @@ What was asked, written once at start and never changed: the source, the workflo
 _Avoid_: manifest, metadata, config snapshot
 
 **Journal**:
-The append-only record of completed calls and steps (key, outcome, output, files). A resume replays completed calls from it. To recover an unjournaled claim before its comment was posted, a later try of the built-in `ticket` intake also reads `ticket:claimed` from the run's event stream; without that event, a missing comment cannot establish ownership.
+The append-only record of completed calls and steps (key, outcome, output, files). A step's line also records its usage, times and, when it ended `error`, its errors, so a resume rebuilds the step from its line alone. A resume replays completed calls from it. To recover an unjournaled claim before its comment was posted, a later try of the built-in `ticket` intake also reads `ticket:claimed` from the run's event stream; without that event, a missing comment cannot establish ownership.
 _Avoid_: log, history, state file, checkpoint
 
 **Replay**:
