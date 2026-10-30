@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import type { PullRequest } from '../../src/ports/types';
 import {
   dedupKey,
+  dispatchedItem,
   openQueue,
   type QueueItem,
   type QueuePolicy,
@@ -1054,4 +1055,28 @@ test('a move that leaves the item where it is changes nothing but still emits qu
   store.move('ticket:FAKE-3', { after: 'ticket:FAKE-1' }, 'moved by hand');
   expect(fileOrder(store)).toEqual(['FAKE-1', 'FAKE-3', 'FAKE-2']);
   expect(typesIn(runs).filter((type) => type === 'queue:moved')).toHaveLength(2);
+});
+
+test('dispatchedItem finds the dispatched item that names a run id across two workflows queues, ignores a done item with the same id, and skips an unreadable queue', () => {
+  const runs = runsDir();
+  const a = open(runs, manualClock(START), 'a');
+  const b = open(runs, manualClock(START), 'b');
+  a.add([ticket('FAKE-1')]);
+  b.add([ticket('FAKE-2'), ticket('FAKE-3')]);
+  a.dispatched('ticket:FAKE-1', 'FAKE-1-01A');
+  b.dispatched('ticket:FAKE-2', 'FAKE-2-01B');
+  b.dispatched('ticket:FAKE-3', 'FAKE-3-01C');
+  b.done('ticket:FAKE-3');
+  mkdirSync(queueDir(runs, 'broken'), { recursive: true });
+  writeFileSync(join(queueDir(runs, 'broken'), 'queue.json'), '{not json');
+  expect({
+    first: dispatchedItem(runs, 'FAKE-1-01A')?.dedupKey,
+    second: dispatchedItem(runs, 'FAKE-2-01B')?.dedupKey,
+    done: dispatchedItem(runs, 'FAKE-3-01C'),
+    unknown: dispatchedItem(runs, 'FAKE-9-01Z'),
+  }).toEqual({ first: 'ticket:FAKE-1', second: 'ticket:FAKE-2', done: undefined, unknown: undefined });
+});
+
+test('dispatchedItem finds nothing when there is no queue directory', () => {
+  expect(dispatchedItem(runsDir(), 'FAKE-1-01A')).toBeUndefined();
 });

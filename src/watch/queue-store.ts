@@ -34,7 +34,7 @@
 // - `skippedLeased()`, `watched()` and `unwatched()` only emit their events: none of them changes `queue.json`.
 // - Every event the store emits is handed to `onEvent` once it is appended, in order: the watcher's terminal lines. A
 //   hook that throws is ignored, so the terminal never breaks the queue.
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { replaceFile } from '../engine/durable';
@@ -618,4 +618,17 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
       stream.emit({ type: 'queue:error', workflow, ...failure });
     },
   };
+}
+
+/** The dispatched item of any of the clone's queues that names run `runId`, or undefined. A queue that can't be read is skipped. */
+export function dispatchedItem(runsDir: string, runId: string): QueueItem | undefined {
+  const root = join(runsDir, QUEUE_DIR);
+  if (!existsSync(root)) return undefined;
+  for (const workflow of readdirSync(root)) {
+    const queue = readQueue(runsDir, workflow);
+    if (queue === undefined || 'refused' in queue) continue;
+    const found = queue.items.find((item) => item.state === 'dispatched' && item.runId === runId);
+    if (found !== undefined) return found;
+  }
+  return undefined;
 }
