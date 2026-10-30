@@ -937,6 +937,31 @@ test('a cut session that sends no result within INTERRUPT_GRACE_MS is aborted, a
   });
 });
 
+test('a request signal aborted once the message loop has ended interrupts nothing and leaves no timer', async () => {
+  const timers = fakeTimers('2026-10-15T09:00:00.000Z');
+  const scripted = scriptedQuery([SUITE.done ?? []]);
+  let interrupts = 0;
+  const query = ((params: Parameters<QueryFunction>[0]) =>
+    Object.assign(scripted(params), {
+      interrupt: async () => {
+        interrupts++;
+      },
+    })) as unknown as QueryFunction;
+  const controller = new AbortController();
+  const result = await createClaudeCodeHarness({ env: {}, query, timers }).run({
+    ...request(),
+    signal: controller.signal,
+    onEvent: (event) => {
+      if (event.type === 'harness:session_end') controller.abort();
+    },
+  });
+  expect({ outcome: result.outcome, interrupts, pending: timers.pending() }).toEqual({
+    outcome: 'done',
+    interrupts: 0,
+    pending: [],
+  });
+});
+
 test('a session that ends inside its minutes set both timers at its start, leaves none, and says nothing of minutes', async () => {
   const { result, capture, timers, pendingAtStart } = await onTheClock(SUITE.done ?? [], async () => undefined);
   expect({

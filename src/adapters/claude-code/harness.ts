@@ -304,6 +304,8 @@ export function createClaudeCodeHarness(options: ClaudeCodeHarnessOptions): Harn
       if (result?.is_error !== true || progress.deaf) thrown = { error };
       sessionAt.abortController.abort();
     } finally {
+      // The loop is over, so an abort from here on has nothing to cut.
+      cutDone = true;
       watch.stop();
       if (grace !== undefined) timers.clear(grace);
     }
