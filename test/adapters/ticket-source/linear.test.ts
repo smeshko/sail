@@ -7,7 +7,11 @@
 // is not registered at all. Its world is named by SAIL_LIVE_LINEAR_TEAM, _LABEL, _DESIGNATED, _STARTED, _UNDESIGNATED and
 // _IN_REVIEW, _SPARE_LABEL (a label of the team that _DESIGNATED and _UNDESIGNATED don't carry), and LINEAR_API_KEY.
 import { describe, expect, test } from 'bun:test';
-import { createLinearTicketSource, linearTicketSource } from '../../../src/adapters/ticket-source/linear';
+import {
+  createLinearTicketSource,
+  linearTicketSource,
+  openLinearTicketSource,
+} from '../../../src/adapters/ticket-source/linear';
 import { type Fetch, LINEAR_ENDPOINT } from '../../../src/adapters/ticket-source/linear-client';
 import type { ProviderEmit, ProviderEvent } from '../../../src/events/types';
 import type { AdapterContext, Env } from '../../../src/ports/adapter';
@@ -1266,6 +1270,59 @@ test('the definition with a valid pickUp reads the team’s states once, and a l
     expect(world.operations()).toEqual(['SailTeam']);
     expect((await adapter.claim('ADW-1')).claimed).toBe(true);
     expect(world.operations().filter((operation) => operation === 'SailTeam')).toEqual(['SailTeam']);
+  } finally {
+    served.stop();
+  }
+});
+
+test.each<[string, { status: number; body: unknown; headers?: Record<string, string> }]>([
+  ['a 503', { status: 503, body: 'Service Unavailable' }],
+  ['a rate limit', RATE_LIMITED],
+])(
+  'the definition with pickUp, with Linear answering the team read with %s, creates the adapter unchecked, and a later claim reads the states again',
+  async (_, response) => {
+    const world = createLinearWorld(PICK_UP_SEED);
+    world.failNext('SailTeam', response);
+    const served = world.serve();
+    try {
+      const env = { LINEAR_API_KEY: KEY, SAIL_LINEAR_API_URL: served.url };
+      const adapter = await linearTicketSource.create({ team: 'ADW', pickUp: ['Todo'] }, context(env));
+      expect(world.operations()).toEqual(['SailTeam']);
+      expect((await adapter.claim('ADW-1')).claimed).toBe(true);
+      expect(world.operations().filter((operation) => operation === 'SailTeam')).toEqual(['SailTeam', 'SailTeam']);
+    } finally {
+      served.stop();
+    }
+  },
+);
+
+test('opening the adapter with pickUp, with the transport to Linear failing, creates it unchecked', async () => {
+  const adapter = await openLinearTicketSource({
+    team: 'ADW',
+    endpoint: LINEAR_ENDPOINT,
+    apiKey: KEY,
+    pickUp: ['Todo'],
+    fetch: () => Promise.reject(new TypeError('fetch failed')),
+  });
+  expect(adapter.scope).toBe('ADW');
+});
+
+test('the definition with pickUp, with Linear answering the team read with a 401, still rejects creation as unauthorized', async () => {
+  const world = createLinearWorld(PICK_UP_SEED);
+  world.failNext('SailTeam', {
+    status: 401,
+    body: { errors: [{ message: 'Authentication required', extensions: { code: 'AUTHENTICATION_ERROR' } }] },
+  });
+  const served = world.serve();
+  try {
+    const env = { LINEAR_API_KEY: KEY, SAIL_LINEAR_API_URL: served.url };
+    const error = await rejection(
+      Promise.resolve(linearTicketSource.create({ team: 'ADW', pickUp: ['Todo'] }, context(env))),
+    );
+    expect([portFailure(error), world.operations()]).toEqual([
+      { port: 'ticketSource', op: 'configure', code: 'unauthorized' },
+      ['SailTeam'],
+    ]);
   } finally {
     served.stop();
   }

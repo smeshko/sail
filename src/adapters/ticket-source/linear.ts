@@ -727,10 +727,20 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
   return buildLinearTicketSource(options).source;
 }
 
-/** The adapter, after its `pickUp` entries were checked against the team's states: one request, and none without `pickUp`. */
+/**
+ * The adapter, after its `pickUp` entries were checked against the team's states: one request, and none without
+ * `pickUp`. A Linear that is unavailable for that request leaves the adapter unchecked; one that answers still refuses
+ * a wrong name, and a 401 or any other answer too.
+ */
 export async function openLinearTicketSource(options: LinearTicketSourceOptions): Promise<TicketSource> {
   const { source, checkPickUp } = buildLinearTicketSource(options);
-  if (options.pickUp !== undefined) await checkPickUp();
+  if (options.pickUp !== undefined) {
+    try {
+      await checkPickUp();
+    } catch (error) {
+      if (!(error instanceof PortError && error.code === 'unavailable')) throw error;
+    }
+  }
   return source;
 }
 
@@ -746,7 +756,7 @@ const LinearOptions = z.strictObject({
 
 /**
  * `linear` in `project.yaml`: `team` is required, `inReview` and `pickUp` optional, and the key comes from
- * `LINEAR_API_KEY`. With `pickUp`, creating it reads the team's states once to check the names.
+ * `LINEAR_API_KEY`. With `pickUp`, creating it reads the team's states once to check the names, and skips the check while Linear is unavailable.
  */
 export const linearTicketSource: AdapterDefinition<TicketSource> = {
   requires: () => ['LINEAR_API_KEY'],
