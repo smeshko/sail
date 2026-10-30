@@ -4,10 +4,12 @@
 //   the newest running run, else the newest run, unless the URL names a run it lists, and a selection is kept while its
 //   run is still listed.
 // - One run socket is open at a time, for the open run, and its events are folded into the run model. A socket that
-//   closes without `end` reconnects after 2 s and starts the model again, since the replay sends everything.
-// - One queue socket per watched workflow in the index feeds its recent events and its watch state. A workflow's queue
-//   row in the rail opens its queue in the centre, in place of the run, until a run is opened again. A queue that leaves
-//   the index gives the centre back to the run.
+//   closes without `end` reconnects after 2 s and starts the model again, since the replay sends everything, unless its
+//   stream sent `error`: then the error and the cards stay, with no reconnect, until the run is clicked again.
+// - One queue socket per watched workflow in the index feeds its recent events and its watch state, and reconnects by
+//   the same rule: a queue whose stream sent `error` shows it until its row is clicked again. A workflow's queue row in
+//   the rail opens its queue in the centre, in place of the run, until a run is opened again. A queue that leaves the
+//   index gives the centre back to the run.
 // - Needs attention is a button in the top bar with its count. It opens a pane over the page, and `a` toggles it; Esc,
 //   a click outside it, and opening one of its items close it.
 // - Opening a stage card shows its timeline in the centre, drawn from the same run model, so it grows with the run
