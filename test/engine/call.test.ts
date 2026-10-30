@@ -15,6 +15,7 @@ import {
 import { dirname, join } from 'node:path';
 import { createClaudeCodeHarness } from '../../src/adapters/claude-code/harness';
 import { createFakeHarness, type ScriptedAnswer } from '../../src/adapters/fake/harness';
+import { FEEDBACK_SOURCE } from '../../src/engine/agent-prompt';
 import type { Supplied } from '../../src/engine/bindings';
 import { type CallRequest, callProblems, runCall } from '../../src/engine/call';
 import { callPaths, nextTry } from '../../src/engine/call-dir';
@@ -613,6 +614,13 @@ test('invalid output is corrected once: a second try in try-2/, with bindings of
     expect(one).toStartWith(`Write the spec from ${join(s.dir(1), 'in', 'brief.md')}.\n`);
     expect(two).toStartWith(`Write the spec from ${join(s.dir(2), 'in', 'brief.md')}.\n`);
     expect([one.includes(feedback), two.includes(feedback)]).toEqual([false, true]);
+    expect([one.includes(FEEDBACK_SOURCE), two.includes(`<untrusted-input source="${FEEDBACK_SOURCE}">\n`)]).toEqual([
+      false,
+      true,
+    ]);
+    const rendered = events.flatMap((event) => (event.type === 'prompt:rendered' ? [event.untrusted] : []));
+    expect(rendered).toHaveLength(2);
+    expect(rendered[1]).toBe((rendered[0] ?? 0) + 1);
     // What the first try left stays as it left it.
     expect([textAt(join(s.dir(1), 'out', 'spec.md')), textAt(join(s.dir(2), 'out', 'spec.md'))]).toEqual([
       '# Draft\n',
@@ -1412,7 +1420,7 @@ test('a document left as its template is corrected once: try-2 starts from the t
     expect(errorsOf(first)).toEqual(LEFT_AS_TEMPLATE.map((message) => ({ reason: 'invalid_output', message })));
     expect(first.derived).toEqual({ tasks: 0 });
     expect(started).toEqual([SPEC_TEMPLATE, SPEC_TEMPLATE]);
-    expect(harness.requests[1]?.prompt.trimEnd()).toEndWith(LEFT_AS_TEMPLATE.join('\n\n'));
+    expect(harness.requests[1]?.prompt.trimEnd()).toEndWith(`${LEFT_AS_TEMPLATE.join('\n\n')}\n</untrusted-input>`);
     const second = readBack(paths.result);
     expect([placeOf(first), placeOf(second)]).toEqual([
       { outcome: 'error', try: 1, validationTry: 1, validationFailed: true },

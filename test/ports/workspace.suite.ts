@@ -3,7 +3,8 @@
 // test/adapters/workspace/git-worktree.test.ts, over a clone of a local bare origin. Each case starts from a fresh
 // make(), and every event it captures must validate against sail.event.v1 with no key.
 import { expect, test } from 'bun:test';
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Status } from '../../src/engine/run-dir';
 import type { ProviderEmit, ProviderEvent } from '../../src/events/types';
@@ -38,6 +39,8 @@ export interface WorkspaceWorld {
   readonly defaultBranch: string;
   /** The commit `base` names. */
   readonly baseSha: string;
+  /** The repository whose working tree `readTree()` must not read. */
+  readonly repoDir: string;
   /** A file tracked at `base`. */
   readonly tracked: string;
   /** Where run directories are made. */
@@ -49,6 +52,8 @@ export interface WorkspaceWorld {
   run(runId: string, status?: Status | 'none', alive?: boolean): Promise<RunRef & { pid: number }>;
   /** Runs git in `cwd`, giving its exit code and trimmed stdout. */
   git(cwd: string, ...args: string[]): { code: number; stdout: string };
+  /** Puts `branch` on the remote at a new commit one past `base`, and returns its sha. */
+  publishBranch(branch: string): string;
 }
 
 export type MakeWorkspace = (emit: ProviderEmit) => Promise<{ adapter: WorkspacePort; world: WorkspaceWorld }>;
@@ -208,6 +213,53 @@ export function workspaceSuite(label: string, make: MakeWorkspace): void {
     );
   });
 
+  test(`${label}: readTree copies the named paths as committed at the default branch's tip, ignores the working tree's edits, and returns the tip's sha`, async () => {
+    const { adapter, world, capture } = await start();
+    const into = mkdtempSync(join(tmpdir(), 'sail-read-tree-'));
+    const file = join(world.repoDir, world.tracked);
+    const committed = readFileSync(file, 'utf8');
+    writeFileSync(file, 'an uncommitted edit\n');
+    try {
+      const read = await adapter.readTree(into, { paths: [world.tracked] });
+      expect(read).toEqual({ sha: world.baseSha });
+      expect(readFileSync(join(into, world.tracked), 'utf8')).toBe(committed);
+      expect(capture.events).toEqual([]);
+    } finally {
+      writeFileSync(file, committed);
+      rmSync(into, { recursive: true, force: true });
+    }
+  });
+
+  test(`${label}: readTree skips a path the commit lacks and copies the others`, async () => {
+    const { adapter, world } = await start();
+    const into = mkdtempSync(join(tmpdir(), 'sail-read-tree-'));
+    try {
+      const read = await adapter.readTree(into, { paths: ['no-such-path', world.tracked] });
+      expect([read.sha, existsSync(join(into, 'no-such-path')), existsSync(join(into, world.tracked))]).toEqual([
+        world.baseSha,
+        false,
+        true,
+      ]);
+    } finally {
+      rmSync(into, { recursive: true, force: true });
+    }
+  });
+
+  test(`${label}: readTree reads at the base it is given, and refuses as invalid a base that names no commit`, async () => {
+    const { adapter, world } = await start();
+    const into = mkdtempSync(join(tmpdir(), 'sail-read-tree-'));
+    try {
+      const given = await adapter.readTree(into, { paths: [world.tracked], base: world.baseSha });
+      const refused = await settle(adapter.readTree(into, { paths: [world.tracked], base: 'no-such-ref' }));
+      expect({ given, refused }).toEqual({
+        given: { sha: world.baseSha },
+        refused: { rejected: { port: 'workspace', op: 'readTree', code: 'invalid' } },
+      });
+    } finally {
+      rmSync(into, { recursive: true, force: true });
+    }
+  });
+
   test(`${label}: release removes a workspace unless it is kept, and emits workspace:released either way`, async () => {
     const { adapter, world, capture } = await start();
     const r1 = await world.run('r1');
@@ -350,6 +402,47 @@ export function workspaceSuite(label: string, make: MakeWorkspace): void {
     expect(workspace).toEqual({ path: join(r1.runDir, 'workspace'), branch: BRANCH, baseSha: world.baseSha });
     const path = 'path' in workspace ? workspace.path : r1.runDir;
     expect(world.git(path, 'rev-parse', 'HEAD')).toEqual({ code: 0, stdout: world.baseSha });
+  });
+
+  test(`${label}: a workspace for a branch the remote has starts from its tip, and workspace:created records it as baseSha`, async () => {
+    const { adapter, world, capture } = await start();
+    const branch = 'sail/FAKE-77-published';
+    const tip = world.publishBranch(branch);
+    const r1 = await world.run('r1');
+    const workspace = held(await settle(adapter.create(r1, { branch })));
+    const path = 'path' in workspace ? workspace.path : r1.runDir;
+    expect({
+      workspace,
+      head: world.git(path, 'rev-parse', 'HEAD').stdout,
+      created: timed(capture.events).filter((event) => event.type === 'workspace:created'),
+    }).toEqual({
+      workspace: { path: join(r1.runDir, 'workspace'), branch, baseSha: tip },
+      head: tip,
+      created: [
+        { type: 'workspace:created', path: join(r1.runDir, 'workspace'), branch, baseSha: tip, durationMs: 'ms' },
+      ],
+    });
+    expect(tip).not.toBe(world.baseSha);
+  });
+
+  test(`${label}: an explicit base wins over the branch's tip`, async () => {
+    const { adapter, world } = await start();
+    const branch = 'sail/FAKE-78-published';
+    world.publishBranch(branch);
+    const workspace = held(await settle(adapter.create(await world.run('r1'), { base: world.base, branch })));
+    expect('baseSha' in workspace ? workspace.baseSha : workspace).toBe(world.baseSha);
+  });
+
+  test(`${label}: a fallback is where a branch the remote lacks starts, and the branch's tip wins over it (review V2)`, async () => {
+    const { adapter, world } = await start();
+    const fallback = world.publishBranch('sail/FAKE-79-elsewhere');
+    const tip = world.publishBranch('sail/FAKE-80-published');
+    const absent = held(await settle(adapter.create(await world.run('r1'), { branch: 'sail/FAKE-81', fallback })));
+    const present = held(
+      await settle(adapter.create(await world.run('r2'), { branch: 'sail/FAKE-80-published', fallback })),
+    );
+    const sha = (workspace: ReturnType<typeof held>) => ('baseSha' in workspace ? workspace.baseSha : workspace);
+    expect([sha(absent), sha(present)]).toEqual([fallback, tip]);
   });
 
   test(`${label}: diff over <rev>...HEAD is taken against the merge-base, and diff over a sha against that sha`, async () => {

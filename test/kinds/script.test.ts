@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pkg from '../../package.json' with { type: 'json' };
 import { callPaths, createCallDir, stepPaths } from '../../src/engine/call-dir';
+import type { ContractError } from '../../src/engine/contract';
 import { redactor } from '../../src/engine/redact';
 import { validateDocument } from '../../src/engine/schemas';
 import { readSlot, releaseSlot, takeSlot } from '../../src/engine/slots';
@@ -88,6 +89,137 @@ function setup(): Setup {
 
 const tests = (options: { exitCodes?: ExitCodes; timeoutSeconds?: number; run?: string } = {}): ScriptStep =>
   script('tests', { run: './run.sh', produces: { 'junit.xml': 'file' }, output: TestReport, ...options });
+
+const secrets = {
+  GITHUB_TOKEN: 'github-secret',
+  SAIL_GITHUB_TOKEN: 'sail-secret',
+  LINEAR_API_KEY: 'linear-secret',
+  TYPESAFE_API_KEY: 'typesafe-secret',
+  ANTHROPIC_API_KEY: 'anthropic-secret',
+  CLAUDE_CODE_OAUTH_TOKEN: 'claude-secret',
+};
+
+async function environmentRun(declared: readonly string[] = [], inClone = false, ports?: readonly 'codehost'[]) {
+  const s = setup();
+  const events: CallEvent[] = [];
+  s.context.env = {
+    ...secrets,
+    FOO: 'bar',
+    HOME: '/test/home',
+    PATH: '/usr/bin:/bin',
+    SSH_AUTH_SOCK: '/test/ssh',
+    SAIL_HOME: '/test/sail',
+    GIT_AUTHOR_NAME: 'Test Author',
+    GIT_INDEX_FILE: '/test/index',
+  };
+  s.context.inClone = inClone;
+  s.context.portVariables = async () => ['SAIL_GITHUB_TOKEN', 'GITHUB_TOKEN'];
+  s.context.emit = (event) => events.push(event);
+  s.run('env > "$STAGE_OUT/environment"\necho "{}"');
+  const result = await scriptKind.run(
+    script('tests', { run: './run.sh', output: z.object({}), env: declared, ...(ports ? { ports } : {}) }),
+    s.context,
+  );
+  expect(result.outcome).toBe('passed');
+  const environment = Object.fromEntries(
+    readFileSync(join(s.context.paths.dir, 'environment'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => {
+        const i = line.indexOf('=');
+        return [line.slice(0, i), line.slice(i + 1)];
+      }),
+  );
+  return { environment, result, events };
+}
+
+test('a script step that declares nothing gets none of the run credentials', async () => {
+  await withTempRepo(async () => {
+    const { environment } = await environmentRun();
+    for (const name of [...Object.keys(secrets), 'FOO', 'GIT_INDEX_FILE']) expect(environment[name]).toBeUndefined();
+    expect(environment.HOME).toBe('/test/home');
+    expect(environment.PATH).toBe(`${BIN_DIR}:/usr/bin:/bin`);
+    expect(environment.SSH_AUTH_SOCK).toBe('/test/ssh');
+    expect(environment.SAIL_HOME).toBe('/test/sail');
+    expect(environment.GIT_AUTHOR_NAME).toBe('Test Author');
+    expect(environment.SAIL_BUN).toBe(process.execPath);
+    expect(environment.RUN_ID).toBe(RUN_ID);
+  });
+});
+
+test('a step that declares GITHUB_TOKEN gets only that credential', async () => {
+  const { environment, events, result } = await environmentRun(['GITHUB_TOKEN']);
+  expect(environment.GITHUB_TOKEN).toBe('github-secret');
+  for (const name of Object.keys(secrets).filter((name) => name !== 'GITHUB_TOKEN'))
+    expect(environment[name]).toBeUndefined();
+  const exec = events.find((e) => e.type === 'script:exec');
+  expect(exec?.type === 'script:exec' ? exec.envKeys.slice(-1) : []).toEqual(['GITHUB_TOKEN']);
+  expect(JSON.stringify({ events, result })).not.toContain('github-secret');
+});
+
+test('a declared variable that is not set is not given or recorded', async () => {
+  const { environment, events } = await environmentRun(['UNSET_SCRIPT_VARIABLE']);
+  expect(environment.UNSET_SCRIPT_VARIABLE).toBeUndefined();
+  expect(JSON.stringify(events)).not.toContain('UNSET_SCRIPT_VARIABLE');
+});
+
+test('in the clone git repository variables are kept and credentials are not', async () => {
+  await withTempRepo(async () => {
+    const { environment } = await environmentRun([], true);
+    expect(environment.GIT_INDEX_FILE).toBe('/test/index');
+    expect(environment.GITHUB_TOKEN).toBeUndefined();
+  });
+});
+
+for (const [env, message] of [
+  [['bad-name'], "env names an invalid variable: 'bad-name'"],
+  [['HOME', 'HOME'], "env names 'HOME' twice"],
+] as const) {
+  test(message, () =>
+    expect(scriptKind.problems(script('x', { run: './x', output: z.object({}), env }))).toEqual([message]),
+  );
+}
+
+test('ports codehost gets codehost variables and no other credential', async () => {
+  const { environment, events } = await environmentRun([], false, ['codehost']);
+  expect(environment.GITHUB_TOKEN).toBe('github-secret');
+  expect(environment.LINEAR_API_KEY).toBeUndefined();
+  const exec = events.find((e) => e.type === 'script:exec');
+  expect(exec?.type === 'script:exec' ? exec.envKeys.slice(-2) : []).toEqual(['SAIL_GITHUB_TOKEN', 'GITHUB_TOKEN']);
+});
+
+for (const resolver of [undefined, async () => ({ problem: 'jev is not configured in project.yaml' })]) {
+  test(`an unresolved port ends not_started with no script exec (${resolver ? 'problem' : 'missing resolver'})`, async () => {
+    const s = setup();
+    const events: CallEvent[] = [];
+    s.context.emit = (event) => events.push(event);
+    if (resolver) s.context.portVariables = resolver;
+    s.run('touch "$STAGE_OUT/ran"\necho "{}"');
+    const result = await scriptKind.run(
+      script('tests', { run: './run.sh', output: z.object({}), ports: ['jev'] }),
+      s.context,
+    );
+    expect(result.outcome).toBe('error');
+    expect(result.errors).toEqual([
+      {
+        reason: 'not_started',
+        message: `the step declares the port jev, but ${resolver ? 'jev is not configured in project.yaml' : 'no port variable resolver is available'}`,
+      },
+    ]);
+    expect(events).toEqual([]);
+    expect(existsSync(join(s.context.paths.dir, 'ran'))).toBe(false);
+  });
+}
+
+for (const [ports, message] of [
+  [['unknown'], "ports names an unknown port 'unknown': ticket-source, codehost or jev"],
+  [['jev', 'jev'], "ports names 'jev' twice"],
+] as const) {
+  test(`problems refuses ports ${ports.join(',')}`, () => {
+    const step = script('x', { run: './x', output: z.object({}), ports: ports as never });
+    expect(scriptKind.problems(step)).toEqual([message]);
+  });
+}
 
 const sha256 = (text: string) => new Bun.CryptoHasher('sha256').update(text).digest('hex');
 
@@ -393,7 +525,7 @@ test("a script inherits none of the variables that tie git to a repository: a sa
       GIT_DIR: 'unset',
       GIT_WORK_TREE: 'unset',
       GIT_INDEX_FILE: 'unset',
-      GIT_CONFIG_COUNT: '0',
+      GIT_CONFIG_COUNT: 'unset',
     });
   } finally {
     for (const [name, value] of Object.entries(saved)) {
@@ -419,7 +551,7 @@ test('a script step that runs in the clone keeps the variables a git hook set: i
     Object.assign(process.env, hooked, { GIT_CONFIG_COUNT: '0' });
     try {
       const run = await scriptKind.run(step, { ...s.context, inClone: true });
-      expect(run.output).toEqual({ ...hooked, GIT_CONFIG_COUNT: '0' });
+      expect(run.output).toEqual({ ...hooked, GIT_CONFIG_COUNT: 'unset' });
     } finally {
       for (const [name, value] of Object.entries(saved)) {
         if (value === undefined) delete process.env[name];
@@ -814,7 +946,7 @@ test("a script that runs sail port jev ask has jev:asked emitted before script:e
   });
 });
 
-test('a script whose sail port jev ask is answered 429 and which exits with its status ends failed, with an error:port of the jev port', async () => {
+test('a script whose sail port jev ask is answered 429 and which exits with its status ends in error, port unavailable, with an error:port of the jev port', async () => {
   const s = setup();
   withJev(s, { error: { status: 429, detail: 'slow down' } });
   s.run(
@@ -831,7 +963,10 @@ test('a script whose sail port jev ask is answered 429 and which exits with its 
       message: 'jev.ask: TypeSafe answered 429 Too Many Requests: slow down',
     },
   ]);
-  expect(run.outcome).toBe('failed');
+  expect([run.outcome, run.errors]).toEqual([
+    'error',
+    [{ reason: 'port', code: 'unavailable', message: 'jev.ask: TypeSafe answered 429 Too Many Requests: slow down' }],
+  ]);
 });
 
 test.each<[string, string, number | undefined, string, string[]]>([
@@ -1194,4 +1329,42 @@ test("a slot that can't be released leaves the script's own result", async () =>
   c.s.run(`echo 'not json' > ${join(slots, 'verify.json')}\necho '{}'`);
   const run = await scriptKind.run(verify(), c.context);
   expect([run.outcome, run.errors]).toEqual(['passed', []]);
+});
+
+const UNAVAILABLE = `printf '%s\\n' '{"type":"error:port","port":"codeHost","op":"push","code":"unavailable","message":"codeHost.push: GitHub is unreachable"}' >> "$SAIL_EVENTS"`;
+const PORT_UNAVAILABLE: ContractError = {
+  reason: 'port',
+  code: 'unavailable',
+  message: 'codeHost.push: GitHub is unreachable',
+};
+
+test('a script whose port call fails unavailable and which exits 1 ends in error, port, code unavailable, naming the call', async () => {
+  const s = setup();
+  s.run(`${UNAVAILABLE}\nexit 1`);
+  const run = await scriptKind.run(tests(), s.context);
+  expect([run.outcome, run.output, run.errors]).toEqual(['error', null, [PORT_UNAVAILABLE]]);
+});
+
+test('a script whose port call fails unavailable and which exits with an unmapped code ends in error the same way, ahead of the exit code', async () => {
+  const s = setup();
+  s.run(`${UNAVAILABLE}\nexit 3`);
+  const { context, events } = collecting(s);
+  const run = await scriptKind.run(tests(), context);
+  expect([run.outcome, run.errors]).toEqual(['error', [PORT_UNAVAILABLE]]);
+  expect(typesOf(events)).toEqual(['script:exec', 'error:port', 'script:exit']);
+});
+
+test('a script whose port call fails unavailable but which exits 0 stays passed', async () => {
+  const s = setup();
+  s.run(`${UNAVAILABLE}\n${JUNIT}\necho '${PASSING}'`);
+  const run = await scriptKind.run(tests(), s.context);
+  expect([run.outcome, run.errors]).toEqual(['passed', []]);
+});
+
+test('a port call that fails not_found and a script that exits 1 keep the exit code as the verdict, with no port error', async () => {
+  const s = setup();
+  withTicket(s);
+  s.run(`sail port ticket-source get FAKE-9 >/dev/null || true\n${JUNIT}\necho '${FAILING}'\nexit 1`);
+  const run = await scriptKind.run(tests(), s.context);
+  expect([run.outcome, run.errors]).toEqual(['failed', []]);
 });

@@ -14,6 +14,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { createFakeHarness } from '../../src/adapters/fake/harness';
+import { FEEDBACK_SOURCE } from '../../src/engine/agent-prompt';
 import { materialisePrepared, type PreparedBindings, prepareBindings, type Supplied } from '../../src/engine/bindings';
 import { type CallPaths, callPaths, createCallDir, stepPaths } from '../../src/engine/call-dir';
 import type { ContractError } from '../../src/engine/contract';
@@ -177,6 +178,111 @@ async function tried(step: AgentStep, harness: Harness, template?: string): Prom
   return { run: await agentKind.run(step, s.context(harness)), s };
 }
 
+test('a silent session stalls once and leaves no timer after returning', async () => {
+  const step = bare(z.any());
+  const limited = { ...step, budget: { ...budget, maxIdleMinutes: 0.001 } };
+  const harness: Harness = {
+    ...scripted({ resolves: done(null) }),
+    async run() {
+      await Bun.sleep(180);
+      return done(null);
+    },
+  };
+  const { s } = await tried(limited, harness);
+  expect(s.events.filter((e) => e.type === 'step:stalled')).toEqual([
+    { type: 'step:stalled', idleMs: 60, since: expect.any(String) },
+  ]);
+  const count = s.events.length;
+  await Bun.sleep(100);
+  expect(s.events.length).toBe(count);
+});
+
+test("a stall's since is the run's clock, as every event's ts is (review R3)", async () => {
+  const step = { ...bare(z.any()), budget: { ...budget, maxIdleMinutes: 0.001 } };
+  const s = setup(step);
+  const harness: Harness = {
+    ...scripted({ resolves: done(null) }),
+    async run() {
+      await Bun.sleep(120);
+      return done(null);
+    },
+  };
+  const clock = () => new Date('2026-09-27T09:00:00.000Z');
+  await agentKind.run(step, { ...s.context(harness), clock });
+  expect(s.events.filter((e) => e.type === 'step:stalled')).toEqual([
+    { type: 'step:stalled', idleMs: 60, since: '2026-09-27T08:59:59.940Z' },
+  ]);
+});
+
+test('an idle limit longer than a timer can wait does not stall a session at once (review R6)', async () => {
+  const step = { ...bare(z.any()), budget: { ...budget, maxIdleMinutes: 1_000_000 } };
+  const { s } = await tried(step, {
+    ...scripted({ resolves: done(null) }),
+    async run(req) {
+      req.onEvent?.({ type: 'agent:message', text: 'working' });
+      await Bun.sleep(50);
+      return done(null);
+    },
+  });
+  expect(s.events.filter((e) => e.type === 'step:stalled')).toEqual([]);
+});
+
+test('the default idle limit is a quarter of the own minute budget', async () => {
+  const step = { ...bare(z.any()), budget: { ...budget, maxMinutes: 0.02 } };
+  const { s } = await tried(step, {
+    ...scripted({ resolves: done(null) }),
+    async run() {
+      await Bun.sleep(70);
+      return done(null);
+    },
+  });
+  expect(s.events.filter((e) => e.type === 'step:stalled')).toEqual([]);
+});
+
+test('a silence past a quarter of the own minute budget, short of half, stalls once at that quarter (review R8)', async () => {
+  // 1.2 s of minutes: a quarter is 300 ms, half 600 ms.
+  const step = { ...bare(z.any()), budget: { ...budget, maxMinutes: 0.02 } };
+  const { s } = await tried(step, {
+    ...scripted({ resolves: done(null) }),
+    async run() {
+      await Bun.sleep(450);
+      return done(null);
+    },
+  });
+  expect(s.events.filter((e) => e.type === 'step:stalled')).toEqual([
+    { type: 'step:stalled', idleMs: 300, since: expect.any(String) },
+  ]);
+});
+
+test('every event resets silence and a speaking stalled session can stall again', async () => {
+  const step = { ...bare(z.any()), budget: { ...budget, maxIdleMinutes: 0.002 } };
+  const s = setup(step);
+  const harness: Harness = {
+    ...scripted({ resolves: done(null) }),
+    async run(req) {
+      await Bun.sleep(70);
+      req.onEvent?.({ type: 'agent:message', text: 'working' });
+      await Bun.sleep(70);
+      expect(s.events.filter((e) => e.type === 'step:stalled')).toEqual([]);
+      await Bun.sleep(140);
+      expect(s.events.filter((e) => e.type === 'step:stalled')).toHaveLength(1);
+      req.onEvent?.({ type: 'agent:thinking', text: 'again' });
+      await Bun.sleep(170);
+      return done(null);
+    },
+  };
+  await agentKind.run(step, s.context(harness));
+  expect(s.events.filter((e) => e.type === 'step:stalled').map((e) => e.idleMs)).toEqual([120, 120]);
+});
+
+test('non-positive and non-finite idle limits are step problems', () => {
+  for (const maxIdleMinutes of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+    expect(agentKind.problems({ ...bare(z.any()), budget: { ...budget, maxIdleMinutes } })).toEqual([
+      `budget.maxIdleMinutes must be a positive number: ${maxIdleMinutes}`,
+    ]);
+  }
+});
+
 const sha256 = (text: string) => new Bun.CryptoHasher('sha256').update(text).digest('hex');
 const types = (events: readonly CallEvent[]): string[] => events.map((event) => event.type);
 
@@ -286,7 +392,8 @@ test('the harness receives the rendered prompt with its feedback, the preamble a
   });
   expect(typeof onEvent).toBe('function');
   expect(prompt).toStartWith(`Write the spec from ${join(dir, 'in', 'brief.md')}.\n\n${UNTRUSTED_HEADING}\n`);
-  expect(prompt?.trimEnd()).toEndWith(feedback[0] ?? '');
+  expect(prompt?.trimEnd()).toEndWith(`${feedback[0]}\n</untrusted-input>`);
+  expect(prompt).toContain(`<untrusted-input source="${FEEDBACK_SOURCE}">\n${feedback[0]}\n</untrusted-input>`);
   expect(s.read('prompt.md')).toBe(prompt ?? '');
   expect(run.output).toEqual({ ...VALID, points: 2, approved: true });
   expect(run.record).toMatchObject({ try: 3, validationTry: 2, validationFailed: false });
@@ -998,6 +1105,9 @@ test('corrective prompt names only template placeholders, not quoted color tags'
     'spec.md: noPlaceholders: line 5 still holds the placeholder {{requirements: …}}',
   );
   expect(harness.requests[0]?.prompt.includes('color')).toBe(false);
+  expect(harness.requests[0]?.prompt).toContain(
+    `<untrusted-input source="${FEEDBACK_SOURCE}">\nspec.md: noPlaceholders: line 5 still holds the placeholder {{requirements: …}}\n</untrusted-input>`,
+  );
 });
 
 test('only a document the session left is validated: one it removed is a missing file, with no verdict', async () => {

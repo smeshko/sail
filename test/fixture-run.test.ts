@@ -15,7 +15,7 @@ import { validateRunDir } from '../src/engine/schemas';
 import { readEvents } from '../src/events/consumers/ndjson';
 import type { SailEvent } from '../src/events/types';
 import { interruptInSession, journaled, writeHarnessScript } from './helpers/agent-fixture';
-import { copyFixture, FIXTURE_SAIL, holdAfterOpen, holdBeforeOpen, killWhenHeld } from './helpers/fixture';
+import { copyFixture, edit, FIXTURE_SAIL, holdAfterOpen, holdBeforeOpen, killWhenHeld } from './helpers/fixture';
 import { fakeInterrupts, runCaptured } from './helpers/run-captured';
 import { copyRun } from './helpers/stub-workflow';
 import { type TempRepo, withTempRepo } from './helpers/temp-repo';
@@ -35,6 +35,14 @@ const JOURNAL = [
 const PR = { number: 5, url: 'fake://codehost/fixture/pull/5', draft: false };
 const BRANCH = 'sail/FAKE-1-add-a-shout-flag-to-the-greet-command';
 const MAIN = join(import.meta.dir, '..', 'src', 'cli', 'main.ts');
+/** What `open` commits when the run made none: the parent, then the author and both dates, then the tree. */
+const emptyCommit = (repo: TempRepo, sha: string, parent: string): string[] => [
+  repo.git('log', '-1', '--format=%P%n%an%n%ae%n%aI%n%cI', sha),
+  repo.git('rev-parse', `${sha}^{tree}`),
+  repo.git('rev-parse', `${parent}^{tree}`),
+];
+const EMPTY_COMMIT_LOG = (parent: string) =>
+  [parent, 'sail', 'sail@example.invalid', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'].join('\n');
 
 /** The run directory of a repository's latest run, or '' when it has none. */
 function latestRun(repoDir: string): string {
@@ -115,13 +123,17 @@ test('implement#2 consumed the failing report as its feedback, and implement#1 c
   expect(existsSync(join(dir, '02-implement', 'call-1', 'in', 'feedback.json'))).toBe(false);
 });
 
-test("the run leaves pull request 5 on the fake code host: open, no draft, from the run's branch into main at the repository's HEAD, labelled sail, with the ticket key, the title describe submitted and the body of its pr-body.md", async () => {
+test("the run leaves pull request 5 on the fake code host: open, no draft, from the run's branch into main at one empty commit on the repository's HEAD, labelled sail, with the ticket key, the title describe submitted and the body of its pr-body.md", async () => {
   const { dir, repo } = await completed();
   const { pullRequests, branches } = fakeState(repo.dir, 'prs.json');
   expect(pullRequests.map((pr: { number: number }) => pr.number)).toEqual([1, 2, 3, 4, 5]);
   const described = json(dir, '05-publish', 'call-1', 'steps', '1-describe', 'result.json').output;
   expect(described).toEqual({ title: 'Add a --shout flag to the greet command (FAKE-1)', bodyFile: 'pr-body.md' });
-  const headSha = repo.git('rev-parse', 'HEAD');
+  const headSha = pullRequests[4].headSha;
+  const base = repo.git('rev-parse', 'HEAD');
+  expect(headSha).not.toBe(base);
+  const [log, tree, baseTree] = emptyCommit(repo, headSha, base);
+  expect([log, tree]).toEqual([EMPTY_COMMIT_LOG(base), baseTree]);
   expect(pullRequests[4]).toMatchObject({
     number: 5,
     title: described.title,
@@ -137,6 +149,29 @@ test("the run leaves pull request 5 on the fake code host: open, no draft, from 
   expect(pullRequests[4].body).toStartWith('## Summary\n');
   expect(branches['sail/FAKE-1-add-a-shout-flag-to-the-greet-command']).toBe(headSha);
 });
+
+test('a run whose workspace already has a commit beyond the base pushes it with no empty commit on top', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = copyFixture(repo.dir);
+    edit(
+      sail,
+      'stages/tests/run.sh',
+      `fi\n\ncat >"\${STAGE_OUT:?}/junit.xml"`,
+      `fi
+
+export GIT_AUTHOR_NAME=stub GIT_AUTHOR_EMAIL=stub@example.invalid GIT_COMMITTER_NAME=stub GIT_COMMITTER_EMAIL=stub@example.invalid
+git -C "$WORKSPACE" commit --allow-empty -q -m 'feat: the stub made a commit'
+
+cat >"\${STAGE_OUT:?}/junit.xml"`,
+    );
+    const ran = await runCaptured(['FAKE-1'], repo.dir, { env: repo.env });
+    expect([ran.code, journalOf(latestRun(repo.dir))]).toEqual([EXIT_OK, JOURNAL]);
+    const headSha = fakeState(repo.dir, 'prs.json').pullRequests[4].headSha;
+    const base = repo.git('rev-parse', 'HEAD');
+    expect(repo.git('rev-list', '--count', `${base}..${headSha}`)).toBe('1');
+    expect(repo.git('log', '-1', '--format=%s', headSha)).toBe('feat: the stub made a commit');
+  });
+}, 60_000);
 
 test("publish#1/open's output is the pull request's number, URL and draft flag, kept from the code host's whole answer, and run:end's result is { pr: that }", async () => {
   const { dir, events } = await completed();
@@ -157,6 +192,7 @@ test("publish#1/open's output is the pull request's number, URL and draft flag, 
 
 test('the events hold codehost:pushed, codehost:pr_opened, codehost:labelled and ticket:commented under the key publish#1/open, after its script:exec and before its script:exit, and the call directory keeps them in its port events file', async () => {
   const { dir, events, repo, runId } = await completed();
+  const pushedHead = fakeState(repo.dir, 'prs.json').branches[BRANCH];
   const own = events.filter((event) => 'key' in event && event.key === 'publish#1/open');
   const from = own.findIndex((event) => event.type === 'script:exec');
   const first = own[from]?.seq ?? 0;
@@ -174,7 +210,7 @@ test('the events hold codehost:pushed, codehost:pr_opened, codehost:labelled and
     {
       type: 'codehost:pushed',
       branch: 'sail/FAKE-1-add-a-shout-flag-to-the-greet-command',
-      headSha: repo.git('rev-parse', 'HEAD'),
+      headSha: pushedHead,
     },
     {
       type: 'codehost:pr_opened',
@@ -300,8 +336,10 @@ test('Ctrl-C during implement#2 exits 2 with the resume hint and a journal that 
       expect(fakeState(other.dir, 'prs.json').pullRequests.at(-1)).toMatchObject({
         number: 5,
         state: 'open',
-        headSha: other.git('rev-parse', 'HEAD'),
       });
+      const base = other.git('rev-parse', 'HEAD');
+      const resumedHead = fakeState(other.dir, 'prs.json').pullRequests.at(-1).headSha;
+      expect(emptyCommit(other, resumedHead, base)[0]).toBe(EMPTY_COMMIT_LOG(base));
       expect(validateRunDir(copy).issues).toEqual([]);
     });
   });
@@ -400,7 +438,9 @@ test('a first spec try that leaves the template as it is gets one correction: tr
       "spec.md: countItems(Tasks, min 1): 'Tasks' has 0 items, fewer than 1",
     ];
     const prompt = readFileSync(join(dir, '01-spec', 'call-1', 'try-2', 'prompt.md'), 'utf8');
-    expect(prompt.trimEnd()).toEndWith(messages.join('\n\n'));
+    expect(prompt.trimEnd()).toEndWith(
+      `<untrusted-input source="the problems found in your last output">\n${messages.join('\n\n')}\n</untrusted-input>`,
+    );
     expect(json(dir, '01-spec', 'call-1', 'try-2', 'result.json')).toMatchObject({
       outcome: 'done',
       try: 2,

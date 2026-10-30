@@ -182,6 +182,13 @@ test("the fixture's header validates, with the workflow's folder, the adapters a
   expect(header.intake.name).toBe('ticket');
 });
 
+test("a step's idle limit of 0 still validates, as its minute budget of 0 does, so the agent kind refuses it with its own message (review D1)", async () => {
+  const header = await fixtureHeader();
+  const spec = header.stages.spec as unknown as { budget: Record<string, number> };
+  spec.budget = { ...spec.budget, maxIdleMinutes: 0 };
+  expect(validateRunHeader(header)).toEqual([]);
+});
+
 test("a workflow's budget overrides project.yaml's field by field, and stands alone without one: the header validates and holds the merged budget a dry run prints", async () => {
   const headerOf = (change: (sail: string) => void) =>
     withTempRepo(async (repo) => {
@@ -376,4 +383,41 @@ test('the header of a seeded run records its fromRun after the source and no cla
     fromRun,
     [],
   ]);
+});
+
+test('a header built with definitionsSha records it after startedAt, round-trips through run.json and validates; one built without it has no such key; a value that is not 40 hex is refused', async () => {
+  const definitionsSha = 'c'.repeat(40);
+  const withSha = await withTempRepo(async (repo) => {
+    const sail = copyFixture(repo.dir);
+    const { loaded, config } = await load(sail);
+    return buildRunHeader({
+      runId: RUN_ID,
+      source: FAKE_1,
+      sailDir: sail,
+      loaded,
+      config,
+      adapters: FAKE_ENTRIES,
+      now: NOW,
+      definitionsSha,
+    });
+  });
+  const without = await fixtureHeader();
+  const dir = tempDir();
+  writeRunHeader(dir, withSha);
+  const refused = (value: string) => validateRunHeader({ ...withSha, definitionsSha: value }).length;
+  expect({
+    recorded: withSha.definitionsSha,
+    after: Object.keys(withSha).slice(Object.keys(withSha).indexOf('startedAt')),
+    issues: validateRunHeader(withSha),
+    readBack: readRunHeader(dir).definitionsSha,
+    without: 'definitionsSha' in without,
+    refused: [refused('c'.repeat(39)), refused('C'.repeat(40)), refused('main')].map((count) => count > 0),
+  }).toEqual({
+    recorded: definitionsSha,
+    after: ['startedAt', 'definitionsSha'],
+    issues: [],
+    readBack: definitionsSha,
+    without: false,
+    refused: [true, true, true],
+  });
 });

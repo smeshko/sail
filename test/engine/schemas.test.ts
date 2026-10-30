@@ -818,6 +818,40 @@ test('result: errors is non-empty, and each error has a known reason and a messa
   expect(paths('sail.result.v1', { ...failing, errors: every })).toEqual([]);
 });
 
+test('event: a run:suspended on an unavailable port names its call, and takes no reset time or budget field', () => {
+  const check = (sample: Record<string, unknown>) =>
+    paths('sail.event.v1', { ...envelope, type: 'run:suspended', ...sample }).sort();
+  const down = { stopReason: 'port_unavailable', key: 'publish#1' };
+  expect({
+    down: check(down),
+    noKey: check({ stopReason: 'port_unavailable' }),
+    withReset: check({ ...down, resetsAt: '2026-10-28T14:20:00.000Z' }),
+    withBudget: check({ ...down, budget: 'usd' }),
+    runEnd: paths('sail.event.v1', {
+      ...envelope,
+      type: 'run:end',
+      status: 'suspended',
+      stopReason: 'port_unavailable',
+      replays: 1,
+    }),
+  }).toEqual({
+    down: [],
+    noKey: ['/key'],
+    withReset: ['/resetsAt'],
+    withBudget: ['/budget'],
+    runEnd: [],
+  });
+});
+
+test('result: a port error may carry the code unavailable, and no other code', () => {
+  const failing = { ...scriptResult, outcome: 'error' };
+  const port = { reason: 'port', message: 'codeHost.push: GitHub is unreachable' };
+  expect({
+    unavailable: paths('sail.result.v1', { ...failing, errors: [{ ...port, code: 'unavailable' }] }),
+    other: paths('sail.result.v1', { ...failing, errors: [{ ...port, code: 'not_found' }] }),
+  }).toEqual({ unavailable: [], other: ['/errors/0/code'] });
+});
+
 test("result: a script's exit code is null only beside the signal that ended it, and exit is left out if it never started", () => {
   const killed = { ...scriptResult, outcome: 'error', errors: [{ reason: 'timeout', message: 'timed out after 1s' }] };
   expect(paths('sail.result.v1', { ...killed, exit: { code: null, signal: 'SIGTERM' } })).toEqual([]);

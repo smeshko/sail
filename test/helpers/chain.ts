@@ -2,7 +2,7 @@
 // its runs talk to. The fixture is `test/fixtures/chain/.sail/`: a test `ticket-to-pr` and a test `pr-to-main`, on the
 // real Linear, GitHub and git-worktree adapters and the fake harness.
 //
-// `withChain()` builds one clone on every real adapter but the harness: `.sail/` uncommitted and `.sail-runs/` ignored, a
+// `withChain()` builds one clone on every real adapter but the harness: `.sail/` uncommitted there (origin's `main` holds it) and `.sail-runs/` ignored, a
 // bare origin the GitHub world reads its branches from, the scripted Linear and GitHub served on 127.0.0.1, and the
 // pull requests the test asks for, each on a branch of its own cut from `main`. Every pull request is behind `main`:
 // `main` moves once after the branches are cut, so a run has to merge it in. The GitHub world follows pushes
@@ -169,6 +169,13 @@ export async function withChain<T>(options: ChainOptions, fn: (chain: Chain) => 
       writeFileSync(path, `${JSON.stringify(answers, null, 2)}\n`);
     }
     options.prepare?.(sail);
+    // A dispatched run reads the `.sail/` committed on the default branch, so origin's `main` carries it too.
+    git(pusher, repo.env, 'fetch', '--quiet', 'origin');
+    git(pusher, repo.env, 'checkout', '--quiet', '-B', 'main', 'origin/main');
+    cpSync(sail, join(pusher, '.sail'), { recursive: true });
+    git(pusher, repo.env, 'add', '.sail');
+    git(pusher, repo.env, 'commit', '--quiet', '-m', 'definitions');
+    git(pusher, repo.env, 'push', '--quiet', 'origin', 'main:refs/heads/main');
 
     const silent = new Set(options.silent ?? []);
     const github = createGitHubWorld({

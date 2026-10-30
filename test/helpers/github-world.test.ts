@@ -22,6 +22,9 @@ interface Reply {
   statuses: { context: string }[];
   merged_at: string | null;
   merge_commit_sha: string | null;
+  message: string;
+  errors: { resource: string; code: string; message: string }[];
+  documentation_url: string;
 }
 
 /** A request to the world, as the adapter makes it: the JSON it answers, parsed. */
@@ -67,7 +70,7 @@ function pushTo(repo: TempRepo, origin: string, branch: string, file: string): s
 /** A world over a fresh origin whose branch `topic` has one commit, with pull request 1 on it. */
 async function withWorld<T>(
   seed: Partial<GitHubWorldSeed>,
-  fn: (world: GitHubWorld, push: () => string, first: string) => Promise<T>,
+  fn: (world: GitHubWorld, push: () => string, first: string, pushMain: (branch: string) => void) => Promise<T>,
 ): Promise<T> {
   return withTempRepo(async (repo) => {
     const origin = withOrigin(repo).url;
@@ -83,7 +86,14 @@ async function withWorld<T>(
       ...seed,
     });
     let pushes = 0;
-    return fn(world, () => pushTo(repo, origin, 'topic', `more-${++pushes}.txt`), first);
+    const pushMain = (branch: string) => {
+      const pushed = Bun.spawnSync(['git', 'push', '--quiet', 'origin', `origin/main:refs/heads/${branch}`], {
+        cwd: join(repo.dir, '..', 'pusher-topic'),
+        env: repo.env,
+      });
+      if (pushed.exitCode !== 0) throw new Error(`git push: ${pushed.stderr.toString()}`);
+    };
+    return fn(world, () => pushTo(repo, origin, 'topic', `more-${++pushes}.txt`), first, pushMain);
   });
 }
 
@@ -229,5 +239,24 @@ test('an injected answer without applied leaves the pull request unmerged', asyn
     expect((await ask(world, 'PUT', '/pulls/1/merge', { merge_method: 'squash', sha: first })).status).toBe(502);
     const read = (await ask(world, 'GET', '/pulls/1')).json;
     expect({ mergedAt: read.merged_at, sha: read.merge_commit_sha }).toEqual({ mergedAt: null, sha: null });
+  });
+});
+
+const NO_COMMITS = (head: string): Partial<Reply> => ({
+  message: 'Validation Failed',
+  errors: [{ resource: 'PullRequest', code: 'custom', message: `No commits between main and ${head}` }],
+  documentation_url: 'https://docs.github.com/rest/pulls/pulls#create-a-pull-request',
+});
+
+test("POST /pulls with a head that has no commits beyond its base answers GitHub's 422 and opens nothing", async () => {
+  await withWorld({ pullRequests: [] }, async (world, _push, _first, pushMain) => {
+    const onMain = await ask(world, 'POST', '/pulls', { title: 'Main', head: 'main', base: 'main' });
+    expect<unknown>([onMain.status, onMain.json]).toEqual([422, NO_COMMITS('main')]);
+    pushMain('empty');
+    const empty = await ask(world, 'POST', '/pulls', { title: 'Empty', head: 'empty', base: 'main' });
+    expect<unknown>([empty.status, empty.json]).toEqual([422, NO_COMMITS('empty')]);
+    expect(world.pullRequests).toEqual([]);
+    const topic = await ask(world, 'POST', '/pulls', { title: 'Topic', head: 'topic', base: 'main' });
+    expect([topic.status, topic.json.number]).toEqual([201, 1]);
   });
 });

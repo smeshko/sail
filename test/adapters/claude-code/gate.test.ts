@@ -368,3 +368,66 @@ describe("with the fixture spec stage's commands, what decide() can't see is den
     }).toEqual({ decision: expected, rules: expected === 'deny' ? ['commands'] : [] });
   });
 });
+
+// What Claude Code saves of a long tool output sits beside the session's transcript, under `<session id>/tool-results/`:
+// the agent is told to Read it, so the gate lets it, and nothing else of `~/.claude`.
+describe("a session's saved tool output", () => {
+  const project = join(base, 'home', '.claude', 'projects', 'proj');
+  const transcript = join(project, 's1.jsonl');
+  const saved = join(project, 's1', 'tool-results', 'out.txt');
+  const other = join(project, 's2', 'tool-results', 'out.txt');
+  mkdirSync(join(project, 's1', 'tool-results'), { recursive: true });
+  mkdirSync(join(project, 's2', 'tool-results'), { recursive: true });
+  writeFileSync(transcript, '{}\n');
+  writeFileSync(saved, 'long output\n');
+  writeFileSync(other, 'another session\n');
+  writeFileSync(join(project, 'settings.json'), '{}\n');
+  symlinkSync(join(base, 'elsewhere', 'secret.txt'), join(project, 's1', 'tool-results', 'link.txt'));
+  const session = { session_id: 's1', transcript_path: transcript };
+
+  const verdictOf = async (tool: string, input: unknown, extra: Partial<PreToolUseHookInput> = session) => {
+    const g = gate();
+    const answer = await ask(g, pre(tool, input, 'toolu_1', extra));
+    return {
+      decision: answer.hookSpecificOutput?.permissionDecision,
+      rules: g.denials.map(([, denial]) => denial.rule as string),
+    };
+  };
+  const runs = { decision: 'allow', rules: [] };
+  const deniedByRead = { decision: 'deny', rules: ['read'] };
+
+  test("a Read of the session's tool-results file runs", async () => {
+    expect(await verdictOf('Read', { file_path: saved })).toEqual(runs);
+  });
+
+  test("a Read of the transcript, of another file under ~/.claude, or of another session's tool-results is denied by read", async () => {
+    expect([
+      await verdictOf('Read', { file_path: transcript }),
+      await verdictOf('Read', { file_path: join(project, 'settings.json') }),
+      await verdictOf('Read', { file_path: other }),
+      await verdictOf('Read', {
+        file_path: join(project, 's1', 'tool-results', '..', '..', 's2', 'tool-results', 'out.txt'),
+      }),
+    ]).toEqual([deniedByRead, deniedByRead, deniedByRead, deniedByRead]);
+  });
+
+  test('a tool-results entry linking outside it is denied by read', async () => {
+    expect(await verdictOf('Read', { file_path: join(project, 's1', 'tool-results', 'link.txt') })).toEqual(
+      deniedByRead,
+    );
+  });
+
+  test("a Grep or Bash cat of the tool-results file is decided as before: denied, as it lies outside the step's read globs", async () => {
+    expect([
+      await verdictOf('Grep', { pattern: 'long', path: saved }),
+      await verdictOf('Bash', { command: `cat ${saved}` }),
+    ]).toEqual([deniedByRead, { decision: 'deny', rules: ['commands'] }]);
+  });
+
+  test('with no transcript_path the Read is denied as before', async () => {
+    expect([
+      await verdictOf('Read', { file_path: saved }, { session_id: 's1', transcript_path: '' }),
+      await verdictOf('Read', { file_path: saved }, { session_id: '', transcript_path: transcript }),
+    ]).toEqual([deniedByRead, deniedByRead]);
+  });
+});

@@ -1,5 +1,6 @@
 // The fake Workspace port: detached worktrees of a local git repository standing in for the remote, one per run at
-// `<runDir>/workspace` (D12), kept apart by the shared branch leases (D9). It runs on the same plumbing as
+// `<runDir>/workspace` (D12), started from the run's branch when the repository has it and else from the default
+// branch, kept apart by the shared branch leases (D9). It runs on the same plumbing as
 // `git-worktree` (src/adapters/workspace/git.ts) and differs from it in three things: it fetches nothing, its remote is
 // a constant (`fake://origin` unless set), and its definition keeps leases beside the repository's runs rather than
 // machine-wide. The branch is never checked out: a workspace records it for the later push of `HEAD:<branch>`, so only
@@ -12,6 +13,7 @@ import type { WorkspacePort } from '../../ports/workspace';
 import { defaultLeasesDir, heldLease, releaseLease, takeLease } from '../leases';
 import {
   addDetached,
+  copyTree,
   diffWorkingTree,
   releaseWorktree,
   reopenWorktree,
@@ -63,14 +65,22 @@ export function createFakeWorkspace(options: FakeWorkspaceOptions): WorkspacePor
     async holder(remote, branch) {
       return heldLease(leasesDir(), remote, branch);
     },
-    async create(run, { base = defaultBranch, branch }) {
+    async create(run, { base, branch, fallback }) {
       const started = now().getTime();
+      // A branch already in the repository, which stands in for the remote, is continued rather than restarted.
+      base ??= resolveCommit(repo, `refs/heads/${branch}`, env) ? `refs/heads/${branch}` : (fallback ?? defaultBranch);
       const baseSha = resolveCommit(repo, base, env);
       if (baseSha === undefined) throw new PortError('workspace', 'create', 'invalid', `${base} names no commit`);
       const path = join(run.runDir, WORKSPACE_DIR);
       const added = addDetached(repo, path, baseSha, env);
       emit({ type: 'workspace:created', path, branch, baseSha, durationMs: Math.max(0, now().getTime() - started) });
       return { path, branch, baseSha, raw: added };
+    },
+    async readTree(into, { paths, base = defaultBranch }) {
+      const sha = resolveCommit(repo, base, env);
+      if (sha === undefined) throw new PortError('workspace', 'readTree', 'invalid', `${base} names no commit`);
+      copyTree(repo, sha, paths, into, env);
+      return { sha };
     },
     async reopen(run, { branch, baseSha }) {
       return reopenWorktree(join(run.runDir, WORKSPACE_DIR), branch, baseSha, env);

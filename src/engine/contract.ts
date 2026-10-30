@@ -22,6 +22,8 @@ export interface ContractError {
   message: string;
   /** When a `usage_limit` resets, if the provider said. */
   resetsAt?: string;
+  /** A `port` error's provider code, when it says the call can be retried: the provider was `unavailable`. */
+  code?: 'unavailable';
 }
 
 /** A produced file as `result.json` records it. `path` is relative to the run directory. */

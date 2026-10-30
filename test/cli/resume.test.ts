@@ -704,3 +704,21 @@ test.each<[string, (repo: TempRepo, dir: string) => void, string]>([
   },
   30_000,
 );
+
+test("sail resume of a dispatched run loads the run's own copy of the definitions, and completes after the clone's workflow is gone", async () => {
+  await withTempRepo(async (repo) => {
+    const sail = writeStub(repo.dir, { testsPassAt: 1 });
+    repo.git('add', '.sail');
+    repo.git('commit', '-q', '-m', 'definitions');
+    const runId = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3P';
+    const first = await runCaptured(
+      ['FAKE-1', '--workflow', 'ticket-to-pr', '--dispatch', runId, '--until', 'implement'],
+      repo.dir,
+    );
+    expect({ code: first.code, stderr: first.stderr }).toEqual({ code: EXIT_SUSPENDED, stderr: '' });
+    rmSync(join(sail, 'workflows', 'ticket-to-pr'), { recursive: true });
+    const resumed = await runCaptured(['resume', runId], repo.dir);
+    expect({ code: resumed.code, stderr: resumed.stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    expect(readStatus(join(repo.dir, '.sail-runs', runId))).toEqual({ status: 'completed' });
+  });
+});
