@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { existsSync, realpathSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative } from 'node:path';
 import { type TempRepo, withTempRepo } from './temp-repo';
@@ -54,6 +54,25 @@ test('a spawn given repo.env sees repo.home', async () => {
   await withTempRepo((repo) => {
     const result = Bun.spawnSync(['sh', '-c', 'echo "$HOME"'], { env: repo.env });
     expect(result.stdout.toString().trim()).toBe(repo.home);
+  });
+});
+
+test('a process scripts/test.ts did not start is refused before anything is made', async () => {
+  await withTempRepo((repo) => {
+    // A plain `bun` script, as an agent's demo runs one: with no SAIL_TEST_HOME, or with a HOME that isn't it.
+    const helper = JSON.stringify(join(import.meta.dir, 'temp-repo.ts'));
+    const script = `import { withTempRepo } from ${helper}; await withTempRepo(() => console.log('ran'));`;
+    const tmp = join(repo.home, 'tmp');
+    mkdirSync(tmp);
+    const outside = (env: Readonly<Record<string, string>>) => {
+      const result = Bun.spawnSync([process.execPath, '-e', script], { cwd: repo.dir, env: { ...env, TMPDIR: tmp } });
+      const [stdout, stderr] = [result.stdout.toString(), result.stderr.toString()];
+      return { code: result.exitCode, stdout, stderr, made: readdirSync(tmp) };
+    };
+    const { SAIL_TEST_HOME: _, ...plain } = repo.env;
+    const refused = { code: 1, stdout: '', stderr: expect.stringContaining('bun run test'), made: [] };
+    expect(outside(plain)).toEqual(refused);
+    expect(outside(repo.env)).toEqual(refused);
   });
 });
 

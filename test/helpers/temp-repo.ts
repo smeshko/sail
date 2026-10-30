@@ -2,11 +2,15 @@
 // Bun spawns inherit the startup environment, not a mutated process.env, so a test must pass `repo.env` to every
 // subprocess it starts. process.env itself is never touched.
 //
+// It runs only in a process scripts/test.ts started, by the check test/setup.ts makes. A plain script keeps the real
+// HOME, and a sail run in process finds its machine directory through that HOME, not repo.env's: it would record the
+// repository in the real watcher registry, and the entry would outlive the repository.
+//
 // Every repository is a copy of one template, made once per test process under the launcher's throwaway HOME: git init,
 // README.md and the commit cost three git spawns, and copying the template costs none. So every temp repository starts
 // at the same commit.
 import { cpSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 export interface TempRepo {
@@ -47,6 +51,11 @@ function templateRepo(env: Readonly<Record<string, string>>): string {
 }
 
 export async function withTempRepo<T>(fn: (repo: TempRepo) => T | Promise<T>): Promise<T> {
+  if (process.env.SAIL_TEST_HOME !== homedir()) {
+    throw new Error(
+      'withTempRepo: call it from a test file run with `bun run test <file>` (in a plain script, a sail run in its repository would register that repository in your real ~/.sail/watchers/)',
+    );
+  }
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'sail-repo-')));
   try {
     // HOME is a sibling of the repository, so a test that chdirs into `dir` never mistakes ~/.sail for its .sail/.
