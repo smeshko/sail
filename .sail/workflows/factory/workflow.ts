@@ -23,7 +23,8 @@ export default workflow(
     intake: ticket,
     version: 7,
     watch: { every: '5m' },
-    maxConcurrentRuns: 2,
+    // One at a time: two factory runs beside the reviews load the machine until every gate turns flaky (ADW-444).
+    maxConcurrentRuns: 1,
     description: 'plan, implement test first, validate, check the tasks, pull request, follow-ups',
   },
   async (run) => {

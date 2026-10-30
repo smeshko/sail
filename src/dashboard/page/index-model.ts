@@ -11,6 +11,8 @@ export interface RailRun {
   runId: string;
   workflow?: string;
   ticketKey?: string;
+  /** The pull request's number, for a run started from a pull request. */
+  pr?: number;
   title?: string;
   status: string;
   stalled?: string;
@@ -72,10 +74,13 @@ function railRun(run: RunItem, now: number): RailRun {
   const status = statusOf(run);
   const row: RailRun = { runId: run.runId, status };
   const { summary } = run;
-  // A pull-request run has no ticket key: its rail entry falls back to its run id.
+  // A pull-request run has no ticket key: its rail entry reads its pull request's number.
   const keyOf = (source: { kind: string; ticketKey?: string } | undefined) =>
     source?.kind === 'ticket' ? source.ticketKey : undefined;
   const ticketKey = keyOf(summary?.source) ?? keyOf(run.source);
+  const prOf = (source: { kind: string; number?: number } | undefined) =>
+    source?.kind === 'pr' ? source.number : undefined;
+  const pr = prOf(summary?.source) ?? prOf(run.source);
   const startedAt = run.startedAt ?? summary?.startedAt;
   const stopReason = stopReasonOf(run);
   const started = startedAt === undefined ? Number.NaN : Date.parse(startedAt);
@@ -84,6 +89,7 @@ function railRun(run: RunItem, now: number): RailRun {
   const facts = {
     workflow: run.workflow ?? summary?.workflow,
     ticketKey,
+    pr,
     title: summary?.ticket?.title,
     stopReason,
     startedAt,

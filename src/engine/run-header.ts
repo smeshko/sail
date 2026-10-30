@@ -47,6 +47,8 @@ export interface RunHeader {
   stages: Record<string, RosterEntry>;
   budget?: { maxUsd?: number; maxMinutes?: number };
   startedAt: string;
+  /** The commit whose `.sail/` the run's definitions were read from. Absent for a run on the clone's `.sail/`. */
+  definitionsSha?: string;
   /** The run's branch, named once at its start. A run from before workspaces has none. */
   branch?: string;
   /** The repository the workspace was made from, and the base it started at. */
@@ -103,6 +105,8 @@ export interface HeaderFields {
   /** The named harnesses the run reached, which the header records beside the ports. Left out when empty. */
   harnesses?: Record<string, AdapterEntry>;
   now: Date;
+  /** The commit the definitions were read from. Left out, the header holds no `definitionsSha`. */
+  definitionsSha?: string;
   /** The run's workspace, once it exists. Left out, the header holds no `branch`, `repository` or `workspace`. */
   workspace?: HeaderWorkspace;
 }
@@ -142,6 +146,7 @@ export function buildRunHeader(fields: HeaderFields): RunHeader {
     stages,
     ...(budget === undefined ? {} : { budget }),
     startedAt: now.toISOString(),
+    ...(fields.definitionsSha === undefined ? {} : { definitionsSha: fields.definitionsSha }),
     ...(fields.workspace === undefined ? {} : workspaceFields(fields.workspace)),
   };
 }

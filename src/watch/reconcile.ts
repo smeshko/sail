@@ -10,7 +10,7 @@
 // | `failed` otherwise | a failed attempt, retried later or parked |
 // | `running` with its pid dead, `suspended interrupted`, `suspended unwatched` | adopted under its lease's pid when a live process holds its lease, else resumed, once |
 // | `suspended usage_limit` | adopted when a live process holds its lease; else held while now is before its reset time (or the back-off after it hit the limit), then resumed, even when this dispatcher resumed it before, unless its resume hit no limit since: then parked with why |
-// | anything else, such as `suspended until` or `budget_exceeded` | left: a person resumes or stops it |
+// | anything else, such as `suspended until`, `suspended port_unavailable` or `budget_exceeded` | left: a person resumes or stops it |
 //
 // A limit with no event to date it by is dated by when the dispatcher first saw it (`limitedAt`).
 //

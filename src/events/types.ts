@@ -121,11 +121,13 @@ interface Payloads {
   };
   /**
    * A run suspended right before its `run:end`: on its budget (which budget, its limit and what was used), or on the
-   * provider's usage limit (the call that hit it, and when it resets if the provider said).
+   * provider's usage limit (the call that hit it, and when it resets if the provider said), or on a provider that was
+   * unavailable (the call whose step it ended).
    */
   'run:suspended':
     | { stopReason: 'budget_exceeded'; budget: 'usd' | 'minutes'; limit: number; used: number }
-    | { stopReason: 'usage_limit'; key: string; resetsAt?: string };
+    | { stopReason: 'usage_limit'; key: string; resetsAt?: string }
+    | { stopReason: 'port_unavailable'; key: string };
   /** Whether the process driving the run holds a keep-awake: once per process, with no key. */
   'run:keep_awake': { held: true; by: string } | { held: false; reason: string };
   'stage:start': {

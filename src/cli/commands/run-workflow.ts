@@ -8,15 +8,20 @@
 //
 // Ctrl-C or SIGTERM while the run runs stops the running call and suspends the run, and the command prints how to
 // resume it. One that arrives while the run is being opened is a refusal: the ticket is as it was, and nothing exists
-// to resume. Earlier still, during the type-check, it ends sail the default way.
+// to resume. Earlier still, during the type-check, it ends sail the default way; a dispatched start's is the same
+// refusal.
 //
 // `--dispatch <run id>` is the watcher's, and not in the usage: the run it dispatches runs under the id it minted, as
 // a start `via` the watcher. So is `--head-sha <sha>`, which pins a run from a pull request to the head sha the watcher
 // queued: a pull request that has moved since is refused. The positional is a ref: a ticket's key or URL, or a pull
 // request's `#12`, `12` or URL, which the ticket source and the code host both read.
 //
+// A dispatched start runs on the `.sail/` committed at the default branch's fetched tip, read into a scratch directory
+// the command removes at its end, and not on the clone's working tree; the run keeps its own copy of it, and so does
+// every resume. A refusal on the way names that commit.
+//
 // `sail resume` takes the same steps: the helpers exported here are the ones both commands run, so they can't drift.
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir, userInfo } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { BUILTINS } from '../../adapters/index';
@@ -35,6 +40,7 @@ import { typecheck } from '../../engine/typecheck';
 import { type TerminalConsumer, terminalConsumer, type Verbosity } from '../../events/consumers/terminal';
 import type { ProviderEmit, SailEvent } from '../../events/types';
 import type { Harness } from '../../ports/harness';
+import type { WorkspacePort } from '../../ports/workspace';
 import { EXIT_INTERNAL, EXIT_REFUSED, type ExitCode, exitCodeFor } from '../exit-codes';
 import { count, formatDiagnostic } from '../format';
 import type { Io, Parsed } from '../index';
@@ -72,18 +78,27 @@ export function verbosityOf(args: Parsed, io: Io, command: string): Verbosity | 
 export async function findProject<P extends Port = RunPort>(
   io: Io,
   command: string,
-  only: { found?: { dir: string } | { refused: string }; ports?: readonly P[]; emit?: ProviderEmit } = {},
+  only: {
+    found?: { dir: string } | { refused: string };
+    /** What names `found`'s `project.yaml` in a config issue, when its path would mean nothing to the user. */
+    label?: string;
+    /** The repository the adapters work on, when `found` is a copy of its `.sail/` elsewhere. */
+    root?: string;
+    ports?: readonly P[];
+    emit?: ProviderEmit;
+  } = {},
 ): Promise<{ sailDir: string; config: ProjectConfig; adapters: ResolvedAdapters<P> } | ExitCode> {
   const found = only.found ?? findSailDir(io.cwd);
   if ('refused' in found) return refuseAs(io, command)(found.refused);
   const config = readConfig(found.dir);
-  const file = at(io, join(found.dir, 'project.yaml'));
+  const file = only.label ?? at(io, join(found.dir, 'project.yaml'));
   if ('issues' in config) {
     for (const issue of config.issues) io.stderr(`${formatIssue({ ...issue, file })}\n`);
     return EXIT_REFUSED;
   }
   const adapters = await resolveAdapters({
     sailDir: found.dir,
+    ...(only.root === undefined ? {} : { root: only.root }),
     config,
     builtins: BUILTINS,
     env: io.env ?? process.env,
@@ -95,6 +110,56 @@ export async function findProject<P extends Port = RunPort>(
     return EXIT_REFUSED;
   }
   return { sailDir: found.dir, config, adapters };
+}
+
+/** The `.sail/` committed at the default branch's tip, read into a scratch directory, and the project that runs on it. */
+export interface CommittedProject {
+  readonly project: { sailDir: string; config: ProjectConfig; adapters: ResolvedAdapters };
+  readonly definitions: { sailDir: string; sha: string; port: WorkspacePort };
+  /** Says whose commit a refusal is about: `(in the .sail/ committed at <sha7>)`. */
+  readonly where: string;
+  /** Removes the scratch directory. */
+  dispose(): void;
+}
+
+/**
+ * Reads the `.sail/` committed at the default branch's tip through the clone's Workspace port, and resolves the project
+ * on it, working on the clone's repository. A refusal prints and returns its exit code, and the scratch is gone.
+ */
+export async function committedProject(
+  io: Io,
+  command: string,
+  clone: { sailDir: string; adapters: ResolvedAdapters },
+  signal?: AbortSignal,
+): Promise<CommittedProject | ExitCode> {
+  const port = clone.adapters.ports.workspace;
+  const scratch = mkdtempSync(join(tmpdir(), 'sail-definitions-'));
+  const dispose = () => rmSync(scratch, { recursive: true, force: true });
+  try {
+    const { sha } = await port.readTree(scratch, { paths: ['.sail'], ...(signal === undefined ? {} : { signal }) });
+    const where = `(in the .sail/ committed at ${sha.slice(0, 7)})`;
+    const sailDir = join(scratch, '.sail');
+    if (!existsSync(join(sailDir, 'project.yaml'))) {
+      dispose();
+      return refuseAs(io, command)(`the commit holds no .sail/project.yaml ${where}`);
+    }
+    const project = await findProject(io, command, {
+      found: { dir: sailDir },
+      label: `${sha.slice(0, 7)}:.sail/project.yaml`,
+      root: dirname(clone.sailDir),
+    });
+    if (typeof project === 'number') {
+      dispose();
+      return project;
+    }
+    return { project, definitions: { sailDir, sha, port }, where, dispose };
+  } catch (error) {
+    dispose();
+    return refuseAs(
+      io,
+      command,
+    )(`the .sail/ at the default branch's tip could not be read: ${(error as Error).message}`);
+  }
 }
 
 /**
@@ -213,12 +278,43 @@ export async function runWorkflowCommand(args: Parsed, io: Io): Promise<ExitCode
   const [ticket = ''] = args.positionals;
   // A refusal names the ticket as it was typed: the ticket source may not even parse it.
   const command = `sail ${ticket}`;
-  const refuse = refuseAs(io, command);
   const verbosity = verbosityOf(args, io, command);
   if (typeof verbosity === 'number') return verbosity;
-  const project = await findProject(io, command);
-  if (typeof project === 'number') return project;
+  const clone = await findProject(io, command);
+  if (typeof clone === 'number') return clone;
+  if (typeof args.values.dispatch !== 'string' || args.values['dry-run'] === true) {
+    return startRun(args, io, command, verbosity, clone);
+  }
+  return interruptibly(io, async (signal) => {
+    const committed = await committedProject(io, command, clone, signal);
+    if (typeof committed === 'number') return committed;
+    try {
+      return await startRun(args, io, command, verbosity, clone, committed, signal);
+    } finally {
+      committed.dispose();
+    }
+  });
+}
 
+type Clone = { sailDir: string; config: ProjectConfig; adapters: ResolvedAdapters };
+
+/**
+ * Starts the run from `args`: on the clone's `.sail/`, or on `committed`, which a dispatch reads from the default branch.
+ * `interrupted` is the dispatch's own signal, which the run's joins, so one that aborted during the type-check refuses it.
+ */
+async function startRun(
+  args: Parsed,
+  io: Io,
+  command: string,
+  verbosity: Verbosity,
+  clone: Clone,
+  committed?: CommittedProject,
+  interrupted?: AbortSignal,
+): Promise<ExitCode> {
+  const [ticket = ''] = args.positionals;
+  const refuse = (message: string) =>
+    refuseAs(io, command)(committed === undefined ? message : `${message} ${committed.where}`);
+  const project = committed?.project ?? clone;
   const named = args.values.workflow;
   const workflow = typeof named === 'string' ? named : project.config.defaultWorkflow;
   if (workflow === undefined) return refuse('no --workflow given, and .sail/project.yaml sets no defaultWorkflow');
@@ -234,17 +330,17 @@ export async function runWorkflowCommand(args: Parsed, io: Io): Promise<ExitCode
   if (typed !== undefined) return typed;
   if (dry) {
     const force = args.values.force === true;
-    return dryRunTicket(io, command, project, {
+    return dryRunTicket(io, command, clone, {
       workflow,
       ticket,
       force,
       ...(typeof until === 'string' ? { until } : {}),
     });
   }
-  await registerRepository(io, command, project);
-  const recording = recorded(args, io, project);
+  await registerRepository(io, command, clone);
+  const recording = recorded(args, io, { sailDir: clone.sailDir, adapters: project.adapters });
 
-  const terminal = terminalFor(io, project.sailDir, verbosity);
+  const terminal = terminalFor(io, clone.sailDir, verbosity);
   // Closed however the run ends, so a throw never leaves the live line or its timer behind.
   const end = await interruptibly(io, (signal) =>
     runWorkflow({
@@ -256,8 +352,9 @@ export async function runWorkflowCommand(args: Parsed, io: Io): Promise<ExitCode
       ...(typeof until === 'string' ? { until } : {}),
       ...(typeof dispatch === 'string' ? { dispatch: { runId: dispatch } } : {}),
       ...(typeof headSha === 'string' ? { headSha } : {}),
+      ...(committed === undefined ? {} : { definitions: committed.definitions }),
       adapters: recording?.adapters ?? project.adapters,
-      signal,
+      signal: interrupted === undefined ? signal : AbortSignal.any([interrupted, signal]),
       keepAwake: io.keepAwake ?? systemKeepAwake(io.env ?? process.env),
       consumers: [terminal],
     }).finally(() => terminal.close()),

@@ -16,7 +16,7 @@
 // at most 60 s, then fails. Once the gate is open, no call holds. Unlike a sleep, the hold outlives a run's process
 // killed alone: the script is in a process group of its own.
 //
-// The scripts keep `.stub/` in the repository root, two directories above `$SAIL_CONFIG`, not in `$WORKSPACE`: a
+// The scripts keep `.stub/` in the repository root, the directory above `.sail/` (above `.sail-runs/` for a run on committed definitions, whose `$SAIL_CONFIG` is its copy), not in `$WORKSPACE`: a
 // run's steps run in a worktree of their own, and a test reads `<repo>/.stub/` whichever workspace the run had.
 //
 // A helper, not a committed fixture: the fixture repository's agent-based `ticket-to-pr` takes over end to end once
@@ -103,7 +103,11 @@ budgets: { run: { maxUsd: 25, maxMinutes: 90 } }
 const shell = (purpose: string, body: string) => `#!/usr/bin/env bash
 # ${purpose}
 set -euo pipefail
-STUB="$(dirname "$(dirname "$SAIL_CONFIG")")/.stub"
+case "$SAIL_CONFIG" in
+  */.sail-runs/*) ROOT="\${SAIL_CONFIG%%/.sail-runs/*}" ;;
+  *) ROOT="$(dirname "$(dirname "$SAIL_CONFIG")")" ;;
+esac
+STUB="$ROOT/.stub"
 mkdir -p "$STUB"
 echo "$STAGE#$CALL" >>"$STUB/executions.log"
 if [ -f "$STUB/sleep-at" ] && [ "$(cat "$STUB/sleep-at")" = "$STAGE#$CALL" ]; then

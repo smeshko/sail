@@ -19,7 +19,11 @@ export const describe = agent('describe', {
   produces: { 'pr-body.md': 'file' },
   output: PrDescription,
   model: 'fast',
-  permissions: readonly,
+  // validate passed `bun run gate` on this HEAD before describe runs, so a test run here only spends minutes and load.
+  permissions: {
+    ...readonly,
+    deny: [...(readonly.deny ?? []), 'bun run gate *', 'bun run test *', 'bun run verify *', 'bun test *'],
+  },
   budget: { maxTurns: 30, maxUsd: 1, maxMinutes: 15 },
   // The body is written in the vocabulary, and the prompt states the rules of AGENTS.md it follows.
   conventions: ['CONTEXT.md'],

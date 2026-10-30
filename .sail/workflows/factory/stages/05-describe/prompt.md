@@ -6,7 +6,8 @@ Write `$STAGE_OUT/pr-body.md`, never a path in the repository, with these sectio
 - **Summary**: what changes and why, in two or three sentences, in `CONTEXT.md`'s terms.
 - **Changes**: one bullet per commit or group of related commits.
 - **Testing**: the tests the plan added and what they prove, and `bun run gate` passing. CI runs the full
-  `bun run verify`.
+  `bun run verify`. The validate step already ran `bun run gate` on this HEAD, and it passed: say so, and run no gate
+  or test yourself.
 - **Demonstration**: the plan's Demonstration section as it is: its surface, then each acceptance criterion's
   scenario and what to observe. The review workflow runs these scenarios against the pull request, so keep them
   exact. For a surface of `none`, its one line saying why nothing can be shown.

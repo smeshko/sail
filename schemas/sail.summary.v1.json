@@ -56,7 +56,8 @@
         "unwatched",
         "stopped",
         "interrupted",
-        "usage_limit"
+        "usage_limit",
+        "port_unavailable"
       ]
     },
     "message": {

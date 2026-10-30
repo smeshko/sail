@@ -8,15 +8,18 @@
 import {
   existsSync,
   lstatSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   unlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { withoutRepositoryVariables } from '../../engine/git-env';
 import { runProcess } from '../../engine/process';
 import { readStatus } from '../../engine/run-dir';
@@ -297,6 +300,44 @@ export function diffWorkingTree(path: string, range: string, env?: Readonly<Reco
 }
 
 /**
+ * Copies the files of commit `sha` under `paths` into `into`, at the same relative paths, and leaves the working tree
+ * alone. A path the commit lacks is skipped. A blob keeps its executable bit, a symbolic link stays one, and a
+ * submodule is skipped. A `sha` that names no commit is `invalid`.
+ */
+export function copyTree(
+  repo: string,
+  sha: string,
+  paths: readonly string[],
+  into: string,
+  env?: Readonly<Record<string, string>>,
+): void {
+  const invalid = (why: string) => new PortError('workspace', 'readTree', 'invalid', why);
+  if (resolveCommit(repo, sha, env) === undefined) throw invalid(`${sha} names no commit`);
+  if (paths.length === 0) return;
+  const listed = gitSync(repo, ['ls-tree', '-r', '-z', '--full-tree', sha, '--', ...paths], env);
+  if (listed.code !== 0) throw new PortError('workspace', 'readTree', 'unavailable', listed.stderr);
+  for (const entry of listed.stdout.split('\0').filter((each) => each !== '')) {
+    const tab = entry.indexOf('\t');
+    const [mode, type, oid] = entry.slice(0, tab).split(' ');
+    const file = entry.slice(tab + 1);
+    if (type !== 'blob' || oid === undefined) continue;
+    const blob = Bun.spawnSync(['git', 'cat-file', 'blob', oid], {
+      cwd: repo,
+      env: nonInteractive(env ?? inherited()),
+      stdin: 'ignore',
+      timeout: LOCAL_TIMEOUT_MS,
+    });
+    if (blob.exitCode !== 0) {
+      throw new PortError('workspace', 'readTree', 'unavailable', `${file}: ${blob.stderr.toString().trim()}`);
+    }
+    const target = join(into, file);
+    mkdirSync(dirname(target), { recursive: true });
+    if (mode === '120000') symlinkSync(blob.stdout.toString(), target);
+    else writeFileSync(target, blob.stdout, { mode: mode === '100755' ? 0o755 : 0o644 });
+  }
+}
+
+/**
  * The workspace at `path`, checked to be a worktree of its own, not a directory inside another checkout, and to have
  * `baseSha` as an ancestor of its `HEAD`. Anything else is `invalid`.
  */
@@ -386,8 +427,8 @@ function pause(ms: number, signal?: AbortSignal): Promise<void> {
 }
 
 /**
- * `git fetch --no-tags <remote>` in `repo`, as a process group killed at `timeoutMs` or when `signal` aborts. Any end
- * but a clean exit is `unavailable`, with what git wrote to stderr. A fetch that lost git's ref lock to another run's
+ * `git fetch --no-tags --prune <remote>` in `repo`, as a process group killed at `timeoutMs` or when `signal` aborts. It
+ * prunes so a branch deleted on the remote leaves no tracking ref to be taken for it. Any end but a clean exit is `unavailable`, with what git wrote to stderr. A fetch that lost git's ref lock to another run's
  * fetch in the same clone is tried again, up to `FETCH_TRIES` times with `FETCH_RETRY_WAITS_MS` between them: the
  * winner has usually updated the ref by then. A timeout, an abort and every other failure end it at once.
  */
@@ -403,7 +444,7 @@ export async function fetchRemote(
     for (let attempt = 1; ; attempt++) {
       const stderr = join(logs, 'stderr');
       const end = await runProcess({
-        command: ['git', 'fetch', '--no-tags', remote],
+        command: ['git', 'fetch', '--no-tags', '--prune', remote],
         cwd: repo,
         env: nonInteractive(env ?? inherited()),
         stdout: join(logs, 'stdout'),
