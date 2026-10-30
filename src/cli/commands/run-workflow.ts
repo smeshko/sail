@@ -26,6 +26,7 @@ import { raiseFlag } from '../../engine/budget';
 import { type Port, type ProjectConfig, type RunPort, readConfig } from '../../engine/config';
 import { systemKeepAwake } from '../../engine/keep-awake';
 import { findWorkflowFile } from '../../engine/load-workflow';
+import { credentialValues } from '../../engine/redact';
 import { runsDir } from '../../engine/run-dir';
 import { type RunEnd, runWorkflow } from '../../engine/runtime';
 import { findSailDir } from '../../engine/sail-dir';
@@ -160,51 +161,6 @@ export interface Recorder {
   finish(runDir: string): void;
 }
 
-/** The names that hold a credential: their values are masked in every form in a recording. */
-const SECRET_NAME = /TOKEN|KEY|SECRET|PASS|AUTH|CREDENTIAL|COOKIE|SESSION|PRIVATE|HEADER|(^|_)PAT$/i;
-/** A URL's `user:password` part, as a proxy or a database URL carries it under any name. */
-const USERINFO = /[a-z][a-z0-9+.-]*:\/\/([^\s/:@]+):([^\s/@]+)@/gi;
-
-/** `text` percent-decoded, or as it is when it isn't valid percent-encoding. */
-function decoded(text: string): string {
-  try {
-    return decodeURIComponent(text);
-  } catch {
-    return text;
-  }
-}
-
-/**
- * The values a recording masks, each of 8 characters or more:
- * - every credential-named value, and each part of it between spaces, commas and semicolons but a header's name, as a
- *   session may print the token of `x-api-key: <token>` alone;
- * - the `user:password` and the password of any URL in any value, such as `HTTPS_PROXY` or `DATABASE_URL`, as written
- *   and percent-decoded.
- */
-export function recordedSecrets(env: Readonly<Record<string, string | undefined>>): string[] {
-  const found = new Set<string>();
-  const add = (secret: string) => {
-    if (secret.length >= 8) found.add(secret);
-  };
-  for (const [name, value = ''] of Object.entries(env)) {
-    if (SECRET_NAME.test(name)) {
-      add(value);
-      for (const part of value.split(/[\s,;]+/)) if (!part.endsWith(':')) add(part);
-    }
-    for (const [, user = '', password = ''] of value.matchAll(USERINFO)) {
-      for (const secret of [
-        `${user}:${password}`,
-        password,
-        `${decoded(user)}:${decoded(password)}`,
-        decoded(password),
-      ]) {
-        add(secret);
-      }
-    }
-  }
-  return [...found];
-}
-
 /**
  * `--record <dir>`: wraps the project's harness in a recorder (11.3 D2, D5). `dir` is relative to where sail runs and is
  * made when missing. Secrets are the environment's credentials of 8 characters or more, and the machine's paths are
@@ -220,7 +176,7 @@ export function recorded(
   const dir = resolve(io.cwd, named);
   mkdirSync(dir, { recursive: true });
   const env = io.env ?? process.env;
-  const secrets = recordedSecrets(env);
+  const secrets = credentialValues(env);
   const roots: Record<string, string> = {
     $RUNS: runsDir(project.sailDir),
     $REPO: dirname(project.sailDir),
@@ -292,6 +248,7 @@ export async function runWorkflowCommand(args: Parsed, io: Io): Promise<ExitCode
   // Closed however the run ends, so a throw never leaves the live line or its timer behind.
   const end = await interruptibly(io, (signal) =>
     runWorkflow({
+      secrets: credentialValues(io.env ?? process.env),
       cwd: io.cwd,
       workflow,
       ticket,

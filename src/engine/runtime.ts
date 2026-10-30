@@ -450,6 +450,7 @@ async function drive(
   const bus = createBus({
     runId,
     firstSeq: opened.firstSeq,
+    mask: opened.redact.value,
     now: clock,
     // The events file first: the summary seeds itself from it on a resume, and it must already hold the event in hand.
     consumers: [ndjsonConsumer(dir), summaryConsumer(dir), ...(options.consumers ?? [])],
@@ -619,6 +620,7 @@ async function drive(
       {
         runDir: dir,
         runId,
+        redact: opened.redact,
         stageIndex: call.stageIndex,
         call: call.call,
         try: nextTry(dir, call.stageIndex, call.stage, call.call),
@@ -656,7 +658,7 @@ async function drive(
   /** Journals a call that ran, with its group's keys when it has a group, and reports it. */
   const journal = (result: Record<string, unknown>, paths: CallPaths, group?: string[]): JournalEntry => {
     tracker?.assertRecorded();
-    const journaled = appendJournal(dir, entryFrom(dir, result, paths, group), clock());
+    const journaled = appendJournal(dir, opened.redact.value(entryFrom(dir, result, paths, group)), clock());
     bus.emit({ type: 'journal:append', key: journaled.key, line: journaled.seq, outcome: journaled.outcome });
     reached ||= journaled.key === last;
     return journaled;
@@ -680,6 +682,7 @@ async function drive(
       {
         runDir: dir,
         runId,
+        redact: opened.redact,
         stageIndex: INTAKE_INDEX,
         call: 1,
         try: nextTry(dir, INTAKE_INDEX, INTAKE_STAGE, 1),
@@ -750,6 +753,7 @@ async function drive(
           : await runIntake({
               runDir: dir,
               runId,
+              redact: opened.redact,
               intake: loaded.intake,
               body,
               source: header.source,

@@ -7,9 +7,9 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFi
 import { join } from 'node:path';
 import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import { Recording } from '../../src/adapters/recording';
-import { recordedSecrets } from '../../src/cli/commands/run-workflow';
 import { EXIT_REFUSED, EXIT_SUSPENDED } from '../../src/cli/exit-codes';
 import { readJournal } from '../../src/engine/journal';
+import { credentialValues } from '../../src/engine/redact';
 import { runDirIn } from '../helpers/agent-fixture';
 import {
   assistantText,
@@ -287,7 +287,7 @@ test('the secrets masked are every credential-named value of 8 characters or mor
     PATH: '/usr/bin:/bin',
     HOME: '/home/someone',
   };
-  expect(recordedSecrets(env).sort()).toEqual(
+  expect(credentialValues(env).sort()).toEqual(
     [
       'sk-ant-oat01-aaaaaaaa',
       'github_pat_bbbbbbbb',
@@ -306,7 +306,7 @@ test('the secrets masked are every credential-named value of 8 characters or mor
 });
 
 test('a percent-encoded URL password is taken decoded too, and a credential inside a header value alone (review #2.1)', () => {
-  const secrets = recordedSecrets({
+  const secrets = credentialValues({
     HTTPS_PROXY: 'https://alice:long%40password42@proxy.example',
     ALL_PROXY: 'http://bob:bad%zzpassword@proxy.example',
     ANTHROPIC_CUSTOM_HEADERS: 'x-api-key: sk-ant-example-1234567890, X-Other: zzzzzzzzzz',

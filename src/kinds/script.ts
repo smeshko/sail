@@ -23,6 +23,7 @@ import { withoutRepositoryVariables } from '../engine/git-env';
 import { PORT_EVENTS_FILE, readPortEvents } from '../engine/port-events';
 import { preamble } from '../engine/preamble';
 import { runProcess } from '../engine/process';
+import { redactFile } from '../engine/redact';
 import { checkoutPath } from '../engine/run-dir';
 import {
   defaultSlotsDir,
@@ -296,6 +297,10 @@ async function runScript(step: ScriptStep, context: StepContext): Promise<StepRu
   });
 
   if (!end.started) return ended({ reason: 'not_started', message: end.message }, recorded);
+
+  if (context.redact !== undefined) {
+    for (const path of [context.paths.stdout, context.paths.stderr, portEvents]) redactFile(path, context.redact);
+  }
 
   // What the script's port commands reported, now that no child can still be writing. The call's emit adds the key.
   const key = context.key ?? `${context.stage}#${context.call}`;

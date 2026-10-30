@@ -105,6 +105,49 @@ async function started(repoDir: string, argv: string[], ticketKey = 'FAKE-1') {
 const head = (key: string, text: string) => `${key.padEnd(13)}  ${text}`;
 const detail = (key: string, text: string) => `${key.padEnd(13)}    ${text}`;
 
+test('sail masks io.env credentials in agent echoes and script tails and leaves none under the runs directory', async () => {
+  await withTempRepo(async (repo) => {
+    const marker = 'ghp_CLI_MARKER_0123456789';
+    const sail = writeAgentFixture(repo.dir, [submits(SPEC, 0.125, { messages: [`echo ${marker}`] })]);
+    const script = 'workflows/brief-to-spec/stages/publish/run.sh';
+    edit(
+      sail,
+      script,
+      'set -euo pipefail',
+      `set -euo pipefail\ntoken='ghp_CLI_''MARKER_0123456789'\necho "token $token"\necho "stderr token $token" >&2`,
+    );
+    edit(
+      sail,
+      script,
+      'echo "{\\"published\\":true,\\"bytes\\":$(wc -c <"$INPUT_SPEC" | tr -d \' \')}"',
+      'echo \'{"published":true,"bytes":1}\'\nexit 1',
+    );
+    edit(
+      sail,
+      'workflows/brief-to-spec/workflow.ts',
+      "return run.stage(publish, { spec: s.files['spec.md'] });",
+      "const p = await run.stage(publish, { spec: s.files['spec.md'] });\n  if (p.outcome === 'failed') return run.fail('publish failed');\n  return p;",
+    );
+    const captured = await runCaptured([...RUN_ARGV, '-vv'], repo.dir, {
+      env: { ...repo.env, SAIL_TEST_TOKEN: marker },
+    });
+    expect(captured.code).toBe(EXIT_FAILED);
+    expect(captured.stdout.includes(marker)).toBe(false);
+    expect(captured.stdout.includes('│ token [redacted]')).toBe(true);
+    expect(captured.stdout.includes('│ stderr token [redacted]')).toBe(true);
+    expect(specFile(runDirIn(repo.dir), 'session.log')).toBe('assistant: echo [redacted]\n');
+    const files = readdirSync(join(repo.dir, '.sail-runs'), { recursive: true, withFileTypes: true }).filter((file) =>
+      file.isFile(),
+    );
+    expect(files.length > 10).toBe(true);
+    expect(
+      files
+        .filter((file) => readFileSync(join(file.parentPath, file.name), 'utf8').includes(marker))
+        .map((file) => file.name),
+    ).toEqual([]);
+  });
+});
+
 test('sail FAKE-1 holds the keep-awake for the run and releases it at its end, the run reporting it once', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);

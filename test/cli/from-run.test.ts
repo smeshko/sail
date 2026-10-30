@@ -3,7 +3,7 @@
 // its own: a process opens one run per `.sail/`. The fake harness answers by call key, not by prompt, so a changed
 // answer in `.sail/fake/harness.json` stands in for the different output an edited prompt would get (DECISIONS D10).
 import { afterAll, expect, test } from 'bun:test';
-import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { EXIT_OK, EXIT_REFUSED, EXIT_SUSPENDED } from '../../src/cli/exit-codes';
 import { readJournal } from '../../src/engine/journal';
@@ -272,3 +272,26 @@ test('a refused sail run leaves the machine registry unwritten, and a seeded run
     [EXIT_SUSPENDED, true],
   ]);
 }, 60_000);
+
+test('sail run --from-run masks credentials from its own io.env in run.json and in the calls it runs', async () => {
+  await withTempRepo(async (repo) => {
+    const from = await source.copyInto(repo.dir);
+    const marker = 'ghp_SEEDED_MARKER_0123456789';
+    answerSpec(repo.dir, (answer) => ({ ...answer, messages: [`echo ${marker}`] }));
+    const ran = await sailRun(repo, from.runId, ['--from-run', from.runId, '--stage', 'spec'], {
+      env: { ...repo.env, SAIL_TEST_TOKEN: marker, SAIL_ORIGIN_TOKEN: 'fake://origin' },
+    });
+    expect(ran.code).toBe(EXIT_SUSPENDED);
+    expect(ran.stdout.includes(marker)).toBe(false);
+    expect(json(ran.dir, 'run.json').repository.url).toBe('[redacted]');
+    expect(readFileSync(join(ran.dir, '01-spec', 'call-1', 'session.log'), 'utf8')).toBe(
+      'assistant: echo [redacted]\n',
+    );
+    const files = readdirSync(ran.dir, { recursive: true, withFileTypes: true }).filter((file) => file.isFile());
+    expect(
+      files
+        .filter((file) => readFileSync(join(file.parentPath, file.name), 'utf8').includes(marker))
+        .map((file) => file.name),
+    ).toEqual([]);
+  });
+});
