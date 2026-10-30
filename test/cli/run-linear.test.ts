@@ -2,7 +2,8 @@
 // the stub workflow, against the scripted Linear world served on 127.0.0.1 through SAIL_LINEAR_API_URL. The key is a
 // marker, so a test can show it never reaches a run directory. Each case has its own repository and its own world.
 import { expect, test } from 'bun:test';
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EXIT_FAILED, EXIT_OK, EXIT_REFUSED, EXIT_SUSPENDED } from '../../src/cli/exit-codes';
 import type { RunHeader } from '../../src/engine/run-header';
@@ -289,6 +290,45 @@ test('sail port ticket-source get on a Linear URL prints the Linear ticket as on
     { type: 'unstarted', name: 'Todo' },
     2,
   ]);
+});
+
+const PICK_UP = 'ticketSource: { use: linear, team: ADW, pickUp: [Todo] }';
+const UNAVAILABLE = { status: 503, body: 'Service Unavailable' };
+
+test('sail port ticket-source get with pickUp, while Linear answers the team read with a 503, still prints the ticket', async () => {
+  const run = await linearRun(['port', 'ticket-source', 'get', 'ADW-1'], {
+    project: PICK_UP,
+    prepare: (linear) => linear.failNext('SailTeam', UNAVAILABLE),
+  });
+  expect({ code: run.code, stderr: run.stderr, key: JSON.parse(run.stdout || '{}').ticketKey }).toEqual({
+    code: EXIT_OK,
+    stderr: '',
+    key: 'ADW-1',
+  });
+});
+
+test('sail port ticket-source get with pickUp, while Linear is unavailable throughout, exits 1 with one error:port of code unavailable, not a refusal', async () => {
+  const file = join(tmpdir(), `port-events-${crypto.randomUUID()}.ndjson`);
+  const run = await linearRun(['port', 'ticket-source', 'get', 'ADW-1'], {
+    project: PICK_UP,
+    prepare: (linear) => {
+      linear.failNext('SailTeam', UNAVAILABLE);
+      linear.failNext('SailTicket', UNAVAILABLE);
+    },
+    env: { SAIL_EVENTS: file },
+  });
+  try {
+    const events = readFileSync(file, 'utf8')
+      .split('\n')
+      .filter((line) => line !== '')
+      .map((line) => JSON.parse(line));
+    expect(run.code).toBe(EXIT_FAILED);
+    expect(run.stderr.endsWith('(unavailable)\n')).toBe(true);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ type: 'error:port', port: 'ticketSource', op: 'get', code: 'unavailable' });
+  } finally {
+    rmSync(file, { force: true });
+  }
 });
 
 test('sail port ticket-source comment reaches Linear as one SailComment with the body, and the marker key is in no output', async () => {

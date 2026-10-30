@@ -357,7 +357,32 @@ function buildLinearTicketSource(options: LinearTicketSourceOptions): {
     return { ticketKey, labels, raw: data };
   }
 
+  /**
+   * The team's states, read once. Each read checks the `pickUp` entries against them, so an adapter created unchecked
+   * while Linear was unavailable refuses a wrong name once Linear answers: at creation (`configure`) as a configuration
+   * error, and later as a PortError `invalid` of `op`.
+   */
   async function states(op: string, signal?: AbortSignal): Promise<LinearState[]> {
+    const all = await readStates(op, signal);
+    const problem = pickUpProblem(all);
+    if (problem === undefined) return all;
+    if (op === 'configure') throw new Error(`linear ticketSource: ${problem}`);
+    throw new PortError('ticketSource', op, 'invalid', problem);
+  }
+
+  /** The first `pickUp` entry that is no triage, backlog or unstarted state among `all`, said as a problem. */
+  function pickUpProblem(all: LinearState[]): string | undefined {
+    for (const name of pickUp ?? []) {
+      const found = all.find((state) => state.name === name);
+      if (found === undefined) return `option pickUp: '${name}' is no state of team ${team}`;
+      if (!UNSTARTED_TYPES.includes(found.type)) {
+        return `option pickUp: '${name}' is a ${found.type} state of team ${team}; pickUp takes triage, backlog and unstarted states`;
+      }
+    }
+    return undefined;
+  }
+
+  async function readStates(op: string, signal?: AbortSignal): Promise<LinearState[]> {
     if (teamStates !== undefined) return teamStates;
     const data = await client.request<{ teams: { nodes: { states: { nodes: LinearState[] } }[] } }>(
       op,
@@ -707,17 +732,7 @@ function buildLinearTicketSource(options: LinearTicketSourceOptions): {
 
   /** Throws naming the first `pickUp` entry that is no triage, backlog or unstarted state of the team. */
   async function checkPickUp(): Promise<void> {
-    for (const name of pickUp ?? []) {
-      const found = (await states('configure')).find((state) => state.name === name);
-      if (found === undefined) {
-        throw new Error(`linear ticketSource: option pickUp: '${name}' is no state of team ${team}`);
-      }
-      if (!UNSTARTED_TYPES.includes(found.type)) {
-        throw new Error(
-          `linear ticketSource: option pickUp: '${name}' is a ${found.type} state of team ${team}; pickUp takes triage, backlog and unstarted states`,
-        );
-      }
-    }
+    await states('configure');
   }
 
   return { source, checkPickUp };
@@ -727,10 +742,20 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
   return buildLinearTicketSource(options).source;
 }
 
-/** The adapter, after its `pickUp` entries were checked against the team's states: one request, and none without `pickUp`. */
+/**
+ * The adapter, after its `pickUp` entries were checked against the team's states: one request, and none without
+ * `pickUp`. A Linear that is unavailable for that request leaves the adapter unchecked; one that answers still refuses
+ * a wrong name, and a 401 or any other answer too.
+ */
 export async function openLinearTicketSource(options: LinearTicketSourceOptions): Promise<TicketSource> {
   const { source, checkPickUp } = buildLinearTicketSource(options);
-  if (options.pickUp !== undefined) await checkPickUp();
+  if (options.pickUp !== undefined) {
+    try {
+      await checkPickUp();
+    } catch (error) {
+      if (!(error instanceof PortError && error.code === 'unavailable')) throw error;
+    }
+  }
   return source;
 }
 
@@ -746,7 +771,7 @@ const LinearOptions = z.strictObject({
 
 /**
  * `linear` in `project.yaml`: `team` is required, `inReview` and `pickUp` optional, and the key comes from
- * `LINEAR_API_KEY`. With `pickUp`, creating it reads the team's states once to check the names.
+ * `LINEAR_API_KEY`. With `pickUp`, creating it reads the team's states once to check the names, and skips the check while Linear is unavailable.
  */
 export const linearTicketSource: AdapterDefinition<TicketSource> = {
   requires: () => ['LINEAR_API_KEY'],
