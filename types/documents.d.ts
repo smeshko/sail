@@ -21,6 +21,8 @@ export interface DocumentContent {
     /** The file's name in `$STAGE_OUT`. */
     readonly name: string;
     readonly text: string;
+    /** The names of the placeholders its template held, each once, in order. */
+    readonly placeholders: readonly string[];
     /** Every heading, in order. Fenced code holds none. */
     readonly headings: readonly DocumentHeading[];
     /** One per heading, in order. */
@@ -59,13 +61,20 @@ export interface CountOptions extends Bounds {
 }
 /**
  * Declares a document in an agent step's `produces`: `template` is rendered into `$STAGE_OUT` before the session,
- * with the step's bindings filled and its `{{name: hint}}` placeholders left for the agent, and `validators` check
+ * with the step's bindings filled and the template's `{{name: hint}}` placeholders left for the agent, and `validators` check
  * what the session left there.
  */
 export declare function doc(template: string, validators?: readonly Validator[]): Document;
 /** Passes when every name is a heading's text, at any level. */
 export declare function hasSections(...names: string[]): Validator;
-/** Passes when no `{{name: hint}}` placeholder is left: a tag whose body holds a colon, as the renderer reads one. */
+/** Tags whose bodies hold a colon, named from the last opener before that colon. */
+export declare function placeholderTags(text: string): Generator<{
+    from: number;
+    name: string;
+}>;
+/** The raw template's placeholder names, each once, in order, including tags in code and untaken branches. */
+export declare function placeholderNames(text: string): string[];
+/** Passes when none of the template's placeholders is left outside untrusted input, fenced code or inline code. */
 export declare function noPlaceholders(): Validator;
 /**
  * Counts the top-level list items of `section`, from its heading to the next heading of the same or a higher level,

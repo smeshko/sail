@@ -3,7 +3,7 @@
 import { z } from 'zod';
 import type { ProviderEvent } from '../../events/types';
 import { PortError } from '../../ports/errors';
-import { checkAttachment, type ProviderOptions, type TicketSource } from '../../ports/ticket-source';
+import { checkAttachment, fetchInterrupted, type ProviderOptions, type TicketSource } from '../../ports/ticket-source';
 import {
   Attachment,
   Comment,
@@ -159,7 +159,8 @@ export function createFakeTicketSource(options: FakeTicketSourceOptions): Ticket
   return {
     name: 'fake',
     parseKey: (ref) => (KEY.test(ref) ? ref : URL_KEY.exec(ref)?.[1]),
-    async get(ticketKey) {
+    async get(ticketKey, options) {
+      if (options?.signal?.aborted) throw fetchInterrupted('get', ticketKey);
       const started = now().getTime();
       const ticket = toTicket(find(store.read(), 'get', ticketKey));
       emit({
@@ -176,7 +177,8 @@ export function createFakeTicketSource(options: FakeTicketSourceOptions): Ticket
     },
     isDesignated: (ticket, label) => ticket.labels.includes(label),
     canPickUp,
-    async listDesignated(label) {
+    async listDesignated(label, options) {
+      if (options?.signal?.aborted) throw fetchInterrupted('listDesignated', `the tickets labelled ${label}`);
       return store
         .read()
         .tickets.filter((ticket) => ticket.labels.includes(label) && canPickUp(ticket))

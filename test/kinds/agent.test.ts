@@ -967,6 +967,30 @@ test('a document with a placeholder left, or a required section missing, ends th
   expect(both.record).toMatchObject({ validationFailed: true, derived: { tasks: 2 } });
 });
 
+test('corrective prompt names only template placeholders, not quoted color tags', async () => {
+  const step = documented();
+  const s = documentSetup(step);
+  const answer = COMPLETED.replace('- greet --shout shouts', '{{requirements: left}}\nstyle={{color: red}}');
+  const first = await agentKind.run(step, s.context(scripted({ resolves: done(VALID), files: { 'spec.md': answer } })));
+  expect(first.errors).toEqual([
+    {
+      reason: 'invalid_output',
+      message: 'spec.md: noPlaceholders: line 5 still holds the placeholder {{requirements: …}}',
+    },
+  ]);
+  const later = documentSetup(step, 2);
+  const harness = scripted({ resolves: done(VALID), files: { 'spec.md': COMPLETED } });
+  const run = await agentKind.run(
+    step,
+    later.context(harness, { validationTry: 2, feedback: first.errors.map(({ message }) => message) }),
+  );
+  expect(run.outcome).toBe('done');
+  expect(harness.requests[0]?.prompt).toContain(
+    'spec.md: noPlaceholders: line 5 still holds the placeholder {{requirements: …}}',
+  );
+  expect(harness.requests[0]?.prompt.includes('color')).toBe(false);
+});
+
 test('only a document the session left is validated: one it removed is a missing file, with no verdict', async () => {
   const step = documented({
     produces: { 'spec.md': specDoc(), 'plan.md': doc('./templates/spec.md', [noPlaceholders()]) },

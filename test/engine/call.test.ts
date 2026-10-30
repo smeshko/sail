@@ -1452,7 +1452,7 @@ test('a document invalid in both tries ends the call in error on its second, lis
     const s = specStage(repo);
     const harness = fake([
       submits(SPEC, 0.125, { files: { 'spec.md': NO_REQUIREMENTS } }),
-      submits(SPEC, 0.25, { files: { 'spec.md': `${NO_REQUIREMENTS}\n{{notes: anything else}}\n` } }),
+      submits(SPEC, 0.25, { files: { 'spec.md': `${NO_REQUIREMENTS}\n{{tasks: one per task}}\n` } }),
     ]);
     const { paths } = await runCall(s.request(documentStep(repo), harness));
 
@@ -1460,7 +1460,7 @@ test('a document invalid in both tries ends the call in error on its second, lis
     const final = readBack(paths.result);
     expect(placeOf(final)).toEqual({ outcome: 'error', try: 2, validationTry: 2, validationFailed: true });
     expect(errorsOf(final)).toEqual(
-      [MISSING_REQUIREMENTS, 'spec.md: noPlaceholders: line 7 still holds the placeholder {{notes: …}}'].map(
+      [MISSING_REQUIREMENTS, 'spec.md: noPlaceholders: line 7 still holds the placeholder {{tasks: …}}'].map(
         (message) => ({ reason: 'invalid_output', message }),
       ),
     );

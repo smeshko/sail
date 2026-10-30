@@ -481,7 +481,14 @@ export async function preflightRun(options: OpenRunOptions): Promise<Preflight |
   if (options.headSha !== undefined) {
     return { refused: `--head-sha pins a pull request to its head, and ${ticket} is a ticket` };
   }
-  const resolved = await resolveSource({ ref: ticket, ticketSource, label, force });
+  const resolved = await resolveSource({
+    ref: ticket,
+    ticketSource,
+    label,
+    force,
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
+  });
+  if (options.signal?.aborted) return { refused: 'stopped before the run was opened' };
   if ('refused' in resolved) return resolved;
   const { ticketKey } = resolved;
   const runId = runIdOf(ticketKey);

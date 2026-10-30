@@ -349,7 +349,7 @@ async function run(step: AgentStep, context: StepContext): Promise<StepRun> {
     emit({ type: 'output:invalid', message: output.message });
     errors.push({ reason: 'invalid_output', message: output.message });
   }
-  const { files, derived } = checkFiles(step, context, emit, errors);
+  const { files, derived } = checkFiles(step, context, emit, errors, templates.placeholders);
   const checked = { ...record, ...(Object.keys(derived).length > 0 ? { derived } : {}) };
   if (errors.length > 0 || !output.ok) return ended(errors, { ...checked, validationFailed: true }, files);
   return { outcome: 'done', output: output.data, files, errors: [], record: { ...checked, validationFailed: false } };
@@ -364,10 +364,11 @@ function checkFiles(
   context: StepContext,
   emit: CallEmit,
   errors: ContractError[],
+  placeholders: Record<string, string[]>,
 ): { files: Record<string, FileEntry>; derived: Record<string, unknown> } {
   const out = stageOut(context.paths);
   const produced = recordFiles(step.produces, out, context.runDir);
-  const checked = validateDocuments({ produces: step.produces, files: produced.files, outDir: out });
+  const checked = validateDocuments({ produces: step.produces, files: produced.files, outDir: out, placeholders });
   const files: [string, FileEntry][] = [];
   for (const [name, entry] of Object.entries(produced.files)) {
     emit({ type: 'file:produced', name, path: entry.path, bytes: entry.bytes, sha256: entry.sha256 });

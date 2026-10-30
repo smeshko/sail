@@ -140,6 +140,27 @@ function section(brief: string, heading: string): string {
   return (to === -1 ? rest : rest.slice(0, to)).trim();
 }
 
+test('an abort after the claim interrupts the body fetch without writing files', async () => {
+  const { ticketSource, out } = world(SEED);
+  const controller = new AbortController();
+  const claim = ticketSource.claim;
+  ticketSource.claim = async (key) => {
+    const result = await claim(key);
+    controller.abort();
+    return result;
+  };
+  ticketSource.get = () => new Promise(() => {});
+  const error = await Promise.race([
+    rejection(
+      ticketIntake({ source: sourceOf(SEED.ticketKey), ticketSource, out, ...running(), signal: controller.signal }),
+    ),
+    Bun.sleep(100).then(() => 'still pending'),
+  ]);
+  expect(portFailure(error)).toEqual({ port: 'ticketSource', op: 'get', code: 'unavailable' });
+  expect(error instanceof Error ? error.message : error).toBe('ticketSource.get: the fetch of FAKE-7 was interrupted');
+  expect(readdirSync(out)).toEqual([]);
+});
+
 test('the body returns the ticket as TicketInput takes it, with the criteria in order, from one get', async () => {
   const { output, gets } = await ran();
   expect(output).toEqual({

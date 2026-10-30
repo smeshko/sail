@@ -91,13 +91,13 @@ export interface TicketSource {
   readonly scope?: string;
   /** The ticket key `ref` names: a ticket key, or a URL the provider owns. Undefined for anything else. */
   parseKey(ref: string): string | undefined;
-  /** The ticket with its comments, links and attachments. Emits `ticket:fetched`. */
-  get(ticketKey: string): Promise<Ticket>;
+  /** The ticket with its comments, links and attachments. Emits `ticket:fetched`. An abort rejects unavailable. */
+  get(ticketKey: string, options?: { readonly signal?: AbortSignal }): Promise<Ticket>;
   isDesignated(ticket: Ticket, label: string): boolean;
   /** Whether the ticket is in one of this source's pick-up states: by default any state it reads as unstarted. */
   canPickUp(ticket: Ticket): boolean;
-  /** The designated tickets that are in a pick-up state. */
-  listDesignated(label: string): Promise<Ticket[]>;
+  /** The designated tickets that are in a pick-up state. An aborted signal rejects unavailable. */
+  listDesignated(label: string, options?: { readonly signal?: AbortSignal }): Promise<Ticket[]>;
   /**
    * The team's tickets in a state of the filter's type and carrying its label, sorted by ticket number. A state that
    * isn't a `TicketStateType` rejects as `invalid`. Emits nothing.
@@ -139,12 +139,36 @@ export interface TicketSource {
   capabilities(): TicketSourceCapabilities;
 }
 
+export function fetchInterrupted(op: string, what: string): PortError {
+  return new PortError('ticketSource', op, 'unavailable', `the fetch of ${what} was interrupted`);
+}
+
 /**
  * The ticket `source.get()` answers with, checked against the port's schema: an adapter's answer crosses a trust
  * boundary. An answer that is no Ticket is a PortError of `get`, code `invalid`, saying where it isn't one.
+ * Bounds even an adapter that ignores the caller's signal.
  */
-export async function getTicket(source: TicketSource, ticketKey: string): Promise<Ticket> {
-  const answer: unknown = await source.get(ticketKey);
+export async function getTicket(source: TicketSource, ticketKey: string, signal?: AbortSignal): Promise<Ticket> {
+  if (signal?.aborted) throw fetchInterrupted('get', ticketKey);
+  let stop: (() => void) | undefined;
+  let answer: unknown;
+  try {
+    const pending = source.get(ticketKey, signal === undefined ? undefined : { signal });
+    pending.catch(() => {});
+    answer =
+      signal === undefined
+        ? await pending
+        : await Promise.race([
+            pending,
+            new Promise<never>((_, reject) => {
+              stop = () => reject(fetchInterrupted('get', ticketKey));
+              signal.addEventListener('abort', stop, { once: true });
+              if (signal.aborted) stop();
+            }),
+          ]);
+  } finally {
+    if (stop !== undefined) signal?.removeEventListener('abort', stop);
+  }
   const parsed = Ticket.safeParse(answer);
   if (parsed.success) return parsed.data;
   const [issue] = parsed.error.issues;

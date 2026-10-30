@@ -221,8 +221,12 @@ function buildLinearTicketSource(options: LinearTicketSourceOptions): {
   let teamStates: LinearState[] | undefined;
 
   /** The ticket node and every page of its comments, or a PortError of `op`. Emits nothing. */
-  async function lookup(op: string, ticketKey: string): Promise<{ node: Node; comments: unknown[] }> {
-    const found = await read(op, ticketKey);
+  async function lookup(
+    op: string,
+    ticketKey: string,
+    signal?: AbortSignal,
+  ): Promise<{ node: Node; comments: unknown[] }> {
+    const found = await read(op, ticketKey, signal);
     if (found === undefined)
       throw new PortError('ticketSource', op, 'not_found', `no ticket ${ticketKey} in team ${team}`);
     return found;
@@ -232,7 +236,11 @@ function buildLinearTicketSource(options: LinearTicketSourceOptions): {
    * As `lookup`, but undefined when the team, which Linear has, holds no such ticket: one deleted, or moved to another
    * team. A team Linear doesn't have is still a PortError.
    */
-  async function read(op: string, ticketKey: string): Promise<{ node: Node; comments: unknown[] } | undefined> {
+  async function read(
+    op: string,
+    ticketKey: string,
+    signal?: AbortSignal,
+  ): Promise<{ node: Node; comments: unknown[] } | undefined> {
     const [, keyTeam = '', number = ''] = KEY.exec(ticketKey) ?? [];
     if (keyTeam !== team) {
       throw new PortError(
@@ -242,14 +250,20 @@ function buildLinearTicketSource(options: LinearTicketSourceOptions): {
         `${ticketKey} is a ticket of team ${keyTeam || '?'}, and this ticket source reads team ${team}`,
       );
     }
-    const data = await client.request<{ issues: { nodes: Node[] } }>(op, 'SailTicket', TICKET, {
-      team,
-      number: Number(number),
-    });
+    const data = await client.request<{ issues: { nodes: Node[] } }>(
+      op,
+      'SailTicket',
+      TICKET,
+      {
+        team,
+        number: Number(number),
+      },
+      signal,
+    );
     const [node] = data.issues.nodes;
     if (node === undefined) {
       // A team Linear doesn't have answers no ticket too: say which it is.
-      await states(op);
+      await states(op, signal);
       return undefined;
     }
     const comments = [...node.comments.nodes];
@@ -261,6 +275,7 @@ function buildLinearTicketSource(options: LinearTicketSourceOptions): {
         'SailTicketComments',
         TICKET_COMMENTS,
         { id: node.id, after },
+        signal,
       );
       comments.push(...more.issue.comments.nodes);
       after = nextCursor(op, what, more.issue.comments, seen);
@@ -273,12 +288,15 @@ function buildLinearTicketSource(options: LinearTicketSourceOptions): {
    * a comment page, makes Linear refuse the later one: a refusal (`invalid`, `not_found`) is read once more from the
    * start, and the ticket is skipped when the team no longer holds it. Any other failure, or a second refusal, rejects.
    */
-  async function readListed(ticketKey: string): Promise<{ node: Node; comments: unknown[] } | undefined> {
+  async function readListed(
+    ticketKey: string,
+    signal?: AbortSignal,
+  ): Promise<{ node: Node; comments: unknown[] } | undefined> {
     try {
-      return await read('listDesignated', ticketKey);
+      return await read('listDesignated', ticketKey, signal);
     } catch (error) {
       if (!(error instanceof PortError) || !['invalid', 'not_found'].includes(error.code)) throw error;
-      return read('listDesignated', ticketKey);
+      return read('listDesignated', ticketKey, signal);
     }
   }
 
@@ -339,7 +357,7 @@ function buildLinearTicketSource(options: LinearTicketSourceOptions): {
     return { ticketKey, labels, raw: data };
   }
 
-  async function states(op: string): Promise<LinearState[]> {
+  async function states(op: string, signal?: AbortSignal): Promise<LinearState[]> {
     if (teamStates !== undefined) return teamStates;
     const data = await client.request<{ teams: { nodes: { states: { nodes: LinearState[] } }[] } }>(
       op,
@@ -348,6 +366,7 @@ function buildLinearTicketSource(options: LinearTicketSourceOptions): {
       {
         team,
       },
+      signal,
     );
     const [found] = data.teams.nodes;
     if (found === undefined) throw new PortError('ticketSource', op, 'not_found', `Linear has no team ${team}`);
@@ -441,9 +460,9 @@ function buildLinearTicketSource(options: LinearTicketSourceOptions): {
     name: 'linear',
     scope: team,
     parseKey: (ref) => (KEY.test(ref) ? ref : URL_KEY.exec(ref)?.[1]),
-    async get(ticketKey) {
+    async get(ticketKey, options) {
       const started = now().getTime();
-      const { node, comments } = await lookup('get', ticketKey);
+      const { node, comments } = await lookup('get', ticketKey, options?.signal);
       const ticket = toTicket(node, comments, 'get');
       emit({
         type: 'ticket:fetched',
@@ -459,7 +478,7 @@ function buildLinearTicketSource(options: LinearTicketSourceOptions): {
     },
     isDesignated: (ticket, label) => ticket.labels.includes(label),
     canPickUp,
-    async listDesignated(label) {
+    async listDesignated(label, options) {
       const keys: string[] = [];
       const seen = new Set<string>();
       let after: string | null = null;
@@ -469,16 +488,17 @@ function buildLinearTicketSource(options: LinearTicketSourceOptions): {
           'SailDesignated',
           pickUp === undefined ? DESIGNATED : DESIGNATED_IN,
           { team, label, types: UNSTARTED_TYPES, ...(pickUp === undefined ? {} : { names: pickUp }), after },
+          options?.signal,
         );
         keys.push(...data.issues.nodes.map((node) => node.identifier));
         after = nextCursor('listDesignated', 'the designated tickets', data.issues, seen);
       } while (after !== null);
       // A team Linear doesn't have lists nothing too: an empty list is checked against the team's existence.
-      if (keys.length === 0) await states('listDesignated');
+      if (keys.length === 0) await states('listDesignated', options?.signal);
       const tickets: Ticket[] = [];
       for (const key of keys) {
         // Read after the list: a ticket deleted, moved to another team, claimed or unlabelled since is not listed.
-        const found = await readListed(key);
+        const found = await readListed(key, options?.signal);
         if (found === undefined) continue;
         const ticket = toTicket(found.node, found.comments, 'listDesignated');
         if (canPickUp(ticket) && ticket.labels.includes(label)) tickets.push(ticket);

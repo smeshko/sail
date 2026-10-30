@@ -68,9 +68,9 @@ function world(instead: Partial<Calls> = {}): {
       calls.push('parseKey');
       return fake.parseKey(ref);
     },
-    get(ticketKey) {
+    get(ticketKey, options) {
       calls.push('get');
-      return (instead.get ?? fake.get)(ticketKey);
+      return (instead.get ?? fake.get)(ticketKey, options);
     },
     claim(ticketKey) {
       calls.push('claim');
@@ -96,6 +96,34 @@ const failing = (op: string, message: string) => async (): Promise<never> => {
 const broken = async (): Promise<never> => {
   throw new TypeError('the adapter broke');
 };
+
+test('resolveSource interrupts a pending fetch with a refusal', async () => {
+  const controller = new AbortController();
+  const { source } = world({
+    get: () => {
+      queueMicrotask(() => controller.abort());
+      return new Promise(() => {});
+    },
+  });
+  const result = await Promise.race([
+    resolveSource({ ref: 'FAKE-1', ticketSource: source, label: 'sail', signal: controller.signal }),
+    Bun.sleep(100).then(() => 'still pending'),
+  ]);
+  expect(result).toEqual({ refused: 'ticketSource.get: the fetch of FAKE-1 was interrupted (unavailable)' });
+});
+
+test('claimSource forwards the signal only to its lost-claim re-read', async () => {
+  const signal = new AbortController().signal;
+  let received: AbortSignal | undefined;
+  const { source, fake } = world({
+    get: (key, options) => {
+      received = options?.signal;
+      return fake.get(key);
+    },
+  });
+  await rejection(claimSource({ ticketKey: 'FAKE-2', runId: RUN_ID, ticketSource: source, forced: [], signal }));
+  expect(received).toBe(signal);
+});
 
 // resolveSource(): the key, the fetch, the label and the state (D4, D7, D8).
 

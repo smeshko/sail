@@ -6,7 +6,7 @@
 // checks it against `TicketInput`. A later try completes an earlier claim whose comment never posted.
 //
 // The ticket key the brief prints bare, and the one in the output, is the run's own: the source's, never the one the
-// provider sent back.
+// provider sent back. An abort cuts the fetch, never the claim or its comment.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { render, untrustedInput } from '../../../engine/render';
@@ -62,9 +62,10 @@ export async function ticketIntake(context: IntakeContext): Promise<unknown> {
     ticketSource: context.ticketSource,
     forced: source.forced,
     claimedEarlier: context.claimedEarlier,
+    ...(context.signal === undefined ? {} : { signal: context.signal }),
   });
   context.record({ claim });
-  const ticket = await getTicket(context.ticketSource, key);
+  const ticket = await getTicket(context.ticketSource, key, context.signal);
   const { request, criteria } = splitDescription(ticket.description);
 
   const file: TicketFile = { ...ticket, acceptanceCriteria: criteria };
