@@ -9,7 +9,9 @@
 // `SAIL_EVENTS` names the step's port events file, `port-events.ndjson` in its call directory, where a `sail port` the
 // script runs leaves its provider events. Once the process has ended, however it ended, the file is read and each event
 // emitted, after `script:exec` and before `script:exit`. A line that is no provider event ends the step in `error`,
-// with the reason `port`. The variable is this kind's, not the preamble's: an agent step gets none.
+// with the reason `port`. A step that doesn't pass and whose port events hold an `unavailable` error ends in `error`,
+// reason `port` with code `unavailable`, ahead of any other error: its provider was unreachable, so the work's own
+// verdict means nothing. The variable is this kind's, not the preamble's: an agent step gets none.
 //
 // A step that declares `exclusive` takes that machine-wide slot before `script:exec` and gives it back once the script
 // has ended and been read. While another holder has it the step waits, emitting `step:queued` for each holder it finds,
@@ -346,6 +348,14 @@ async function runScript(step: ScriptStep, context: StepContext): Promise<StepRu
     return ended({ reason: 'exit_code', message: `interrupted, then ${how}` }, record);
   }
   if (end.signal !== null) return ended({ reason: 'exit_code', message: `ended by signal ${end.signal}` }, record);
+  // A step that didn't pass because a provider was unreachable is an error, never a verdict: the run suspends to retry it.
+  const outage = ported.events.find(
+    (event): event is Extract<typeof event, { type: 'error:port' }> =>
+      event.type === 'error:port' && event.code === 'unavailable',
+  );
+  if (mapped !== 'passed' && outage !== undefined) {
+    return ended({ reason: 'port', code: 'unavailable', message: outage.message }, record);
+  }
   if (mapped !== 'passed' && mapped !== 'failed') {
     return ended({ reason: 'exit_code', message: `exit code ${end.code} is not mapped to passed or failed` }, record);
   }
