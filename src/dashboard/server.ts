@@ -448,8 +448,12 @@ export function startDashboard(options: DashboardOptions): Dashboard | { refused
         if (segments === undefined) return error(400, 'the path is not percent-encoded properly');
         if (request.method === 'POST') {
           const path = url.pathname;
-          if (RESUME_PATH.test(path)) return resumeRoute(starts, segments, request);
-          if (RESTART_PATH.test(path)) return restartRoute(starts, segments, request);
+          // A start is waited for up to `startWaitMs`, past Bun's 10 s idle timeout, which would close the request.
+          const start = RESUME_PATH.test(path) ? resumeRoute : RESTART_PATH.test(path) ? restartRoute : undefined;
+          if (start !== undefined) {
+            self.timeout(request, 0);
+            return start(starts, segments, request);
+          }
           return moveRoute(registryDir, segments, request);
         }
         return route(options, segments, url);
