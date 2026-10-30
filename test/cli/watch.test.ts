@@ -372,6 +372,29 @@ test('sail unwatch with no watcher exits 3, and sail unwatch a b with one makes 
   });
 }, 30_000);
 
+test('sail unwatch with no names empties the set and the watcher stops, and with no watcher it exits 3', async () => {
+  await withTempRepo(async (repo) => {
+    const { env } = repository(repo);
+    const none = await runCaptured(['unwatch'], repo.dir, { env });
+    expect({ code: none.code, stderr: none.stderr }).toEqual({
+      code: EXIT_REFUSED,
+      stderr: "sail unwatch: no watcher is running for 'stub' here: nothing to unwatch\n",
+    });
+  });
+  await withTempRepo(async (repo) => {
+    const w = await running(repo, ['a', 'b']);
+    expect(w.recorded).toBe(true);
+    const removed = await w.second(unwatchCommand, []);
+    expect(removed).toEqual({
+      code: EXIT_OK,
+      stdout: `sail unwatch: the watch set is empty: the watcher of 'stub' (pid ${WATCHER_PID}) stops\n`,
+      stderr: '',
+    });
+    expect(await Promise.race([w.exited, Bun.sleep(2000).then(() => 'running')])).toBe(EXIT_OK);
+    expect(readEntry(w.registry, 'stub')?.watcher).toBeUndefined();
+  });
+}, 30_000);
+
 test('Ctrl-C ends the watcher with exit 0 and clears its registry field, and its runs are left running', async () => {
   await withTempRepo(async (repo) => {
     const w = await running(repo, ['a']);

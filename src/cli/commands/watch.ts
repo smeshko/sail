@@ -3,11 +3,11 @@
 // | | No live watcher here | A live watcher here |
 // |---|---|---|
 // | `sail watch` | starts the watcher in the foreground, watching the workflows named, or with none named every workflow that declares a watch | hands it a `watch` command, waits for it, and prints the set |
-// | `sail unwatch` | refused: nothing to unwatch | hands it an `unwatch` command, waits for it, and prints the set, or that the watcher stops |
+// | `sail unwatch` | refused: nothing to unwatch | hands it an `unwatch` command, with no names for every workflow it watches, waits for it, and prints the set, or that the watcher stops |
 //
 // A live watcher is one the registry records for this repository's `name` with a pid that is alive. One recorded for
 // the same `name` in another clone refuses both commands. Every refusal is exit code 3: no `.sail/project.yaml`, no
-// workflow that declares a watch, a name or a workflow that isn't a watched workflow or won't load, two workflows on one label (the live set's included), a live watcher
+// workflow that declares a watch (`sail watch` with no names), a name or a workflow that isn't a watched workflow or won't load, two workflows on one label (the live set's included), a live watcher
 // in the way, named with its clone and pid, or a model alias whose harness can't run its model.
 //
 // A watcher starts only when every model alias's harness can run its model, and pauses its dispatch while an edit of
@@ -268,9 +268,7 @@ export function watchCommand(deps: WatchDeps = {}): Command {
 export function unwatchCommand(deps: WatchDeps = {}): Command {
   return async (args, io) => {
     const command = 'sail unwatch';
-    const located = await locate(io, command, args, deps.isAlive ?? processIsAlive, async () => ({
-      refused: 'name at least one workflow to unwatch',
-    }));
+    const located = await locate(io, command, args, deps.isAlive ?? processIsAlive);
     if (typeof located === 'number') return located;
     const { project, names, entry, live } = located;
     if (live === undefined) {
@@ -278,7 +276,9 @@ export function unwatchCommand(deps: WatchDeps = {}): Command {
     }
     const { pid } = live.watcher;
     const watcher = `the watcher of '${entry.name}' (pid ${pid})`;
-    const file = dropCommand(runsDirOf(project.sailDir), { op: 'unwatch', workflows: names });
+    const workflows = names.length > 0 ? names : liveSet(project.sailDir, pid).map((each) => each.workflow);
+    if (workflows.length === 0) return refuseAs(io, command)(`${watcher} watches nothing: nothing to unwatch`);
+    const file = dropCommand(runsDirOf(project.sailDir), { op: 'unwatch', workflows });
     if (!(await taken(file, deps))) {
       io.stdout(`${command}: ${watcher} has not taken the command yet: it waits in ${at(io, file)}\n`);
       return EXIT_OK;
