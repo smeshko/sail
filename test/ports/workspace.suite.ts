@@ -49,6 +49,8 @@ export interface WorkspaceWorld {
   run(runId: string, status?: Status | 'none', alive?: boolean): Promise<RunRef & { pid: number }>;
   /** Runs git in `cwd`, giving its exit code and trimmed stdout. */
   git(cwd: string, ...args: string[]): { code: number; stdout: string };
+  /** Puts `branch` on the remote at a new commit one past `base`, and returns its sha. */
+  publishBranch(branch: string): string;
 }
 
 export type MakeWorkspace = (emit: ProviderEmit) => Promise<{ adapter: WorkspacePort; world: WorkspaceWorld }>;
@@ -350,6 +352,35 @@ export function workspaceSuite(label: string, make: MakeWorkspace): void {
     expect(workspace).toEqual({ path: join(r1.runDir, 'workspace'), branch: BRANCH, baseSha: world.baseSha });
     const path = 'path' in workspace ? workspace.path : r1.runDir;
     expect(world.git(path, 'rev-parse', 'HEAD')).toEqual({ code: 0, stdout: world.baseSha });
+  });
+
+  test(`${label}: a workspace for a branch the remote has starts from its tip, and workspace:created records it as baseSha`, async () => {
+    const { adapter, world, capture } = await start();
+    const branch = 'sail/FAKE-77-published';
+    const tip = world.publishBranch(branch);
+    const r1 = await world.run('r1');
+    const workspace = held(await settle(adapter.create(r1, { branch })));
+    const path = 'path' in workspace ? workspace.path : r1.runDir;
+    expect({
+      workspace,
+      head: world.git(path, 'rev-parse', 'HEAD').stdout,
+      created: timed(capture.events).filter((event) => event.type === 'workspace:created'),
+    }).toEqual({
+      workspace: { path: join(r1.runDir, 'workspace'), branch, baseSha: tip },
+      head: tip,
+      created: [
+        { type: 'workspace:created', path: join(r1.runDir, 'workspace'), branch, baseSha: tip, durationMs: 'ms' },
+      ],
+    });
+    expect(tip).not.toBe(world.baseSha);
+  });
+
+  test(`${label}: an explicit base wins over the branch's tip`, async () => {
+    const { adapter, world } = await start();
+    const branch = 'sail/FAKE-78-published';
+    world.publishBranch(branch);
+    const workspace = held(await settle(adapter.create(await world.run('r1'), { base: world.base, branch })));
+    expect('baseSha' in workspace ? workspace.baseSha : workspace).toBe(world.baseSha);
   });
 
   test(`${label}: diff over <rev>...HEAD is taken against the merge-base, and diff over a sha against that sha`, async () => {

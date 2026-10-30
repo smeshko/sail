@@ -1,7 +1,7 @@
 // One workflow's dispatch (DECISIONS D6-D9): settle the items whose run has ended, then start due items within the
 // cap, skipping a leased branch without a slot or an attempt, and dropping an item no longer eligible. On the stub's
 // file-backed fakes in a temp repository, a hand-moved clock and a fake spawner.
-import { expect, test } from 'bun:test';
+import { afterAll, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createFakeTicketSource } from '../../src/adapters/fake/ticket-source';
@@ -9,6 +9,7 @@ import { branchFor } from '../../src/engine/branch';
 import { requestStop, requestUnwatch } from '../../src/engine/control';
 import { writeStatus } from '../../src/engine/run-dir';
 import { claimComment } from '../../src/engine/source';
+import { readEvents } from '../../src/events/consumers/ndjson';
 import type { CodeHost } from '../../src/ports/code-host';
 import { PortError } from '../../src/ports/errors';
 import type { TicketSource } from '../../src/ports/ticket-source';
@@ -16,10 +17,11 @@ import type { PullRequestDetails } from '../../src/ports/types';
 import type { WorkspacePort } from '../../src/ports/workspace';
 import { createDispatcher, type Settled } from '../../src/watch/dispatch';
 import { openQueue, type QueueStore, queueDir } from '../../src/watch/queue-store';
-import { dispatchLog } from '../../src/watch/spawn';
+import { dispatchLog, spawnRun } from '../../src/watch/spawn';
 import { fakeAdapters } from '../helpers/adapters';
 import { commitBranch, seedPullRequests } from '../helpers/pr-workflow';
 import { manualClock, queueEventIssues, queueEvents, sourceKey, ticket } from '../helpers/queue';
+import { sharedSource } from '../helpers/seeded';
 import { writeStub } from '../helpers/stub-workflow';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
 import { FAKE_PID, type FakeSpawner, fakeSpawner, writeTickets } from '../helpers/watched';
@@ -1192,3 +1194,36 @@ test('with one slot, a ticket whose priority was raised after it was queued is d
     expect(states(w.store)).toEqual(['FAKE-3 dispatched 1', 'FAKE-1 queued 0', 'FAKE-2 queued 0']);
   });
 });
+
+// A dispatched start is an ordinary `sail <ticket> --workflow <name> --dispatch <run id>` process, so a rerun of a ticket
+// whose branch an earlier run pushed continues that branch, as a start by hand does.
+
+const dispatchSource = sharedSource();
+afterAll(() => dispatchSource.release());
+
+test('a dispatched rerun of a ticket whose branch is pushed starts from it, and its push is a fast-forward', async () => {
+  await withTempRepo(async (repo) => {
+    const from = await dispatchSource.copyInto(repo.dir);
+    const branch = (
+      readEvents(from.dir).find((event) => event.type === 'codehost:pushed') as { branch: string } | undefined
+    )?.branch;
+    const tip = repo.git('commit-tree', 'main^{tree}', '-p', 'main', '-m', 'work an earlier run pushed');
+    repo.git('update-ref', `refs/heads/${branch}`, tip);
+    const runId = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3P';
+    const runs = join(repo.dir, '.sail-runs');
+    const spawned = spawnRun({
+      root: repo.dir,
+      runsDir: runs,
+      workflow: 'ticket-to-pr',
+      ticketKey: 'FAKE-1',
+      runId,
+      env: repo.env,
+      force: true,
+    });
+    const code = await spawned.exited;
+    const events = readEvents(join(runs, runId));
+    const created = events.find((event) => event.type === 'workspace:created') as { baseSha: string } | undefined;
+    const pushed = events.find((event) => event.type === 'codehost:pushed') as { headSha: string } | undefined;
+    expect({ code, base: created?.baseSha, pushed: pushed?.headSha }).toEqual({ code: 0, base: tip, pushed: tip });
+  });
+}, 90_000);

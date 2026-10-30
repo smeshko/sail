@@ -1,5 +1,6 @@
 // The built-in `git-worktree` Workspace adapter (ADR-0018, D6): a run works in a detached worktree of the repository at
-// `<runDir>/workspace`, made from `<remote>/<default branch>` right after a fetch, so the clone's own checkout, index
+// `<runDir>/workspace`, made right after a fetch from the run's branch on `<remote>` when it has one, else from
+// `<remote>/<default branch>`, so the clone's own checkout, index
 // and working files are never touched. Leases are shared within the selected machine directory, in `$SAIL_HOME/leases/`
 // (or `~/.sail/leases/`), keyed by the remote's URL with any credentials taken out.
 //
@@ -154,7 +155,12 @@ export function createGitWorktreeWorkspace(options: GitWorktreeOptions): Workspa
     async create(run, { branch, base, signal }) {
       const started = now().getTime();
       await fetchRemote(repo, remote, env, options.fetchTimeoutMs ?? FETCH_TIMEOUT_MS, signal);
-      const from = base ?? `${remote}/${defaultBranch()}`;
+      // A rerun whose branch is already on the remote continues it, so its push is a fast-forward.
+      const from =
+        base ??
+        (resolveCommit(repo, `refs/remotes/${remote}/${branch}`, env)
+          ? `refs/remotes/${remote}/${branch}`
+          : `${remote}/${defaultBranch()}`);
       const baseSha = resolveCommit(repo, from, env);
       if (baseSha === undefined) throw new PortError('workspace', 'create', 'invalid', `${from} names no commit`);
       const path = join(run.runDir, WORKSPACE_DIR);

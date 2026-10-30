@@ -319,7 +319,7 @@ The shell command the `git-worktree` adapter runs in each workspace it makes, be
 _Avoid_: bootstrap, install step, setup stage
 
 **Base**:
-The commit a run's workspace starts from: the default branch's tip on the remote after a fetch, recorded as `baseSha`. For a pull-request source it is the pull request's head.
+The commit a run's workspace starts from: the default branch's tip on the remote after a fetch, or, when the run's branch is already on the remote, that branch's tip, recorded as `baseSha`. For a pull-request source it is the pull request's head.
 _Avoid_: start point, fork point
 
 **Run ref**:

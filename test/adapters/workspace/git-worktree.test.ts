@@ -88,6 +88,11 @@ function world(repo: TempRepo): WorkspaceWorld & { leasesDir: string } {
       return { runId, runDir, pid: alive ? process.pid : await deadPid() };
     },
     git: (cwd, ...args) => gitIn(repo, cwd, ...args),
+    publishBranch: (branch) => {
+      const sha = repo.git('commit-tree', 'origin/main^{tree}', '-p', 'origin/main', '-m', `work on ${branch}`);
+      repo.git('push', '--quiet', 'origin', `${sha}:refs/heads/${branch}`);
+      return sha;
+    },
   };
 }
 
