@@ -348,3 +348,17 @@ test("a run seeded for the stage after a two-step call reuses the call's step li
     });
   });
 }, 90_000);
+
+test("a seeded run keeps its reused calls' bindings and replays them, one that consumed another reused call's file included, without a violation", async () => {
+  await withTempRepo(async (repo) => {
+    const from = await source.copyInto(repo.dir);
+    const end = await seeded(repo, from.runId, 'tests', { continue: true });
+    expect(endOf(end)).toEqual({ status: 'completed', stopReason: undefined });
+    const dir = dirOf(end);
+    const [reused, original] = [readJournal(dir).entries, readJournal(from.dir).entries];
+    const implement = reused.find((entry) => entry.key === 'implement#1');
+    expect(Object.keys(implement?.bindings ?? {})).toEqual(['spec']);
+    expect(implement?.bindings).toEqual(original.find((entry) => entry.key === 'implement#1')?.bindings);
+    expect(journaled(dir)).toEqual(SOURCE_JOURNAL);
+  });
+}, 60_000);

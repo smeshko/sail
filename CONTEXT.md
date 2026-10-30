@@ -343,7 +343,7 @@ What was asked, written once at start and never changed: the source, the workflo
 _Avoid_: manifest, metadata, config snapshot
 
 **Journal**:
-The append-only record of completed calls and steps (key, outcome, output, files). A resume replays completed calls from it. To recover an unjournaled claim before its comment was posted, a later try of the built-in `ticket` intake also reads `ticket:claimed` from the run's event stream; without that event, a missing comment cannot establish ownership.
+The append-only record of completed calls and steps (key, outcome, output, files, and on a call its binding fingerprints). A resume replays completed calls from it. To recover an unjournaled claim before its comment was posted, a later try of the built-in `ticket` intake also reads `ticket:claimed` from the run's event stream; without that event, a missing comment cannot establish ownership.
 _Avoid_: log, history, state file, checkpoint
 
 **Replay**:
@@ -351,8 +351,12 @@ Re-executing the workflow function after every completed call, so journaled call
 _Avoid_: rerun, recovery, fast-forward
 
 **Determinism guard**:
-The check that fails a run when the workflow asks for a key sequence that diverges from the journal, and, for a group, its whole key sequence. That is the sign of non-deterministic workflow code or a mid-run change.
+The check that fails a run when the workflow asks for a key sequence that diverges from the journal, and, for a group, its whole key sequence. It also compares each journaled call's binding fingerprints with the bindings the workflow asks with now, naming each that changed, appeared or went; a journal line without them keeps the key check alone. That is the sign of non-deterministic workflow code or a mid-run change.
 _Avoid_: replay check, drift detection
+
+**Binding fingerprint**:
+A short hash of one value or file binding a workflow supplied to a call, journaled on the call's line by binding name. A value is hashed by its canonical JSON, a file by the run-relative path it names. A `gitDiff` or `fromStep` binding has none, since the engine supplies it.
+_Avoid_: bindings hash, checksum
 
 **Result**:
 What a call or step left behind, as the engine recorded it: outcome, output, derived facts, files and usage. "The run's result" is what the workflow returned, for example the pull request.
