@@ -2,6 +2,7 @@
 // definition and imports it needs a copy of its own.
 import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import type { TempRepo } from './temp-repo';
 
 export const FIXTURE_SAIL = join(import.meta.dir, '..', 'fixtures', 'repo', '.sail');
 
@@ -206,4 +207,21 @@ export function seedHarness(sail: string, key: string, answers: unknown[]): void
   const seeds = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
   seeds[key] = answers;
   writeFileSync(path, `${JSON.stringify(seeds, null, 2)}\n`);
+}
+
+const GREET = `#!/usr/bin/env bun
+const [arg] = process.argv.slice(2);
+if (arg === '--help') console.log('usage: greet <name>');
+else console.log(\`Hello, \${arg ?? 'world'}!\`);
+`;
+
+/**
+ * Commits a `greet` source on `main` of `repo`. FAKE-1 asks for a flag on `greet`, and a real spec session blocks on a
+ * workspace that holds only README.md (ADW-221); a workspace starts from `main`, so the source must be committed.
+ */
+export function commitGreet(repo: TempRepo): void {
+  mkdirSync(join(repo.dir, 'src'), { recursive: true });
+  writeFileSync(join(repo.dir, 'src', 'greet.ts'), GREET);
+  repo.git('add', 'src/greet.ts');
+  repo.git('commit', '-q', '-m', 'add greet');
 }
