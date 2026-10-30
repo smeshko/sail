@@ -406,7 +406,7 @@ The rolled-up view of a run derived from its events: calls, loops, totals, and c
 _Avoid_: report, status file, digest
 
 **Usage**:
-The tokens and cost an agent step consumed, reported per turn by the harness. A harness that cannot report usage does not qualify. A Jev call reports its tokens too, on its `jev:asked`, when its adapter has them.
+The tokens and cost an agent step consumed, reported per turn by the harness. A harness that prices turns itself reports that estimate as the running cost, until the provider's own total replaces it. A harness that cannot report usage does not qualify. A Jev call reports its tokens too, on its `jev:asked`, when its adapter has them.
 _Avoid_: consumption, spend, billing, metering
 
 ### Guardrails
