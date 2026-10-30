@@ -168,7 +168,7 @@
       "type": "object",
       "properties": {
         "maxTurns": { "type": "integer", "minimum": 1 },
-        "maxIdleMinutes": { "type": "number", "exclusiveMinimum": 0 },
+        "maxIdleMinutes": { "type": "number", "minimum": 0 },
         "maxUsd": { "type": "number", "minimum": 0 },
         "maxMinutes": { "type": "number", "minimum": 0 }
       },

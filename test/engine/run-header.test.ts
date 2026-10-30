@@ -175,6 +175,13 @@ test("the fixture's header validates, with the workflow's folder, the adapters a
   expect(header.intake.name).toBe('ticket');
 });
 
+test("a step's idle limit of 0 still validates, as its minute budget of 0 does, so the agent kind refuses it with its own message (review D1)", async () => {
+  const header = await fixtureHeader();
+  const spec = header.stages.spec as unknown as { budget: Record<string, number> };
+  spec.budget = { ...spec.budget, maxIdleMinutes: 0 };
+  expect(validateRunHeader(header)).toEqual([]);
+});
+
 test("a workflow's budget overrides project.yaml's field by field, and stands alone without one: the header validates and holds the merged budget a dry run prints", async () => {
   const headerOf = (change: (sail: string) => void) =>
     withTempRepo(async (repo) => {
