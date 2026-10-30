@@ -13,12 +13,14 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { isAlive } from '../../src/adapters/leases';
 import type { ResolvedAdapters } from '../../src/engine/adapters';
 import type { Port } from '../../src/engine/config';
 import { appendJournal, type NewJournalEntry, readJournal } from '../../src/engine/journal';
 import { findRun, type OpenedRun, type OpenRunOptions, openRun, reopenRun } from '../../src/engine/open-run';
-import { type Forced, readStatus, writeStatus } from '../../src/engine/run-dir';
+import { type Forced, readStatus, runsDir, writeStatus } from '../../src/engine/run-dir';
 import { type AdapterEntry, RUN_HEADER_FILE, type RunHeader, readRunHeader } from '../../src/engine/run-header';
+import { liveRuns } from '../../src/engine/runs';
 import { validateRunDir } from '../../src/engine/schemas';
 import { PortError } from '../../src/ports/errors';
 import type { TicketSource } from '../../src/ports/ticket-source';
@@ -1574,5 +1576,41 @@ test('a forced pull-request start at a full cap opens and records cap', async ()
     } finally {
       await live.release();
     }
+  });
+});
+
+test('a start is counted against its cap while it builds its workspace, before its header and STATUS are written', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = writeStub(repo.dir);
+    writeWatched(sail, 'capped', { label: 'sail', cap: 1 });
+    const adapters = await fakeAdapters(repo.dir);
+    const { workspace } = adapters.ports;
+    const create = workspace.create.bind(workspace);
+    let during: string[] | undefined;
+    workspace.create = async (run, options) => {
+      during = await liveRuns(runsDir(sail), 'capped', { workspace, isAlive });
+      return create(run, options);
+    };
+    const run = await openStub(repo.dir, { ticket: 'FAKE-1', workflow: 'capped' }, adapters);
+    if ('refused' in run) throw new Error(run.refused);
+    expect(during).toEqual([run.runId]);
+    expect(existsSync(join(run.dir, 'OPENING'))).toBe(false);
+  });
+});
+
+test('a resumed run is counted against its cap once it renews its lease, before its STATUS is running again', async () => {
+  await withTempRepo(async (repo) => {
+    const run = await suspendedCopy(repo.dir);
+    const adapters = await fakeAdapters(repo.dir);
+    const { workspace } = adapters.ports;
+    const reopen = workspace.reopen.bind(workspace);
+    let during: string[] | undefined;
+    workspace.reopen = async (ref, options) => {
+      during = await liveRuns(join(repo.dir, '.sail-runs'), 'ticket-to-pr', { workspace, isAlive });
+      return reopen(ref, options);
+    };
+    const reopened = await reopenRun({ cwd: repo.dir, runId: run.runId, adapters });
+    if ('refused' in reopened) throw new Error(reopened.refused);
+    expect(during).toEqual([run.runId]);
   });
 });

@@ -77,9 +77,11 @@ import {
   DEFINITION_DIR,
   type RunStatus,
   readStatus,
+  removeOpening,
   removeRunDir,
   runsDir,
   type Source,
+  writeOpening,
   writeStatus,
 } from './run-dir';
 import {
@@ -361,11 +363,13 @@ export async function startWorkspace(options: {
   port: WorkspacePort;
   run: RunRef;
   sailDir: string;
+  /** The run's workflow, which its `OPENING` names until its header does. */
+  workflow: string;
   branch: string;
   base?: string;
   signal: AbortSignal | undefined;
 }): Promise<{ made: Made } | { refused: string }> {
-  const { port, run, sailDir, branch, base, signal } = options;
+  const { port, run, sailDir, workflow, branch, base, signal } = options;
   let repository: Repository;
   try {
     repository = await port.repository();
@@ -389,6 +393,7 @@ export async function startWorkspace(options: {
   };
   try {
     createRunDir(sailDir, run.runId);
+    writeOpening(run.runDir, { workflow, branch, remote: repository.url });
     workspace = await port.create(run, {
       branch,
       ...(base === undefined ? {} : { base }),
@@ -439,7 +444,8 @@ function conventionPaths(config: ProjectConfig, header: Pick<RunHeader, 'intake'
 /**
  * The cap on a watched workflow's live runs in this clone, whoever started them. A full one refuses the start, or with
  * `force` lets it through and says it overrode the cap. A dispatched start, which the watcher counted, and a workflow with
- * no `maxConcurrentRuns` are never held. Two starts at once can both pass the count; the watcher then counts both.
+ * no `maxConcurrentRuns` are never held. A run making its workspace is counted by its `OPENING`, but two starts that
+ * count at once can both pass; the watcher then counts both.
  */
 async function checkCap(options: {
   loaded: LoadedWorkflow;
@@ -661,6 +667,7 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
       port: options.adapters.ports.workspace,
       run,
       sailDir: home,
+      workflow: loaded.name,
       branch,
       signal: options.signal,
       // A pull-request run starts at the head sha it was resolved at (D4), and a ticket run from definitions at their
@@ -685,6 +692,7 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
     createJournal(dir);
     createEventsFile(dir);
     writeStatus(dir, 'running');
+    removeOpening(dir);
   } catch (error) {
     // No run is behind the workspace, so nothing may hold its branch: undone as a refusal would, as far as it still can.
     await undoOpened(options.adapters.ports.workspace, run, made.repository.url, branch);

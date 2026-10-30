@@ -71,6 +71,41 @@ export function createRunDir(sailDir: string, runId: string): string {
   return dir;
 }
 
+/**
+ * What a run being opened is, before its header is written: its workflow, and the branch it leased on its remote. The
+ * cap counts a run by it while the run makes its workspace, which can take minutes, and it goes once STATUS is written.
+ */
+export interface Opening {
+  workflow: string;
+  branch: string;
+  remote: string;
+}
+
+const OPENING_FILE = 'OPENING';
+
+/** Writes the run's `OPENING`. */
+export function writeOpening(runDir: string, opening: Opening): void {
+  replaceFile(join(runDir, OPENING_FILE), `${JSON.stringify(opening)}\n`);
+}
+
+/** The run's `OPENING`, or undefined when it has none or it doesn't read as one. */
+export function readOpening(runDir: string): Opening | undefined {
+  try {
+    const read: unknown = JSON.parse(readFileSync(join(runDir, OPENING_FILE), 'utf8'));
+    if (typeof read !== 'object' || read === null) return undefined;
+    const { workflow, branch, remote } = read as Record<string, unknown>;
+    if (typeof workflow !== 'string' || typeof branch !== 'string' || typeof remote !== 'string') return undefined;
+    return { workflow, branch, remote };
+  } catch {
+    return undefined;
+  }
+}
+
+/** Removes the run's `OPENING`, once its header and STATUS say what it is. */
+export function removeOpening(runDir: string): void {
+  rmSync(join(runDir, OPENING_FILE), { force: true });
+}
+
 /** The folder of a run directory that holds its copy of the stage folders. */
 export const DEFINITION_DIR = 'definition';
 
