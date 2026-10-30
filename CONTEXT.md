@@ -335,7 +335,7 @@ Everything a run wrote: the run header, the journal, the events, the summary, `d
 _Avoid_: run folder, output directory, artifacts
 
 **Run header**:
-What was asked, written once at start and never changed: the source, the workflow and its hash, the roster, the budgets, and the versions and adapters in use.
+What was asked, written once at start and never changed: the source, the workflow and its hash, the roster, the budgets, and the versions and adapters in use. A run started from committed definitions also records `definitionsSha`, the commit its `.sail/` was read from.
 _Avoid_: manifest, metadata, config snapshot
 
 **Journal**:
@@ -546,7 +546,7 @@ A workflow that declares `watch: { every, label? }` and `maxConcurrentRuns`, whi
 _Avoid_: loop, line, daemon, pipeline
 
 **Watcher**:
-The resident process that automates one repository's watch set: it polls and it dispatches. `sail watch <workflow…>` starts it in the clone where it is run, or adds to the live one. There is one per repository. Each run it dispatches fetches before it makes its worktree, and runs start from `origin/<default>` in detached worktrees, using the `.sail/` committed there. It is sail's home in v1. Without one running, nothing starts on its own.
+The resident process that automates one repository's watch set: it polls and it dispatches. `sail watch <workflow…>` starts it in the clone where it is run, or adds to the live one. There is one per repository. Each run it dispatches fetches before it makes its worktree, and runs start from `origin/<default>` in detached worktrees. A dispatched run, and every resume of it, reads its `.sail/` and conventions from the commit it fetched, never the clone's working tree, and records that commit as `definitionsSha`; a workflow missing or broken there is refused, naming the commit. It is sail's home in v1. Without one running, nothing starts on its own.
 _Avoid_: daemon, monitor, poller, scheduler
 
 **Watch set**:
