@@ -25,7 +25,7 @@ export function runsDir(sailDir: string): string {
 }
 
 /** The checks `--force` can override, in the order a run header lists them. */
-export const FORCED = ['designation', 'state'] as const;
+export const FORCED = ['designation', 'state', 'cap'] as const;
 export type Forced = (typeof FORCED)[number];
 
 /** A run started from a ticket, by its key. */
@@ -35,8 +35,8 @@ export interface TicketRunSource {
   via: 'cli' | 'watch';
   /**
    * The checks `--force` overrode, each at most once: `designation` when the ticket didn't carry the repository's
-   * label, `state` when the claim didn't take because the ticket was not in a pick-up state. Empty for a run nobody forced, and
-   * for one `--force` had nothing to override.
+   * label, `state` when the claim didn't take because the ticket was not in a pick-up state, `cap` when its workflow's
+   * live runs filled its maxConcurrentRuns. Empty for a run nobody forced, and for one `--force` had nothing to override.
    */
   forced: Forced[];
 }
@@ -50,7 +50,7 @@ export interface PullRequestRunSource {
   via: 'cli' | 'watch';
   /**
    * The checks `--force` overrode: `designation` when the pull request didn't carry the label, `state` when it was
-   * closed, merged or a draft.
+   * closed, merged or a draft, `cap` when its workflow's live runs filled its maxConcurrentRuns.
    */
   forced: Forced[];
 }

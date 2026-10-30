@@ -1331,9 +1331,9 @@ test('event: stage:end takes the reason port in its errors, and every other reas
 const forcedIssues = (schema: SchemaName, document: { source: object }, forced: unknown): string[] =>
   paths(schema, { ...document, source: { ...document.source, forced } });
 
-test('run: source.forced takes no check, either check, or both in order', () => {
-  const taken = [[], ['designation'], ['state'], ['designation', 'state']];
-  expect(taken.map((forced) => forcedIssues('sail.run.v1', run, forced))).toEqual([[], [], [], []]);
+test('run: source.forced takes no check, any check, or all in order', () => {
+  const taken = [[], ['designation'], ['state'], ['cap'], ['designation', 'state'], ['designation', 'state', 'cap']];
+  expect(taken.map((forced) => forcedIssues('sail.run.v1', run, forced))).toEqual([[], [], [], [], [], []]);
 });
 
 test('run: source.forced refuses a boolean, a check it does not know and a check listed twice, naming /source/forced', () => {
@@ -1473,6 +1473,8 @@ test('a reused call reported for another run than the header names, or after a c
 
 test('event: run:start takes source.forced as the list, and refuses a boolean', () => {
   expect(forcedIssues('sail.event.v1', event, ['designation', 'state'])).toEqual([]);
+  expect(forcedIssues('sail.event.v1', event, ['cap'])).toEqual([]);
+  expect(forcedIssues('sail.event.v1', event, ['designation', 'state', 'cap'])).toEqual([]);
   expect(forcedIssues('sail.event.v1', event, false)).toEqual(['/source/forced']);
   expect(forcedIssues('sail.event.v1', event, ['label'])).toEqual(['/source/forced/0']);
 });

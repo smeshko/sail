@@ -106,7 +106,7 @@
     "forced": {
       "description": "the checks --force overrode: empty for a run nobody forced",
       "type": "array",
-      "items": { "enum": ["designation", "state"] },
+      "items": { "enum": ["designation", "state", "cap"] },
       "uniqueItems": true
     },
     "ticketSource": {
