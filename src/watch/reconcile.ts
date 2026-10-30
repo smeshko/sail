@@ -46,13 +46,13 @@ export interface ReconcileContext {
   backoffMs: number;
   /** How long a run suspended on an unavailable port holds the dispatch, by consecutive suspension; one past the end parks. */
   portBackoffMs: readonly number[];
-  /** When this dispatcher first saw the run on its usage limit: dates a limit whose run left no event for it. */
+  /** When this dispatcher first saw the run held, on its usage limit or an unavailable port: dates a hold whose run left no event for it. */
   limitedAt?: Date;
   /** The dispatcher's first settle: a live run is adopted. */
   first: boolean;
   /** Whether this dispatcher has already resumed the item's run. */
   resumed: boolean;
-  /** When this dispatcher last resumed the item's run from its usage limit: a limit not hit since means it failed. */
+  /** When this dispatcher last resumed the item's run from a hold: no limit hit nor suspension on an unavailable port since means it failed. */
   resumedAt?: Date;
   /** How the process this dispatcher last started for the item exited, once it has. */
   exited?: number | null;

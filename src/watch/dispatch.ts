@@ -259,7 +259,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
         park(item, runId, answer.reason);
         break;
       case 'held':
-        // The run will be resumed once, and again if it hits the limit again, so it is not one this dispatcher resumed.
+        // The run will be resumed once, and again if it is held again, so it is not one this dispatcher resumed.
         resumed.delete(runId);
         resumedAt.delete(runId);
         limitedAt.set(runId, limitedAt.get(runId) ?? now());
