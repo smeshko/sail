@@ -736,7 +736,7 @@ async function journaledDescribe(s: Setup, change: Partial<JournalEntry> = {}): 
     outcome: 'done',
     output: heard?.output,
     reason: null,
-    files: { 'pr-body.md': `${CALL}/pr-body.md` },
+    files: { 'pr-body.md': `${CALL}/out/pr-body.md` },
     resultPath: `${CALL}/steps/1-describe/result.json`,
     recordedAt: TS,
     ...change,
@@ -837,7 +837,7 @@ test("a resume whose journaled step's file is missing ends in error, missing_fil
   await withTempRepo(async (repo) => {
     const s = setup(repo);
     const entry = await journaledDescribe(s);
-    rmSync(join(s.runDir, CALL, 'pr-body.md'));
+    rmSync(join(s.runDir, CALL, 'out', 'pr-body.md'));
     const { result } = await runStageCall(s.request(), publish, { finished: [entry] });
     expect(result).toMatchObject({ outcome: 'error' });
     expect(result.errors).toContainEqual(GONE_BODY);
@@ -850,7 +850,7 @@ test("a journaled step's file replaced by a directory ends the call in error, mi
   await withTempRepo(async (repo) => {
     const s = setup(repo);
     const entry = await journaledDescribe(s);
-    const file = join(s.runDir, CALL, 'pr-body.md');
+    const file = join(s.runDir, CALL, 'out', 'pr-body.md');
     rmSync(file);
     mkdirSync(file);
     const { result } = await runStageCall(s.request(), publish, { finished: [entry] });
@@ -866,7 +866,7 @@ test("a journaled step's file changed after it was journaled is hashed again: th
   await withTempRepo(async (repo) => {
     const s = setup(repo);
     const entry = await journaledDescribe(s);
-    writeFileSync(join(s.runDir, CALL, 'pr-body.md'), 'Changed.\n');
+    writeFileSync(join(s.runDir, CALL, 'out', 'pr-body.md'), 'Changed.\n');
     const { result } = await runStageCall(s.request(), publish, { finished: [entry] });
     const now = new Bun.CryptoHasher('sha256').update('Changed.\n').digest('hex');
     expect(result).toMatchObject({ outcome: 'passed' });
