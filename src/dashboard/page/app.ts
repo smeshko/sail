@@ -547,12 +547,13 @@ export function boot(host: PageHost): Page {
   };
 
   const connectQueue = (id: string, open: OpenQueue) => {
-    open.connection = host.connect(`queue=${enc(id)}`, {
+    const connection = host.connect(`queue=${enc(id)}`, {
       message: (text) => onQueueMessage(id, open, text),
+      // A socket the queue has since replaced closes without a retry, like the run's.
       close: retryOnClose(
         open,
         () => open.stream.error !== undefined,
-        () => queues.get(id) === open,
+        () => queues.get(id) === open && open.connection === connection,
         () => {
           open.stream = { recent: [], watch: 'unknown' };
           connectQueue(id, open);
@@ -560,6 +561,7 @@ export function boot(host: PageHost): Page {
         },
       ),
     });
+    open.connection = connection;
   };
 
   const openQueueSocket = (id: string) => {

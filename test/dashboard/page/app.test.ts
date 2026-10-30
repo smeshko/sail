@@ -625,6 +625,20 @@ test('a queue stream that sends an error and closes is not reopened and shows it
   expect(queueSockets()).toHaveLength(2);
 });
 
+test('a failed queue reopened before its old socket closes keeps one open socket when the old one closes (review R1) (ADW-209)', () => {
+  const queue = `beta/${QUEUE_WORKFLOW}`;
+  page = boot(host);
+  host.push(host.open('index')[0], indexMessage());
+  const old = host.open('queue=')[0];
+  host.click({ action: 'select-queue', queue });
+  host.push(old, { kind: 'error', message: "events.ndjson:2 can't be read" });
+  host.click({ action: 'select-queue', queue });
+  host.drop(old);
+  host.advance(10_000);
+  expect(host.sockets.filter((socket) => socket.query.startsWith('queue='))).toHaveLength(2);
+  expect(host.open('queue=')).toHaveLength(1);
+});
+
 test('keys move the cursor, Enter opens a timeline, ] and [ step it, Escape goes back to the cards then deselects, i toggles the inspector, and a key typed in an input does nothing', () => {
   page = boot(host);
   host.push(host.open('index')[0], indexMessage());
