@@ -1401,3 +1401,23 @@ test("the open run's actions are read again when the index shows its status chan
   await settle();
   expect(host.actionReads).toHaveLength(3);
 });
+
+test("a stage chosen and a raise typed on one run don't carry over to the next opened, which defaults to its own failed stage (review R7)", async () => {
+  await openOffering('alpha', FAKE_2_ID, fake2Dir(m));
+  host.fields = { stage: 'spec', raise: '7' };
+  host.click({ action: 'restart-run' });
+  host.advance(100);
+  expect(page?.ui.restartStage).toBe('spec');
+  // The first draw after the switch still finds the fields of the run left behind.
+  host.click({ action: 'select-run', repo: 'alpha', run: GOLDEN_RUN_ID });
+  host.advance(100);
+  expect([page?.ui.restartStage, page?.ui.raise]).toEqual([undefined, undefined]);
+  host.fields = {};
+  host.click({ action: 'select-run', repo: 'alpha', run: FAKE_2_ID });
+  replay(host.open('run=')[0], fake2Dir(m));
+  await settle();
+  host.advance(100);
+  expect(host.regions.main).toContain(
+    '<option value="implement" title="implement#1 and everything after it, in loop fix from iteration 1" selected>',
+  );
+});

@@ -150,6 +150,8 @@ export function boot(host: PageHost): Page {
   /** The stage a Restart was armed with, and whether a start is waiting for its answer. */
   let armedStage: string | undefined;
   let starting = false;
+  /** Whether the page's raise field and stage list are the open run's, not those of the run selected before it. */
+  let fieldsOwn = false;
   /** The selected call's script output by call or step key, once a command is opened. */
   let outputs: Record<string, CallOutput> | undefined;
   let outputRead = 0;
@@ -206,9 +208,12 @@ export function boot(host: PageHost): Page {
       }
       if (run === undefined) return html`<div class="qempty">no run selected</div>`.value;
       const error = run.error === undefined ? '' : html`<div class="code bad">${run.error}</div>`;
-      // A raise typed and a stage chosen survive the draw.
-      ui.raise = host.value('raise') ?? ui.raise;
-      ui.restartStage = host.value('stage') ?? ui.restartStage;
+      // A raise typed and a stage chosen survive the draw, but not a switch of run.
+      if (fieldsOwn) {
+        ui.raise = host.value('raise') ?? ui.raise;
+        ui.restartStage = host.value('stage') ?? ui.restartStage;
+      }
+      fieldsOwn = true;
       const card = opened();
       const view =
         card === undefined
@@ -565,6 +570,9 @@ export function boot(host: PageHost): Page {
     offers = undefined;
     delete ui.armed;
     delete ui.runNotice;
+    delete ui.raise;
+    delete ui.restartStage;
+    fieldsOwn = false;
     openRunSocket(run);
     readOffers();
     mark('rail', 'main', 'inspector', 'status');
