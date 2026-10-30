@@ -2826,3 +2826,98 @@ test("a group's call lines each carry their own call's bindings, beside the grou
     expect(calls.map((entry) => [entry.group, entry.bindings])).toEqual(calls.map(() => [TRIO_KEYS, brief]));
   });
 }, 30_000);
+
+/** A workflow of two `implement` calls whose feedback differs by `total`, in `order`, sequential or as a group. */
+function twoImplements(sail: string, mode: 'sequence' | 'group', order: [number, number]): void {
+  const body =
+    mode === 'sequence'
+      ? `  await run.stage(implement, { spec: s.files['spec.md'], feedback: report(${order[0]}) });
+  await run.stage(implement, { spec: s.files['spec.md'], feedback: report(${order[1]}) });`
+      : `  await run.all([
+    [implement, { spec: s.files['spec.md'], feedback: report(${order[0]}) }],
+    [implement, { spec: s.files['spec.md'], feedback: report(${order[1]}) }],
+  ]);`;
+  write(
+    sail,
+    WORKFLOW,
+    `import { workflow } from 'sail';
+import { ticket } from 'sail/intakes';
+import { implement } from '../../stages/implement/stage';
+import { tests } from '../../stages/tests/stage';
+import { spec } from './stages/spec/stage';
+
+const report = (total: number) => ({ ok: true, total, failed: 0, durationMs: 0, failures: [] });
+
+export default workflow('ticket-to-pr', { intake: ticket, version: 1 }, async (run) => {
+  const s = await run.stage(spec, { brief: run.intake.files['brief.md'] });
+${body}
+  await run.stage(tests);
+  return 'ok';
+});
+`,
+  );
+}
+
+test('a workflow that binds a value built from a counter fails with determinism_violation on its next replay, naming the binding', async () => {
+  await stubRun(
+    {},
+    (sail) => {
+      edit(sail, WORKFLOW, 'export default workflow(', 'let replays = 0;\n\nexport default workflow(');
+      edit(
+        sail,
+        WORKFLOW,
+        'feedback: iteration.previous }',
+        'feedback: { ok: true, total: replays++, failed: 0, durationMs: 0, failures: [] } }',
+      );
+    },
+    (end) => {
+      expect(end).toMatchObject({
+        status: 'failed',
+        stopReason: 'determinism_violation',
+        message: "the workflow asked for 'implement#1' with other bindings than the journal's: 'feedback' changed",
+      });
+      expect(keys(end.dir)).toEqual(['intake#1', 'spec#1', 'implement#1']);
+    },
+  );
+});
+
+test.each(['sequence', 'group'] as const)(
+  'a resume whose workflow swapped two %s calls of one stage fails with determinism_violation',
+  async (mode) => {
+    await withTempRepo(async (repo) => {
+      const sail = writeStub(repo.dir);
+      twoImplements(sail, mode, [1, 2]);
+      const first = await ran(repo.dir, { until: 'implement' });
+      expect(first.status).toBe('suspended');
+      const runId = await withTempRepo(async (copy) => {
+        copyRun(repo.dir, copy.dir);
+        twoImplements(join(copy.dir, '.sail'), mode, [2, 1]);
+        const end = await resumeWorkflow({ cwd: copy.dir, adapters: await fakeAdapters(copy.dir), runId: first.runId });
+        expect(end).toMatchObject({ status: 'failed', stopReason: 'determinism_violation' });
+        expect((end as { message?: string }).message).toMatch(
+          /^the workflow asked for 'implement#[12]' with other bindings than the journal's: 'feedback' changed$/,
+        );
+        return first.runId;
+      });
+      expect(runId).toBe(first.runId);
+    });
+  },
+);
+
+test('a resume of a run whose journal lines lack bindings completes, since an older run keeps the key-only check', async () => {
+  await withTempRepo(async (repo) => {
+    const runId = await stoppedCopy(repo.dir);
+    const dir = join(repo.dir, '.sail-runs', runId);
+    const path = join(dir, JOURNAL_FILE);
+    const lines = readFileSync(path, 'utf8').trim().split('\n');
+    expect(lines.some((line) => 'bindings' in JSON.parse(line))).toBe(true);
+    const stripped = lines.map((line) => {
+      const { bindings: _, ...rest } = JSON.parse(line);
+      return JSON.stringify(rest);
+    });
+    writeFileSync(path, `${stripped.join('\n')}\n`);
+    const end = await resumeWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), runId });
+    expect(end).toMatchObject({ runId, status: 'completed' });
+    expect(keys(dir)).toEqual(ALL_KEYS);
+  });
+});

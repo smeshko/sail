@@ -14,7 +14,10 @@
 // `run.input` and `run.intake.files` come from.
 //
 // Replay goes by position: request n must be journal entry n. That is how a request finds its result, and it catches a
-// workflow whose calls changed between replays, which a lookup by key would silently accept.
+// workflow whose calls changed between replays, which a lookup by key would silently accept. The key is not the whole
+// of a call: the determinism guard also compares the fingerprints of the bindings the workflow asks with against the
+// ones the journaled line carries, so two calls of one stage swapped, or a binding built from the clock, are caught. A
+// line without fingerprints (an older run's) keeps the key check alone.
 //
 // A group, `run.all()`, keys its calls in the order given before it looks at the journal, so the same stage twice gets
 // two consecutive calls. Its calls are journaled as they complete, so its lines are one run of entries in completion
@@ -34,7 +37,7 @@ import type { ProducedFile } from '../sdk/bindings';
 import type { StageDefinition } from '../sdk/steps';
 import type { CallOptions, Iteration, Run, Workflow } from '../sdk/workflow';
 import type { Supplied } from './bindings';
-import { fingerprintBindings } from './fingerprint';
+import { bindingChanges, fingerprintBindings } from './fingerprint';
 import type { JournalEntry } from './journal';
 import type { ReachedStage } from './load-workflow';
 import type { StopReason } from './run-dir';
@@ -287,6 +290,19 @@ export function replay(options: ReplayOptions): Promise<ReplayEnd> {
 
     const listed = (keys: readonly string[]) => `[${keys.join(', ')}]`;
 
+    /** Why the bindings the workflow asks `journaled` with aren't the ones it was journaled with, or undefined. */
+    function diverged(key: string, definition: StageDefinition, bindings: unknown, journaled: JournalEntry) {
+      if (journaled.bindings === undefined) return undefined;
+      const resolved = resolveBindings(definition, bindings);
+      if ('problems' in resolved) {
+        return `the workflow asked for '${key}' with bindings the journal can't match: ${resolved.problems.join('; ')}`;
+      }
+      const changes = bindingChanges(journaled.bindings, resolved.fingerprints);
+      return changes === undefined
+        ? undefined
+        : `the workflow asked for '${key}' with other bindings than the journal's: ${changes}`;
+    }
+
     function request(definition: StageDefinition, bindings: unknown, callOptions?: CallOptions): Promise<unknown> {
       if (ended) return never();
       if (!isStage(definition)) {
@@ -305,6 +321,11 @@ export function replay(options: ReplayOptions): Promise<ReplayEnd> {
         }
         if (journaled.key !== key) {
           failRun('determinism_violation', `the workflow asked for '${key}' where the journal has '${journaled.key}'`);
+          return never();
+        }
+        const other = diverged(key, definition, bindings, journaled);
+        if (other !== undefined) {
+          failRun('determinism_violation', other);
           return never();
         }
         position++;
@@ -374,6 +395,14 @@ export function replay(options: ReplayOptions): Promise<ReplayEnd> {
             `the journal holds '${after.key}' after the unfinished group ${listed(keys)}`,
           );
           return never();
+        }
+        for (const { keyed, definition, bindings } of members) {
+          const journaled = done.get(keyed.key);
+          const other = journaled && diverged(keyed.key, definition, bindings, journaled);
+          if (other) {
+            failRun('determinism_violation', other);
+            return never();
+          }
         }
         if (done.size === keys.length) {
           return Promise.all(
