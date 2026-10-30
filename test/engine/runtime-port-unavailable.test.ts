@@ -1,19 +1,22 @@
 // A run whose script step ends on an unavailable port (runtime.ts): the fixture's ticket-to-pr on the fakes, with the fake
 // code host seeded to fail its first push as `unavailable`. The run is suspended with `port_unavailable`, not failed: the
 // call is left unjournaled, the workspace and the lease are kept, and a resume runs it again, from the step that failed. A
-// resume runs in a copy of the repository the run was suspended in (copyRun()).
+// resume runs in a copy of the repository the run was suspended in (copyRun()). In a group (the review fixture's trio, b
+// a script that ends on an unavailable port), the members that passed are journaled, and a usage limit takes precedence.
 import { expect, test } from 'bun:test';
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readJournal } from '../../src/engine/journal';
 import { type RunEnd, resumeWorkflow, runWorkflow } from '../../src/engine/runtime';
 import { readEvents } from '../../src/events/consumers/ndjson';
 import type { SailEvent } from '../../src/events/types';
 import { fakeAdapters } from '../helpers/adapters';
-import { copyFixture } from '../helpers/fixture';
+import { copyFixture, write } from '../helpers/fixture';
+import { TRIO, writeTrio } from '../helpers/review-fixture';
 import { copyRun } from '../helpers/stub-workflow';
 import { withTempRepo } from '../helpers/temp-repo';
 
+const RESETS_AT = '2026-10-28T14:20:00.000Z';
 const keys = (runDir: string) => readJournal(runDir).entries.map((entry) => entry.key);
 const status = (runDir: string) => readFileSync(join(runDir, 'STATUS'), 'utf8');
 const bare = ({ seq: _s, ts: _t, runId: _r, ...rest }: SailEvent) => rest;
@@ -30,8 +33,35 @@ function downFor(repoDir: string, pushes: number): void {
   writeFileSync(file, `${JSON.stringify({ ...world, unavailable: { push: pushes } }, null, 2)}\n`);
 }
 
-async function ran(cwd: string): Promise<RunEnd> {
-  const end = await runWorkflow({ cwd, adapters: await fakeAdapters(cwd), workflow: 'ticket-to-pr', ticket: 'FAKE-1' });
+/** trio, its b a script whose port call fails unavailable and which exits 1; `answers` replaces any agent's answers. */
+function trioDownAtB(repoDir: string, answers: Parameters<typeof writeTrio>[2] = {}): void {
+  const sail = writeTrio(repoDir, { a: 0, b: 0, c: 0 }, answers);
+  write(
+    sail,
+    `workflows/${TRIO}/stages/b/stage.ts`,
+    `// b: a script whose code host is down.
+import { file, script, z } from 'sail';
+
+export const b = script('b', {
+  run: './run.sh',
+  consumes: { brief: file('brief.md') },
+  output: z.object({ name: z.string() }),
+});
+`,
+  );
+  const run = write(
+    sail,
+    `workflows/${TRIO}/stages/b/run.sh`,
+    `#!/usr/bin/env bash
+printf '%s\\n' '{"type":"error:port","port":"codeHost","op":"push","code":"unavailable","message":"codeHost.push: GitHub is unreachable"}' >> "$SAIL_EVENTS"
+exit 1
+`,
+  );
+  chmodSync(run, 0o755);
+}
+
+async function ran(cwd: string, workflow = 'ticket-to-pr'): Promise<RunEnd> {
+  const end = await runWorkflow({ cwd, adapters: await fakeAdapters(cwd), workflow, ticket: 'FAKE-1' });
   if ('refused' in end) throw new Error(`refused: ${end.refused}`);
   return end;
 }
@@ -104,6 +134,46 @@ test('a resume of a run suspended on an unavailable port runs publish#1/open aga
         journal: ['publish#1/describe', 'publish#1/open', 'publish#1'],
         final: 'completed\n',
       });
+    });
+  });
+});
+
+test('in a group, a member that ends on an unavailable port is left unjournaled while the members that passed are journaled, and the run is suspended port_unavailable (review R6)', async () => {
+  await withTempRepo(async (repo) => {
+    trioDownAtB(repo.dir);
+    const end = await ran(repo.dir, TRIO);
+    expect({
+      status: end.status,
+      stopReason: end.stopReason,
+      journal: keys(end.dir).sort(),
+      suspended: readEvents(end.dir)
+        .filter((event) => event.type === 'run:suspended')
+        .map(bare),
+    }).toEqual({
+      status: 'suspended',
+      stopReason: 'port_unavailable',
+      journal: ['a#1', 'c#1', 'intake#1'],
+      suspended: [{ type: 'run:suspended', stopReason: 'port_unavailable', key: 'b#1' }],
+    });
+  });
+});
+
+test('in a group whose member ends on an unavailable port while another hits the usage limit, the usage limit suspends the run (review R6)', async () => {
+  await withTempRepo(async (repo) => {
+    trioDownAtB(repo.dir, { c: [{ outcome: 'error', reason: 'usage_limit', message: 'limit', resetsAt: RESETS_AT }] });
+    const end = await ran(repo.dir, TRIO);
+    expect({
+      status: end.status,
+      stopReason: end.stopReason,
+      journal: keys(end.dir).sort(),
+      suspended: readEvents(end.dir)
+        .filter((event) => event.type === 'run:suspended')
+        .map(bare),
+    }).toEqual({
+      status: 'suspended',
+      stopReason: 'usage_limit',
+      journal: ['a#1', 'intake#1'],
+      suspended: [{ type: 'run:suspended', stopReason: 'usage_limit', key: 'c#1', resetsAt: RESETS_AT }],
     });
   });
 });
