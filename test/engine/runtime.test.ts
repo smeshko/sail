@@ -1694,7 +1694,7 @@ test('an agent call is journaled once, with the output, the files and the result
       try: 2,
       validationTry: 2,
       harness: { adapter: 'fake', model: 'claude-opus-5-5', sessionId: 'fake-session-spec-1-try-2' },
-      prompt: { path: '02-spec/call-1/try-2/prompt.md', untrusted: 1, conventions: ['AGENTS.md'] },
+      prompt: { path: '02-spec/call-1/try-2/prompt.md', untrusted: 2, conventions: ['AGENTS.md'] },
       usage: usageOf(0.25),
     });
     // The prompt the second session was sent: the ticket's title wrapped, the brief where this try holds it, the

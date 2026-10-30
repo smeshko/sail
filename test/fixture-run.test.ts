@@ -438,7 +438,9 @@ test('a first spec try that leaves the template as it is gets one correction: tr
       "spec.md: countItems(Tasks, min 1): 'Tasks' has 0 items, fewer than 1",
     ];
     const prompt = readFileSync(join(dir, '01-spec', 'call-1', 'try-2', 'prompt.md'), 'utf8');
-    expect(prompt.trimEnd()).toEndWith(messages.join('\n\n'));
+    expect(prompt.trimEnd()).toEndWith(
+      `<untrusted-input source="the problems found in your last output">\n${messages.join('\n\n')}\n</untrusted-input>`,
+    );
     expect(json(dir, '01-spec', 'call-1', 'try-2', 'result.json')).toMatchObject({
       outcome: 'done',
       try: 2,
