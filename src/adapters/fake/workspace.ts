@@ -89,10 +89,10 @@ export function createFakeWorkspace(options: FakeWorkspaceOptions): WorkspacePor
       return { path, kept: keep, ...commits, raw };
     },
     async sweep(runsDir) {
-      const paths = sweepEnded(runsDir, (runDir) =>
+      const swept = sweepEnded(runsDir, (runDir) =>
         releaseWorktree(repo, { runId: basename(runDir), runDir }, 'sweep', env),
       );
-      return { paths, raw: null };
+      return { ...swept, raw: null };
     },
     capabilities: () => ({ keep: true, sweep: true }),
   };

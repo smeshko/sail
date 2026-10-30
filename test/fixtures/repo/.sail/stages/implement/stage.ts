@@ -14,7 +14,7 @@ export const Finding = z.object({
 export const Feedback = z.union([TestReport, z.object({ findings: z.array(Finding) })]);
 
 export const ChangeSet = z.object({
-  commits: z.array(z.object({ sha: z.string().length(40), message: z.string() })),
+  commits: z.array(z.object({ sha: z.string().regex(/^[0-9a-f]{7,40}$/), message: z.string() })),
   files: z.array(z.string()),
   notes: z.string().max(600),
 });

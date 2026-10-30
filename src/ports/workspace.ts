@@ -56,7 +56,10 @@ export interface WorkspacePort {
   diff(path: string, range: string): Promise<Diff>;
   /** Removes the run's workspace unless `keep`. Emits `workspace:released`. */
   release(run: RunRef, keep: boolean): Promise<WorkspaceReleased>;
-  /** Removes the workspaces of the ended runs under `runsDir`. */
+  /**
+   * Removes the workspaces of ended runs under `runsDir`. A workspace it can't remove is left in `failed` with why;
+   * every other ended run's is still removed. Resolves with both removed paths and failures, each sorted by path.
+   */
   sweep(runsDir: string): Promise<Swept>;
   capabilities(): WorkspaceCapabilities;
 }

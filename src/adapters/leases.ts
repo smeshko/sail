@@ -1,5 +1,6 @@
 // Branch leases (ADR-0018, D9): one pid-held file per remote and branch in the selected machine directory's `leases/`
 // (`$SAIL_HOME/leases/`, or `~/.sail/leases/`), so manual and watched runs sharing that directory never hold the same branch.
+// Keys ignore scheme, user and port, and normalise host and path case, `.git` and trailing slashes.
 // Different machine directories have independent leases. The shared primitive serialises removals under drop tokens.
 // Every built-in Workspace adapter takes its leases here. A run resumed under another `SAIL_HOME` finds no lease
 // of its own there.
@@ -35,15 +36,54 @@ export function defaultLeasesDir(env: Readonly<Record<string, string | undefined
   return join(machineDir(env), 'leases');
 }
 
-/** The lease file for `remote` and `branch`: the first 16 hex of sha256(`<remote>\n<branch>`), plus `.json`. */
+/**
+ * A remote's host/path key: `git@github.com:o/r.git`, `ssh://github.com:2222/O/R/` and
+ * `https://user:token@GitHub.com/o/r.git/` all name `github.com/o/r`. Hostless remotes pass through.
+ */
+export function leaseKey(remote: string): string {
+  const url = /^[^/]+:\/\/([^/]*)(\/.*)?$/.exec(remote);
+  let host: string;
+  let path: string;
+  if (url) {
+    const authority = (url[1] ?? '').split('@').at(-1) ?? '';
+    host = authority.startsWith('[') ? authority.slice(0, authority.indexOf(']') + 1) : (authority.split(':')[0] ?? '');
+    path = url[2] ?? '';
+  } else {
+    if (remote.includes('://')) return remote;
+    const scp = /^((?:[^/@:]+@)?\[[^\]]+\]|[^/:]+):(.*)$/.exec(remote);
+    if (!scp) return remote;
+    host = (scp[1] ?? '').split('@').at(-1) ?? '';
+    path = scp[2] ?? '';
+  }
+  if (!host) return remote;
+  path = path
+    .toLowerCase()
+    .replace(/^\/+/, '')
+    .replace(/\/+$/, '')
+    .replace(/\.git$/, '')
+    .replace(/\/+$/, '');
+  return `${host.toLowerCase()}/${path}`;
+}
+
+/** The lease file: first 16 hex of sha256(`<leaseKey(remote)>\n<branch>`), plus `.json`. */
 export function leaseFile(dir: string, remote: string, branch: string): string {
-  const hex = new Bun.CryptoHasher('sha256').update(`${remote}\n${branch}`).digest('hex');
+  const hex = new Bun.CryptoHasher('sha256').update(`${leaseKey(remote)}\n${branch}`).digest('hex');
   return join(dir, `${hex.slice(0, 16)}.json`);
+}
+
+// Bridge for one release (ADW-175): drop with the next release.
+function legacyLeaseFile(dir: string, remote: string, branch: string): string | undefined {
+  const hex = new Bun.CryptoHasher('sha256').update(`${remote}\n${branch}`).digest('hex');
+  const file = join(dir, `${hex.slice(0, 16)}.json`);
+  return file === leaseFile(dir, remote, branch) ? undefined : file;
 }
 
 /** The lease on `remote` and `branch`, or undefined when there is none. Invalid or unreadable files throw. */
 export function readLease(dir: string, remote: string, branch: string): Lease | undefined {
-  return readRecord(leaseFile(dir, remote, branch), leaseKind);
+  const lease = readRecord(leaseFile(dir, remote, branch), leaseKind);
+  if (lease) return lease;
+  const legacy = legacyLeaseFile(dir, remote, branch);
+  return legacy === undefined ? undefined : readRecord(legacy, leaseKind);
 }
 
 /** Whether `lease`'s run no longer holds it: its run has ended, or it isn't suspended and its pid is dead. */
@@ -104,12 +144,20 @@ export function takeLease(
   const file = leaseFile(dir, remote, branch);
   const { runId, runDir, pid } = checked.data;
   const lease: Lease = { remote, branch, runId, runDir, pid, takenAt: now.toISOString() };
-  const result = takeRecord(file, lease, leaseKind, (held) =>
-    held.runId === runId ? stillRunning(held, pid) : !isStale(held),
-  );
+  const blocks = (held: Lease) => (held.runId === runId ? stillRunning(held, pid) : !isStale(held));
+  const legacy = legacyLeaseFile(dir, remote, branch);
+  const old = legacy === undefined ? undefined : readRecord(legacy, leaseKind);
+  if (old && legacy) {
+    if (blocks(old)) return { leased: false, holder: old, file: legacy, raw: old };
+    if (!dropRecord(legacy, old, leaseKind) && readRecord(legacy, leaseKind) !== undefined) {
+      throw new PortError('workspace', 'lease', 'conflict', `${remote} ${branch}: the lease kept changing hands`);
+    }
+  }
+  const result = takeRecord(file, lease, leaseKind, blocks);
   if (result.taken) {
-    return result.took && result.took.runId !== runId
-      ? { leased: true, lease, took: result.took.runId, raw: lease }
+    const took = result.took ?? old;
+    return took && took.runId !== runId
+      ? { leased: true, lease, took: took.runId, raw: lease }
       : { leased: true, lease, raw: lease };
   }
   if ('holder' in result) return { leased: false, holder: result.holder, file, raw: result.holder };
@@ -143,9 +191,18 @@ export function markLease(
 
 /** Removes the lease, only when `runId` holds it: a lease taken over since it was read is left to its new holder. */
 export function releaseLease(dir: string, remote: string, branch: string, runId: string): Released {
-  const file = leaseFile(dir, remote, branch);
-  const held = readRecord(file, leaseKind);
-  if (held === undefined || held.runId !== runId) return { released: false, raw: held ?? null };
-  if (dropRecord(file, held, leaseKind)) return { released: true, raw: held };
-  return { released: false, raw: readRecord(file, leaseKind) ?? null };
+  const files = [leaseFile(dir, remote, branch), legacyLeaseFile(dir, remote, branch)];
+  let released: Lease | undefined;
+  let remaining: Lease | undefined;
+  for (const file of files) {
+    if (file === undefined) continue;
+    const held = readRecord(file, leaseKind);
+    if (held?.runId === runId) {
+      if (dropRecord(file, held, leaseKind)) released = held;
+      else remaining ??= readRecord(file, leaseKind);
+    } else {
+      remaining ??= held;
+    }
+  }
+  return released ? { released: true, raw: released } : { released: false, raw: remaining ?? null };
 }

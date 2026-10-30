@@ -2,7 +2,15 @@
 // substitutions (D9), checked against the deny set first, then the step's commands, then where `cd`, git's directory
 // options and every redirection lead.
 import { statSync } from 'node:fs';
-import { commandName, type DenyEntry, denied, deniedAssignment, deniedPipeline, gitInvocation } from './deny';
+import {
+  commandName,
+  type DenyEntry,
+  denied,
+  deniedAssignment,
+  deniedPipeline,
+  gitInvocation,
+  optionValues,
+} from './deny';
 import { matchesCommand } from './glob';
 import { checkRead, checkWrite, expand, insideRoots, logical, resolvePhysical } from './paths';
 import { MAX_DEPTH, type Pipeline, parseCommand, type SimpleCommand, type Word } from './shell';
@@ -45,15 +53,39 @@ interface Collected {
 /** What an argument the shell expands at run time could add: the flags the deny set looks for. */
 const WORST = ['-rf', '--force', '--hard', '-D', '-delete'];
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh']);
+const VALUE_LETTERS: Record<string, string> = { sh: 'o', dash: 'o', zsh: 'o', bash: 'oO', ksh: 'oR' };
 const DECLARERS = new Set(['export', 'declare', 'typeset', 'local', 'readonly']);
 const GIT_PATHS = new Set(['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE']);
 const OUTPUT = /^--o(?:u(?:t(?:p(?:u(?:t)?)?)?)?)?(?:=|$)/;
+
+/** Git options whose values are shell commands, rather than program names. */
+const GIT_COMMANDS: Record<string, { long: string[]; short?: string }> = {
+  rebase: { long: ['--exec'], short: 'x' },
+  difftool: { long: ['--extcmd'], short: 'x' },
+  'filter-branch': {
+    long: [
+      '--setup',
+      '--env-filter',
+      '--tree-filter',
+      '--index-filter',
+      '--parent-filter',
+      '--msg-filter',
+      '--commit-filter',
+      '--tag-name-filter',
+    ],
+  },
+  'send-email': { long: ['--sendmail-cmd', '--to-cmd', '--cc-cmd', '--header-cmd'] },
+};
 
 interface Grammar {
   /** Options that take no value. */
   readonly flags: readonly string[];
   /** Options that take a value, attached (`-n1`, `--max-args=1`) or as the next word. */
   readonly valued: readonly string[];
+  /** Long options whose value attaches only with `=`. */
+  readonly optional?: readonly string[];
+  /** Valued options that name a file the wrapper writes. */
+  readonly writes?: readonly string[];
   /** Options of the form `-<digits>`. */
   readonly numeric?: boolean;
   /** Words to skip after the options, such as `timeout`'s duration. */
@@ -67,7 +99,7 @@ const WRAPPERS: Readonly<Record<string, Grammar>> = {
   exec: { flags: ['-c', '-l'], valued: ['-a'] },
   nice: { flags: [], valued: ['-n', '--adjustment'], numeric: true },
   nohup: { flags: [], valued: [] },
-  time: { flags: ['-p', '-l', '-h'], valued: [] },
+  time: { flags: ['-p', '-l', '-h', '-a', '--append'], valued: ['-o', '--output'], writes: ['-o', '--output'] },
   timeout: {
     flags: ['--preserve-status', '--foreground', '-v', '--verbose'],
     valued: ['-s', '--signal', '-k', '--kill-after'],
@@ -75,7 +107,8 @@ const WRAPPERS: Readonly<Record<string, Grammar>> = {
   },
   xargs: {
     flags: ['-0', '--null', '-r', '--no-run-if-empty', '-t', '--verbose', '-p', '--interactive', '-x', '--exit', '-o'],
-    valued: ['-n', '--max-args', '-L', '--max-lines', '-P', '--max-procs', '-I', '--replace', '-d', '--delimiter'],
+    valued: ['-n', '--max-args', '-L', '-P', '--max-procs', '-I', '-d', '--delimiter'],
+    optional: ['--replace', '--max-lines'],
   },
 };
 
@@ -84,21 +117,31 @@ function quote(text: string): string {
 }
 
 /** Where the options of `grammar` end in `args`, or the option it doesn't know. */
-function skipOptions(args: readonly Word[], grammar: Grammar): { at: number } | { unknown: string } {
+function skipOptions(args: readonly Word[], grammar: Grammar): { at: number; writes: Word[] } | { unknown: string } {
+  const writes: Word[] = [];
   let i = 0;
   while (i < args.length) {
     const arg = (args[i] as Word).text;
-    if (arg === '--') return { at: i + 1 };
+    if (arg === '--') return { at: i + 1, writes };
     if (!arg.startsWith('-') || (arg === '-' && !grammar.flags.includes('-'))) break;
     const name = arg.startsWith('--') ? (arg.split('=')[0] as string) : arg;
-    if (grammar.flags.includes(arg)) i++;
+    const writeOption = grammar.writes?.find((option) =>
+      option.startsWith('--') ? option === name : arg.startsWith(option),
+    );
+    if (writeOption !== undefined) {
+      const attached = arg.slice(writeOption.length).replace(/^=/, '');
+      const value = arg === writeOption ? args[i + 1] : { ...(args[i] as Word), text: attached };
+      if (value !== undefined) writes.push(value);
+    }
+    if (grammar.optional?.includes(name)) i++;
+    else if (grammar.flags.includes(arg)) i++;
     else if (grammar.valued.includes(name) && name !== arg) i++;
     else if (grammar.valued.includes(arg)) i += 2;
     else if (!arg.startsWith('--') && arg.length > 2 && grammar.valued.includes(arg.slice(0, 2))) i++;
     else if (grammar.numeric === true && /^-\d+$/.test(arg)) i++;
     else return { unknown: arg };
   }
-  return { at: Math.min(i + (grammar.positional ?? 0), args.length) };
+  return { at: Math.min(i + (grammar.positional ?? 0), args.length), writes };
 }
 
 class Collector {
@@ -202,6 +245,7 @@ class Collector {
         this.out.refusals.push(`${name}'s option ${skipped.unknown} isn't known: ${quote(text)}`);
         return undefined;
       }
+      for (const word of skipped.writes) this.out.writes.push({ word, text, cwd: cwd.physical });
       let at = skipped.at;
       if (name === 'env') {
         for (; at < args.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test((args[at] as Word).text); at++) {
@@ -231,7 +275,7 @@ class Collector {
       }
     }
     if (name === 'find') this.find(args, text, cwd, depth);
-    if (name === 'git') this.git(argv, fed ? undefined : words, open, text, cwd);
+    if (name === 'git') this.git(argv, fed ? undefined : words, open, text, cwd, depth);
     return undefined;
   }
 
@@ -275,7 +319,7 @@ class Collector {
     return { logical: lexical ?? found, physical: found };
   }
 
-  /** A shell running `-c` text is recursed into; one reading its input is refused. Returns false for a script. */
+  /** Consume option values before finding `-c` text or a script; shells reading their input are refused. */
   private shell(name: string, args: readonly Word[], text: string, cwd: Cwd, depth: number): boolean {
     let command = false;
     let input = false;
@@ -286,7 +330,7 @@ class Collector {
         i++;
         break;
       }
-      if (/^[-+]o$/.test(arg)) i++;
+      if (arg === '--emulate' && name === 'zsh') i++;
       else if (arg === '--rcfile' || arg === '--init-file') {
         this.out.refusals.push(`${name} ${arg} runs a file of commands: ${quote(text)}`);
         return true;
@@ -294,6 +338,7 @@ class Collector {
       else if (/^[-+][A-Za-z]+$/.test(arg)) {
         if (arg.startsWith('-') && arg.includes('c')) command = true;
         if (arg.includes('s')) input = true;
+        i += [...arg.slice(1)].filter((letter) => VALUE_LETTERS[name]?.includes(letter)).length;
       } else break;
     }
     if (command) {
@@ -359,13 +404,14 @@ class Collector {
     });
   }
 
-  /** git's directory options must stay inside the roots, and `--output` is a write. */
+  /** Confine git's paths, record `--output` writes, and collect commands its options and subcommands run. */
   private git(
     argv: readonly string[],
     words: readonly Word[] | undefined,
     open: boolean,
     text: string,
     cwd: Cwd,
+    depth: number,
   ): void {
     const invocation = gitInvocation(argv);
     if (invocation.unknown !== undefined) {
@@ -391,6 +437,46 @@ class Collector {
       if (path === undefined) this.out.refusals.push(`git ${arg} without its file: ${quote(text)}`);
       else this.out.writes.push({ word: path, text, cwd: here });
     });
+    const { subcommand, args } = invocation;
+    const from = { logical: here, physical: here };
+    const grammar = GIT_COMMANDS[subcommand ?? ''];
+    if (grammar !== undefined) {
+      for (const { option, value } of optionValues(args, grammar.long, grammar.short)) {
+        if (value === undefined || value.trim() === '') {
+          this.out.refusals.push(`git ${subcommand} ${option} without its command`);
+        } else this.parse(value, `git ${subcommand} ${option}`, from, depth);
+      }
+    }
+    let at: number | undefined;
+    if (subcommand === 'bisect' && args[0] === 'run') at = 1;
+    if (subcommand === 'submodule') {
+      let i = 0;
+      while (args[i]?.startsWith('-')) i++;
+      if (args[i] === 'foreach') {
+        i++;
+        while (['--recursive', '-q', '--quiet'].includes(args[i] ?? '')) i++;
+        at = i;
+      }
+    }
+    if (at === undefined) return;
+    const inner = words?.slice(argv.length - args.length + at) ?? [];
+    if (inner.length === 0) {
+      this.out.refusals.push(`git ${subcommand} without its command`);
+    } else if (subcommand === 'submodule' && inner.length === 1) {
+      const body = this.known(inner[0] as Word);
+      if (body === undefined || body.trim() === '') {
+        this.out.refusals.push('git submodule foreach without a resolvable command');
+      } else this.parse(body, 'git submodule foreach', from, depth);
+    } else if (
+      subcommand === 'submodule' &&
+      // Git's use_shell runs argv[0] as shell text when it contains a metacharacter,
+      // appending the remaining arguments as "$@". That is not a plain argv.
+      /[|&;<>()$`\\"' \t\n*?[#~=%]/.test(this.known(inner[0] as Word) ?? ' ')
+    ) {
+      this.out.refusals.push('git submodule foreach with shell text and extra arguments');
+    } else {
+      this.unwrap(inner, inner.map((word) => word.text).join(' '), from, depth, false);
+    }
   }
 }
 
