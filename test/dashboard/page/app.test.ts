@@ -452,6 +452,34 @@ test('a run socket closed without end reconnects after 2 s into a fresh model, o
   expect(host.regions.main).toContain('<span class="pill p-skip">unknown</span>');
 });
 
+test('a run stream that sends an error and closes is not reopened, keeps its cards and its error, and clicking the run opens it again from empty (ADW-209)', () => {
+  const runSockets = () => host.sockets.filter((socket) => socket.query.startsWith('run='));
+  page = boot(host);
+  host.push(host.open('index')[0], indexMessage());
+  const socket = host.open('run=')[0];
+  const before = [...readEvents(GOLDEN())].slice(0, 12);
+  for (const event of before) host.push(socket, { kind: 'event', event });
+  host.advance(100);
+  const drawn = cards(host.regions.main);
+  expect(drawn.length).toBeGreaterThan(0);
+  host.push(socket, { kind: 'error', message: "events.ndjson:9 can't be read" });
+  host.drop(socket);
+  host.advance(10_000);
+  expect(runSockets()).toHaveLength(1);
+  expect(host.regions.main).toContain('<div class="code bad">events.ndjson:9 can&#39;t be read</div>');
+  expect(cards(host.regions.main)).toEqual(drawn);
+  host.click({ action: 'select-card', key: drawn[0] ?? '' });
+  expect(page.ui.key).toBe(drawn[0]);
+  host.click({ action: 'select-run', repo: 'alpha', run: GOLDEN_RUN_ID });
+  host.advance(100);
+  expect(runSockets()).toHaveLength(2);
+  expect(cards(host.regions.main)).toEqual([]);
+  expect(host.regions.main).not.toContain('code bad');
+  expect(page.ui.key).toBeUndefined();
+  host.click({ action: 'select-run', repo: 'alpha', run: GOLDEN_RUN_ID });
+  expect(runSockets()).toHaveLength(2);
+});
+
 test("a run stream's error is shown in the main region, and a message or a result that is no JSON changes nothing", async () => {
   page = boot(host);
   host.push(host.open('index')[0], indexMessage());

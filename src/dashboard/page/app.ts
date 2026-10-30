@@ -423,21 +423,32 @@ export function boot(host: PageHost): Page {
     }
   };
 
+  /** A close handler that, unless the stream failed or is no longer live, runs `again` after the reconnect delay. */
+  const retryOnClose =
+    (holder: { retry?: number }, failed: () => boolean, live: () => boolean, again: () => void) => () => {
+      if (stopped || failed() || !live()) return;
+      holder.retry = host.later(() => {
+        delete holder.retry;
+        if (live()) again();
+      }, RECONNECT_MS);
+    };
+
   const openRunSocket = (open: OpenRun) => {
     const connection = host.connect(`run=${enc(`${open.repo}/${open.runId}`)}`, {
       message: (text) => onRunMessage(open, text),
-      close: () => {
-        // A socket the run has since replaced closes without a retry.
-        if (stopped || open !== run || open.ended || open.connection !== connection) return;
-        open.retry = host.later(() => {
-          delete open.retry;
-          if (open !== run) return;
+      // A socket the run has since replaced, or that ended, closes without a retry, and so does one whose stream sent
+      // `error`: the error stays until the run is clicked again.
+      close: retryOnClose(
+        open,
+        () => open.error !== undefined,
+        () => !(open !== run || open.ended || open.connection !== connection),
+        () => {
           open.model = emptyRun();
           delete open.error;
           openRunSocket(open);
           mark('main', 'status', 'inspector');
-        }, RECONNECT_MS);
-      },
+        },
+      ),
     });
     open.connection = connection;
   };
@@ -504,7 +515,7 @@ export function boot(host: PageHost): Page {
   };
 
   const selectRun = (repo: string, runId: string) => {
-    if (run?.repo === repo && run.runId === runId) return;
+    if (run?.repo === repo && run.runId === runId && run.error === undefined) return;
     closeRun();
     clearCall();
     ui.repo = repo;
