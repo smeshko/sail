@@ -2,7 +2,7 @@
 // run interrupted or stopped by `until`, then resumed. Each case has a temp repository of its own: one run per .sail/
 // in a process, and Bun caches the workflow's modules by path. So a run resumes in a copy of the repository it was
 // interrupted in. Every run starts from the stub's `FAKE-1`, so its journal starts with `intake#1`.
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 import {
   appendFileSync,
   cpSync,
@@ -14,13 +14,16 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import type { ScriptedAnswer } from '../../src/adapters/fake/harness';
 import { BUILTINS } from '../../src/adapters/index';
 import { readConfig } from '../../src/engine/config';
 import { CONTROL_FILE, requestStop, requestStopNow, requestUnwatch } from '../../src/engine/control';
+import * as durable from '../../src/engine/durable';
 import { fingerprintBindings } from '../../src/engine/fingerprint';
+import * as journalModule from '../../src/engine/journal';
 import { JOURNAL_FILE, type JournalEntry, JournalError, readJournal } from '../../src/engine/journal';
+import * as runDirModule from '../../src/engine/run-dir';
 import { readStatus, writeStatus } from '../../src/engine/run-dir';
 import { RUN_HEADER_FILE } from '../../src/engine/run-header';
 import { type RunEnd, type RunWorkflowOptions, resumeWorkflow, runWorkflow } from '../../src/engine/runtime';
@@ -2995,6 +2998,182 @@ test("a two-step stage in a group: its step lines interleave with its sibling's 
     expect(sessionsOf(events(dir), 'publish#1/describe')).toBe(1);
   });
 }, 90_000);
+
+test("events.ndjson is synced before each journal line, holding the call's end", async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const order: string[] = [];
+    const ended: Record<string, boolean> = {};
+    let runDir = '';
+    const realSync = durable.syncFile;
+    const syncSpy = spyOn(durable, 'syncFile').mockImplementation((path: string) => {
+      if (path.endsWith('events.ndjson')) order.push('sync');
+      realSync(path);
+    });
+    const realAppend = journalModule.appendJournal;
+    const appendSpy = spyOn(journalModule, 'appendJournal').mockImplementation(((dir, entry, now) => {
+      runDir = dir;
+      order.push('append');
+      const end = events(dir).filter(
+        (event) => event.type.endsWith(':end') && 'key' in event && event.key === entry.key,
+      );
+      ended[entry.key] = end.length > 0;
+      return realAppend(dir, entry, now);
+    }) as typeof journalModule.appendJournal);
+    try {
+      expect((await ran(repo.dir)).status).toBe('completed');
+    } finally {
+      syncSpy.mockRestore();
+      appendSpy.mockRestore();
+    }
+    const appends = order.filter((step) => step === 'append').length;
+    expect(appends).toBe(keys(runDir).length);
+    expect(order.filter((step, at) => step === 'append' && order[at - 1] === 'sync')).toHaveLength(appends);
+    expect(Object.values(ended).every(Boolean)).toBe(true);
+    expect(Object.keys(ended)).toEqual(keys(runDir));
+  });
+}, 30_000);
+
+test('a run that ends syncs its last journal:append before STATUS, and its run:end after', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const order: string[] = [];
+    let runDir = '';
+    const realSync = durable.syncFile;
+    const syncSpy = spyOn(durable, 'syncFile').mockImplementation((path: string) => {
+      if (basename(path) === 'events.ndjson') {
+        runDir = join(path, '..');
+        const list = events(runDir);
+        order.push(`sync:${countOf(list, 'journal:append')}:${countOf(list, 'run:end')}`);
+      }
+      realSync(path);
+    });
+    const realStatus = runDirModule.writeStatus;
+    const statusSpy = spyOn(runDirModule, 'writeStatus').mockImplementation(((dir, status, stopReason) => {
+      order.push(`status:${status}`);
+      realStatus(dir, status, stopReason);
+    }) as typeof runDirModule.writeStatus);
+    try {
+      expect((await ran(repo.dir)).status).toBe('completed');
+    } finally {
+      syncSpy.mockRestore();
+      statusSpy.mockRestore();
+    }
+    const lines = keys(runDir).length;
+    const at = order.indexOf('status:completed');
+    expect(order[at - 1]).toBe(`sync:${lines}:0`);
+    expect(order.slice(at + 1)).toContain(`sync:${lines}:1`);
+  });
+}, 60_000);
+
+/** `events.ndjson` of `dir` cut back to the lines before the last `journal:append`, as a power loss after the last sync. */
+function cutBeforeLastAppend(dir: string): { lost: SailEvent } {
+  const list = events(dir);
+  const at = list.findLastIndex((event) => event.type === 'journal:append');
+  const lost = list[at] as SailEvent;
+  writeFileSync(
+    join(dir, 'events.ndjson'),
+    list
+      .slice(0, at)
+      .map((event) => `${JSON.stringify(event)}\n`)
+      .join(''),
+  );
+  return { lost };
+}
+
+const countOf = (list: readonly SailEvent[], type: string, key?: string) =>
+  list.filter((event) => event.type === type && (key === undefined || ('key' in event && event.key === key))).length;
+
+test('a resume restores the journal:append a power loss took, once, and the summary lists the call', async () => {
+  await withTempRepo(async (repo) => {
+    const runId = await interruptedCopy(repo.dir);
+    const dir = join(repo.dir, '.sail-runs', runId);
+    const { lost } = cutBeforeLastAppend(dir);
+    if (lost.type !== 'journal:append') throw new Error('no journal:append to cut');
+    const line = readJournal(dir).entries.find((entry) => entry.key === lost.key);
+    expect(countOf(events(dir), 'journal:append', lost.key)).toBe(0);
+
+    expect(await resumeWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), runId })).toMatchObject({
+      status: 'completed',
+    });
+    const list = events(dir);
+    for (const key of keys(dir)) expect(countOf(list, 'journal:append', key)).toBe(1);
+    expect(list.find((event) => event.type === 'journal:append' && event.key === lost.key)).toMatchObject({
+      key: lost.key,
+      line: line?.seq,
+      outcome: line?.outcome,
+    });
+    expect(seqs(list)).toEqual(gapless(list));
+    expect(validateRunDir(dir).issues).toEqual([]);
+    const summary = JSON.parse(readFileSync(join(dir, 'summary.json'), 'utf8')) as Summary;
+    expect(summary.calls.map((call) => call.key)).toContain(lost.key);
+  });
+}, 30_000);
+
+test('a resume of a run whose events hold no run:start builds one from run.json, and writes a summary', async () => {
+  await withTempRepo(async (repo) => {
+    const runId = await interruptedCopy(repo.dir);
+    const dir = join(repo.dir, '.sail-runs', runId);
+    writeFileSync(join(dir, 'events.ndjson'), '');
+    rmSync(join(dir, 'summary.json'), { force: true });
+
+    expect(await resumeWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), runId })).toMatchObject({
+      status: 'completed',
+    });
+    const header = JSON.parse(readFileSync(join(dir, RUN_HEADER_FILE), 'utf8'));
+    const starts = events(dir).filter((event) => event.type === 'run:start');
+    expect(starts).toHaveLength(1);
+    expect(starts[0]).toMatchObject({ source: header.source, workflow: header.workflow });
+    expect(existsSync(join(dir, 'summary.json'))).toBe(true);
+    expect(validateRunDir(dir).issues).toEqual([]);
+  });
+}, 30_000);
+
+test('a second resume restores nothing more', async () => {
+  await withTempRepo(async (repo) => {
+    const runId = await interruptedCopy(repo.dir);
+    const dir = join(repo.dir, '.sail-runs', runId);
+    writeFileSync(join(dir, 'events.ndjson'), '');
+    const stop = new AbortController();
+    const interruptedAgain = await resumeWorkflow({
+      cwd: repo.dir,
+      adapters: await fakeAdapters(repo.dir),
+      runId,
+      signal: stop.signal,
+      onCall: () => stop.abort(),
+    });
+    expect(interruptedAgain).toMatchObject({ status: 'suspended', stopReason: 'interrupted' });
+    const first = events(dir);
+    expect(countOf(first, 'run:start')).toBe(1);
+
+    await withTempRepo(async (again) => {
+      copyRun(repo.dir, again.dir);
+      const copy = join(again.dir, '.sail-runs', runId);
+      expect(await resumeWorkflow({ cwd: again.dir, adapters: await fakeAdapters(again.dir), runId })).toMatchObject({
+        status: 'completed',
+      });
+      const second = events(copy);
+      expect(countOf(second, 'run:start')).toBe(1);
+      for (const key of keys(copy)) expect(countOf(second, 'journal:append', key)).toBe(1);
+      expect(second.slice(0, first.length)).toEqual(first);
+      expect(validateRunDir(copy).issues).toEqual([]);
+    });
+  });
+}, 30_000);
+
+test('a resume with intact events restores nothing', async () => {
+  const { dir, interrupted } = await resumed();
+  const added = events(dir).slice(interrupted.length);
+  const reported = interrupted.flatMap((event) => (event.type === 'journal:append' ? [event.key] : []));
+  expect(added.filter((event) => event.type === 'run:start')).toEqual([]);
+  expect(added.flatMap((event) => (event.type === 'journal:append' ? [event.key] : []))).not.toEqual(
+    expect.arrayContaining(reported.slice(0, 1)),
+  );
+  for (const event of added) {
+    if (event.type === 'journal:append') expect(reported).not.toContain(event.key);
+  }
+  expect(added[0]).toMatchObject({ type: 'workspace:leased' });
+}, 30_000);
 
 /** The hash of one file binding, as a call line journals it. */
 const fileHash = (name: string, path: string) =>
