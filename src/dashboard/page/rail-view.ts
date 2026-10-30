@@ -1,9 +1,9 @@
-// The rail: every registered repository, each with its workflows, each with its runs, newest first. A repository and a
-// workflow fold away when the person closes them. A watched workflow's queue is a row of its own, which opens the queue
-// in the centre. Failed runs fold into a counted `failed` section and completed ones into a `completed` section, each
-// open when the person opened it, so a long tail of finished runs never buries live work. Whatever is folded, the open
-// run's row and the open queue's row stay in sight under it, so the selection is never hidden. Above the tree, a
-// `running` block lists every live run of every repository and a `queued` block every workflow with work waiting.
+// The rail, in three blocks. `running` lists every live run of every repository, newest first, and `queued` every
+// watched workflow with work waiting, each row opening its queue in the centre. Under them, the `repositories` tree:
+// each repository with its workflows, every one folded until the person opens it. A watched workflow's header carries a
+// queue badge that opens its queue. An open workflow shows a history line, whose `failed` and `done` parts each open
+// that status's finished runs, so a long tail of them never buries live work. Whatever is folded, the open run's row
+// and the open queue's workflow stay in sight under it, so the selection is never hidden.
 import { ago, cost, duration } from './format';
 import { html, type SafeHtml } from './html';
 import { newestFirst, type RailRepo, type RailRun, type RailWorkflow, workflowOf } from './index-model';
