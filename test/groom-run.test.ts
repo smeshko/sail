@@ -700,3 +700,30 @@ test("groom's duplicates check searches a started ticket among the others", asyn
     expect(readFileSync(join(call, 'prompt.md'), 'utf8')).toContain(join(call, 'in', 'others.md'));
   });
 }, 120_000);
+
+/** Scripts FAKE-2's label answers in the committed seed. */
+function scriptLabels(repo: TempRepo, answers: Record<string, string[]>): void {
+  const tickets = join(repo.dir, '.sail', 'fake', 'tickets.json');
+  const world = JSON.parse(readFileSync(tickets, 'utf8'));
+  world.tickets.find((each: { ticketKey: string }) => each.ticketKey === 'FAKE-2').answers = answers;
+  writeFileSync(tickets, JSON.stringify(world));
+  repo.git('add', '.sail/fake/tickets.json');
+  repo.git('commit', '-q', '-m', 'script the label answers');
+}
+
+const reports = (repoDir: string) =>
+  fakeTicket(repoDir, 'FAKE-2').comments.filter((each) => each.body.includes('## Actions'));
+
+test('a remove-label the provider refuses once is tried again, so the run completes with one report and open-questions alone', async () => {
+  await withTempRepo(async (repo) => {
+    writeGroomRepo(repo);
+    scriptLabels(repo, { removeLabel: ['unavailable', 'ok'] });
+    const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    expect(readStatus(onlyRun(repo.dir))).toEqual({ status: 'completed' });
+    const ticket = fakeTicket(repo.dir, 'FAKE-2');
+    expect(ticket.labels).toEqual(['open-questions']);
+    expect(ticket.comments).toHaveLength(2);
+    expect(reports(repo.dir)).toHaveLength(1);
+  });
+}, 120_000);
