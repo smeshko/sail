@@ -159,6 +159,7 @@ test("sail FAKE-1 on github pushes the run's branch to the origin and opens one 
   const [pr] = run.world.pullRequests;
   expect({
     origin: originHead(run),
+    commitsBeyondMain: run.repo.git('-C', run.origin, 'rev-list', '--count', `main..${BRANCH}`),
     pulls: run.world.pullRequests.map((each) => [each.head, each.base, each.labels, each.draft, each.headSha]),
     title: pr?.title.includes('FAKE-1'),
     links: pr?.body.includes('Ticket: [FAKE-1](fake://tickets/FAKE-1)'),
@@ -166,6 +167,7 @@ test("sail FAKE-1 on github pushes the run's branch to the origin and opens one 
     output: json(run.dir, '05-publish', 'call-1', 'steps', '2-open', 'result.json').output,
   }).toEqual({
     origin: headSha,
+    commitsBeyondMain: '1',
     pulls: [[BRANCH, 'main', ['sail'], false, headSha]],
     title: true,
     links: true,
