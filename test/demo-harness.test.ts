@@ -58,3 +58,41 @@ test("new --from the repository's own .sail/ is still refused: its ports aren't 
     expect({ code, refused: stderr.includes('every port must be on fake') }).toEqual({ code: 2, refused: true });
   });
 });
+
+test('new --runs copies a run directory under its runId and a .sail-runs folder as it is', async () => {
+  await withTempRepo(async (repo) => {
+    const dir = join(repo.dir, 'demo');
+    const { code, stdout } = await demo(
+      repo.env,
+      'new',
+      dir,
+      '--runs',
+      join(ROOT, 'test', 'fixtures', 'playback', 'fake-1-claude-code'),
+      '--runs',
+      join(ROOT, 'test', 'fixtures', 'dashboard', 'beta'),
+    );
+    const runs = join(dir, 'repo', '.sail-runs');
+    const tracked = Bun.spawnSync(['git', 'ls-files', '.sail-runs'], { cwd: join(dir, 'repo'), env: repo.env });
+    const files = new TextDecoder().decode(tracked.stdout);
+    expect({
+      code,
+      seeded: stdout.includes('seeded .sail-runs/ from'),
+      recorded: existsSync(join(runs, 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N', 'run.json')),
+      beta: existsSync(join(runs, 'FAKE-3-01M39H4ZW0S46MV303CFX3T4PY', 'run.json')),
+      queue: existsSync(join(runs, 'queue', 'ticket-to-pr', 'queue.json')),
+      committed: files.includes('.sail-runs/queue/ticket-to-pr/queue.json'),
+    }).toEqual({ code: 0, seeded: true, recorded: true, beta: true, queue: true, committed: true });
+  });
+});
+
+test("new --runs refuses a folder that doesn't exist", async () => {
+  await withTempRepo(async (repo) => {
+    const dir = join(repo.dir, 'demo');
+    const { code, stderr } = await demo(repo.env, 'new', dir, '--runs', join(repo.dir, 'missing'));
+    expect({ code, named: stderr.includes('missing'), made: existsSync(join(dir, 'repo')) }).toEqual({
+      code: 2,
+      named: true,
+      made: false,
+    });
+  });
+});

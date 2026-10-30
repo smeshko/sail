@@ -5,6 +5,9 @@
 //                                  repository's .sail/ when left out, and the HOME its commands get, at <dir>/home
 //   new <dir> --own                the same, holding this checkout's own .sail/ with every adapter put on fake, its
 //                                  seeds the ones under .sail/fake/
+//   new <dir> … --runs <folder>   with either form, seeds <dir>/repo/.sail-runs/ before the first commit; repeatable. A
+//                                  folder holding run.json is copied in under its runId, any other folder's entries
+//                                  as they are (a .sail-runs/ with its runs and queue/)
 //   run <dir> sail [args…]         commits what changed in <dir>/repo, runs this checkout's sail there, prints what
 //                                  it printed and appends it to <dir>/transcript.txt; exits with sail's code. Only
 //                                  sail runs, so a stage allowed this harness runs nothing else through it
@@ -18,7 +21,19 @@
 // The environment a command gets is built from nothing: no SAIL_CONFIG, SAIL_EVENTS or SAIL_BUN from a step around
 // it, no keys, and a HOME, SAIL_HOME and git identity of its own. A repository whose ports aren't all fake is refused.
 import { spawn, spawnSync } from 'node:child_process';
-import { appendFileSync, cpSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  chmodSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
 const root = resolve(import.meta.dir, '..', '..');
@@ -89,9 +104,30 @@ function fakeAll(sailDir) {
   writeFileSync(config, Bun.YAML.stringify(project, null, 2));
 }
 
-function create(dir, from, own) {
+/** Where each runs folder goes under `.sail-runs/`: `to` is the run's own directory, or '' for a folder of runs. */
+function planRuns(folders) {
+  return folders.map((folder) => {
+    if (!existsSync(folder) || !statSync(folder).isDirectory()) refuse(`--runs ${folder} is no folder`);
+    const header = join(folder, 'run.json');
+    if (!existsSync(header)) return { folder, to: '' };
+    const runId = JSON.parse(readFileSync(header, 'utf8')).runId;
+    if (typeof runId !== 'string' || !/^[\w.-]+$/.test(runId)) refuse(`${header} holds no runId`);
+    return { folder, to: runId };
+  });
+}
+
+/** Makes every file under `path` writable, as a copy of a read-only fixture must be. */
+function makeWritable(path) {
+  if (statSync(path).isDirectory()) {
+    chmodSync(path, 0o755);
+    for (const entry of readdirSync(path)) makeWritable(join(path, entry));
+  } else chmodSync(path, 0o644);
+}
+
+function create(dir, from, own, runs) {
   if (existsSync(join(dir, 'repo'))) refuse(`${join(dir, 'repo')} exists already`);
   if (!own) checkFake(from, `${from} holds no project.yaml`);
+  const seeds = planRuns(runs);
   mkdirSync(join(dir, 'repo'), { recursive: true });
   mkdirSync(join(dir, 'home'), { recursive: true });
   git(dir, 'init', '--quiet', '-b', 'main');
@@ -103,6 +139,12 @@ function create(dir, from, own) {
     fakeAll(join(dir, 'repo', '.sail'));
     // The conventions the config lists are appended to every agent prompt, so they must exist.
     for (const name of ['AGENTS.md', 'CONTEXT.md']) cpSync(join(root, name), join(dir, 'repo', name));
+  }
+  for (const { folder, to } of seeds) {
+    const target = join(dir, 'repo', '.sail-runs', to);
+    cpSync(folder, target, { recursive: true });
+    makeWritable(target);
+    console.log(`demo: seeded .sail-runs/ from ${folder}`);
   }
   git(dir, 'add', '-A');
   git(dir, 'commit', '--quiet', '-m', 'demo repository');
@@ -333,14 +375,21 @@ async function capture(dir, name, query) {
 const [command, target, ...rest] = process.argv.slice(2);
 if (target === undefined)
   refuse(
-    'usage: demo.sh new <dir> [--from <sail-dir> | --own] | run <dir> sail [args…] | dashboard <dir> <name> [<k>=<v>…]',
+    'usage: demo.sh new <dir> [--from <sail-dir> | --own] [--runs <folder>]… | run <dir> sail [args…] | dashboard <dir> <name> [<k>=<v>…]',
   );
 const dir = resolve(target);
 if (command === 'new') {
-  const own = rest.length === 1 && rest[0] === '--own';
-  if (rest.length !== 0 && !own && (rest.length !== 2 || rest[0] !== '--from'))
-    refuse('usage: demo.sh new <dir> [--from <sail-dir> | --own]');
-  create(dir, own ? join(root, '.sail') : resolve(rest[1] ?? FIXTURE_SAIL), own);
+  const usage = 'usage: demo.sh new <dir> [--from <sail-dir> | --own] [--runs <folder>]…';
+  let own = false;
+  let from;
+  const runs = [];
+  for (let at = 0; at < rest.length; at++) {
+    if (rest[at] === '--own' && !own && from === undefined) own = true;
+    else if (rest[at] === '--from' && !own && from === undefined && rest[at + 1] !== undefined) from = rest[++at];
+    else if (rest[at] === '--runs' && rest[at + 1] !== undefined) runs.push(resolve(rest[++at]));
+    else refuse(usage);
+  }
+  create(dir, own ? join(root, '.sail') : resolve(from ?? FIXTURE_SAIL), own, runs);
 } else if (command === 'run') {
   if (rest[0] !== 'sail') refuse('usage: demo.sh run <dir> sail [args…]: only sail runs here');
   await runIn(dir, rest);
