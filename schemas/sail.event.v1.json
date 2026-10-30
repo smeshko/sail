@@ -21,6 +21,7 @@
         "step:start",
         "step:end",
         "step:queued",
+        "step:stalled",
         "loop:iteration",
         "loop:exit",
         "all:start",
@@ -139,6 +140,10 @@
     {
       "if": { "properties": { "type": { "const": "step:queued" } }, "required": ["type"] },
       "then": { "$ref": "#/$defs/stepQueued" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "step:stalled" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/stepStalled" }
     },
     {
       "if": { "properties": { "type": { "const": "loop:iteration" } }, "required": ["type"] },
@@ -503,11 +508,26 @@
       },
       "additionalProperties": false
     },
+    "stepStalled": {
+      "type": "object",
+      "properties": {
+        "seq": true,
+        "ts": true,
+        "type": true,
+        "runId": true,
+        "key": { "type": "string", "pattern": "^[a-z0-9-]+#[0-9]+(/[a-z0-9-]+)?$" },
+        "idleMs": { "type": "number", "exclusiveMinimum": 0 },
+        "since": { "type": "string" }
+      },
+      "required": ["key", "idleMs", "since"],
+      "additionalProperties": false
+    },
     "budget": {
       "description": "a step's budget",
       "type": "object",
       "properties": {
         "maxTurns": { "type": "integer", "minimum": 1 },
+        "maxIdleMinutes": { "type": "number", "minimum": 0 },
         "maxUsd": { "type": "number", "minimum": 0 },
         "maxMinutes": { "type": "number", "minimum": 0 }
       },

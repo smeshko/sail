@@ -32,7 +32,11 @@ function liveRow(repo: string, run: RailRun, ui: UiState): SafeHtml {
   } data-action="select-run" data-repo="${repo}" data-run="${run.runId}">
 <span class="r-main"><span class="r-line"><span class="st ${pillOf(run.status)}"></span><span class="r-id">${runLabel(run)}</span>${
     run.title === undefined ? '' : html` <span class="r-title">${run.title}</span>`
-  }</span><span class="r-sub">${repo} › ${workflowOf(run)} · ${facts}${
+  }</span><span class="r-sub">${repo} › ${workflowOf(run)}${
+    run.status === 'running' && run.stalled !== undefined
+      ? html` · <span class="stalled">stalled ${run.stalled}</span>`
+      : ''
+  } · ${facts}${
     run.stopReason === undefined ? '' : html` · <span class="why">${run.stopReason}</span>`
   }</span>${run.problem === undefined ? '' : html`<span class="r-problem">${run.problem}</span>`}</span></button>`;
 }

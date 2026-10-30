@@ -7,7 +7,7 @@ import type { IndexRepo } from '../files';
 import { shellWord } from './commands';
 import { newestFirst, statusOf, stopReasonOf } from './index-model';
 
-export type AttentionKind = 'failed' | 'suspended' | 'error' | 'denial' | 'parked' | 'problem';
+export type AttentionKind = 'failed' | 'suspended' | 'error' | 'denial' | 'parked' | 'problem' | 'stalled';
 
 /** What an item opens in the shell. */
 export interface Opens {
@@ -52,6 +52,19 @@ function repoItems(repo: IndexRepo): AttentionItem[] {
       const resume = `sail resume ${shellWord(runId)}`;
       const detail = message === undefined ? resume : `${message} · ${resume}`;
       items.push({ repo: name, runId, kind: 'suspended', title: `suspended: ${stopReason}`, detail, opens });
+    }
+    if (status === 'running') {
+      for (const { key, since } of run.summary?.stalled ?? []) {
+        items.push({
+          repo: name,
+          runId,
+          key,
+          kind: 'stalled',
+          title: 'stalled',
+          detail: `${key} · no event since ${since}`,
+          opens: { ...opens, key: key.split('/')[0] ?? key, tab: 'overview' },
+        });
+      }
     }
     const denying: { key: string; denials: number }[] = [];
     for (const call of run.summary?.calls ?? []) {

@@ -10,6 +10,7 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { z } from 'zod';
 import { bindingValues, prepareAgentPrompt } from '../engine/agent-prompt';
 import { runRelative, stageOut, writeOwnFile } from '../engine/call-dir';
+import { systemClock } from '../engine/clock';
 import { type ContractError, type FileEntry, producesProblems, recordFiles, validateOutput } from '../engine/contract';
 import { documentProblems, renderDocuments, validateDocuments } from '../engine/documents';
 import { preamble } from '../engine/preamble';
@@ -20,6 +21,9 @@ import type { AgentStep } from '../sdk/steps';
 import type { StepContext, StepKind, StepRun } from './index';
 
 const POLICIES = ['retry-once', 'fail'];
+
+/** The longest delay a timer takes: a longer one fires at once, so a longer wait is set in steps. */
+const LONGEST_MS = 2 ** 31 - 1;
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
@@ -34,7 +38,10 @@ function submissionSchema(step: AgentStep): { schema: Record<string, unknown> } 
 
 function problems(step: AgentStep): string[] {
   const found = [...producesProblems(step.produces), ...documentProblems(step.produces)];
-  const { maxTurns, maxUsd, maxMinutes } = step.budget;
+  const { maxTurns, maxUsd, maxMinutes, maxIdleMinutes } = step.budget;
+  if (maxIdleMinutes !== undefined && !(Number.isFinite(maxIdleMinutes) && maxIdleMinutes > 0)) {
+    found.push(`budget.maxIdleMinutes must be a positive number: ${maxIdleMinutes}`);
+  }
   if (!(Number.isInteger(maxTurns) && maxTurns >= 1)) {
     found.push(`budget.maxTurns must be a whole number of 1 or more: ${maxTurns}`);
   }
@@ -212,148 +219,177 @@ async function ask(harness: Harness, request: HarnessRequest): Promise<Answer> {
 }
 
 async function run(step: AgentStep, context: StepContext): Promise<StepRun> {
-  const emit: CallEmit = (event) => context.emit?.(event);
-  const { agent } = context;
-  const key = context.key ?? `${context.stage}#${context.call}`;
-  // Its call checks both before anything is written, so either is a bug in sail.
-  if (agent === undefined) throw new Error(`${key}: an agent step ran with no harness`);
-  const submission = submissionSchema(step);
-  if ('problem' in submission) throw new Error(`${key}: ${submission.problem}`);
-
-  const place = { try: context.try, validationTry: agent.validationTry };
-  const on = { adapter: agent.harness.name, model: agent.model };
-  const sessionLog = join(context.paths.dir, 'session.log');
-  const ended = (errors: ContractError[], record: Record<string, unknown>, files: StepRun['files'] = {}): StepRun => ({
-    outcome: 'error',
-    output: null,
-    files,
-    errors,
-    record,
-  });
-
-  // The step's own conventions replace the project's.
-  const conventions = step.conventions ?? agent.conventions;
-  const prompt = prepareAgentPrompt({
-    sailDir: dirname(context.config),
-    file: resolve(context.stageDir, step.prompt),
-    bindings: agent.bindings,
-    inputs: context.inputs,
-    ...(conventions === undefined ? {} : { conventions }),
-    ...(agent.feedback === undefined ? {} : { feedback: agent.feedback }),
-  });
-  /** A try that never reached a session: there is nothing to say of one, so an empty transcript and nothing spent. */
-  const unstarted = (message: string): StepRun => {
-    writeFileSync(sessionLog, '');
-    return ended([{ reason: 'not_started', message }], {
-      ...place,
-      validationFailed: false,
-      harness: { ...on, turns: 0, toolCalls: 0, denials: 0 },
-      usage: { costUsd: 0 },
-    });
-  };
-  if (!prompt.ok) return unstarted(prompt.message);
-  // Each document starts the session as its template, rendered fresh into `$STAGE_OUT`: this try's own directory, or
-  // the one a multi-step call's steps share, where an earlier try of the step may have left it.
-  const templates = renderDocuments({
-    produces: step.produces,
-    stageDir: context.stageDir,
-    values: bindingValues(agent.bindings, context.inputs),
-    outDir: stageOut(context.paths),
-    replace: context.paths.out !== undefined,
-  });
-  if (!templates.ok) return unstarted(templates.message);
-  const promptPath = join(context.paths.dir, 'prompt.md');
-  writeFileSync(promptPath, prompt.text);
-  const rendered = {
-    path: runRelative(context.runDir, promptPath),
-    untrusted: prompt.untrusted,
-    fragments: prompt.fragments,
-    conventions: prompt.conventions,
-  };
-  emit({ type: 'prompt:rendered', try: context.try, ...rendered });
-
-  const { seen, onEvent } = listen(emit);
-  const { result, reasonless, broken, reported } = await ask(agent.harness, {
-    key,
-    try: context.try,
-    prompt: prompt.text,
-    cwd: context.workspace,
-    // The preamble alone: what sail's own process inherited, credentials included, is not the session's to read.
-    env: Object.fromEntries(preamble(context).map(({ name, value }) => [name, value])),
-    model: agent.model,
-    permissions: step.permissions,
-    budget: step.budget,
-    outputSchema: submission.schema,
-    ...(context.signal === undefined ? {} : { signal: context.signal }),
-    onEvent,
-  });
-
-  // What the harness returned is the authority on its session, and what its events said stands in where it gave none:
-  // a session that reported what it had spent, and then failed to return, still spent it.
-  const usage = reported.usage ?? seen.spent ?? { costUsd: 0 };
-  const sessionId = reported.sessionId ?? seen.sessionId;
-  // The session's own end counts for it, where what it gives is a count: one that isn't would break `result.json`.
-  const counted = (said: unknown, heard: number): number => (isCount(said) ? said : heard);
-  const counters = {
-    turns: counted(seen.end?.turns, seen.turns),
-    toolCalls: counted(seen.end?.toolCalls, seen.toolCalls),
-    denials: counted(seen.end?.denials, seen.denials),
-  };
-  const reason = seen.end?.reason;
-  const record = {
-    ...place,
-    prompt: rendered,
-    harness: { ...on, ...(sessionId === undefined ? {} : { sessionId }), ...counters },
-    usage,
-  };
-  const rawTranscript = reported.transcript ?? seen.messages.map((text) => `assistant: ${text}`).join('\n');
-  const transcript = context.redact?.text(rawTranscript) ?? rawTranscript;
-  // The session has had the directory to write in, so the transcript is made a new file, whatever it left by the name.
-  writeOwnFile(sessionLog, transcript === '' ? '' : `${transcript}\n`);
-
-  const failure = broken ?? (result?.outcome === 'error' ? result.message : undefined);
-  if (failure !== undefined && !seen.failed) emit({ type: 'error:harness', message: failure });
-  emit({
-    type: 'harness:session_end',
-    ...(sessionId === undefined ? {} : { sessionId }),
-    outcome: result?.outcome ?? (reasonless ? 'blocked' : 'error'),
-    ...(typeof reason === 'string' ? { reason } : {}),
-    ...counters,
-    usage,
-  });
-
-  if (failure !== undefined) {
-    const reason = result?.outcome === 'error' ? (result.reason ?? 'harness') : 'harness';
-    const resetsAt = result?.outcome === 'error' ? result.resetsAt : undefined;
-    const error = resetsAt === undefined ? { reason, message: failure } : { reason, message: failure, resetsAt };
-    return ended([error], { ...record, validationFailed: false });
-  }
-  if (reasonless) {
-    const message = 'a blocked agent must give its reason: one with nothing in it was submitted';
-    return ended([{ reason: 'invalid_output', message }], { ...record, validationFailed: true });
-  }
-  if (result?.outcome === 'blocked') {
-    return {
-      outcome: 'blocked',
-      output: null,
-      files: {},
-      errors: [],
-      record: { ...record, validationFailed: false, reason: result.reason },
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let armed = false;
+  const idleMs = (step.budget.maxIdleMinutes ?? step.budget.maxMinutes / 4) * 60_000;
+  const emit: CallEmit = (event) => {
+    context.emit?.(event);
+    if (event.type === 'prompt:rendered') armed = true;
+    if (!armed) return;
+    clearTimeout(timer);
+    const wait = (ms: number): void => {
+      const step = Math.min(ms, LONGEST_MS);
+      timer = setTimeout(() => {
+        if (ms > step) wait(ms - step);
+        else {
+          // Read only when a stall fires, so a run's clock moves for its events alone, as with no stall.
+          const since = new Date((context.clock ?? systemClock)().getTime() - idleMs).toISOString();
+          context.emit?.({ type: 'step:stalled', idleMs, since });
+        }
+      }, step);
+      timer.unref();
     };
-  }
+    wait(idleMs);
+  };
+  try {
+    const { agent } = context;
+    const key = context.key ?? `${context.stage}#${context.call}`;
+    // Its call checks both before anything is written, so either is a bug in sail.
+    if (agent === undefined) throw new Error(`${key}: an agent step ran with no harness`);
+    const submission = submissionSchema(step);
+    if ('problem' in submission) throw new Error(`${key}: ${submission.problem}`);
 
-  // A done session owes its output and every file it declared, and each one it broke is a problem of its own.
-  const errors: ContractError[] = [];
-  const output = checkOutput(step, result?.outcome === 'done' ? result.output : undefined);
-  if (output.ok) emit({ type: 'output:validated' });
-  else {
-    emit({ type: 'output:invalid', message: output.message });
-    errors.push({ reason: 'invalid_output', message: output.message });
+    const place = { try: context.try, validationTry: agent.validationTry };
+    const on = { adapter: agent.harness.name, model: agent.model };
+    const sessionLog = join(context.paths.dir, 'session.log');
+    const ended = (
+      errors: ContractError[],
+      record: Record<string, unknown>,
+      files: StepRun['files'] = {},
+    ): StepRun => ({
+      outcome: 'error',
+      output: null,
+      files,
+      errors,
+      record,
+    });
+
+    // The step's own conventions replace the project's.
+    const conventions = step.conventions ?? agent.conventions;
+    const prompt = prepareAgentPrompt({
+      sailDir: dirname(context.config),
+      file: resolve(context.stageDir, step.prompt),
+      bindings: agent.bindings,
+      inputs: context.inputs,
+      ...(conventions === undefined ? {} : { conventions }),
+      ...(agent.feedback === undefined ? {} : { feedback: agent.feedback }),
+    });
+    /** A try that never reached a session: there is nothing to say of one, so an empty transcript and nothing spent. */
+    const unstarted = (message: string): StepRun => {
+      writeFileSync(sessionLog, '');
+      return ended([{ reason: 'not_started', message }], {
+        ...place,
+        validationFailed: false,
+        harness: { ...on, turns: 0, toolCalls: 0, denials: 0 },
+        usage: { costUsd: 0 },
+      });
+    };
+    if (!prompt.ok) return unstarted(prompt.message);
+    // Each document starts the session as its template, rendered fresh into `$STAGE_OUT`: this try's own directory, or
+    // the one a multi-step call's steps share, where an earlier try of the step may have left it.
+    const templates = renderDocuments({
+      produces: step.produces,
+      stageDir: context.stageDir,
+      values: bindingValues(agent.bindings, context.inputs),
+      outDir: stageOut(context.paths),
+      replace: context.paths.out !== undefined,
+    });
+    if (!templates.ok) return unstarted(templates.message);
+    const promptPath = join(context.paths.dir, 'prompt.md');
+    writeFileSync(promptPath, prompt.text);
+    const rendered = {
+      path: runRelative(context.runDir, promptPath),
+      untrusted: prompt.untrusted,
+      fragments: prompt.fragments,
+      conventions: prompt.conventions,
+    };
+    emit({ type: 'prompt:rendered', try: context.try, ...rendered });
+
+    const { seen, onEvent } = listen(emit);
+    const { result, reasonless, broken, reported } = await ask(agent.harness, {
+      key,
+      try: context.try,
+      prompt: prompt.text,
+      cwd: context.workspace,
+      // The preamble alone: what sail's own process inherited, credentials included, is not the session's to read.
+      env: Object.fromEntries(preamble(context).map(({ name, value }) => [name, value])),
+      model: agent.model,
+      permissions: step.permissions,
+      budget: step.budget,
+      outputSchema: submission.schema,
+      ...(context.signal === undefined ? {} : { signal: context.signal }),
+      onEvent,
+    });
+
+    // What the harness returned is the authority on its session, and what its events said stands in where it gave none:
+    // a session that reported what it had spent, and then failed to return, still spent it.
+    const usage = reported.usage ?? seen.spent ?? { costUsd: 0 };
+    const sessionId = reported.sessionId ?? seen.sessionId;
+    // The session's own end counts for it, where what it gives is a count: one that isn't would break `result.json`.
+    const counted = (said: unknown, heard: number): number => (isCount(said) ? said : heard);
+    const counters = {
+      turns: counted(seen.end?.turns, seen.turns),
+      toolCalls: counted(seen.end?.toolCalls, seen.toolCalls),
+      denials: counted(seen.end?.denials, seen.denials),
+    };
+    const reason = seen.end?.reason;
+    const record = {
+      ...place,
+      prompt: rendered,
+      harness: { ...on, ...(sessionId === undefined ? {} : { sessionId }), ...counters },
+      usage,
+    };
+    const rawTranscript = reported.transcript ?? seen.messages.map((text) => `assistant: ${text}`).join('\n');
+    const transcript = context.redact?.text(rawTranscript) ?? rawTranscript;
+    // The session has had the directory to write in, so the transcript is made a new file, whatever it left by the name.
+    writeOwnFile(sessionLog, transcript === '' ? '' : `${transcript}\n`);
+
+    const failure = broken ?? (result?.outcome === 'error' ? result.message : undefined);
+    if (failure !== undefined && !seen.failed) emit({ type: 'error:harness', message: failure });
+    emit({
+      type: 'harness:session_end',
+      ...(sessionId === undefined ? {} : { sessionId }),
+      outcome: result?.outcome ?? (reasonless ? 'blocked' : 'error'),
+      ...(typeof reason === 'string' ? { reason } : {}),
+      ...counters,
+      usage,
+    });
+
+    if (failure !== undefined) {
+      const reason = result?.outcome === 'error' ? (result.reason ?? 'harness') : 'harness';
+      const resetsAt = result?.outcome === 'error' ? result.resetsAt : undefined;
+      const error = resetsAt === undefined ? { reason, message: failure } : { reason, message: failure, resetsAt };
+      return ended([error], { ...record, validationFailed: false });
+    }
+    if (reasonless) {
+      const message = 'a blocked agent must give its reason: one with nothing in it was submitted';
+      return ended([{ reason: 'invalid_output', message }], { ...record, validationFailed: true });
+    }
+    if (result?.outcome === 'blocked') {
+      return {
+        outcome: 'blocked',
+        output: null,
+        files: {},
+        errors: [],
+        record: { ...record, validationFailed: false, reason: result.reason },
+      };
+    }
+
+    // A done session owes its output and every file it declared, and each one it broke is a problem of its own.
+    const errors: ContractError[] = [];
+    const output = checkOutput(step, result?.outcome === 'done' ? result.output : undefined);
+    if (output.ok) emit({ type: 'output:validated' });
+    else {
+      emit({ type: 'output:invalid', message: output.message });
+      errors.push({ reason: 'invalid_output', message: output.message });
+    }
+    const { files, derived } = checkFiles(step, context, emit, errors, templates.placeholders);
+    const checked = { ...record, ...(Object.keys(derived).length > 0 ? { derived } : {}) };
+    if (errors.length > 0 || !output.ok) return ended(errors, { ...checked, validationFailed: true }, files);
+    return { outcome: 'done', output: output.data, files, errors: [], record: { ...checked, validationFailed: false } };
+  } finally {
+    clearTimeout(timer);
   }
-  const { files, derived } = checkFiles(step, context, emit, errors, templates.placeholders);
-  const checked = { ...record, ...(Object.keys(derived).length > 0 ? { derived } : {}) };
-  if (errors.length > 0 || !output.ok) return ended(errors, { ...checked, validationFailed: true }, files);
-  return { outcome: 'done', output: output.data, files, errors: [], record: { ...checked, validationFailed: false } };
 }
 
 /**

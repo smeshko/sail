@@ -63,6 +63,32 @@ const STOPPED = {
   issues: [],
 };
 
+test('an immediate stop on a live run writes stopped now and returns its pid', async () => {
+  await withTempRepo(async (repo) => {
+    const end = await suspendedRun(repo);
+    const adapters = await fakeAdapters(repo.dir);
+    const lease = adapters.ports.workspace.lease.bind(adapters.ports.workspace);
+    adapters.ports.workspace.lease = async (...args) => {
+      await lease(...args);
+      return {
+        leased: false,
+        holder: {
+          runId: end.runId,
+          runDir: end.dir,
+          pid: 12345,
+          remote: args[0],
+          branch: args[1],
+          takenAt: '2026-10-01T12:00:00.000Z',
+        },
+        raw: null,
+      };
+    };
+    const stopped = await stopRun({ sailDir: join(repo.dir, '.sail'), runId: end.runId, adapters, now: true });
+    expect(stopped).toEqual({ requested: { pid: 12345, now: true } });
+    expect(readFileSync(join(end.dir, 'CONTROL'), 'utf8')).toBe('stopped now\n');
+  });
+});
+
 test('a suspended run stopped ends failed stopped: STATUS, run:end last with the next seq, summary.json final, its worktree and lease gone, and a resume refused', async () => {
   await withTempRepo(async (repo) => {
     const end = await suspendedRun(repo);
