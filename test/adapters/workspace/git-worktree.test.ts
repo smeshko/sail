@@ -163,6 +163,19 @@ test('create fetches first: a commit pushed to the origin after the clone fetche
   });
 });
 
+test("a run's branch deleted on the remote is not continued from the clone's stale tracking ref: create starts at the default branch (review R1)", async () => {
+  await withTempRepo(async (repo) => {
+    withOrigin(repo);
+    const w = world(repo);
+    const stale = w.publishBranch(BRANCH);
+    // Deleting it from the clone drops the tracking ref too, so it is put back as a merged-and-deleted branch leaves it.
+    repo.git('push', '--quiet', 'origin', `:refs/heads/${BRANCH}`);
+    repo.git('update-ref', `refs/remotes/origin/${BRANCH}`, stale);
+    const created = await settle(adapterOf(repo, w).create(runIn(w.runsDir), { branch: BRANCH }));
+    expect('rejected' in created ? created : created.baseSha).toBe(w.baseSha);
+  });
+});
+
 test("a remote other than origin is the one fetched and started from: through the remote option, repository() names upstream and create starts at upstream's tip, and a missing remote is invalid, naming it", async () => {
   await withTempRepo(async (repo) => {
     const upstream = withOrigin(repo, 'upstream');

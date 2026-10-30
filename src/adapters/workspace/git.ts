@@ -386,8 +386,8 @@ function pause(ms: number, signal?: AbortSignal): Promise<void> {
 }
 
 /**
- * `git fetch --no-tags <remote>` in `repo`, as a process group killed at `timeoutMs` or when `signal` aborts. Any end
- * but a clean exit is `unavailable`, with what git wrote to stderr. A fetch that lost git's ref lock to another run's
+ * `git fetch --no-tags --prune <remote>` in `repo`, as a process group killed at `timeoutMs` or when `signal` aborts. It
+ * prunes so a branch deleted on the remote leaves no tracking ref to be taken for it. Any end but a clean exit is `unavailable`, with what git wrote to stderr. A fetch that lost git's ref lock to another run's
  * fetch in the same clone is tried again, up to `FETCH_TRIES` times with `FETCH_RETRY_WAITS_MS` between them: the
  * winner has usually updated the ref by then. A timeout, an abort and every other failure end it at once.
  */
@@ -403,7 +403,7 @@ export async function fetchRemote(
     for (let attempt = 1; ; attempt++) {
       const stderr = join(logs, 'stderr');
       const end = await runProcess({
-        command: ['git', 'fetch', '--no-tags', remote],
+        command: ['git', 'fetch', '--no-tags', '--prune', remote],
         cwd: repo,
         env: nonInteractive(env ?? inherited()),
         stdout: join(logs, 'stdout'),
