@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { join } from 'node:path';
+import { fingerprintBindings } from '../../src/engine/fingerprint';
 import type { JournalEntry } from '../../src/engine/journal';
 import type { ReachedStage } from '../../src/engine/load-workflow';
 import { dropStrayHalt, type ReplayEnd, replay } from '../../src/engine/replay';
@@ -131,6 +132,7 @@ test("with an empty journal the first run.stage() is the replay's end, and the w
       definition: a,
       stageFile: '/repo/.sail/stages/a/stage.ts',
       supplied: {},
+      fingerprints: {},
     },
   });
   if (end.kind !== 'call') throw new Error('a call');
@@ -186,6 +188,40 @@ test("a value binding records where it came from: a call's output, or the workfl
       },
     },
   });
+});
+
+test('a pending call carries one hash per supplied binding, a value by its canonical JSON and a file by its path', async () => {
+  const entries = [entry('a#1', 'passed', { files: { 'r.txt': '01-a/call-1/r.txt' } })];
+  const end = await replayed(async (run) => {
+    const r = await run.stage(a);
+    await run.stage(c, { data: { y: 1, x: [2] }, extra: undefined });
+    await run.stage(b, { report: r.files['r.txt'] });
+  }, entries);
+  if (end.kind !== 'call') throw new Error('a call');
+  expect(end.call.fingerprints).toEqual(
+    fingerprintBindings({ data: { kind: 'value', value: { x: [2], y: 1 }, from: '' } }),
+  );
+  expect(end.call.fingerprints.data).toMatch(/^[0-9a-f]{16}$/);
+
+  const consumer = await replayed(async (run) => {
+    const r = await run.stage(a);
+    await run.stage(b, { report: r.files['r.txt'] });
+  }, entries);
+  if (consumer.kind !== 'call') throw new Error('a call');
+  expect(consumer.call.fingerprints).toEqual(
+    fingerprintBindings({
+      report: { kind: 'file', path: join(RUN_DIR, '01-a/call-1/r.txt'), from: '01-a/call-1/r.txt' },
+    }),
+  );
+});
+
+test('a value canonical JSON cannot encode fails the call as workflow_failed, naming the binding', async () => {
+  const end = await replayed(async (run) => {
+    await run.stage(c, { data: 1n });
+  });
+  if (end.kind !== 'failed') throw new Error('a failure');
+  expect(end.stopReason).toBe('workflow_failed');
+  expect(end.message).toStartWith("c#1 can't run: 'data' can't be fingerprinted: ");
 });
 
 test('a value binding not declared by the stage passes through for callProblems to name', async () => {
@@ -916,6 +952,7 @@ const pendingOf = (key: string, stage: StageDefinition, call: number, stageIndex
   definition: stage,
   stageFile: `/repo/.sail/stages/${stage.name}/stage.ts`,
   supplied: {},
+  fingerprints: {},
   group: GROUP,
 });
 

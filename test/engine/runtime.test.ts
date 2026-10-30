@@ -18,6 +18,7 @@ import { join } from 'node:path';
 import type { ScriptedAnswer } from '../../src/adapters/fake/harness';
 import { readConfig } from '../../src/engine/config';
 import { CONTROL_FILE, requestStop, requestUnwatch } from '../../src/engine/control';
+import { fingerprintBindings } from '../../src/engine/fingerprint';
 import { JOURNAL_FILE, type JournalEntry, JournalError, readJournal } from '../../src/engine/journal';
 import { readStatus, writeStatus } from '../../src/engine/run-dir';
 import { RUN_HEADER_FILE } from '../../src/engine/run-header';
@@ -2783,3 +2784,45 @@ test("a two-step stage in a group: its step lines interleave with its sibling's 
     expect(sessionsOf(events(dir), 'publish#1/describe')).toBe(1);
   });
 }, 90_000);
+
+/** The hash of one file binding, as a call line journals it. */
+const fileHash = (name: string, path: string) =>
+  fingerprintBindings({ [name]: { kind: 'file', path: `/run/${path}`, from: path } })[name] ?? '';
+
+test('a run journals each call line with its bindings fingerprints, {} for a call with none, and the intake line none', async () => {
+  const { end } = await completed();
+  const { entries } = readJournal(end.dir);
+  const by = Object.fromEntries(entries.map((entry) => [entry.key, entry]));
+  expect(by['intake#1']?.bindings).toBeUndefined();
+  expect(by['spec#1']?.bindings).toEqual({ brief: fileHash('brief', '00-intake/call-1/brief.md') });
+  expect(by['implement#1']?.bindings).toEqual({ spec: fileHash('spec', '01-spec/call-1/spec.md') });
+  expect(by['tests#1']?.bindings).toEqual({});
+  const feedback = fingerprintBindings({ feedback: { kind: 'value', value: by['tests#1']?.output, from: '' } });
+  expect(by['implement#2']?.bindings).toEqual({ spec: fileHash('spec', '01-spec/call-1/spec.md'), ...feedback });
+  expect(feedback.feedback).toMatch(/^[0-9a-f]{16}$/);
+  const lines = readFileSync(join(end.dir, JOURNAL_FILE), 'utf8').trim().split('\n');
+  expect(lines.flatMap((line) => validateDocument('sail.journal.v1', JSON.parse(line))).map(formatIssue)).toEqual([]);
+});
+
+test("a multi-step call's line carries its bindings and its step lines none", async () => {
+  await withTempRepo(async (repo) => {
+    writeTwoStep(repo.dir);
+    const end = await ranAgent(repo.dir);
+    expect(entryOf(end.dir, 'publish#1/describe')?.bindings).toBeUndefined();
+    expect(entryOf(end.dir, 'publish#1/open')?.bindings).toBeUndefined();
+    const call = entryOf(end.dir, 'publish#1')?.bindings ?? {};
+    expect(Object.keys(call)).toEqual(['spec']);
+    expect(call.spec).toMatch(/^[0-9a-f]{16}$/);
+  });
+}, 60_000);
+
+test("a group's call lines each carry their own call's bindings, beside the group's keys", async () => {
+  await withTempRepo(async (repo) => {
+    writeTrio(repo.dir, { a: 0, b: 0, c: 0 });
+    const end = await ranTrio(repo.dir);
+    const calls = readJournal(end.dir).entries.filter((entry) => entry.group !== undefined);
+    const brief = { brief: fileHash('brief', '00-intake/call-1/brief.md') };
+    expect(calls.map((entry) => entry.key).sort()).toEqual(TRIO_KEYS);
+    expect(calls.map((entry) => [entry.group, entry.bindings])).toEqual(calls.map(() => [TRIO_KEYS, brief]));
+  });
+}, 30_000);

@@ -34,6 +34,7 @@ import type { ProducedFile } from '../sdk/bindings';
 import type { StageDefinition } from '../sdk/steps';
 import type { CallOptions, Iteration, Run, Workflow } from '../sdk/workflow';
 import type { Supplied } from './bindings';
+import { fingerprintBindings } from './fingerprint';
 import type { JournalEntry } from './journal';
 import type { ReachedStage } from './load-workflow';
 import type { StopReason } from './run-dir';
@@ -49,6 +50,8 @@ export interface PendingCall {
   definition: StageDefinition;
   stageFile: string;
   supplied: Record<string, Supplied>;
+  /** One short hash per value and file binding the workflow supplied, by name: journaled on the call's line. */
+  fingerprints: Record<string, string>;
   /** The keys of the group the call belongs to, in declaration order, when it belongs to one. */
   group?: string[];
 }
@@ -218,7 +221,7 @@ export function replay(options: ReplayOptions): Promise<ReplayEnd> {
     function resolveBindings(
       definition: StageDefinition,
       bindings: unknown,
-    ): { supplied: Record<string, Supplied> } | { problems: string[] } {
+    ): { supplied: Record<string, Supplied>; fingerprints: Record<string, string> } | { problems: string[] } {
       if (!isObject(bindings)) return { problems: ['its bindings must be an object'] };
       // A Map, not assignment: `supplied['__proto__'] = …` would set the prototype, and the binding would go unchecked.
       const supplied = new Map<string, Supplied>();
@@ -234,7 +237,19 @@ export function replay(options: ReplayOptions): Promise<ReplayEnd> {
         if (path === undefined) problems.push(`'${key}' needs a file a call produced`);
         else supplied.set(key, { kind: 'file', path: join(runDir, path), from: path });
       }
-      return problems.length > 0 ? { problems } : { supplied: Object.fromEntries(supplied) };
+      if (problems.length > 0) return { problems };
+      const all = Object.fromEntries(supplied);
+      // One binding at a time, so the problem names the one canonical JSON can't encode.
+      const fingerprints = new Map<string, string>();
+      for (const [key, each] of supplied) {
+        try {
+          for (const [name, hash] of Object.entries(fingerprintBindings({ [key]: each }))) fingerprints.set(name, hash);
+        } catch (error) {
+          problems.push(`'${key}' can't be fingerprinted: ${messageOf(error)}`);
+        }
+      }
+      if (problems.length > 0) return { problems };
+      return { supplied: all, fingerprints: Object.fromEntries(fingerprints) };
     }
 
     /** The next call of `definition`'s stage: its number, its stage directory's number and its key. */

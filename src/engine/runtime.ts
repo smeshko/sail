@@ -11,6 +11,9 @@
 // and only the call's line is journaled: its steps' results are in the call directory, and a call interrupted before
 // it ended runs again from its first step.
 //
+// A call's line carries the fingerprints of the bindings the workflow supplied, which the determinism guard compares on
+// replay. The intake's line and a step's carry none.
+//
 // A group, `run.all()`, ends the replay with its unjournaled calls, which run at once, each in its own call directory.
 // Each is journaled as it completes, carrying the group's keys, so the journal holds them in completion order, and
 // `all:start` and `all:end` bracket them. An `error` doesn't stop its siblings. A call that throws, a bug in sail, stops
@@ -224,6 +227,7 @@ function entryFrom(
   result: Record<string, unknown>,
   paths: CallPaths,
   group?: string[],
+  bindings?: Record<string, string>,
 ): NewJournalEntry {
   const files = result.files as Record<string, { path: string }>;
   return {
@@ -237,6 +241,7 @@ function entryFrom(
     files: Object.fromEntries(Object.entries(files).map(([name, file]) => [name, file.path])),
     resultPath: runRelative(runDir, paths.result),
     ...(group === undefined ? {} : { group }),
+    ...(bindings === undefined ? {} : { bindings }),
   };
 }
 
@@ -655,10 +660,15 @@ async function drive(
         diff: async (range) => (await opened.adapters.workspace.diff(opened.workspace.path, range)).patch,
       },
     );
-  /** Journals a call that ran, with its group's keys when it has a group, and reports it. */
-  const journal = (result: Record<string, unknown>, paths: CallPaths, group?: string[]): JournalEntry => {
+  /** Journals a call that ran, with its group's keys when it has a group and its bindings' fingerprints, and reports it. */
+  const journal = (
+    result: Record<string, unknown>,
+    paths: CallPaths,
+    group?: string[],
+    bindings?: Record<string, string>,
+  ): JournalEntry => {
     tracker?.assertRecorded();
-    const journaled = appendJournal(dir, opened.redact.value(entryFrom(dir, result, paths, group)), clock());
+    const journaled = appendJournal(dir, opened.redact.value(entryFrom(dir, result, paths, group, bindings)), clock());
     bus.emit({ type: 'journal:append', key: journaled.key, line: journaled.seq, outcome: journaled.outcome });
     reached ||= journaled.key === last;
     return journaled;
@@ -882,7 +892,7 @@ async function drive(
           running = undefined;
           continue;
         }
-        const journaled = journal(result, paths);
+        const journaled = journal(result, paths, undefined, one.call.fingerprints);
         running = undefined;
         options.onCall?.(journaled);
         continue;
@@ -917,7 +927,7 @@ async function drive(
               return;
             }
             if (stopped === true || ranOut(result)) return;
-            const journaled = journal(result, paths, keys);
+            const journaled = journal(result, paths, keys, each.call.fingerprints);
             journaledNow++;
             settle(each);
             options.onCall?.(journaled);
