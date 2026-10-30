@@ -96,3 +96,150 @@ test("new --runs refuses a folder that doesn't exist", async () => {
     });
   });
 });
+
+const CHROMES = [
+  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  '/Applications/Chromium.app/Contents/MacOS/Chromium',
+  'google-chrome',
+  'chromium',
+  'chromium-browser',
+];
+function findChrome(): string | undefined {
+  const named = process.env.SAIL_DEMO_CHROME;
+  for (const candidate of named ? [named] : CHROMES) {
+    const found = candidate.startsWith('/') ? (existsSync(candidate) ? candidate : null) : Bun.which(candidate);
+    if (found !== null) return found;
+  }
+  return undefined;
+}
+const chrome = findChrome();
+
+const RECORDED = join(ROOT, 'test', 'fixtures', 'playback', 'fake-1-claude-code');
+const RECORDED_RUN = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N';
+const TOOL = 'toolu_01AgSNycYkym43qwZ94yQvzK';
+
+async function stepsRefusal(steps: string) {
+  return await withTempRepo(async (repo) => {
+    const file = join(repo.dir, 'steps.json');
+    await Bun.write(file, steps);
+    const dir = join(repo.dir, 'demo');
+    const result = await demo(repo.env, 'dashboard', dir, 'x', `steps=${file}`);
+    return { ...result, png: existsSync(join(dir, 'x-a.png')) || existsSync(join(dir, 'x.png')) };
+  });
+}
+
+test('dashboard refuses a steps file that repeats a shot name', async () => {
+  const { code, stderr, png } = await stepsRefusal('[{"shot":"a"},{"click":"body"},{"shot":"a"}]');
+  expect({ code, named: stderr.includes('step 3') && stderr.includes('"a"'), png }).toEqual({
+    code: 2,
+    named: true,
+    png: false,
+  });
+});
+
+test("dashboard refuses a steps file with a step it doesn't know", async () => {
+  const { code, stderr, png } = await stepsRefusal('[{"shot":"a"},{"hover":"body"}]');
+  expect({ code, named: stderr.includes('step 2'), png }).toEqual({ code: 2, named: true, png: false });
+});
+
+test("dashboard refuses a steps file that isn't a JSON list", async () => {
+  const { code, stderr, png } = await stepsRefusal('{"shot":"a"}');
+  expect({ code, named: stderr.includes('list'), png }).toEqual({ code: 2, named: true, png: false });
+});
+
+async function seededDemo(repo: { dir: string; env: Record<string, string> }) {
+  const dir = join(repo.dir, 'demo');
+  expect((await demo(repo.env, 'new', dir, '--runs', RECORDED)).code).toBe(0);
+  expect((await demo(repo.env, 'run', dir, 'sail', 'FAKE-1')).code).toBe(0);
+  return dir;
+}
+
+test.skipIf(chrome === undefined)(
+  "dashboard runs a steps file's clicks, scroll and shots on one load",
+  async () => {
+    await withTempRepo(async (repo) => {
+      const dir = await seededDemo(repo);
+      const card = '[data-action="select-card"][data-key="self-review#1"]';
+      const scroller = `[data-scroll="input:${TOOL}"]`;
+      const steps = [
+        { wait: card },
+        { click: card },
+        { wait: `[data-call="${TOOL}"]` },
+        { click: `[data-action="toggle-tool"][data-call="${TOOL}"]` },
+        { wait: scroller },
+        { scroll: scroller, top: 120 },
+        { shot: 'one' },
+        { click: '[data-action="toggle-filter"]' },
+        { click: '[data-action="toggle-filter"]' },
+        { shot: 'two' },
+      ];
+      const file = join(repo.dir, 'steps.json');
+      await Bun.write(file, JSON.stringify(steps));
+      const { code, stdout } = await demo(
+        repo.env,
+        'dashboard',
+        dir,
+        'cap',
+        'repo=fixture',
+        `run=${RECORDED_RUN}`,
+        `steps=${file}`,
+      );
+      const scrolled = `scrolled input:${TOOL} 120`;
+      expect({
+        code,
+        stepLines: stdout.split('\n').filter((line) => /^step \d+ /.test(line)).length,
+        scrollStep: stdout.includes('scrollTop 120'),
+        scrolledTwice: stdout.split(scrolled).length - 1,
+        files: ['one', 'two']
+          .flatMap((shot) => [`cap-${shot}.png`, `cap-${shot}.html`])
+          .map((f) => existsSync(join(dir, f))),
+        plain: existsSync(join(dir, 'cap.png')),
+      }).toEqual({
+        code: 0,
+        stepLines: 10,
+        scrollStep: true,
+        scrolledTwice: 2,
+        files: [true, true, true, true],
+        plain: false,
+      });
+      expect(readFileSync(join(dir, 'cap-one.html'), 'utf8')).toContain('data-action="toggle-tool"');
+    });
+  },
+  120_000,
+);
+
+test.skipIf(chrome === undefined)(
+  'dashboard exits 1 naming the step a selector missed, keeping earlier shots',
+  async () => {
+    await withTempRepo(async (repo) => {
+      const dir = await seededDemo(repo);
+      const file = join(repo.dir, 'steps.json');
+      await Bun.write(file, JSON.stringify([{ shot: 'before' }, { click: '#no-such-element' }, { shot: 'after' }]));
+      const { code, stdout } = await demo(repo.env, 'dashboard', dir, 'miss', `steps=${file}`);
+      expect({
+        code,
+        shot: /step 1 .*screenshot /s.test(stdout),
+        named: /step 2 .*#no-such-element.* matched nothing/.test(stdout),
+        before: existsSync(join(dir, 'miss-before.png')),
+        after: existsSync(join(dir, 'miss-after.png')),
+      }).toEqual({ code: 1, shot: true, named: true, before: true, after: false });
+    });
+  },
+  120_000,
+);
+
+test.skipIf(chrome === undefined)(
+  'dashboard without steps= still writes <name>.png and <name>.html',
+  async () => {
+    await withTempRepo(async (repo) => {
+      const dir = await seededDemo(repo);
+      const { code } = await demo(repo.env, 'dashboard', dir, 'plain', 'repo=fixture');
+      expect({ code, png: existsSync(join(dir, 'plain.png')), html: existsSync(join(dir, 'plain.html')) }).toEqual({
+        code: 0,
+        png: true,
+        html: true,
+      });
+    });
+  },
+  120_000,
+);

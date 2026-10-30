@@ -50,8 +50,10 @@ const CHROMES = [
 ];
 /** The page fills in from its sockets after load: it is captured once its DOM hasn't changed for SETTLE_MS. */
 const SETTLE_MS = 1500;
-/** How long a capture may take in all, Chrome's start included. */
+/** How long Chrome may take to start, and a page to settle. */
 const CAPTURE_SECONDS = 60;
+/** How long a step may wait for a selector to appear. */
+const WAIT_SECONDS = 20;
 
 function refuse(message) {
   console.error(`demo: ${message}`);
@@ -242,11 +244,20 @@ async function devtools(url) {
   };
 }
 
+/** Evaluates `expression` in the page and answers its value; a throw in the page becomes an Error. */
+async function evaluate(session, expression) {
+  const answer = await session.send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
+  if (answer.exceptionDetails !== undefined)
+    throw new Error(answer.exceptionDetails.exception?.description ?? answer.exceptionDetails.text);
+  return answer.result.value;
+}
+
 /**
- * Opens `page` in headless Chrome over its DevTools protocol, waits for its DOM to settle, and writes the screenshot
- * to `png` and the DOM to `html`. A screenshot taken at load would show the page empty: it draws from its sockets.
+ * Starts headless Chrome and opens `page` over its DevTools protocol, then waits for its DOM to settle: a screenshot
+ * taken at load would show the page empty, since it draws from its sockets. A page that keeps changing fails the
+ * capture, unless `lenient`: a live run's page may never settle, and the steps carry on after CAPTURE_SECONDS.
  */
-async function shoot(browser, profile, page, png, html) {
+async function openPage(browser, profile, page, lenient) {
   // Chrome writes the port it picked, then the browser's path, to DevToolsActivePort in its profile: a file left by
   // an earlier capture would name a port no one listens on.
   const portFile = join(profile, 'DevToolsActivePort');
@@ -276,12 +287,15 @@ async function shoot(browser, profile, page, png, html) {
   child.on('error', () => {
     ended = true;
   });
-  const until = Date.now() + CAPTURE_SECONDS * 1000;
-  const late = () => Date.now() > until;
   let session;
+  const close = () => {
+    session?.close();
+    signalGroup(child, 'SIGKILL');
+  };
   try {
+    const started = Date.now() + CAPTURE_SECONDS * 1000;
     while (!existsSync(portFile) || readFileSync(portFile, 'utf8').split('\n').length < 2) {
-      if (late() || ended) throw new Error(`${browser} started no DevTools`);
+      if (Date.now() > started || ended) throw new Error(`${browser} started no DevTools`);
       await Bun.sleep(100);
     }
     const port = readFileSync(portFile, 'utf8').split('\n')[0];
@@ -291,32 +305,113 @@ async function shoot(browser, profile, page, png, html) {
     session = await devtools(target.webSocketDebuggerUrl);
     await session.send('Page.enable');
     await session.send('Page.navigate', { url: page });
-    const size = async () =>
-      (await session.send('Runtime.evaluate', { expression: 'document.documentElement.outerHTML.length' })).result
-        .value;
+    const until = Date.now() + CAPTURE_SECONDS * 1000;
     let last = -1;
     let since = Date.now();
     for (;;) {
-      if (late()) throw new Error(`the page kept changing for ${CAPTURE_SECONDS}s`);
+      if (Date.now() > until) {
+        if (lenient) break;
+        throw new Error(`the page kept changing for ${CAPTURE_SECONDS}s`);
+      }
       await Bun.sleep(250);
-      const now = await size();
+      const now = await evaluate(session, 'document.documentElement.outerHTML.length');
       if (now !== last) [last, since] = [now, Date.now()];
       else if (Date.now() - since >= SETTLE_MS) break;
     }
-    const shot = await session.send('Page.captureScreenshot', { format: 'png' });
-    writeFileSync(png, Buffer.from(shot.data, 'base64'));
-    const dom = await session.send('Runtime.evaluate', {
-      expression: 'document.documentElement.outerHTML',
-      returnByValue: true,
-    });
-    writeFileSync(html, `${dom.result.value}\n`);
-  } finally {
-    session?.close();
-    signalGroup(child, 'SIGKILL');
+  } catch (error) {
+    close();
+    throw error;
+  }
+  return { session, close };
+}
+
+/** Writes the screenshot to `png` and the DOM to `html`; answers a `scrolled <key> <top>` line per box scrolled down. */
+async function writeShot(session, png, html) {
+  const shot = await session.send('Page.captureScreenshot', { format: 'png' });
+  writeFileSync(png, Buffer.from(shot.data, 'base64'));
+  const dom = await evaluate(session, 'document.documentElement.outerHTML');
+  writeFileSync(html, `${dom}\n`);
+  const scrolled = await evaluate(
+    session,
+    `[...document.querySelectorAll('[data-scroll]')].filter((e) => e.scrollTop > 0).map((e) => e.getAttribute('data-scroll') + ' ' + Math.round(e.scrollTop))`,
+  );
+  return { characters: dom.length + 1, scrolled };
+}
+
+const SHAPES = {
+  click: (step) => typeof step.click === 'string' && Object.keys(step).length === 1,
+  scroll: (step) => typeof step.scroll === 'string' && Number.isFinite(step.top) && Object.keys(step).length === 2,
+  wait: (step) =>
+    ((typeof step.wait === 'string' && step.wait !== '') || (Number.isFinite(step.wait) && step.wait >= 0)) &&
+    Object.keys(step).length === 1,
+  shot: (step) => typeof step.shot === 'string' && /^[\w-]+$/.test(step.shot) && Object.keys(step).length === 1,
+};
+
+/** Reads and checks a whole steps file, so a bad one is refused before Chrome or the dashboard starts. */
+function readSteps(file) {
+  let steps;
+  try {
+    steps = JSON.parse(readFileSync(file, 'utf8'));
+  } catch (error) {
+    refuse(`${file} is no steps file: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (!Array.isArray(steps) || steps.length === 0) refuse(`${file} must hold a non-empty JSON list of steps`);
+  const shots = new Set();
+  steps.forEach((step, at) => {
+    const kind =
+      step !== null && typeof step === 'object' ? Object.keys(SHAPES).find((each) => each in step) : undefined;
+    if (kind === undefined || !SHAPES[kind](step))
+      refuse(
+        `step ${at + 1} of ${file} is ${JSON.stringify(step)}: a step is {"click": css}, {"scroll": css, "top": px}, {"wait": css or ms} or {"shot": name}`,
+      );
+    if (kind === 'shot') {
+      if (shots.has(step.shot)) refuse(`step ${at + 1} of ${file} repeats the shot name ${JSON.stringify(step.shot)}`);
+      shots.add(step.shot);
+    }
+  });
+  return steps;
+}
+
+/** Runs `steps` in order on the open page, pushing each one's transcript lines to `out`; throws at the first miss. */
+async function runSteps(session, steps, dir, name, out) {
+  for (const [at, step] of steps.entries()) {
+    const head = `step ${at + 1} ${JSON.stringify(step)}`;
+    const miss = (within = '') => new Error(`step ${at + 1} (${JSON.stringify(step)}) matched nothing${within}`);
+    if ('click' in step) {
+      const hit = await evaluate(
+        session,
+        `(() => { const e = document.querySelector(${JSON.stringify(step.click)}); if (e === null) return false; e.click(); return true; })()`,
+      );
+      if (!hit) throw miss();
+      out.push(`${head}: clicked`);
+    } else if ('scroll' in step) {
+      const top = await evaluate(
+        session,
+        `(() => { const e = document.querySelector(${JSON.stringify(step.scroll)}); if (e === null) return null; e.scrollTop = ${step.top}; return Math.round(e.scrollTop); })()`,
+      );
+      if (top === null) throw miss();
+      out.push(`${head}: scrollTop ${top}`);
+    } else if ('wait' in step) {
+      const started = Date.now();
+      if (typeof step.wait === 'number') await Bun.sleep(step.wait);
+      else {
+        while (!(await evaluate(session, `document.querySelector(${JSON.stringify(step.wait)}) !== null`))) {
+          if (Date.now() - started > WAIT_SECONDS * 1000) throw miss(` within ${WAIT_SECONDS}s`);
+          await Bun.sleep(100);
+        }
+      }
+      out.push(`${head}: ${typeof step.wait === 'number' ? 'waited' : 'found after'} ${Date.now() - started}ms`);
+    } else {
+      const png = join(dir, `${name}-${step.shot}.png`);
+      const html = join(dir, `${name}-${step.shot}.html`);
+      const { characters, scrolled } = await writeShot(session, png, html);
+      out.push(`${head}: screenshot ${png}`, `  dom ${html}, ${characters} characters`);
+      for (const line of scrolled) out.push(`  scrolled ${line}`);
+    }
   }
 }
 
-async function capture(dir, name, query) {
+async function capture(dir, name, query, stepsFile, steps) {
   checkFake(join(dir, 'repo', '.sail'), `${dir} holds no demo repository: run \`demo.sh new ${dir}\` first`);
   if (!/^[\w-]+$/.test(name)) refuse(`a capture's name is letters, digits, - and _, not ${name}`);
   const browser = findChrome();
@@ -352,17 +447,39 @@ async function capture(dir, name, query) {
     const page = `${url}/${query === '' ? '' : `?${query}`}`;
     const png = join(dir, `${name}.png`);
     const html = join(dir, `${name}.html`);
-    let ending;
+    const lines = [];
+    let work;
     try {
-      await shoot(browser, join(dir, 'chrome'), page, png, html);
-      ending = `screenshot ${png}\ndom ${html}, ${readFileSync(html, 'utf8').length} characters`;
+      const opened = await Promise.race([
+        openPage(browser, join(dir, 'chrome'), page, steps !== undefined),
+        new Promise((_, fail) =>
+          setTimeout(() => fail(new Error(`no capture in ${TIMEOUT_SECONDS}s`)), TIMEOUT_SECONDS * 1000).unref(),
+        ),
+      ]);
+      work = opened;
+      if (steps === undefined) {
+        const png = join(dir, `${name}.png`);
+        const html = join(dir, `${name}.html`);
+        const { characters } = await writeShot(opened.session, png, html);
+        lines.push(`screenshot ${png}`, `dom ${html}, ${characters} characters`);
+      } else {
+        await Promise.race([
+          runSteps(opened.session, steps, dir, name, lines),
+          new Promise((_, fail) =>
+            setTimeout(() => fail(new Error(`steps took over ${TIMEOUT_SECONDS}s`)), TIMEOUT_SECONDS * 1000).unref(),
+          ),
+        ]);
+      }
     } catch (error) {
-      ending = `no capture: ${error instanceof Error ? error.message : String(error)}`;
+      lines.push(`no capture: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      work?.close();
     }
-    const entry = `$ dashboard ${page}\n${ending}\n`;
+    const ending = lines.join('\n');
+    const entry = `$ dashboard ${page}${stepsFile === undefined ? '' : ` steps=${stepsFile}`}\n${ending}\n`;
     appendFileSync(join(dir, 'transcript.txt'), `${entry}\n`);
     process.stdout.write(entry);
-    return ending.startsWith('no capture') ? 1 : 0;
+    return lines.some((line) => line.startsWith('no capture')) ? 1 : 0;
   } finally {
     stop();
     const killer = setTimeout(() => signalGroup(server, 'SIGKILL'), 5000);
@@ -395,14 +512,17 @@ if (command === 'new') {
   await runIn(dir, rest);
 } else if (command === 'dashboard') {
   const [name, ...picks] = rest;
-  if (name === undefined) refuse('usage: demo.sh dashboard <dir> <name> [repo=… run=… key=… tab=…]');
+  if (name === undefined) refuse('usage: demo.sh dashboard <dir> <name> [repo=… run=… key=… tab=… steps=…]');
   const query = new URLSearchParams();
+  let stepsFile;
   for (const pick of picks) {
-    const [, field, value] = /^(repo|run|key|tab)=(.+)$/.exec(pick) ?? [];
-    if (field === undefined) refuse(`${pick} picks nothing: repo=, run=, key= or tab=`);
-    query.set(field, value);
+    const [, field, value] = /^(repo|run|key|tab|steps)=(.+)$/.exec(pick) ?? [];
+    if (field === undefined) refuse(`${pick} picks nothing: repo=, run=, key=, tab= or steps=`);
+    if (field === 'steps') stepsFile = resolve(value);
+    else query.set(field, value);
   }
-  process.exit(await capture(dir, name, query.toString()));
+  const steps = stepsFile === undefined ? undefined : readSteps(stepsFile);
+  process.exit(await capture(dir, name, query.toString(), stepsFile, steps));
 } else {
   refuse(`no command ${command}: new, run or dashboard`);
 }
