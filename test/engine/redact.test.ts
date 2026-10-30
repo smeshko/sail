@@ -7,6 +7,11 @@ import { REDACTED, redactFile, redactor } from '../../src/engine/redact';
 import { PortError } from '../../src/ports/errors';
 
 const SECRET = 'ghp_MARKER_7c1d/9e+a=f';
+test('a secret is masked JSON-escaped, as a line of port-events.ndjson holds it', () => {
+  const secret = 'pa"ss\\word\tx';
+  expect(redactor([secret]).text(JSON.stringify({ message: `bad ${secret}` }))).toBe('{"message":"bad [redacted]"}');
+});
+
 test('base64 behind a one-byte lead is masked', () => {
   expect(redactor([SECRET]).text(base64(`user:${SECRET}`))).toBe('dXNlcjpn[redacted]');
 });

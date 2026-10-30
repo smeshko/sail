@@ -1,6 +1,7 @@
 // Masks secrets wherever an adapter could hand them on: in a message, in a provider's `raw`, in an event (DECISIONS
-// D11). Each secret is masked as written, URL-encoded and in base64, git's Basic credential `x-access-token:<secret>`
-// included, along with base64 cores behind one- and two-byte prefixes, so echoes leave as `[redacted]`.
+// D11). Each secret is masked as written, JSON-escaped, URL-encoded and in base64, git's Basic credential
+// `x-access-token:<secret>` included, along with base64 cores behind one- and two-byte prefixes, so echoes leave as
+// `[redacted]`.
 import { closeSync, fstatSync, openSync, readSync, renameSync, rmSync, writeSync } from 'node:fs';
 import { PortError } from '../ports/errors';
 
@@ -101,7 +102,7 @@ export interface Redactor {
 
 const base64 = (text: string): string => Buffer.from(text, 'utf8').toString('base64');
 
-/** Each form a secret can take. Base64 is masked with its padding, then without, as it reads inside a longer encoding. */
+/** Each form a secret can take, JSON-escaped included. Base64 is masked with its padding, then without, as it reads inside a longer encoding. */
 function forms(secret: string): string[] {
   const encoded = [base64(secret), base64(`x-access-token:${secret}`)];
   const bytes = Buffer.from(secret);
@@ -112,7 +113,14 @@ function forms(secret: string): string[] {
         .slice(4, Math.floor((lead + bytes.length) / 3) * 4),
     )
     .filter((core) => core.length >= 8);
-  return [secret, encodeURIComponent(secret), ...encoded, ...encoded.map((form) => form.replace(/=+$/, '')), ...cores];
+  return [
+    secret,
+    JSON.stringify(secret).slice(1, -1),
+    encodeURIComponent(secret),
+    ...encoded,
+    ...encoded.map((form) => form.replace(/=+$/, '')),
+    ...cores,
+  ];
 }
 
 export function redactor(secrets: readonly string[]): Redactor {
