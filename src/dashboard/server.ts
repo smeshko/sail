@@ -1,11 +1,16 @@
-// The dashboard's server: the registry's run files and queues, read-only but for one request, on 127.0.0.1. Every
+// The dashboard's server: the registry's run files and queues, read-only but for three requests, on 127.0.0.1. Every
 // request passes the guard first:
 //
 // 1. `Host` must be this server's (`127.0.0.1:<port>` or `localhost:<port>`), so a DNS-rebinding page gets 403.
 // 2. Only GET: anything else is 405, OPTIONS included, so a cross-origin preflight fails. The one exception is a POST to
-//    `/api/repos/<repo>/queues/<workflow>/move`, which needs the client header (403), `Content-Type: application/json`
-//    (415) and an `Origin` that is absent or this server's own (403). It never writes a queue: it drops a move command
-//    in the watcher's inbox, as `sail queue move` does, and answers 409 when no watcher of that clone watches it.
+//    `/api/repos/<repo>/queues/<workflow>/move`, and two more, `/api/repos/<repo>/runs/<run>/resume` and `…/restart`.
+//    Each needs the client header (403), `Content-Type: application/json` (415) and an `Origin` that is absent or this
+//    server's own (403). A move never writes a queue: it drops a move command in the watcher's inbox, as `sail queue
+//    move` does, and answers 409 when no watcher of that clone watches it. A resume or a restart checks again what the
+//    run offers (src/dashboard/actions.ts), then starts `sail resume <run>` or `sail run --from-run <run> --stage …`
+//    itself, detached in the clone, its output in `.sail-runs/dashboard/<run id>.log`, as a typed command would: it
+//    needs no watcher and skips the watcher's cap. It answers 202 once the run has started, or 409 with the line the
+//    start was refused with.
 // 3. A WebSocket upgrade needs a same-origin `Origin`, or no `Origin` and the client header: browsers can't set headers
 //    on an upgrade, but always send `Origin`.
 // 4. A GET of exactly `/` is the page, which a navigation fetches with no header of its own. It holds no data: all it
@@ -13,13 +18,17 @@
 // 5. Any other request needs `X-Sail-Dashboard: 1`, which a cross-origin page can't send without a preflight.
 //
 // No answer carries a CORS header. Errors are JSON, `{ "error": "…" }`.
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import type { Server, ServerWebSocket } from 'bun';
 import { z } from 'zod';
-import { runsDir } from '../engine/run-dir';
+import { readStatus, runsDir } from '../engine/run-dir';
+import { RUN_HEADER_FILE, readRunHeader } from '../engine/run-header';
+import { newRunId } from '../engine/run-id';
 import { dropCommand } from '../watch/inbox';
 import { liveSet, liveWatcher } from '../watch/registry';
+import { lastLine, type SpawnedRun, spawnDetached } from '../watch/spawn';
+import { runActions } from './actions';
 import { callFile, containedFile, findRepo, findRunDir, repos, runItems } from './files';
 import { renderMarkdown } from './markdown';
 import { createPage } from './page';
@@ -34,6 +43,14 @@ export interface DashboardOptions {
   followPollMs?: number;
   /** How often the index stream rereads the registry. 1000 ms by default. */
   indexPollMs?: number;
+  /** The environment a run it starts gets, and the leases are found by. `process.env` when left out. */
+  env?: Readonly<Record<string, string | undefined>>;
+  /** Where branch leases are looked up, instead of the fake workspace's or the machine's. */
+  leasesDir?: string;
+  /** The `sail` a resume or a restart starts: this checkout's when left out. */
+  cli?: readonly string[];
+  /** How long a start is waited for before it is answered as under way. 120 000 ms by default. */
+  startWaitMs?: number;
 }
 
 export interface Dashboard {
@@ -54,6 +71,21 @@ const origins = (port: number) => [`127.0.0.1:${port}`, `localhost:${port}`];
 
 /** The one path a POST is served at: `/api/repos/<repo>/queues/<workflow>/move`. */
 const MOVE_PATH = /^\/api\/repos\/[^/]+\/queues\/[^/]+\/move$/;
+
+/** The paths a run is started at: `/api/repos/<repo>/runs/<run>/resume` and `…/restart`. */
+const RESUME_PATH = /^\/api\/repos\/[^/]+\/runs\/[^/]+\/resume$/;
+const RESTART_PATH = /^\/api\/repos\/[^/]+\/runs\/[^/]+\/restart$/;
+
+const ResumeBody = z.strictObject({
+  raise: z
+    .union([
+      z.strictObject({ usd: z.number().min(0.01).optional() }),
+      z.strictObject({ minutes: z.number().min(0.01).optional() }),
+    ])
+    .optional(),
+});
+
+const RestartBody = z.strictObject({ stage: z.string().min(1) });
 
 const MoveBody = z
   .strictObject({
@@ -116,6 +148,157 @@ async function moveRoute(registryDir: string, segments: string[], request: Reque
   return Response.json({ file }, { status: 202 });
 }
 
+/** The run ids with a start under way: a second request for one is refused. */
+interface Starts {
+  options: DashboardOptions;
+  underway: Set<string>;
+}
+
+/** The JSON body of `request`, or the answer that refuses it. */
+async function bodyOf<T>(request: Request, schema: z.ZodType<T>, what: string): Promise<{ body: T } | Response> {
+  const text = await request.text();
+  let data: unknown;
+  try {
+    data = text.length > 4096 ? undefined : JSON.parse(text);
+  } catch {
+    return error(400, 'the body is not JSON');
+  }
+  const parsed = schema.safeParse(data);
+  if (parsed.success) return { body: parsed.data };
+  const [issue] = parsed.error.issues;
+  return error(400, `not ${what}: ${[issue?.path.join('.'), issue?.message].filter(Boolean).join(' ')}`);
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Waits for the start `spawned` made: until `has()` holds, which is 202, or the child exits. An exit before `has()`
+ * holds, a refusal's code 3, an internal error's or a signal's, is answered 409 with the last line it printed. A start
+ * that takes longer than `startWaitMs` is 202: the run is detached and on its way.
+ */
+async function started(
+  spawned: SpawnedRun,
+  log: string,
+  startWaitMs: number,
+  has: () => boolean,
+  runId: string,
+): Promise<Response> {
+  let exit: number | null | undefined;
+  spawned.exited.then((code) => {
+    exit = code;
+  });
+  const deadline = Date.now() + startWaitMs;
+  while (exit === undefined) {
+    if (has() || Date.now() >= deadline) return Response.json({ runId }, { status: 202 });
+    await Promise.race([sleep(100), spawned.exited]);
+  }
+  if (has()) return Response.json({ runId }, { status: 202 });
+  return error(409, lastLine(log, spawned.logFrom) ?? `the start exited ${exit ?? 'on a signal'}`);
+}
+
+/** The run the request names, with its repository, or the answer that refuses it. */
+function runOf(registryDir: string, segments: string[]) {
+  const [, , name = '', , runId = ''] = segments;
+  const entry = findRepo(registryDir, name);
+  if (entry === undefined) return error(404, `no repository '${name}'`);
+  const dir = findRunDir(entry, runId);
+  if (typeof dir !== 'string') return error(404, dir.missing);
+  return { entry, runId, dir };
+}
+
+/**
+ * Starts `sail resume <run>` for a suspended run, detached in its clone. A run suspended over its budget needs the
+ * raise of the budget it ran out of. Answers 202 once STATUS no longer reads `suspended`.
+ */
+async function resumeRoute(starts: Starts, segments: string[], request: Request): Promise<Response> {
+  const { options, underway } = starts;
+  const found = runOf(options.registryDir, segments);
+  if (found instanceof Response) return found;
+  const { entry, runId, dir } = found;
+  const parsed = await bodyOf(request, ResumeBody, 'a resume');
+  if (parsed instanceof Response) return parsed;
+  const actions = runActions(entry, runId, { leasesDir: options.leasesDir, env: options.env });
+  const { resume } = actions;
+  if (resume === undefined || !resume.enabled) {
+    return error(409, resume?.why ?? actions.why ?? `run ${runId} offers no resume`);
+  }
+  const raise = parsed.body.raise as { usd?: number; minutes?: number } | undefined;
+  const needed = resume.raise;
+  if (needed !== undefined && raise?.[needed] === undefined) {
+    return error(400, `run ${runId} ran out of its ${needed === 'usd' ? 'dollars' : 'minutes'}: give raise.${needed}`);
+  }
+  const flags = [
+    ...(raise?.usd === undefined ? [] : ['--raise-budget', String(raise.usd)]),
+    ...(raise?.minutes === undefined ? [] : ['--raise-minutes', String(raise.minutes)]),
+  ];
+  if (underway.has(runId)) return error(409, `a start of ${runId} is already under way`);
+  underway.add(runId);
+  try {
+    const log = join(runsDir(entry.sailDir), 'dashboard', `${runId}.log`);
+    const spawned = spawnDetached(
+      dirname(entry.sailDir),
+      log,
+      ['resume', runId, ...flags],
+      environmentOf(options),
+      options.cli,
+    );
+    const suspended = () => {
+      try {
+        return readStatus(dir).status !== 'suspended';
+      } catch {
+        return false;
+      }
+    };
+    return await started(spawned, log, options.startWaitMs ?? 120_000, suspended, runId);
+  } finally {
+    underway.delete(runId);
+  }
+}
+
+/**
+ * Starts `sail run --from-run <run> --stage <stage> --continue --run-id <minted>` for a failed run, detached in its
+ * clone, under an id minted here so the answer can name the new run. Answers 202 `{ runId }` once its `run.json` exists.
+ */
+async function restartRoute(starts: Starts, segments: string[], request: Request): Promise<Response> {
+  const { options, underway } = starts;
+  const found = runOf(options.registryDir, segments);
+  if (found instanceof Response) return found;
+  const { entry, runId, dir } = found;
+  const parsed = await bodyOf(request, RestartBody, 'a restart');
+  if (parsed instanceof Response) return parsed;
+  const actions = runActions(entry, runId, { leasesDir: options.leasesDir, env: options.env });
+  const { restart } = actions;
+  if (restart === undefined || !restart.enabled) {
+    return error(409, restart?.why ?? actions.why ?? `run ${runId} offers no restart`);
+  }
+  const { stage } = parsed.body;
+  if (!restart.stages.some((each) => each.stage === stage)) {
+    const known = restart.stages.map((each) => each.stage).join(', ');
+    return error(400, `'${stage}' is no stage to restart ${runId} from: ${known}`);
+  }
+  const { source } = readRunHeader(dir);
+  if (source.kind !== 'ticket') return error(409, `run ${runId} started from a pull request`);
+  if (underway.has(runId)) return error(409, `a start of ${runId} is already under way`);
+  underway.add(runId);
+  try {
+    const minted = newRunId(source.ticketKey);
+    const runs = runsDir(entry.sailDir);
+    const log = join(runs, 'dashboard', `${minted}.log`);
+    const args = ['run', '--from-run', runId, '--stage', stage, '--continue', '--run-id', minted];
+    const spawned = spawnDetached(dirname(entry.sailDir), log, args, environmentOf(options), options.cli);
+    const opened = () => existsSync(join(runs, minted, RUN_HEADER_FILE));
+    return await started(spawned, log, options.startWaitMs ?? 120_000, opened, minted);
+  } finally {
+    underway.delete(runId);
+  }
+}
+
+/** The environment a run the server starts gets: the server's own, with no variable left unset. */
+function environmentOf(options: DashboardOptions): Record<string, string> {
+  const env = options.env ?? process.env;
+  return Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined));
+}
+
 /** The refusal of a request the dashboard doesn't serve, or undefined to let it through. */
 export function guard(request: Request, port: number): Response | undefined {
   const allowed = origins(port);
@@ -123,16 +306,19 @@ export function guard(request: Request, port: number): Response | undefined {
     return error(403, 'this dashboard answers only its own host');
   const client = request.headers.get(CLIENT_HEADER) === '1';
   if (request.method !== 'GET') {
-    if (request.method !== 'POST' || !MOVE_PATH.test(new URL(request.url).pathname)) {
-      return error(405, 'the dashboard answers only GET, and POST to a queue move', { Allow: 'GET' });
+    const path = new URL(request.url).pathname;
+    if (request.method !== 'POST' || ![MOVE_PATH, RESUME_PATH, RESTART_PATH].some((each) => each.test(path))) {
+      return error(405, 'the dashboard answers only GET, and POST to a queue move, a resume or a restart', {
+        Allow: 'GET',
+      });
     }
     if (!client) return error(403, `send ${CLIENT_HEADER}: 1`);
     if (!(request.headers.get('content-type') ?? '').toLowerCase().startsWith('application/json')) {
-      return error(415, 'send the move as application/json');
+      return error(415, 'send the body as application/json');
     }
     const origin = request.headers.get('origin');
     if (origin !== null && !allowed.some((host) => origin === `http://${host}`)) {
-      return error(403, 'a move needs this dashboard as its origin');
+      return error(403, 'a POST needs this dashboard as its origin');
     }
     return undefined;
   }
@@ -160,7 +346,8 @@ function file(runDir: string, path: string, type: string): Response {
 }
 
 /** The answer to a GET of `/api/…`, from the path's decoded segments. */
-function route(registryDir: string, segments: string[], url: URL): Response {
+function route(options: DashboardOptions, segments: string[], url: URL): Response {
+  const { registryDir } = options;
   const [api, reposWord, name, kind, runId, part, key, what, ...rest] = segments;
   if (api !== 'api' || reposWord !== 'repos') return error(404, 'no such route');
   if (name === undefined) return Response.json(repos(registryDir));
@@ -171,6 +358,9 @@ function route(registryDir: string, segments: string[], url: URL): Response {
   if (runId === undefined) return Response.json(runItems(entry));
   const runDir = findRunDir(entry, runId);
   if (typeof runDir !== 'string') return error(404, runDir.missing);
+  if (part === 'actions' && key === undefined) {
+    return Response.json(runActions(entry, runId, { leasesDir: options.leasesDir, env: options.env }));
+  }
   if (part === 'summary' && key === undefined) return file(runDir, join(runDir, 'summary.json'), 'application/json');
   if (part === 'events' && key === undefined) {
     return file(runDir, join(runDir, 'events.ndjson'), 'application/x-ndjson');
@@ -222,6 +412,7 @@ type SocketData = { run: string } | { queue: string } | { index: true };
 /** Starts the dashboard on 127.0.0.1. A port in use is refused. */
 export function startDashboard(options: DashboardOptions): Dashboard | { refused: string } {
   const { registryDir } = options;
+  const starts: Starts = { options, underway: new Set() };
   const feed = createIndexFeed(registryDir, options.indexPollMs ?? 1000);
   const page = createPage();
   const followPollMs = options.followPollMs ?? 200;
@@ -255,8 +446,17 @@ export function startDashboard(options: DashboardOptions): Dashboard | { refused
         }
         const segments = segmentsOf(url);
         if (segments === undefined) return error(400, 'the path is not percent-encoded properly');
-        if (request.method === 'POST') return moveRoute(registryDir, segments, request);
-        return route(registryDir, segments, url);
+        if (request.method === 'POST') {
+          const path = url.pathname;
+          // A start is waited for up to `startWaitMs`, past Bun's 10 s idle timeout, which would close the request.
+          const start = RESUME_PATH.test(path) ? resumeRoute : RESTART_PATH.test(path) ? restartRoute : undefined;
+          if (start !== undefined) {
+            self.timeout(request, 0);
+            return start(starts, segments, request);
+          }
+          return moveRoute(registryDir, segments, request);
+        }
+        return route(options, segments, url);
       },
       websocket: {
         open(ws) {

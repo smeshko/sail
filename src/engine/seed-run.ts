@@ -15,7 +15,8 @@
 //      included: a seed never splits a group, so the seeded run runs the whole group again. A stage with only step lines
 //      and no recorded group is refused if another call is incomplete too: they may be grouped. Each entry must point inside its own
 //      call directory, at regular files, since that is what a run writes and all the copy takes.
-// Then the run id is minted and the header built and checked, with `fromRun`, `reused` (the seed's length, the boundary a
+// Then the run id is minted, or the one the caller minted is taken, refused unless it is a new run's id of the source's
+// ticket, and the header built and checked, with `fromRun`, `reused` (the seed's length, the boundary a
 // resume restores the reused calls' reports by) and no claim: a seeded run reads no
 // ticket and claims nothing: the source's ticket, as its events name it, is carried for the summary. An abort seen by
 // then refuses. Then, as a start does, the branch is leased and the run directory and the workspace made, each undone
@@ -64,7 +65,7 @@ import {
   workspaceFields,
   writeRunHeader,
 } from './run-header';
-import { newRunId } from './run-id';
+import { isRunIdOf, newRunId } from './run-id';
 
 export interface SeededRunOptions {
   secrets?: readonly string[];
@@ -82,6 +83,8 @@ export interface SeededRunOptions {
   clock?: Clock;
   /** Fills the run id's random part. */
   random?: (bytes: Uint8Array) => Uint8Array;
+  /** The id the caller minted for the run, `<ticket key>-<26 Crockford characters>`, of no existing run. */
+  runId?: string;
   /** Refuses the run when it has aborted by the time the run would be opened. */
   signal?: AbortSignal;
 }
@@ -171,13 +174,24 @@ function callDirs(sourceDir: string, runId: string, entries: readonly JournalEnt
   return [...dirs];
 }
 
+/** Why a seeded run can't start from the pull-request run `fromRun`, as a refusal words it. */
+export const notTicketRun = (fromRun: string, number: number) =>
+  `a seeded run starts from a ticket run: run ${fromRun} started from pull request #${number}`;
+
+/** Why a seeded run can't start from the run `fromRun` that started before runs had workspaces. */
+export const noWorkspaceRun = (fromRun: string) =>
+  `run ${fromRun} started before runs had workspaces: it can't seed a run`;
+
+/** Why a seeded run can't start from the run `fromRun` whose intake didn't pass. */
+export const noIntakeRun = (fromRun: string) => `run ${fromRun}'s intake didn't pass: there is nothing to reuse`;
+
 /**
  * The seed's cut before stage's first call or any line of its group. Step lines carry no group, so read the group
  * from call lines, then include every member's step lines when finding its start. No line of stage means -1.
  * With only steps and no group-bearing call, refuse if another call is incomplete too: they may be grouped.
  * A lone incomplete call is safe: the cut excludes all its steps, and no other incomplete call can be reused.
  */
-function seedEnd(entries: readonly JournalEntry[], stage: string): number | { incomplete: string } {
+export function seedEnd(entries: readonly JournalEntry[], stage: string): number | { incomplete: string } {
   const first = entries.findIndex((entry) => entry.stage === stage);
   if (first === -1) return -1;
   const own = `${stage}#${entries[first]?.call}`;
@@ -214,14 +228,12 @@ export async function openSeededRun(options: SeededRunOptions): Promise<OpenedRu
   if ('refused' in source) return source;
   const from = source.header.source;
   if (from.kind !== 'ticket') {
-    return {
-      refused: `a seeded run starts from a ticket run: run ${fromRun} started from pull request #${from.number}`,
-    };
+    return { refused: notTicketRun(fromRun, from.number) };
   }
   const { ticketKey } = from;
   const { branch: sourceBranch, repository } = source.header;
   if (sourceBranch === undefined || repository === undefined) {
-    return { refused: `run ${fromRun} started before runs had workspaces: it can't seed a run` };
+    return { refused: noWorkspaceRun(fromRun) };
   }
   const unmarked = unmarkedRefusal(fromRun, source.header, 'seed a run');
   if (unmarked !== undefined) return { refused: unmarked };
@@ -248,7 +260,7 @@ export async function openSeededRun(options: SeededRunOptions): Promise<OpenedRu
   }
   const [intake] = entries;
   if (intake?.key !== INTAKE_KEY || intake.outcome !== 'passed') {
-    return { refused: `run ${fromRun}'s intake didn't pass: there is nothing to reuse` };
+    return { refused: noIntakeRun(fromRun) };
   }
   const at = seedEnd(entries, stage);
   if (typeof at !== 'number') {
@@ -262,7 +274,21 @@ export async function openSeededRun(options: SeededRunOptions): Promise<OpenedRu
   if ('refused' in copied) return copied;
   const ticket = sourceTicket(source.dir);
 
-  const runId = newRunId(ticketKey, now.getTime(), options.random);
+  const minted = options.runId;
+  if (minted !== undefined) {
+    if (!isRunIdOf(ticketKey, minted)) {
+      return {
+        refused: `--run-id takes the id of a new run of ${ticketKey}, ${ticketKey}-<26 Crockford characters>: '${minted}' is not one`,
+      };
+    }
+    const runs = runsDir(found.dir);
+    if (existsSync(join(runs, minted))) {
+      return {
+        refused: `--run-id names run ${minted}, which already exists in ${relative(dirname(found.dir), runs)}: a seeded run is a new run`,
+      };
+    }
+  }
+  const runId = minted ?? newRunId(ticketKey, now.getTime(), options.random);
   const branch = `${sourceBranch}-seeded-${runId.slice(-8).toLowerCase()}`;
   const runSource: Source = { kind: 'ticket', ticketKey, via: 'cli', forced: [] };
   const unopened = buildRunHeader({

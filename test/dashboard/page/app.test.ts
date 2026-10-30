@@ -4,6 +4,7 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { runActions } from '../../../src/dashboard/actions';
 import { callFile, findRepo, findRunDir, index } from '../../../src/dashboard/files';
 import { boot, FILTER_KEY, type Page, RAIL_KEY, THEME_KEY } from '../../../src/dashboard/page/app';
 import type { ConnectHandlers, PageHost, Region } from '../../../src/dashboard/page/host';
@@ -73,12 +74,23 @@ class FakeHost implements PageHost {
   onKey(handler: (key: string, inInput: boolean) => void) {
     this.key = handler;
   }
+  /** The reads of a run's actions: answered at once, and kept apart from the reads of its calls. */
+  actionReads: string[] = [];
   get(path: string) {
+    if (path.endsWith('/actions')) {
+      this.actionReads.push(path);
+      return Promise.resolve(this.answer(path));
+    }
     return new Promise<{ status: number; body: string }>((done) => {
       const read = { path, resolve: () => done(this.answer(path)) };
       this.reads.push(read);
       if (!this.hold) read.resolve();
     });
+  }
+  /** The values of the fields the page reads, by name. */
+  fields: Record<string, string> = {};
+  value(name: string) {
+    return this.fields[name];
   }
   /** The POSTs made, and what the dashboard answers them. */
   posts: { path: string; body: unknown }[] = [];
@@ -94,6 +106,10 @@ class FakeHost implements PageHost {
     const url = new URL(path, 'http://dashboard');
     const [, , , repo = '', , runId = '', , key = '', what] = url.pathname.split('/').map(decodeURIComponent);
     const entry = findRepo(this.machine.registryDir, repo);
+    if (url.pathname.endsWith('/actions') && entry !== undefined) {
+      const leasesDir = join(this.machine.root, 'leases');
+      return { status: 200, body: JSON.stringify(runActions(entry, runId, { leasesDir })) };
+    }
     const dir = entry === undefined ? { missing: '' } : findRunDir(entry, runId);
     if (typeof dir !== 'string') return { status: 404, body: '' };
     const name = what === 'result' ? 'result.json' : (STREAMS[url.searchParams.get('stream') ?? ''] ?? '');
@@ -1275,4 +1291,201 @@ test("a click on a waiting row's down button posts the move to the queue's move 
     refused: true,
     cleared: [undefined, false],
   });
+});
+
+// Resume and Restart: what the open run offers is read from its actions route, a first click arms a button, and a second
+// posts it.
+const NEW_ID = 'FAKE-2-01HZX3Y4Z5A6B7C8D9E0F1G2H3';
+const GOLDEN_PATH = `/api/repos/alpha/runs/${GOLDEN_RUN_ID}`;
+const FAKE_2_PATH = `/api/repos/alpha/runs/${FAKE_2_ID}`;
+const FAKE_3_PATH = `/api/repos/beta/runs/${FAKE_3_ID}`;
+const buttons = (region: string | undefined) =>
+  [
+    ...(region ?? '').matchAll(
+      /<button class="btn( armed)?"( disabled)? ?(?:data-action="(\w+-run)")?>([^<]*)<\/button>/g,
+    ),
+  ].map(([, armed, disabled, action, label]) => [
+    label,
+    action,
+    armed === undefined ? '' : 'armed',
+    disabled === undefined ? '' : 'disabled',
+  ]);
+
+/** Boots the page on `run` of `repo`, its events replayed and its actions read, and settled. */
+async function openOffering(repo: string, runId: string, dir: string) {
+  page = boot(host);
+  host.push(host.open('index')[0], indexMessage());
+  host.click({ action: 'open', repo, run: runId });
+  replay(host.open('run=')[0], dir);
+  await settle();
+  host.advance(100);
+}
+
+/** The queue item of FAKE-3 as the watcher leaves it when it has let go: settled, so nothing holds the run. */
+const settleQueue = () => {
+  const file = join(queueDirOf(m), 'queue.json');
+  writeFileSync(file, readFileSync(file, 'utf8').replace('"state": "dispatched"', '"state": "done"'));
+};
+
+test("a failed run's view offers Restart with its stages and the failed one chosen, and no Resume; the first click arms it and posts nothing, the second posts the stage and opens the new run", async () => {
+  await openOffering('alpha', FAKE_2_ID, fake2Dir(m));
+  expect(host.actionReads).toEqual([`${GOLDEN_PATH}/actions`, `${FAKE_2_PATH}/actions`]);
+  expect(buttons(host.regions.main).filter(([, action]) => action?.endsWith('-run'))).toEqual([
+    ['restart', 'restart-run', '', ''],
+  ]);
+  expect(host.regions.main).toContain(
+    '<option value="implement" title="implement#1 and everything after it, in loop fix from iteration 1" selected>',
+  );
+  host.click({ action: 'restart-run' });
+  host.advance(100);
+  expect(host.posts).toEqual([]);
+  expect(buttons(host.regions.main).find(([, action]) => action === 'restart-run')).toEqual([
+    'confirm restart from implement · budget $25.00',
+    'restart-run',
+    'armed',
+    '',
+  ]);
+  host.postAnswer = { status: 202, body: JSON.stringify({ runId: NEW_ID }) };
+  host.click({ action: 'restart-run' });
+  await settle();
+  host.advance(100);
+  expect(host.posts).toEqual([{ path: `${FAKE_2_PATH}/restart`, body: { stage: 'implement' } }]);
+  expect([host.open('run=').map((socket) => socket.query), page?.ui.runId, page?.ui.armed]).toEqual([
+    [runQuery('alpha', NEW_ID)],
+    NEW_ID,
+    undefined,
+  ]);
+});
+
+test('a stage chosen in the list is the one a restart is armed and posted with, and changing it after arming arms again', async () => {
+  await openOffering('alpha', FAKE_2_ID, fake2Dir(m));
+  host.fields.stage = 'spec';
+  host.click({ action: 'restart-run' });
+  host.advance(100);
+  expect(buttons(host.regions.main).find(([, action]) => action === 'restart-run')?.[0]).toBe(
+    'confirm restart from spec · budget $25.00',
+  );
+  host.fields.stage = 'implement';
+  host.click({ action: 'restart-run' });
+  host.advance(100);
+  expect(host.posts).toEqual([]);
+  expect(buttons(host.regions.main).find(([, action]) => action === 'restart-run')?.[0]).toBe(
+    'confirm restart from implement · budget $25.00',
+  );
+  host.click({ action: 'restart-run' });
+  await settle();
+  expect(host.posts).toEqual([{ path: `${FAKE_2_PATH}/restart`, body: { stage: 'implement' } }]);
+});
+
+test("a refusal is shown beside the buttons in the dashboard's words and disarms, and a request that got no answer says so", async () => {
+  await openOffering('alpha', FAKE_2_ID, fake2Dir(m));
+  host.click({ action: 'restart-run' });
+  host.postAnswer = {
+    status: 409,
+    body: JSON.stringify({ error: 'sail run: branch sail/x is leased by run FAKE-9-Y' }),
+  };
+  host.click({ action: 'restart-run' });
+  await settle();
+  host.advance(100);
+  expect(host.regions.main).toContain(
+    '<span class="warnchip">sail run: branch sail/x is leased by run FAKE-9-Y</span>',
+  );
+  expect(buttons(host.regions.main).find(([, action]) => action === 'restart-run')?.[0]).toBe('restart');
+  host.postAnswer = { status: 0, body: '' };
+  host.click({ action: 'restart-run' });
+  host.click({ action: 'restart-run' });
+  await settle();
+  host.advance(100);
+  expect(host.regions.main).toContain(
+    '<span class="warnchip">the restart could not be sent: the dashboard did not answer</span>',
+  );
+  expect(page?.ui.runId).toBe(FAKE_2_ID);
+});
+
+test('any other click disarms an armed button', async () => {
+  await openOffering('alpha', FAKE_2_ID, fake2Dir(m));
+  host.click({ action: 'restart-run' });
+  host.click({ action: 'toggle-theme' });
+  host.advance(100);
+  expect(buttons(host.regions.main).find(([, action]) => action === 'restart-run')?.[0]).toBe('restart');
+  host.click({ action: 'restart-run' });
+  await settle();
+  expect(host.posts).toEqual([]);
+});
+
+test('a suspended run over its dollars offers Resume with a raise field and no Restart; with no raise typed a click gives a notice, and with one the second click posts it and reads the run again', async () => {
+  settleQueue();
+  await openOffering('beta', FAKE_3_ID, m.beta.runDir);
+  expect(host.regions.main).toContain('name="raise"');
+  expect(buttons(host.regions.main).filter(([, action]) => action?.endsWith('-run'))).toEqual([
+    ['resume', 'resume-run', '', ''],
+  ]);
+  host.click({ action: 'resume-run' });
+  host.advance(100);
+  expect([host.posts, page?.ui.armed]).toEqual([[], undefined]);
+  expect(host.regions.main).toContain('give the dollars to raise the budget by: at least 0.01');
+  host.fields.raise = '5';
+  host.click({ action: 'resume-run' });
+  host.advance(100);
+  expect(buttons(host.regions.main).find(([, action]) => action === 'resume-run')?.[0]).toBe(
+    'confirm resume · spent $1.06 of $1.00',
+  );
+  const before = host.open('run=')[0];
+  host.click({ action: 'resume-run' });
+  await settle();
+  expect(host.posts).toEqual([{ path: `${FAKE_3_PATH}/resume`, body: { raise: { usd: 5 } } }]);
+  expect([before?.closed, host.open('run=').map((socket) => socket.query)]).toEqual([
+    true,
+    [runQuery('beta', FAKE_3_ID)],
+  ]);
+});
+
+test('a run the watcher has is offered Resume disabled with the reason, and a click posts nothing', async () => {
+  await openOffering('beta', FAKE_3_ID, m.beta.runDir);
+  expect(
+    buttons(host.regions.main).filter(
+      ([, action]) => action === undefined && ['resume', 'restart'].includes(action ?? ''),
+    ),
+  ).toEqual([]);
+  expect(host.regions.main).toContain('<button class="btn" disabled>resume</button>');
+  expect(host.regions.main).toContain('ticket-to-pr&#39;s watcher has this run: ticket:FAKE-3 is dispatched');
+  host.click({ action: 'resume-run' });
+  host.click({ action: 'resume-run' });
+  await settle();
+  expect(host.posts).toEqual([]);
+});
+
+test("the open run's actions are read again when the index shows its status change, and the armed button is disarmed", async () => {
+  await openOffering('alpha', FAKE_2_ID, fake2Dir(m));
+  host.click({ action: 'restart-run' });
+  writeFileSync(join(fake2Dir(m), 'STATUS'), 'running\n');
+  host.push(host.open('index')[0], indexMessage());
+  await settle();
+  host.advance(100);
+  expect(host.actionReads).toEqual([`${GOLDEN_PATH}/actions`, `${FAKE_2_PATH}/actions`, `${FAKE_2_PATH}/actions`]);
+  expect(page?.ui.armed).toBeUndefined();
+  expect(host.regions.main).toContain(`run ${FAKE_2_ID} is running`);
+  host.push(host.open('index')[0], indexMessage());
+  await settle();
+  expect(host.actionReads).toHaveLength(3);
+});
+
+test("a stage chosen and a raise typed on one run don't carry over to the next opened, which defaults to its own failed stage (review R7)", async () => {
+  await openOffering('alpha', FAKE_2_ID, fake2Dir(m));
+  host.fields = { stage: 'spec', raise: '7' };
+  host.click({ action: 'restart-run' });
+  host.advance(100);
+  expect(page?.ui.restartStage).toBe('spec');
+  // The first draw after the switch still finds the fields of the run left behind.
+  host.click({ action: 'select-run', repo: 'alpha', run: GOLDEN_RUN_ID });
+  host.advance(100);
+  expect([page?.ui.restartStage, page?.ui.raise]).toEqual([undefined, undefined]);
+  host.fields = {};
+  host.click({ action: 'select-run', repo: 'alpha', run: FAKE_2_ID });
+  replay(host.open('run=')[0], fake2Dir(m));
+  await settle();
+  host.advance(100);
+  expect(host.regions.main).toContain(
+    '<option value="implement" title="implement#1 and everything after it, in loop fix from iteration 1" selected>',
+  );
 });

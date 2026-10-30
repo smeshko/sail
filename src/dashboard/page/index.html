@@ -160,6 +160,33 @@
         border-color: var(--line-2);
         color: var(--fg);
       }
+      .btn[disabled] {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .btn.armed {
+        border-color: var(--warn);
+        color: var(--fg);
+      }
+      .acts {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 12px;
+        font-family: var(--mono);
+        font-size: 12px;
+      }
+      .act {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .act-why {
+        color: var(--fg-4);
+      }
+      .act .num {
+        width: 7em;
+      }
       .mvs {
         display: inline-flex;
         gap: 4px;

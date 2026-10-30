@@ -22,7 +22,7 @@ const WORKFLOW = 'workflows/ticket-to-pr/workflow.ts';
 const PROMPT = 'workflows/ticket-to-pr/stages/spec/prompt.md';
 const EDIT = 'Keep the spec to one page.';
 const SUMMARY = 'Add --shout to greet() and the CLI, upper-casing the whole line.';
-const USAGE = 'sail run: usage: sail run --from-run <run> --stage <stage> [--continue]\n';
+const USAGE = 'sail run: usage: sail run --from-run <run> --stage <stage> [--continue] [--run-id <id>]\n';
 const STAGES = 'implement, publish, self-review, spec, tests';
 
 const sha256 = (path: string) => new Bun.CryptoHasher('sha256').update(readFileSync(path)).digest('hex');
@@ -95,6 +95,29 @@ test('sail run --from-run --stage spec, after an edit of the spec prompt, reruns
       summary: [SUMMARY, false, ran.runId],
       journal: ['intake#1', 'spec#1'],
     });
+  });
+}, 60_000);
+
+test('sail run --from-run --run-id starts the seeded run under exactly that id', async () => {
+  await withTempRepo(async (repo) => {
+    const from = await source.copyInto(repo.dir);
+    const id = 'FAKE-1-01HZX3Y4Z5A6B7C8D9E0F1G2H3';
+    const ran = await sailRun(repo, from.runId, ['--from-run', from.runId, '--stage', 'spec', '--run-id', id]);
+    expect([ran.code, ran.runId, json(ran.dir, 'run.json').fromRun]).toEqual([EXIT_SUSPENDED, id, from.runId]);
+  });
+}, 60_000);
+
+test('sail run --from-run with a --run-id of another ticket is refused with exit 3, one line, and starts no run', async () => {
+  await withTempRepo(async (repo) => {
+    const from = await source.copyInto(repo.dir);
+    const id = 'FAKE-2-01HZX3Y4Z5A6B7C8D9E0F1G2H3';
+    const ran = await sailRun(repo, from.runId, ['--from-run', from.runId, '--stage', 'spec', '--run-id', id]);
+    expect([ran.code, ran.stdout, ran.stderr, runIds(repo.dir)]).toEqual([
+      EXIT_REFUSED,
+      '',
+      `sail run: --run-id takes the id of a new run of FAKE-1, FAKE-1-<26 Crockford characters>: '${id}' is not one\n`,
+      [from.runId],
+    ]);
   });
 }, 60_000);
 
@@ -229,8 +252,9 @@ test('the usage lists sail run --from-run and what --continue does, and still li
   const commands = stdout.split('\n').filter((line) => line.startsWith('  sail '));
   expect(commands[0]).toBe('  sail <ticket> [--workflow <name>] [--force] [--until <stage>] [-q|-v|-vv]');
   expect(stdout).toMatch(
-    /^ {2}sail run --from-run <run> --stage <stage> \[--continue\] {2,}Rerun one stage on another run's earlier calls: a seeded run$/m,
+    /^ {2}sail run --from-run <run> --stage <stage> \[--continue\] \[--run-id <id>\]\n {2,}Rerun one stage on another run's earlier calls: a seeded run$/m,
   );
+  expect(stdout).toMatch(/^ {2}--run-id {4}Names the new run, ready to be told before it exists: /m);
   expect(stdout).toMatch(
     /^A seeded run:\n {2}--continue {2,}Runs the rest of the workflow after the stage, not just the stage$/m,
   );

@@ -1,9 +1,10 @@
-// `sail run --from-run <run> --stage <stage> [--continue] [-q|-v|-vv]`: starts a seeded run in the repository sail is
+// `sail run --from-run <run> --stage <stage> [--continue] [--run-id <id>] [-q|-v|-vv]`: starts a seeded run in the repository sail is
 // run from. It reuses the calls the source run made before the stage, runs the stage, and stops after its first call,
 // suspended, so `sail resume` takes it on. With `--continue` it runs the rest of the workflow too. It takes `sail
 // resume`'s steps: the source's workflow is type-checked first, and every refusal is one `sail run: <message>` line with
 // exit 3, before anything is written, the machine registry included: the repository is registered once the run is
-// open. It asks nothing of the ticket and claims nothing.
+// open. It asks nothing of the ticket and claims nothing. `--run-id` names the new run, as a caller that must know it
+// before it exists mints it; an id that isn't a new run's id of the source's ticket is a refusal.
 //
 // Ctrl-C or SIGTERM stops the running call and suspends the run, as during `sail <ticket>`. One seen before the run is
 // opened is a refusal: nothing was written.
@@ -46,7 +47,7 @@ export async function fromRun(args: Parsed, io: Io): Promise<ExitCode> {
   const source = args.values['from-run'];
   const { stage } = args.values;
   if (typeof source !== 'string' || typeof stage !== 'string') {
-    return refuse('usage: sail run --from-run <run> --stage <stage> [--continue]');
+    return refuse('usage: sail run --from-run <run> --stage <stage> [--continue] [--run-id <id>]');
   }
   const verbosity = verbosityOf(args, io, COMMAND);
   if (typeof verbosity === 'number') return verbosity;
@@ -72,6 +73,7 @@ export async function fromRun(args: Parsed, io: Io): Promise<ExitCode> {
       fromRun: source,
       stage,
       continue: args.values.continue === true,
+      ...(typeof args.values['run-id'] === 'string' ? { runId: args.values['run-id'] } : {}),
       adapters: project.adapters,
       signal,
       keepAwake: io.keepAwake ?? systemKeepAwake(io.env ?? process.env),

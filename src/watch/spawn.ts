@@ -9,6 +9,8 @@
 //   leaves only this log, whose last line says why. A resume appends to its run's log from the offset it reports as
 //   `logFrom`, so only what follows that offset is the resume's, and the log's last line after it is why the resume
 //   failed when it did.
+// - `spawnDetached()` is the start itself: the dashboard's server starts a resume or a seeded run through it, so a run it
+//   starts is detached as a watched one is.
 import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { queueDir } from './queue-store';
@@ -59,8 +61,8 @@ export interface SpawnedRun {
   logFrom: number;
 }
 
-/** Starts `sail <args>` in `root`, detached, its output appended to `log`. */
-function spawnSail(
+/** Starts `sail <args>` in `root`, detached, its output appended to `log`. The dashboard's server starts its runs here too. */
+export function spawnDetached(
   root: string,
   log: string,
   args: readonly string[],
@@ -101,13 +103,13 @@ export function spawnRun(options: SpawnRunOptions): SpawnedRun {
     ...pinned,
     ...(options.force === true ? ['--force'] : []),
   ];
-  return spawnSail(root, dispatchLog(runsDir, workflow, runId), args, env, options.cli);
+  return spawnDetached(root, dispatchLog(runsDir, workflow, runId), args, env, options.cli);
 }
 
 /** Starts `sail resume <run>`, detached, its output appended to the run's dispatch log. */
 export function spawnResume(options: SpawnResumeOptions): SpawnedRun {
   const { root, runsDir, workflow, runId, env } = options;
-  return spawnSail(root, dispatchLog(runsDir, workflow, runId), ['resume', runId], env, options.cli);
+  return spawnDetached(root, dispatchLog(runsDir, workflow, runId), ['resume', runId], env, options.cli);
 }
 
 /** The longest reason a log's last line gives. */

@@ -25,7 +25,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { BUILTINS } from '../src/adapters/index';
 import { recordingHarness, writeJournalKeys } from '../src/adapters/recording';
-import { index } from '../src/dashboard/files';
+import { runActions } from '../src/dashboard/actions';
+import { findRepo, index } from '../src/dashboard/files';
 import { attention } from '../src/dashboard/page/attention';
 import { renderAttention } from '../src/dashboard/page/attention-view';
 import type { SafeHtml } from '../src/dashboard/page/html';
@@ -259,7 +260,11 @@ export function renderDashboardViews(outDir: string): string[] {
     for (const [name, [repo, dir]] of Object.entries(runDirs)) {
       const runId = runIdOf[name as keyof typeof runIdOf];
       const model = foldRun(readEvents(dir));
-      views[`run-${name}.html`] = renderRun(model, summaryOf(repo, runId), ui({ repo, runId }), VIEWS_NOW);
+      const entry = findRepo(machine.registryDir, repo);
+      // An empty leases directory of its own, so no lease of this machine disables a run's actions.
+      const offers =
+        entry === undefined ? undefined : runActions(entry, runId, { leasesDir: join(machine.root, 'leases') });
+      views[`run-${name}.html`] = renderRun(model, summaryOf(repo, runId), ui({ repo, runId }), VIEWS_NOW, offers);
     }
     const inspectors: [name: string, run: keyof typeof runDirs, key: string, tab: InspectorTab][] = [
       ['inspector-fake-2-implement-1-permissions.html', 'fake-2', 'implement#1', 'permissions'],
