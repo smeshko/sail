@@ -1001,6 +1001,32 @@ test('corrective prompt names only template placeholders, not quoted color tags'
   expect(harness.requests[0]?.prompt.includes('color')).toBe(false);
 });
 
+test('a document nested too deep ends the try in error with the depth problem, and the corrective try with a valid one ends done (ADW-198)', async () => {
+  const step = documented();
+  const deep = COMPLETED.replace('- greet --shout shouts', `${'- '.repeat(100)}x`);
+  const first = await agentKind.run(
+    step,
+    documentSetup(step).context(scripted({ resolves: done(VALID), files: { 'spec.md': deep } })),
+  );
+  expect([first.outcome, first.errors]).toEqual([
+    'error',
+    [
+      {
+        reason: 'invalid_output',
+        message: 'spec.md: nests 100 levels deep, more than the 64 a document may nest to be validated',
+      },
+    ],
+  ]);
+  expect(first.files['spec.md']?.validation).toEqual({ ok: false, checks: [] });
+  const harness = scripted({ resolves: done(VALID), files: { 'spec.md': COMPLETED } });
+  const second = await agentKind.run(
+    step,
+    documentSetup(step, 2).context(harness, { validationTry: 2, feedback: first.errors.map(({ message }) => message) }),
+  );
+  expect(second.outcome).toBe('done');
+  expect(harness.requests[0]?.prompt).toContain('spec.md: nests 100 levels deep');
+});
+
 test('only a document the session left is validated: one it removed is a missing file, with no verdict', async () => {
   const step = documented({
     produces: { 'spec.md': specDoc(), 'plan.md': doc('./templates/spec.md', [noPlaceholders()]) },
