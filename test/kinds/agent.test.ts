@@ -17,6 +17,7 @@ import { createFakeHarness } from '../../src/adapters/fake/harness';
 import { materialisePrepared, type PreparedBindings, prepareBindings, type Supplied } from '../../src/engine/bindings';
 import { type CallPaths, callPaths, createCallDir, stepPaths } from '../../src/engine/call-dir';
 import type { ContractError } from '../../src/engine/contract';
+import { redactor } from '../../src/engine/redact';
 import { buildResult } from '../../src/engine/result';
 import { formatIssue, validateDocument } from '../../src/engine/schemas';
 import type { CallEvent } from '../../src/events/types';
@@ -74,6 +75,15 @@ const spec = (options: Options = {}): AgentStep =>
 
 /** A step that consumes and produces nothing, and submits against `output`. */
 const bare = (output: z.ZodType): AgentStep => spec({ consumes: {}, produces: {}, output });
+
+test('agent transcripts mask the run credential', async () => {
+  const marker = 'ghp_AGENT_MARKER_0123456789';
+  const step = bare(z.string());
+  const s = setup(step);
+  const harness = scripted({ resolves: { ...done('ok'), transcript: `echo ${marker}` } });
+  await agentKind.run(step, { ...s.context(harness), redact: redactor([marker]) });
+  expect(s.read('session.log')).toBe('echo [redacted]\n');
+});
 
 const VALID = { summary: 'Add a --shout flag.', tasks: ['greet()'] };
 const USAGE = { inputTokens: 100, outputTokens: 20, costUsd: 0.125 };

@@ -137,7 +137,7 @@ export function createGitWorktreeWorkspace(options: GitWorktreeOptions): Workspa
     },
     async lease(leased, branch, holder) {
       const result = takeLease(leasesDir(), leased, branch, holder, now());
-      if (result.leased) {
+      if (result.leased && !holder.suspended) {
         const took = result.took === undefined ? {} : { took: result.took };
         emit({ type: 'workspace:leased', remote: leased, branch, ...took });
       }
@@ -190,10 +190,10 @@ export function createGitWorktreeWorkspace(options: GitWorktreeOptions): Workspa
       return { path, kept: keep, ...commits, raw };
     },
     async sweep(runsDir) {
-      const paths = sweepEnded(runsDir, (runDir) =>
+      const swept = sweepEnded(runsDir, (runDir) =>
         releaseWorktree(repo, { runId: basename(runDir), runDir }, 'sweep', env),
       );
-      return { paths, raw: null };
+      return { ...swept, raw: null };
     },
     capabilities: () => ({ keep: true, sweep: true }),
   };

@@ -3,6 +3,7 @@ import type { StepRun } from '../kinds/index';
 import type { Usage } from '../ports/types';
 import { writeOwnFile } from './call-dir';
 import { replaceFileAnew } from './durable';
+import type { Redactor } from './redact';
 import { formatIssue, validateDocument } from './schemas';
 
 export interface ResultFields {
@@ -109,7 +110,12 @@ export function buildStageResult(fields: {
  * Writes `result` to `path` once it validates against `sail.result.v1`. One that doesn't is a bug in sail, and throws.
  * A `durable` result is written whole and synced before this returns: a resume reads how far an agent call got from it.
  */
-export function writeResult(path: string, result: Record<string, unknown>, options: { durable?: boolean } = {}): void {
+export function writeResult(
+  path: string,
+  result: Record<string, unknown>,
+  options: { durable?: boolean; redact?: Redactor } = {},
+): void {
+  result = options.redact?.value(result) ?? result;
   const issues = validateDocument('sail.result.v1', result);
   if (issues.length > 0) {
     throw new Error(`result.json breaks sail.result.v1, a bug in sail:\n${issues.map(formatIssue).join('\n')}`);

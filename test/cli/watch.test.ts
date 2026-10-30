@@ -117,13 +117,14 @@ async function running(repo: TempRepo, names: string[], extra?: (sail: string) =
   return { ...world, timers, spawner, interrupts, watcher, exited, second, recorded };
 }
 
-test('sail watch outside a git repository, without .sail/, with no names, naming no workflow or an unwatched one, exits 3 saying which', async () => {
+test('sail watch outside a git repository, without .sail/, with no names and no watched workflow, naming no workflow or an unwatched one, exits 3 saying which', async () => {
   await withTempRepo(async (repo) => {
     const outside = await runCaptured(['watch', 'a'], repo.home);
     const noSail = await runCaptured(['watch', 'a'], repo.dir);
-    const { env } = repository(repo);
+    const { env, sail: sailDir } = repository(repo);
     const interrupts = fakeInterrupts();
     const sail = (argv: string[]) => runCaptured(argv, repo.dir, { env, onInterrupt: interrupts.onInterrupt });
+    for (const name of ['a', 'b', 'c']) rmSync(join(sailDir, 'workflows', name), { recursive: true });
     const none = await sail(['watch']);
     const unknown = await sail(['watch', 'nope']);
     const unwatched = await sail(['watch', 'ticket-to-pr']);
@@ -132,11 +133,45 @@ test('sail watch outside a git repository, without .sail/, with no names, naming
     ).toEqual([
       { code: EXIT_REFUSED, stderr: `sail watch: not inside a git repository: ${repo.home}` },
       { code: EXIT_REFUSED, stderr: `sail watch: no .sail/ between ${repo.dir} and the git root ${repo.dir}` },
-      { code: EXIT_REFUSED, stderr: 'sail watch: name at least one workflow to watch' },
+      { code: EXIT_REFUSED, stderr: 'sail watch: no workflow declares a watch' },
       { code: EXIT_REFUSED, stderr: expect.stringMatching(/^sail watch: .*'nope'/) },
       { code: EXIT_REFUSED, stderr: "sail watch: workflow 'ticket-to-pr' isn't watched: it declares no watch" },
     ]);
     expect(existsSync(join(repo.home, 'sail-home', 'watchers'))).toBe(false);
+  });
+});
+
+test('sail watch with no names starts the watcher on a, b and c and skips ticket-to-pr, which declares no watch', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await running(repo, []);
+    expect(w.recorded).toBe(true);
+    expect(w.watcher.printed.stdout).toContain(' watch set: a, b, c\n');
+    w.interrupts.interrupt();
+    expect(await w.exited).toBe(EXIT_OK);
+  });
+}, 30_000);
+
+test("sail watch with no names exits 3 when no workflow declares a watch, naming a workflow that won't load, and naming two that poll one label", async () => {
+  await withTempRepo(async (repo) => {
+    const stubOnly = writeStub(repo.dir);
+    const env = { ...repo.env, SAIL_HOME: join(repo.home, 'sail-home') };
+    const sail = () => runCaptured(['watch'], repo.dir, { env, onInterrupt: fakeInterrupts().onInterrupt });
+    const none = await sail();
+    mkdirSync(join(stubOnly, 'workflows', 'broken'), { recursive: true });
+    writeFileSync(join(stubOnly, 'workflows', 'broken', 'workflow.ts'), 'export default 1;\n');
+    const broken = await sail();
+    rmSync(join(stubOnly, 'workflows', 'broken'), { recursive: true });
+    writeWatched(stubOnly, 'a', { label: 'sail-a', cap: 1 });
+    writeWatched(stubOnly, 'd', { label: 'sail-a', cap: 1 });
+    const clash = await sail();
+    expect([none, broken, clash].map(({ code, stderr }) => ({ code, stderr: stderr.split('\n')[0] }))).toEqual([
+      { code: EXIT_REFUSED, stderr: 'sail watch: no workflow declares a watch' },
+      {
+        code: EXIT_REFUSED,
+        stderr: expect.stringMatching(/^sail watch: .*workflows\/broken\/workflow\.ts.*default-exports no workflow/),
+      },
+      { code: EXIT_REFUSED, stderr: "sail watch: workflows 'a' and 'd' both poll the label 'sail-a'" },
+    ]);
   });
 });
 
@@ -244,6 +279,24 @@ test('with a watcher running, sail watch c exits 0 printing the set with c, and 
   });
 }, 30_000);
 
+test('with a watcher running on a, sail watch with no names adds b and c and prints the set, and prints it again once all are watched', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await running(repo, ['a']);
+    expect(w.recorded).toBe(true);
+    const added = await w.second(watchCommand, []);
+    const set = `sail watch: the watcher of 'stub' (pid ${WATCHER_PID}) watches a, b, c\n`;
+    expect(added).toEqual({ code: EXIT_OK, stdout: set, stderr: '' });
+    const again = io(repo.dir, w.env);
+    const code = await watchCommand({ isAlive: (pid) => pid === WATCHER_PID })(
+      { values: {}, positionals: [] },
+      again.io,
+    );
+    expect({ code, ...again.printed }).toEqual({ code: EXIT_OK, stdout: set, stderr: '' });
+    w.interrupts.interrupt();
+    expect(await w.exited).toBe(EXIT_OK);
+  });
+}, 30_000);
+
 test("with a watcher running, sail watch of a pull-request workflow on a ticket workflow's label exits 0: labels are unique per kind (ADW-235)", async () => {
   await withTempRepo(async (repo) => {
     const w = await running(repo, ['a'], (sail) => writePrWorkflow(sail, 'rv', { watch: { label: 'sail-a', cap: 1 } }));
@@ -309,6 +362,29 @@ test('sail unwatch with no watcher exits 3, and sail unwatch a b with one makes 
     const w = await running(repo, ['a', 'b']);
     expect(w.recorded).toBe(true);
     const removed = await w.second(unwatchCommand, ['a', 'b']);
+    expect(removed).toEqual({
+      code: EXIT_OK,
+      stdout: `sail unwatch: the watch set is empty: the watcher of 'stub' (pid ${WATCHER_PID}) stops\n`,
+      stderr: '',
+    });
+    expect(await Promise.race([w.exited, Bun.sleep(2000).then(() => 'running')])).toBe(EXIT_OK);
+    expect(readEntry(w.registry, 'stub')?.watcher).toBeUndefined();
+  });
+}, 30_000);
+
+test('sail unwatch with no names empties the set and the watcher stops, and with no watcher it exits 3', async () => {
+  await withTempRepo(async (repo) => {
+    const { env } = repository(repo);
+    const none = await runCaptured(['unwatch'], repo.dir, { env });
+    expect({ code: none.code, stderr: none.stderr }).toEqual({
+      code: EXIT_REFUSED,
+      stderr: "sail unwatch: no watcher is running for 'stub' here: nothing to unwatch\n",
+    });
+  });
+  await withTempRepo(async (repo) => {
+    const w = await running(repo, ['a', 'b']);
+    expect(w.recorded).toBe(true);
+    const removed = await w.second(unwatchCommand, []);
     expect(removed).toEqual({
       code: EXIT_OK,
       stdout: `sail unwatch: the watch set is empty: the watcher of 'stub' (pid ${WATCHER_PID}) stops\n`,

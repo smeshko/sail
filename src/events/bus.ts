@@ -7,6 +7,7 @@
 import type { Consumer, NewEvent, SailEvent } from './types';
 
 export interface BusOptions {
+  mask?: <T>(value: T) => T;
   runId: string;
   /** 1 for a fresh run, `nextSeq()` on a resume. */
   firstSeq: number;
@@ -44,7 +45,7 @@ export function createBus(options: BusOptions): EventBus {
   // The envelope comes first, then the key, then the payload, so a written line reads in that order. The envelope is
   // spread again last, since it is the bus's: a payload's `seq`, `ts` or `runId` must not replace it.
   function stamp(event: NewEvent): SailEvent {
-    const { type, ...rest } = event;
+    const { type, ...rest } = options.mask?.(event) ?? event;
     const { key, ...payload } = rest as { key?: string };
     const envelope = { seq: seq++, ts: (now?.() ?? new Date()).toISOString(), type, runId };
     return { ...envelope, ...(key === undefined ? {} : { key }), ...payload, ...envelope } as SailEvent;

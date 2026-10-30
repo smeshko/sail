@@ -98,6 +98,56 @@ function flags(args: readonly string[]): Flags {
   return { long: (name) => given.some((flag) => flag.length > 2 && name.startsWith(flag)), short };
 }
 
+/** Values of listed options, conservatively matching long prefixes and letters anywhere in short clusters. */
+export function optionValues(
+  args: readonly string[],
+  long: readonly string[],
+  short = '',
+): { option: string; value?: string }[] {
+  const found: { option: string; value?: string }[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i] as string;
+    if (arg === '--') break;
+    if (arg.startsWith('--')) {
+      const eq = arg.indexOf('=');
+      const name = eq === -1 ? arg : arg.slice(0, eq);
+      const option = long.find((option) => name.length > 2 && option.startsWith(name));
+      if (option !== undefined) {
+        const value = eq === -1 ? args[++i] : arg.slice(eq + 1);
+        found.push(value === undefined ? { option } : { option, value });
+      }
+    } else if (arg.startsWith('-')) {
+      for (let j = 1; j < arg.length; j++) {
+        const letter = arg[j] as string;
+        if (!short.includes(letter)) continue;
+        const option = `-${letter}`;
+        const value = j + 1 < arg.length ? arg.slice(j + 1) : args[++i];
+        found.push(value === undefined ? { option } : { option, value });
+        break;
+      }
+    }
+    // An unlisted option may take `--` as its value. Git then keeps parsing options;
+    // without that option's grammar we must conservatively keep scanning too.
+    if (args[i + 1] === '--' && arg.startsWith('-') && !arg.includes('=')) i++;
+  }
+  return found;
+}
+
+const GIT_PROGRAMS: Record<string, { long: string[]; short?: string; path?: true }> = {
+  clone: { long: ['--upload-pack', '--template'], short: 'u' },
+  fetch: { long: ['--upload-pack'] },
+  'fetch-pack': { long: ['--upload-pack', '--exec'] },
+  'send-pack': { long: ['--receive-pack', '--exec'] },
+  pull: { long: ['--upload-pack'] },
+  'ls-remote': { long: ['--upload-pack', '--exec'] },
+  push: { long: ['--receive-pack', '--exec'] },
+  archive: { long: ['--exec'] },
+  init: { long: ['--template'] },
+  grep: { long: ['--open-files-in-pager'], short: 'O' },
+  instaweb: { long: ['--httpd'], short: 'd' },
+  'send-email': { long: ['--smtp-server'], path: true },
+};
+
 function git(argv: readonly string[], subcommand: string): readonly string[] | undefined {
   if (commandName(argv[0] ?? '') !== 'git') return undefined;
   const invocation = gitInvocation(argv);
@@ -109,6 +159,26 @@ const FETCHERS = new Set(['curl', 'wget']);
 const ELEVATORS = new Set(['sudo', 'doas']);
 
 export const DENY_SET: readonly CommandEntry[] = [
+  {
+    name: 'git remote-ext',
+    why: 'the remote helper runs an arbitrary program',
+    matches: (argv) => git(argv, 'remote-ext') !== undefined,
+  },
+  {
+    name: 'git program option',
+    why: 'the option names a program, or a template of hooks, for git to run',
+    matches: (argv) => {
+      if (commandName(argv[0] ?? '') !== 'git') return false;
+      const { subcommand, args } = gitInvocation(argv);
+      const grammar = GIT_PROGRAMS[subcommand ?? ''];
+      return (
+        grammar !== undefined &&
+        optionValues(args, grammar.long, grammar.short).some(
+          ({ value }) => grammar.path !== true || value?.startsWith('/') === true,
+        )
+      );
+    },
+  },
   {
     name: 'rm -rf',
     why: 'a recursive forced delete is never an agent step',
@@ -184,9 +254,12 @@ export const DENY_SET: readonly CommandEntry[] = [
     why: 'a configuration override can name an alias or a program, which runs any command',
     matches: (argv) => {
       if (commandName(argv[0] ?? '') !== 'git') return false;
-      const { globals } = gitInvocation(argv);
-      return globals.some(
-        (g) => g.name === '-c' || g.name === '--config-env' || (g.name === '--exec-path' && g.value !== undefined),
+      const { globals, subcommand, args } = gitInvocation(argv);
+      return (
+        globals.some(
+          (g) => g.name === '-c' || g.name === '--config-env' || (g.name === '--exec-path' && g.value !== undefined),
+        ) ||
+        (subcommand === 'clone' && optionValues(args, ['--config'], 'c').length > 0)
       );
     },
   },

@@ -411,6 +411,14 @@ _Avoid_: consumption, spend, billing, metering
 
 ### Guardrails
 
+**Gate file**:
+A file `bun run verify` reads: the toolchain configs, the test launcher and preload, the coverage census, the lint config and `.github/`. A pull request could change one to loosen its own `verify` check; sail's review workflow hands a pull request that changes one to a human rather than merging it.
+_Avoid_: protected file, CI file
+
+**Redaction**:
+Masking credential-named values of at least eight characters from the run's environment, their parts and URL userinfo, raw, URL-encoded and in base64, as `[redacted]` in the run header, events, summary, journal, results, completed script logs, port events and transcripts, and the terminal view. Produced files, prompts and bindings are not masked, nor are live script logs before the process ends.
+_Avoid_: scrubbing, censoring, sanitising
+
 **Script environment**:
 The environment a script step runs with: the allowlist's names that are no credential, `SSH_AUTH_SOCK`, sail's own `SAIL_*` settings, git's identity and the preamble, plus the variables its `env` names and those the adapters of the ports its `ports` names require. Its `script:exec` lists the names it was given, never their values. A step in the clone keeps git's repository variables too.
 _Avoid_: inherited environment, env passthrough
@@ -424,7 +432,7 @@ What a step may do, declared per step: paths it may read and write, commands it 
 _Avoid_: policy, allowlist, sandbox, scope
 
 **Deny set**:
-The commands no step's permissions can allow: `rm -rf`, a forced push, `git reset --hard`, `git clean -f`, `git branch -D`, `git checkout`, `git switch`, `sudo`, `curl` piped into a shell, and git configuration overrides. Checked before the step's own commands.
+The commands no step's permissions can allow: `rm -rf`, a forced push, `git reset --hard`, `git clean -f`, `git branch -D`, `git checkout`, `git switch`, `sudo`, `curl` piped into a shell, git options that name a program for git to run, and git configuration overrides. Checked before the step's own commands.
 _Avoid_: blocklist, denylist, banned commands, safe commands
 
 **Tool call**:
@@ -546,11 +554,11 @@ A workflow that declares `watch: { every, label? }` and `maxConcurrentRuns`, whi
 _Avoid_: loop, line, daemon, pipeline
 
 **Watcher**:
-The resident process that automates one repository's watch set: it polls and it dispatches. `sail watch <workflow…>` starts it in the clone where it is run, or adds to the live one. There is one per repository. Each run it dispatches fetches before it makes its worktree, and runs start from `origin/<default>` in detached worktrees, using the `.sail/` committed there. It is sail's home in v1. Without one running, nothing starts on its own.
+The resident process that automates one repository's watch set: it polls and it dispatches. `sail watch <workflow…>` starts it in the clone where it is run, or adds to the live one; `sail watch` with no names does so for every workflow that declares a watch. There is one per repository. Each run it dispatches fetches before it makes its worktree, and runs start from `origin/<default>` in detached worktrees, using the `.sail/` committed there. It is sail's home in v1. Without one running, nothing starts on its own.
 _Avoid_: daemon, monitor, poller, scheduler
 
 **Watch set**:
-The watched workflows a watcher is watching now: exactly those named with `sail watch`, minus those removed with `sail unwatch`. It is never remembered across restarts, and the watcher exits when it becomes empty. Each change is a `watch:added` or `watch:removed` event in that workflow's queue event stream, naming the watcher's pid. Unwatching a workflow suspends its runs; stopping the watcher does not (ADR-0019).
+The watched workflows a watcher is watching now: exactly those named with `sail watch` (every workflow that declares a watch, when it names none), minus those removed with `sail unwatch` (the whole set, when it names none). It is never remembered across restarts, and the watcher exits when it becomes empty. Each change is a `watch:added` or `watch:removed` event in that workflow's queue event stream, naming the watcher's pid. Unwatching a workflow suspends its runs; stopping the watcher does not (ADR-0019).
 _Avoid_: enabled workflows, active loops, subscriptions
 
 **Watcher registry**:
@@ -558,7 +566,7 @@ The machine-level record of repositories in `~/.sail/watchers/` (`$SAIL_HOME/wat
 _Avoid_: registry (alone; the config also has an adapter registry), roster, manifest
 
 **Branch lease**:
-A run's exclusive hold on its git branch, from workspace creation to release, kept while the run is suspended. Leases are shared within the selected machine directory, in `~/.sail/leases/` (`$SAIL_HOME/leases/` when set); different machine directories have independent leases. They are keyed by remote and branch, and are stale only once the run is neither running nor suspended. A lease whose run has no status yet is stale once its pid is dead, and the same run leasing again renews it (a resume). Dispatch skips a source whose branch is leased, and manual runs take leases too. Because worktrees are detached, leases are the only thing keeping runs apart (ADR-0018).
+A run's exclusive hold on its git branch, from workspace creation to release, kept while the run is suspended. Leases are shared within the selected machine directory, in `~/.sail/leases/` (`$SAIL_HOME/leases/` when set); different machine directories have independent leases. They are keyed by the remote's host, lower-cased, and its path, lower-cased, without `.git` or a trailing `/`, and by the branch. Scheme, user and port are ignored, so an ssh and an https clone of one repository share them. A remote with no host is used as it is. Leases are stale only once the run is neither running nor suspended. A lease whose run has no status yet is stale once its pid is dead, and the same run leasing again renews it (a resume). A run marks its lease as held by no process as the last act of a suspend, so a resume takes it whatever its pid. Dispatch skips a source whose branch is leased, and manual runs take leases too. Because worktrees are detached, leases are the only thing keeping runs apart (ADR-0018).
 _Avoid_: lock, branch lock, reservation
 
 **Adoption**:

@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pkg from '../../package.json' with { type: 'json' };
 import { callPaths, createCallDir, stepPaths } from '../../src/engine/call-dir';
+import { redactor } from '../../src/engine/redact';
 import { validateDocument } from '../../src/engine/schemas';
 import { readSlot, releaseSlot, takeSlot } from '../../src/engine/slots';
 import type { CallEvent } from '../../src/events/types';
@@ -229,6 +230,28 @@ function preambleOnly(run: StepRun): StepRun {
   const { SAIL_EVENTS: _events, ...env } = run.record.env as Record<string, string>;
   return { ...run, record: { ...run.record, env } };
 }
+
+test('script logs, JSON output and port events mask run credentials before reading', async () => {
+  const s = setup();
+  const marker = 'ghp_SCRIPT_MARKER_0123456789';
+  const event = { type: 'codehost:labelled', number: 5, label: marker, change: 'added' } as const;
+  s.run(
+    `echo 'token ${marker}'\necho 'stderr ${marker}' >&2\necho '${JSON.stringify(event)}' >> "$SAIL_EVENTS"\necho '{"token":"${marker}"}'`,
+  );
+  const events: CallEvent[] = [];
+  const run = await scriptKind.run(script('tests', { run: './run.sh', output: z.object({ token: z.string() }) }), {
+    ...s.context,
+    redact: redactor([marker]),
+    emit: (event) => events.push(event),
+  });
+  expect(run.output).toEqual({ token: '[redacted]' });
+  expect(readFileSync(s.context.paths.stdout, 'utf8')).toBe('token [redacted]\n{"token":"[redacted]"}\n');
+  expect(readFileSync(s.context.paths.stderr, 'utf8')).toBe('stderr [redacted]\n');
+  expect(readFileSync(join(s.context.paths.dir, 'port-events.ndjson'), 'utf8')).toBe(
+    '{"type":"codehost:labelled","number":5,"label":"[redacted]","change":"added"}\n',
+  );
+  expect(events.find((event) => event.type === 'codehost:labelled')).toEqual({ ...event, label: '[redacted]' });
+});
 
 test('KINDS holds the script kind', () => {
   expect(KINDS.script).toBe(scriptKind);

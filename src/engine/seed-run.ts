@@ -51,6 +51,7 @@ import {
   startWorkspace,
   undoOpened,
 } from './open-run';
+import { credentialValues, redactor } from './redact';
 import { harnessesReached, modelProblems } from './roster';
 import { copyStageFolders, runsDir, type Source, writeStatus } from './run-dir';
 import {
@@ -65,6 +66,7 @@ import {
 import { newRunId } from './run-id';
 
 export interface SeededRunOptions {
+  secrets?: readonly string[];
   /** Where the run starts from: `.sail/` is found from here up to the git root, and the source run beside it. */
   cwd: string;
   /** The id of the run whose calls are reused. */
@@ -287,13 +289,15 @@ export async function openSeededRun(options: SeededRunOptions): Promise<OpenedRu
   });
   if ('refused' in opened) return opened;
   const { made } = opened;
-  const header: RunHeader = {
+  const redact = redactor(options.secrets ?? credentialValues(process.env));
+  const header: RunHeader = redact.value({
     ...unopened,
     ...workspaceFields({ branch, repository: made.repository, baseSha: made.workspace.baseSha }),
-  };
+  });
   const dir = run.runDir;
   let journaled: JournalEntry[];
   try {
+    assertRunHeader(header);
     for (const path of copied) {
       cpSync(join(source.dir, path), join(dir, path), {
         recursive: true,
@@ -317,6 +321,7 @@ export async function openSeededRun(options: SeededRunOptions): Promise<OpenedRu
     runId,
     dir,
     header,
+    redact,
     sailDir: found.dir,
     adapters: options.adapters.ports,
     portVariables: options.adapters.portVariables,

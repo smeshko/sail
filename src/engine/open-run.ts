@@ -62,6 +62,7 @@ import { INTAKE_KEY, INTAKE_STAGE } from './intake';
 import { createJournal, type JournalEntry } from './journal';
 import { type LoadedWorkflow, loadWorkflow } from './load-workflow';
 import { type ResolvedPullRequest, resolvePullRequest, resolveRef } from './pr-source';
+import { credentialValues, type Redactor, redactor } from './redact';
 import { harnessesReached, modelProblems } from './roster';
 import {
   copyStageFolders,
@@ -93,6 +94,7 @@ import { watchLabel } from './watchable';
 const claimed = new Set<string>();
 
 export interface OpenedRun {
+  redact: Redactor;
   runId: string;
   /** The absolute run directory. */
   dir: string;
@@ -147,6 +149,7 @@ export interface OpenedWorkspace {
 }
 
 export interface OpenRunOptions {
+  secrets?: readonly string[];
   /** Where the run starts from: `.sail/` is found from here up to the git root. */
   cwd: string;
   /** The workflow's name, its folder under `.sail/workflows/`. */
@@ -540,10 +543,11 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
   });
   if ('refused' in opened) return opened;
   const { made } = opened;
-  const header: RunHeader = {
+  const redact = redactor(options.secrets ?? credentialValues(process.env));
+  const header: RunHeader = redact.value({
     ...preflighted,
     ...workspaceFields({ branch, repository: made.repository, baseSha: made.workspace.baseSha }),
-  };
+  });
   // A failure from here is thrown, not refused: these are sail's own files.
   const dir = run.runDir;
   try {
@@ -563,6 +567,7 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
     runId,
     dir,
     header,
+    redact,
     sailDir: found.dir,
     adapters: options.adapters.ports,
     portVariables: options.adapters.portVariables,
@@ -578,6 +583,7 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
 }
 
 export interface ReopenRunOptions {
+  secrets?: readonly string[];
   /** Where the run is resumed from: `.sail/` is found from here up to the git root, and the run beside it. */
   cwd: string;
   /** The run's id, its directory under `.sail-runs/`. */
@@ -646,7 +652,7 @@ export function changedAdapters(
 /**
  * Renews the run's lease and reopens its workspace, or says why the run can't resume there: it predates workspaces, it
  * is still alive in another process, another run holds its branch, or its workspace is gone or has lost its base. A
- * refusal from `reopen()` leaves the lease renewed, since the run still owns it.
+ * refusal from `reopen()` keeps the run's lease, marked as held by no process.
  */
 async function resumeWorkspace(
   port: WorkspacePort,
@@ -666,7 +672,10 @@ async function resumeWorkspace(
   if (!leased.leased) {
     const { holder } = leased;
     if (holder.runId === run.runId) {
-      return { refused: `run ${run.runId} is still running, in process ${holder.pid}: stop it before resuming it` };
+      const lease = leased.file === undefined ? 'its lease' : `the lease file ${leased.file}`;
+      return {
+        refused: `run ${run.runId} is still running, in process ${holder.pid}: stop it before resuming it. If process ${holder.pid} is not sail, it took the pid of the run's ended process: remove ${lease}, then resume it`,
+      };
     }
     return { refused: leasedBy(branch, holder) };
   }
@@ -684,8 +693,39 @@ async function resumeWorkspace(
     const reopened = await port.reopen(run, { branch, baseSha: repository.baseSha });
     return { path: reopened.path, branch, baseSha: repository.baseSha, remote: repository.url };
   } catch (error) {
-    return { refused: `run ${run.runId}'s workspace can't be reopened: ${portRefusal(error)}` };
+    return refuseRenewedWorkspace(
+      port,
+      run,
+      header,
+      `run ${run.runId}'s workspace can't be reopened: ${portRefusal(error)}`,
+    );
   }
+}
+
+/** A refused resume no longer has a process, but still owns its branch. */
+async function refuseRenewedWorkspace(
+  port: WorkspacePort,
+  run: RunRef,
+  header: RunHeader,
+  refused: string,
+): Promise<{ refused: string }> {
+  const { branch, repository } = header;
+  if (branch === undefined || repository === undefined) return { refused };
+  try {
+    const marked = await port.lease(repository.url, branch, {
+      runId: run.runId,
+      runDir: run.runDir,
+      pid: process.pid,
+      suspended: true,
+    });
+    if (!marked.leased)
+      return { refused: `${refused}; its lease on ${branch} could not be marked as held by no process` };
+  } catch (error) {
+    return {
+      refused: `${refused}; its lease on ${branch} could not be marked as held by no process: ${portRefusal(error)}`,
+    };
+  }
+  return { refused };
 }
 
 /**
@@ -721,13 +761,21 @@ export async function reopenRun(options: ReopenRunOptions): Promise<OpenedRun | 
   if ('refused' in workspace) return workspace;
   // Last of the checks, since it cuts a torn tail: only a resume that goes ahead changes the file.
   const firstSeq = nextSeq(run.dir);
-  if (typeof firstSeq !== 'number') return firstSeq;
+  if (typeof firstSeq !== 'number') {
+    return refuseRenewedWorkspace(
+      options.adapters.ports.workspace,
+      { runId, runDir: run.dir },
+      run.header,
+      firstSeq.refused,
+    );
+  }
 
   writeStatus(run.dir, 'running');
   return {
     runId,
     dir: run.dir,
     header: run.header,
+    redact: redactor(options.secrets ?? credentialValues(process.env)),
     sailDir: found.dir,
     adapters: options.adapters.ports,
     portVariables: options.adapters.portVariables,

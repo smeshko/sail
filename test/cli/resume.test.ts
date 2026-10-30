@@ -98,6 +98,42 @@ function replaysOf(repoDir: string, runId: string): number {
     .reduce((sum, event) => sum + (event.replays ?? 0), 0);
 }
 
+test('sail resume masks credentials from its own io.env in newly written calls', async () => {
+  await withTempRepo(async (repo) => {
+    const marker = 'ghp_RESUME_MARKER_0123456789';
+    const runId = await withTempRepo(async (from) => {
+      const sail = writeAgentFixture(from.dir, [submits(SPEC, 0.125, { messages: [`echo ${marker}`] })]);
+      edit(
+        sail,
+        'workflows/brief-to-spec/stages/publish/run.sh',
+        'set -euo pipefail',
+        `set -euo pipefail\ntoken='ghp_RESUME_''MARKER_0123456789'\necho "token $token"\necho "stderr token $token" >&2`,
+      );
+      const started = await runCaptured([...RUN_ARGV, '--until', 'brief'], from.dir, { env: from.env });
+      expect(started.code).toBe(EXIT_SUSPENDED);
+      copyRun(from.dir, repo.dir);
+      return runIdIn(repo.dir);
+    });
+    const captured = await runCaptured(['resume', runId, '-v'], repo.dir, {
+      env: { ...repo.env, SAIL_TEST_TOKEN: marker },
+    });
+    expect(captured.code).toBe(EXIT_OK);
+    expect(captured.stdout.includes(marker)).toBe(false);
+    expect(captured.stdout.includes('│ token [redacted]')).toBe(true);
+    expect(captured.stdout.includes('│ stderr token [redacted]')).toBe(true);
+    expect(specFile(runDirIn(repo.dir), 'session.log')).toBe('assistant: echo [redacted]\n');
+    const files = readdirSync(runDirIn(repo.dir), { recursive: true, withFileTypes: true }).filter((file) =>
+      file.isFile(),
+    );
+    expect(files.length > 10).toBe(true);
+    expect(
+      files
+        .filter((file) => readFileSync(join(file.parentPath, file.name), 'utf8').includes(marker))
+        .map((file) => file.name),
+    ).toEqual([]);
+  });
+});
+
 test('sail resume holds the keep-awake for the resumed run and releases it at its end, the resume reporting its own', async () => {
   await withTempRepo(async (repo) => {
     const runId = await interruptedInto(repo.dir);
@@ -547,7 +583,14 @@ test('sail resume refuses a run still running in another process, naming its pid
       );
       const runId = heldRuns(repo.dir)[0]?.runId ?? '';
       const lease = leasesIn(repo);
+      const leasesDir = join(repo.dir, '.sail-runs', 'fake', 'leases');
+      const leaseName = readdirSync(leasesDir).find((name) => name.endsWith('.json'));
+      expect(leaseName).toBeString();
       const refused = await spawned(repo, 'resume', runId);
+      expect(refused.stderr).toContain(
+        `If process ${running.pid} is not sail, it took the pid of the run's ended process`,
+      );
+      expect(refused.stderr).toContain(`remove the lease file ${join(leasesDir, leaseName ?? '')}, then resume it`);
       expect({
         code: refused.code,
         said: refused.stderr.includes(`is still running, in process ${running.pid}`),

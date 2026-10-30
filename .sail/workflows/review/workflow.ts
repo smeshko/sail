@@ -9,6 +9,7 @@
 // before the next try. A review that leaves findings open, one too thin to trust, or a pull request that
 // can't land in the passes left, comments why, takes the label off and fails, leaving the pull request to a human; so
 // does one a stage blocked, which also puts needs-human on, since no run of it would get further.
+// A pull request that changes a gate file is handed to a human before any merge.
 // Composition only: every contract lives on its stage, and every check that needs no judgment is a script.
 import { type Result, workflow, type z } from 'sail';
 import { pr } from 'sail/intakes';
@@ -39,6 +40,7 @@ import { merge } from './stages/18-merge/stage';
 import { syncBase } from './stages/19-sync-base/stage';
 import { resolveConflicts } from './stages/20-resolve-conflicts/stage';
 import { handOver } from './stages/21-hand-over/stage';
+import { gateFiles } from './stages/22-gate-files/stage';
 
 /** The designation label: the factory's pull requests carry it, and a review that can't finish takes it off. */
 const LABEL = 'factory';
@@ -59,7 +61,7 @@ export default workflow(
   'review',
   {
     intake: pr,
-    version: 4,
+    version: 5,
     watch: { every: '5m' },
     // Two pull requests at a time, though each merge moves the base the other is being reviewed against.
     maxConcurrentRuns: 2,
@@ -307,6 +309,10 @@ export default workflow(
     let blocked: string | undefined;
     const landing: string[] = [];
     for (const attempt of run.loop('land', { max: FIX_PASSES - passes + 1 })) {
+      const gated = await run.stage(gateFiles, { pr: pullRequest, headSha });
+      const { touched } = gated.output;
+      if (touched.length > 0)
+        return handOff(`the pull request changes gate files: ${touched.join(', ')}; a person merges it`);
       const merged = await run.stage(merge, {
         pr: pullRequest,
         headSha,
