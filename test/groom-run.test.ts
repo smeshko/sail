@@ -2,10 +2,10 @@
 // repository that holds a copy of the repository's own `.sail/`, its ports all fake (.sail/fake/*.json).
 import { expect, test } from 'bun:test';
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { createFakeCodeHost } from '../src/adapters/fake/code-host';
 import { createFakeTicketSource } from '../src/adapters/fake/ticket-source';
-import { EXIT_OK, EXIT_REFUSED } from '../src/cli/exit-codes';
+import { EXIT_OK, EXIT_REFUSED, EXIT_SUSPENDED } from '../src/cli/exit-codes';
 import { readJournal } from '../src/engine/journal';
 import { readStatus } from '../src/engine/run-dir';
 import { readEvents } from '../src/events/consumers/ndjson';
@@ -51,6 +51,7 @@ test('a groom run on fakes reads FAKE-2 unclaimed, comments the report and swaps
     }
     expect(comment).toContain('## Actions');
     expect(comment).toContain('Labelled `open-questions`.');
+    expect(comment.trimEnd().split('\n').at(-1)).toBe(`sail run ${basename(dir)} groomed this ticket.`);
     expect(seeded).toBe(2);
 
     const types = readEvents(dir).map((event) => event.type);
@@ -724,6 +725,31 @@ test('a remove-label the provider refuses once is tried again, so the run comple
     const ticket = fakeTicket(repo.dir, 'FAKE-2');
     expect(ticket.labels).toEqual(['open-questions']);
     expect(ticket.comments).toHaveLength(2);
+    expect(reports(repo.dir)).toHaveLength(1);
+  });
+}, 120_000);
+
+test('a groom run suspended after its report posts no second report on resume, and finishes the label swap', async () => {
+  await withTempRepo(async (repo) => {
+    writeGroomRepo(repo);
+    scriptLabels(repo, { removeLabel: ['unavailable', 'unavailable', 'unavailable', 'ok'] });
+    const first = await sail(repo.dir, repo.env, RUN);
+    expect(first.code).toBe(EXIT_SUSPENDED);
+    const dir = onlyRun(repo.dir);
+    const runId = basename(dir);
+    expect(readStatus(dir)).toMatchObject({ status: 'suspended', stopReason: 'port_unavailable' });
+
+    const ticket = fakeTicket(repo.dir, 'FAKE-2');
+    expect(ticket.labels).toContain('groom');
+    expect(reports(repo.dir)).toHaveLength(1);
+    expect(reports(repo.dir)[0]?.body.trimEnd().split('\n').at(-1)).toBe(`sail run ${runId} groomed this ticket.`);
+
+    const resumed = await sail(repo.dir, repo.env, ['resume', runId]);
+    expect(resumed.code).toBe(EXIT_OK);
+    expect(readStatus(dir)).toEqual({ status: 'completed' });
+    const after = fakeTicket(repo.dir, 'FAKE-2');
+    expect(after.labels).toEqual(['open-questions']);
+    expect(after.comments).toHaveLength(2);
     expect(reports(repo.dir)).toHaveLength(1);
   });
 }, 120_000);
