@@ -291,8 +291,12 @@ The status of a run that has exited with nothing running and a resume expected, 
 _Avoid_: paused, waiting, blocked, pending
 
 **Control file**:
-A run's `CONTROL` file in its run directory, a request to stop at its next call boundary: `unwatched`, which the watcher writes when the run's workflow is unwatched and which suspends the run, or `stopped`, which `sail stop` writes and which fails it. `sail stop --now` writes `stopped now`, ending the running call through its abort signal rather than waiting for the boundary. The run takes the request before its intake and before each call.
+A run's `CONTROL` file in its run directory, a request to stop at its next call boundary: `unwatched`, which the watcher writes when the run's workflow is unwatched and which suspends the run, or `stopped`, which `sail stop` writes and which fails it. `sail stop --now` writes `stopped now`, ending the running call through its abort signal rather than waiting for the boundary. The run takes the request before its intake and before each call. A dispatched run with no run directory yet gets its request as a hand-off file, which it moves in as `CONTROL` once its run directory exists.
 _Avoid_: signal file, kill file, flag
+
+**Hand-off file**:
+`.sail-runs/<run id>.control`, a control file's request for a dispatched run that has no run directory yet. The run moves it in as `CONTROL` once its run directory exists, and the watcher deletes one the run never took when it settles the item.
+_Avoid_: pending control, mailbox
 
 **Resume**:
 Continuing a suspended or interrupted run from its journal. Every journaled call is replayed, and the first one that is not journaled runs.
@@ -339,7 +343,7 @@ What was asked, written once at start and never changed: the source, the workflo
 _Avoid_: manifest, metadata, config snapshot
 
 **Journal**:
-The append-only record of completed calls and steps (key, outcome, output, files). A resume replays completed calls from it. To recover an unjournaled claim before its comment was posted, a later try of the built-in `ticket` intake also reads `ticket:claimed` from the run's event stream; without that event, a missing comment cannot establish ownership.
+The append-only record of completed calls and steps (key, outcome, output, files, and on a call its binding fingerprints). A resume replays completed calls from it. To recover an unjournaled claim before its comment was posted, a later try of the built-in `ticket` intake also reads `ticket:claimed` from the run's event stream; without that event, a missing comment cannot establish ownership.
 _Avoid_: log, history, state file, checkpoint
 
 **Replay**:
@@ -347,8 +351,12 @@ Re-executing the workflow function after every completed call, so journaled call
 _Avoid_: rerun, recovery, fast-forward
 
 **Determinism guard**:
-The check that fails a run when the workflow asks for a key sequence that diverges from the journal, and, for a group, its whole key sequence. That is the sign of non-deterministic workflow code or a mid-run change.
+The check that fails a run when the workflow asks for a key sequence that diverges from the journal, and, for a group, its whole key sequence. It also compares each journaled call's binding fingerprints with the bindings the workflow asks with now, naming each that changed, appeared or went; a journal line without them keeps the key check alone. That is the sign of non-deterministic workflow code or a mid-run change.
 _Avoid_: replay check, drift detection
+
+**Binding fingerprint**:
+A short hash of one value or file binding a workflow supplied to a call, journaled on the call's line by binding name. A value is hashed by its canonical JSON, a file by the run-relative path it names. A `gitDiff` or `fromStep` binding has none, since the engine supplies it.
+_Avoid_: bindings hash, checksum
 
 **Result**:
 What a call or step left behind, as the engine recorded it: outcome, output, derived facts, files and usage. "The run's result" is what the workflow returned, for example the pull request.

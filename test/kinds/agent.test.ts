@@ -14,6 +14,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { createFakeHarness } from '../../src/adapters/fake/harness';
+import { FEEDBACK_SOURCE } from '../../src/engine/agent-prompt';
 import { materialisePrepared, type PreparedBindings, prepareBindings, type Supplied } from '../../src/engine/bindings';
 import { type CallPaths, callPaths, createCallDir, stepPaths } from '../../src/engine/call-dir';
 import type { ContractError } from '../../src/engine/contract';
@@ -398,7 +399,8 @@ test('the harness receives the rendered prompt with its feedback, the preamble a
   });
   expect(typeof onEvent).toBe('function');
   expect(prompt).toStartWith(`Write the spec from ${join(dir, 'in', 'brief.md')}.\n\n${UNTRUSTED_HEADING}\n`);
-  expect(prompt?.trimEnd()).toEndWith(feedback[0] ?? '');
+  expect(prompt?.trimEnd()).toEndWith(`${feedback[0]}\n</untrusted-input>`);
+  expect(prompt).toContain(`<untrusted-input source="${FEEDBACK_SOURCE}">\n${feedback[0]}\n</untrusted-input>`);
   expect(s.read('prompt.md')).toBe(prompt ?? '');
   expect(run.output).toEqual({ ...VALID, points: 2, approved: true });
   expect(run.record).toMatchObject({ try: 3, validationTry: 2, validationFailed: false });
@@ -1104,6 +1106,35 @@ test('corrective prompt names only template placeholders, not quoted color tags'
     'spec.md: noPlaceholders: line 5 still holds the placeholder {{requirements: …}}',
   );
   expect(harness.requests[0]?.prompt.includes('color')).toBe(false);
+  expect(harness.requests[0]?.prompt).toContain(
+    `<untrusted-input source="${FEEDBACK_SOURCE}">\nspec.md: noPlaceholders: line 5 still holds the placeholder {{requirements: …}}\n</untrusted-input>`,
+  );
+});
+
+test('a document nested too deep ends the try in error with the depth problem, and the corrective try with a valid one ends done (ADW-198)', async () => {
+  const step = documented();
+  const deep = COMPLETED.replace('- greet --shout shouts', `${'- '.repeat(100)}x`);
+  const first = await agentKind.run(
+    step,
+    documentSetup(step).context(scripted({ resolves: done(VALID), files: { 'spec.md': deep } })),
+  );
+  expect([first.outcome, first.errors]).toEqual([
+    'error',
+    [
+      {
+        reason: 'invalid_output',
+        message: 'spec.md: nests 100 levels deep, more than the 64 a document may nest to be validated',
+      },
+    ],
+  ]);
+  expect(first.files['spec.md']?.validation).toEqual({ ok: false, checks: [] });
+  const harness = scripted({ resolves: done(VALID), files: { 'spec.md': COMPLETED } });
+  const second = await agentKind.run(
+    step,
+    documentSetup(step, 2).context(harness, { validationTry: 2, feedback: first.errors.map(({ message }) => message) }),
+  );
+  expect(second.outcome).toBe('done');
+  expect(harness.requests[0]?.prompt).toContain('spec.md: nests 100 levels deep');
 });
 
 test('only a document the session left is validated: one it removed is a missing file, with no verdict', async () => {

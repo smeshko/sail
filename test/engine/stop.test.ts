@@ -2,7 +2,7 @@
 // once, its workspace and lease released and `run:end` closing its stream; a run whose lease another run took over ends
 // the same way with no lease to release. On the stub workflow and the fake adapters, one run per temp repository.
 import { expect, test } from 'bun:test';
-import { appendFileSync, existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { type RunEnd, resumeWorkflow, runWorkflow } from '../../src/engine/runtime';
 import { validateRunDir } from '../../src/engine/schemas';
@@ -225,5 +225,55 @@ test("a stopped run's events and summary mask a credential a release's error car
       message:
         'stopped by sail stop; its workspace was not released: workspace.release: denied https://x:[redacted]@h/r',
     });
+  });
+});
+
+// A dispatched run that is still starting has no run.json: `starting` says it is one, and the stop waits for it.
+
+const STARTING = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N';
+
+test('stopRun of a run with no run.json that starting vouches for writes its hand-off, or CONTROL once its directory exists', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const runs = join(repo.dir, '.sail-runs');
+    mkdirSync(runs, { recursive: true });
+    const sailDir = join(repo.dir, '.sail');
+    const starting = async () =>
+      stopRun({ sailDir, runId: STARTING, adapters: await fakeAdapters(repo.dir), starting: () => true });
+    const first = await starting();
+    const handOff = readFileSync(join(runs, `${STARTING}.control`), 'utf8');
+    mkdirSync(join(runs, STARTING));
+    const second = await starting();
+    expect({
+      first,
+      handOff,
+      second,
+      control: readFileSync(join(runs, STARTING, 'CONTROL'), 'utf8'),
+      left: existsSync(join(runs, `${STARTING}.control`)),
+    }).toEqual({
+      first: { starting: true },
+      handOff: 'stopped\n',
+      second: { starting: true },
+      control: 'stopped\n',
+      left: false,
+    });
+  });
+});
+
+test.each<[string, Partial<Parameters<typeof stopRun>[0]>]>([
+  ['no starting check', {}],
+  ['a starting check that says no', { starting: () => false }],
+])('stopRun of a run with no run.json is refused and writes nothing with %s', async (_, extra) => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const runs = join(repo.dir, '.sail-runs');
+    mkdirSync(runs, { recursive: true });
+    const stopped = await stopRun({
+      sailDir: join(repo.dir, '.sail'),
+      runId: STARTING,
+      adapters: await fakeAdapters(repo.dir),
+      ...extra,
+    });
+    expect([stopped, readdirSync(runs)]).toEqual([{ refused: `no run '${STARTING}' in .sail-runs` }, []]);
   });
 });

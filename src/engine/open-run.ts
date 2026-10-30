@@ -64,6 +64,7 @@ import { type Raise, raiseProblem } from './budget';
 import { isPlainName } from './call-dir';
 import { type Clock, systemClock } from './clock';
 import { PORTS, type ProjectConfig, type RunPort, readConfig } from './config';
+import { returnStop, takeHandOff } from './control';
 import { INTAKE_KEY, INTAKE_STAGE } from './intake';
 import { createJournal, type JournalEntry } from './journal';
 import { type LoadedWorkflow, loadWorkflow } from './load-workflow';
@@ -351,8 +352,10 @@ export interface Made {
 }
 
 /**
- * Leases `branch`, makes the run directory and the workspace at `base`, and checks for an abort, in that order. Left out,
- * `base` is the branch's tip on the remote when the remote has it, else `fallback`, else the default branch's tip. A refusal at any step undoes the ones before it, in reverse.
+ * Leases `branch`, makes the run directory, moves the run's hand-off file into its `CONTROL` if a request is waiting
+ * there, makes the workspace at `base`, and checks for an abort, in that order. Left out, `base` is the branch's tip on
+ * the remote when the remote has it, else `fallback`, else the default branch's tip. A refusal at any step undoes the
+ * ones before it, in reverse, giving a stop in `CONTROL` back to the hand-off.
  */
 export async function startWorkspace(options: {
   port: WorkspacePort;
@@ -381,12 +384,14 @@ export async function startWorkspace(options: {
   let workspace: Workspace | undefined;
   const undo = async (refused: string): Promise<{ refused: string }> => {
     if (workspace !== undefined) await quietly(() => port.release(run, false));
+    returnStop(runsDir(sailDir), run.runId);
     removeRunDir(run.runDir);
     await quietly(() => port.releaseLease(repository.url, branch, run.runId));
     return { refused };
   };
   try {
     createRunDir(sailDir, run.runId);
+    takeHandOff(runsDir(sailDir), run.runId);
     workspace = await port.create(run, {
       branch,
       ...(base === undefined ? {} : { base }),

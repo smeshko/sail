@@ -9,6 +9,9 @@
 //   in `run:end`'s message, as `finish()` in runtime.ts says it.
 // - **Refused, held by another run:** this run's lease went stale and was taken over. It ends as above, with no lease
 //   to release.
+// - **A dispatched run still starting:** it has no run.json yet, and `options.starting` says a dispatched run has that id.
+//   The stop waits for it in the run's hand-off file, or in its `CONTROL` once its directory exists, and the run fails
+//   `stopped` before its intake.
 // A run from before workspaces has no lease or workspace, and ends as above with nothing to release.
 //
 // It needs only the Workspace port, and loads no workflow: a workflow changed since the run started can't block a stop.
@@ -22,7 +25,7 @@ import { PortError } from '../ports/errors';
 import type { ResolvedAdapters } from './adapters';
 import { isPlainName } from './call-dir';
 import { type Clock, systemClock } from './clock';
-import { requestStop, requestStopNow } from './control';
+import { askToStop, requestStop, requestStopNow } from './control';
 import { rootRelative } from './open-run';
 import { credentialValues, redactor } from './redact';
 import { type RunStatus, readStatus, runsDir, writeStatus } from './run-dir';
@@ -40,10 +43,16 @@ export interface StopRunOptions {
   secrets?: readonly string[];
   /** What `run:end` is stamped with. The system's by default. */
   clock?: Clock;
+  /** Whether a dispatched run with this id is still starting, so it has no run directory to stop yet. */
+  starting?: (runId: string) => boolean;
 }
 
-/** How a stop went: the run ended now, a running run was asked to stop, or the stop was refused. */
-export type Stopped = { ended: RunEnd } | { requested: { pid: number; now?: boolean } } | { refused: string };
+/** How a stop went: the run ended now, a running or starting run was asked to stop, or the stop was refused. */
+export type Stopped =
+  | { ended: RunEnd }
+  | { requested: { pid: number; now?: boolean } }
+  | { starting: true }
+  | { refused: string };
 
 const MESSAGE = 'stopped by sail stop';
 
@@ -66,7 +75,11 @@ export async function stopRun(options: StopRunOptions): Promise<Stopped> {
   const root = dirname(sailDir);
   if (!isPlainName(runId)) return { refused: `'${runId}' is not a run id` };
   const dir = join(runs, runId);
-  if (!existsSync(join(dir, RUN_HEADER_FILE))) return { refused: `no run '${runId}' in ${relative(root, runs)}` };
+  if (!existsSync(join(dir, RUN_HEADER_FILE))) {
+    if (options.starting?.(runId) !== true) return { refused: `no run '${runId}' in ${relative(root, runs)}` };
+    askToStop(runs, runId);
+    return { starting: true };
+  }
   const ended = hasEnded(dir, runId);
   if (ended !== undefined) return { refused: ended };
 
