@@ -3,7 +3,7 @@
 // are about check-tasks: Jev's clear yes ends it without an agent session, anything else leaves it to the agent, with
 // Jev's answers as its hint.
 import { expect, test } from 'bun:test';
-import { readdirSync, readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { EXIT_OK } from '../src/cli/exit-codes';
 import { readJournal } from '../src/engine/journal';
@@ -94,5 +94,35 @@ test('with no adapters.jev, check-tasks runs after jev-tasks on every pass as th
     const hint = jevHint(dir, 'check-tasks', 1);
     expect([hint.asked, hint.answers]).toEqual([false, []]);
     expect(readEvents(dir).filter((event) => event.type === 'jev:asked')).toEqual([]);
+  });
+}, 120_000);
+
+test('a ticket comment Linear refuses after the pull request is open still completes the run, and open#1 says commented false with its backfill', async () => {
+  await withTempRepo(async (repo) => {
+    writeOwnSail(repo);
+    const tickets = join(repo.dir, '.sail', 'fake', 'tickets.json');
+    const world = JSON.parse(readFileSync(tickets, 'utf8'));
+    world.tickets.find((each: { ticketKey: string }) => each.ticketKey === 'FAKE-1').answers = {
+      comment: ['ok', 'unavailable'],
+    };
+    writeFileSync(tickets, JSON.stringify(world));
+    repo.git('add', '.sail/fake/tickets.json');
+    repo.git('commit', '-q', '-m', 'script the comments');
+
+    const { code, keys, dir } = await factory(repo);
+    expect(code).toBe(EXIT_OK);
+    expect(readStatus(dir)).toEqual({ status: 'completed' });
+    expect(keys).toContain('file-follow-ups#1');
+
+    const open = readJournal(dir).entries.find((entry) => entry.key === 'open#1');
+    expect(open?.outcome).toBe('passed');
+    const ticket = ((open?.output ?? {}) as { ticket: { commented: boolean; moved: boolean; backfill: string[] } })
+      .ticket;
+    expect([ticket.commented, ticket.moved, ticket.backfill.length]).toEqual([false, true, 1]);
+    expect(ticket.backfill[0]).toStartWith('sail port ticket-source comment FAKE-1 --body-file ');
+    const refused = readEvents(dir).filter(
+      (event) => event.type === 'error:port' && (event as { key?: string }).key === 'open#1',
+    );
+    expect(refused.map((event) => (event as { op?: string }).op)).toEqual(['comment', 'comment', 'comment']);
   });
 }, 120_000);

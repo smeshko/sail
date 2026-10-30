@@ -12,6 +12,7 @@ import type { WorkspacePort } from '../../ports/workspace';
 import { defaultLeasesDir, heldLease, releaseLease, takeLease } from '../leases';
 import {
   addDetached,
+  copyTree,
   diffWorkingTree,
   releaseWorktree,
   reopenWorktree,
@@ -71,6 +72,12 @@ export function createFakeWorkspace(options: FakeWorkspaceOptions): WorkspacePor
       const added = addDetached(repo, path, baseSha, env);
       emit({ type: 'workspace:created', path, branch, baseSha, durationMs: Math.max(0, now().getTime() - started) });
       return { path, branch, baseSha, raw: added };
+    },
+    async readTree(into, { paths, base = defaultBranch }) {
+      const sha = resolveCommit(repo, base, env);
+      if (sha === undefined) throw new PortError('workspace', 'readTree', 'invalid', `${base} names no commit`);
+      copyTree(repo, sha, paths, into, env);
+      return { sha };
     },
     async reopen(run, { branch, baseSha }) {
       return reopenWorktree(join(run.runDir, WORKSPACE_DIR), branch, baseSha, env);

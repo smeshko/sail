@@ -9,13 +9,16 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readlinkSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  copyTree,
   diffWorkingTree,
   fetchRemote,
   gitSync,
@@ -285,3 +288,61 @@ test.skipIf(process.getuid?.() === 0)(
     }
   },
 );
+
+test('copyTree keeps an executable blob executable and a symlink a symlink, skips a submodule, and reads the commit rather than the working tree', async () => {
+  await withTempRepo(async (repo) => {
+    mkdirSync(join(repo.dir, 'tree'));
+    writeFileSync(join(repo.dir, 'tree', 'run.sh'), '#!/bin/sh\n', { mode: 0o755 });
+    writeFileSync(join(repo.dir, 'tree', 'plain.txt'), 'plain\n');
+    writeFileSync(join(repo.dir, 'tree', 'bytes.bin'), new Uint8Array([0, 255, 10, 128]));
+    symlinkSync('plain.txt', join(repo.dir, 'tree', 'link'));
+    repo.git('add', 'tree');
+    repo.git('update-index', '--add', '--cacheinfo', `160000,${repo.git('rev-parse', 'HEAD')},tree/sub`);
+    repo.git('commit', '-q', '-m', 'a tree');
+    const sha = repo.git('rev-parse', 'HEAD');
+    writeFileSync(join(repo.dir, 'tree', 'plain.txt'), 'edited\n');
+    const into = mkdtempSync(join(tmpdir(), 'sail-copy-tree-'));
+    try {
+      copyTree(repo.dir, sha, ['tree'], into, repo.env);
+      expect({
+        exec: (statSync(join(into, 'tree', 'run.sh')).mode & 0o111) !== 0,
+        plainExec: (statSync(join(into, 'tree', 'plain.txt')).mode & 0o111) !== 0,
+        plain: readFileSync(join(into, 'tree', 'plain.txt'), 'utf8'),
+        link: readlinkSync(join(into, 'tree', 'link')),
+        isLink: lstatSync(join(into, 'tree', 'link')).isSymbolicLink(),
+        bytes: [...readFileSync(join(into, 'tree', 'bytes.bin'))],
+        submodule: existsSync(join(into, 'tree', 'sub')),
+      }).toEqual({
+        exec: true,
+        plainExec: false,
+        plain: 'plain\n',
+        link: 'plain.txt',
+        isLink: true,
+        bytes: [0, 255, 10, 128],
+        submodule: false,
+      });
+    } finally {
+      rmSync(into, { recursive: true, force: true });
+    }
+  });
+});
+
+test('copyTree of a sha that names no commit is invalid, and copies nothing', async () => {
+  await withTempRepo(async (repo) => {
+    const into = mkdtempSync(join(tmpdir(), 'sail-copy-tree-'));
+    try {
+      let error: unknown;
+      try {
+        copyTree(repo.dir, 'no-such-sha', ['README.md'], into, repo.env);
+      } catch (thrown) {
+        error = thrown;
+      }
+      expect({ failure: portFailure(error), copied: existsSync(join(into, 'README.md')) }).toEqual({
+        failure: { port: 'workspace', op: 'readTree', code: 'invalid' },
+        copied: false,
+      });
+    } finally {
+      rmSync(into, { recursive: true, force: true });
+    }
+  });
+});

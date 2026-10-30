@@ -4,7 +4,18 @@
 // lease before run:end, and a stage consuming gitDiff() finds the run's patch in $STAGE_IN. All on the fakes, whose
 // leases live in the repository's `.sail-runs/fake/leases/`.
 import { expect, test } from 'bun:test';
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { leaseFile, readLease, takeLease } from '../../src/adapters/leases';
 import type { ResolvedAdapters } from '../../src/engine/adapters';
@@ -571,6 +582,48 @@ test("an agent step's session runs in the run's worktree, with BRANCH in its env
       branch: 'sail/FAKE-1-add-a-shout-flag',
       workspace: join(end.dir, 'workspace'),
     });
+  });
+});
+
+test('a run from committed definitions prompts with the committed conventions from its own copy, and its events stay relative to the clone', async () => {
+  await withTempRepo(async (repo) => {
+    writeAgentFixture(repo.dir, [submits(SPEC, 0.25)]);
+    writeFileSync(join(repo.dir, 'AGENTS.md'), 'committed rule\n');
+    repo.git('add', '.sail', 'AGENTS.md');
+    repo.git('commit', '-q', '-m', 'definitions');
+    const adapters = await fakeAdapters(repo.dir);
+    const scratch = mkdtempSync(join(tmpdir(), 'sail-definitions-test-'));
+    try {
+      const port = adapters.ports.workspace;
+      const { sha } = await port.readTree(scratch, { paths: ['.sail'] });
+      writeFileSync(join(repo.dir, 'AGENTS.md'), 'uncommitted rule\n');
+      const asked: HarnessRequest[] = [];
+      const { harness } = adapters.ports;
+      const run = harness.run.bind(harness);
+      harness.run = (request) => {
+        asked.push(request);
+        return run(request);
+      };
+      const end = await ran(repo.dir, {
+        workflow: AGENT_WORKFLOW,
+        adapters,
+        definitions: { sailDir: join(scratch, '.sail'), sha, port },
+      });
+      const [spec] = asked;
+      expect({
+        committed: spec?.prompt.includes('committed rule') ?? false,
+        uncommitted: spec?.prompt.includes('uncommitted rule') ?? true,
+        recorded: readRunHeader(end.dir).definitionsSha,
+        dir: end.dir,
+      }).toEqual({
+        committed: true,
+        uncommitted: false,
+        recorded: sha,
+        dir: join(repo.dir, '.sail-runs', end.runId),
+      });
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
   });
 });
 
