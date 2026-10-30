@@ -230,6 +230,17 @@ test('seeding self-review journals every call of the source before self-review#1
   });
 }, 60_000);
 
+test('a seeded run masks its secrets in run.json and hands on a redactor of them', async () => {
+  await withTempRepo(async (repo) => {
+    const from = await source.copyInto(repo.dir);
+    const opened = openedFrom(await seed(repo, { fromRun: from.runId, secrets: ['fake://origin'] }));
+    expect([readRunHeader(opened.dir).repository?.url, opened.redact.text('at fake://origin')]).toEqual([
+      '[redacted]',
+      'at [redacted]',
+    ]);
+  });
+}, 60_000);
+
 /** Makes `deep` name the harness `harness` in `repo`'s config, which defines `second` and the credentialed `echo`. */
 function nameHarness(repo: TempRepo, harness: string, model = 'claude-opus-5-5'): void {
   const sail = join(repo.dir, '.sail');
