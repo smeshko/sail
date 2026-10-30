@@ -331,7 +331,7 @@ Always the git branch, such as the one a run's workspace sits on. A workflow's r
 _Avoid_: using "branch" for a route or a fork in the workflow
 
 **Run directory**:
-Everything a run wrote: the run header, the journal, the events, the summary, `definition/`, a copy of each roster stage's folder as the run started, which its calls read their prompts, templates and scripts from, and one directory per call holding its result and files.
+Everything a run wrote: the run header, the journal, the events, the summary, `definition/`, a copy of each roster stage's folder as the run started, which its calls read their prompts, templates and scripts from (for a run started from the `.sail/` committed at the default branch, as a dispatched one is, the whole of that `.sail/` and its conventions), and one directory per call holding its result and files.
 _Avoid_: run folder, output directory, artifacts
 
 **Run header**:

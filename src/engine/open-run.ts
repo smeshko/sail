@@ -35,6 +35,10 @@
 // that isn't one of this ticket's, or whose run directory exists, is refused. A forced queue item is dispatched with
 // `force`, and records the checks it overrode as a forced manual run does.
 //
+// A start given `definitions`, as a dispatched one is, runs on the `.sail/` committed at their sha rather than the
+// clone's: every check above reads that copy, its workspace is based on that commit, and its run directory keeps the
+// committed `.sail/` and conventions whole in `definition/`, recording the sha as `definitionsSha`.
+//
 // Every start checks designation against the workflow's label: its `watch.label`, then `project.yaml`'s, then sail's,
 // the label its watcher polls.
 //

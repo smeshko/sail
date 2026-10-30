@@ -8,14 +8,17 @@
 //
 // Ctrl-C or SIGTERM while the run runs stops the running call and suspends the run, and the command prints how to
 // resume it. One that arrives while the run is being opened is a refusal: the ticket is as it was, and nothing exists
-// to resume. Earlier still, during the type-check, it ends sail the default way.
+// to resume. Earlier still, during the type-check, it ends sail the default way; a dispatched start's is the same
+// refusal.
 //
 // `--dispatch <run id>` is the watcher's, and not in the usage: the run it dispatches runs under the id it minted, as
-// a start `via` the watcher. It runs on the `.sail/` committed at the default branch's fetched tip, read into a scratch
-// directory the command removes at its end, and not on the clone's working tree; the run keeps its own copy of it, and
-// so does every resume. A refusal on the way names that commit. So is `--head-sha <sha>`, which pins a run from a pull request to the head sha the watcher
+// a start `via` the watcher. So is `--head-sha <sha>`, which pins a run from a pull request to the head sha the watcher
 // queued: a pull request that has moved since is refused. The positional is a ref: a ticket's key or URL, or a pull
 // request's `#12`, `12` or URL, which the ticket source and the code host both read.
+//
+// A dispatched start runs on the `.sail/` committed at the default branch's fetched tip, read into a scratch directory
+// the command removes at its end, and not on the clone's working tree; the run keeps its own copy of it, and so does
+// every resume. A refusal on the way names that commit.
 //
 // `sail resume` takes the same steps: the helpers exported here are the ones both commands run, so they can't drift.
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
