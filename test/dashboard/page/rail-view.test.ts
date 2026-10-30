@@ -52,6 +52,17 @@ test('repository headers are one line with the remote as the tooltip and counts 
   );
 });
 
+test('a running stalled row names the key with a warning marker', () => {
+  const repos = railRepos(index(m.registryDir), NOW);
+  const run = repos[0]?.workflows[0]?.runs[0];
+  if (!run) throw new Error('missing fixture run');
+  run.status = 'running';
+  run.stalled = 'spec#1';
+  expect(renderRail(repos, initialUi(0), NOW).value).toContain(
+    'ticket-to-pr · <span class="stalled">stalled spec#1</span>',
+  );
+});
+
 test('each repository lists its workflows by name, the watched one with a warn queue badge that opens its queue and the others with none', () => {
   const markup = rail();
   const groups = [...markup.matchAll(/data-action="toggle-group" data-group="([^"]+)"/g)].map(([, group]) => group);

@@ -3,7 +3,7 @@
 //
 // - A run that is running, alive in another process, gets a stop request in its control file, and the command exits 0
 //   at once, saying it stops at its next call boundary: a run may be inside a long agent call, and `sail show <run>
-//   --follow` follows it to its end.
+//   --follow` follows it to its end. With --now its running call is ended instead.
 // - A run that nothing runs, suspended or running with its process gone, ends `failed stopped` now: its workspace and
 //   lease are released, and `run:end` closes its stream.
 // - A dispatched run that is still starting, which a dispatched queue item names but has no run directory yet, gets a
@@ -27,13 +27,14 @@ const COMMAND = 'sail stop';
 export async function stop(args: Parsed, io: Io): Promise<ExitCode> {
   const refuse = refuseAs(io, COMMAND);
   const [runId] = args.positionals;
-  if (runId === undefined) return refuse('usage: sail stop <run>');
+  if (runId === undefined) return refuse('usage: sail stop <run> [--now]');
   const project = await findProject(io, COMMAND, { ports: ['workspace'] });
   if (typeof project === 'number') return project;
   const stopped = await stopRun({
     sailDir: project.sailDir,
     runId,
     adapters: project.adapters,
+    now: args.values.now === true,
     secrets: credentialValues(io.env ?? process.env),
     starting: (id) => {
       const item = dispatchedItem(runsDir(project.sailDir), id);
@@ -44,7 +45,9 @@ export async function stop(args: Parsed, io: Io): Promise<ExitCode> {
   if ('starting' in stopped) {
     io.stdout(`${COMMAND}: run ${runId} is still starting: it stops before its intake\n`);
   } else if ('requested' in stopped) {
-    io.stdout(`${COMMAND}: run ${runId} stops at its next call boundary (pid ${stopped.requested.pid})\n`);
+    io.stdout(
+      `${COMMAND}: run ${runId} ${stopped.requested.now ? 'ends its running call now' : 'stops at its next call boundary'} (pid ${stopped.requested.pid})\n`,
+    );
   } else {
     io.stdout(`${COMMAND}: run ${runId} stopped\n`);
   }

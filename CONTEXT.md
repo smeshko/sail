@@ -291,7 +291,7 @@ The status of a run that has exited with nothing running and a resume expected, 
 _Avoid_: paused, waiting, blocked, pending
 
 **Control file**:
-A run's `CONTROL` file in its run directory, a request to stop at its next call boundary: `unwatched`, which the watcher writes when the run's workflow is unwatched and which suspends the run, or `stopped`, which `sail stop` writes and which fails it. The run takes it before its intake and before each call. A dispatched run with no run directory yet gets its request as a hand-off file, which it moves in as `CONTROL` once its run directory exists.
+A run's `CONTROL` file in its run directory, a request to stop at its next call boundary: `unwatched`, which the watcher writes when the run's workflow is unwatched and which suspends the run, or `stopped`, which `sail stop` writes and which fails it. `sail stop --now` writes `stopped now`, ending the running call through its abort signal rather than waiting for the boundary. The run takes the request before its intake and before each call. A dispatched run with no run directory yet gets its request as a hand-off file, which it moves in as `CONTROL` once its run directory exists.
 _Avoid_: signal file, kill file, flag
 
 **Hand-off file**:
@@ -455,8 +455,16 @@ _Avoid_: lock, mutex
 A script step's hold on a named slot within the selected machine directory, declared as `exclusive: '<name>'`, kept in `~/.sail/slots/` (`$SAIL_HOME/slots/` when set). One step sharing that directory holds a name at a time; different machine directories have independent slots. A step that finds it held waits and emits `step:queued` naming the holder. The slot is stale only once its holder's pid is dead.
 _Avoid_: lock, mutex, semaphore
 
+**Idle limit**:
+An agent step's `budget.maxIdleMinutes`, by default a quarter of `maxMinutes`: how long it may emit no event before it is marked stalled. Agent steps only.
+_Avoid_: inactivity timeout, heartbeat
+
+**Stalled**:
+A running agent step that has emitted no event for its idle limit. It is marked, never ended by the idle limit: the dashboard marks its run in the run list and lists it in needs attention until the step speaks again.
+_Avoid_: hung, stuck, frozen
+
 **Budget**:
-The most a step may spend (turns, dollars, minutes) and the most a run may spend overall. A step over budget ends in `error`; a run over budget is suspended, and a raise lets it resume.
+An agent step's budget also names its idle limit, which warns rather than ends it. The most a step may spend (turns, dollars, minutes) and the most a run may spend overall. A step over budget ends in `error`; a run over budget is suspended, and a raise lets it resume.
 _Avoid_: limit, quota, cap, allowance
 
 **Usage limit**:
@@ -630,5 +638,5 @@ The dashboard's panel for one call, with its overview, files, permissions and lo
 _Avoid_: details pane, drawer
 
 **Needs attention**:
-The dashboard's one list, across every repository, of what a person should look at: failed and suspended runs, calls whose outcome is `error`, denials, parked items and problems. Each item opens its run and call. It opens as a pane from a button in the top bar, which counts its items.
+The dashboard's one list, across every repository, of what a person should look at: failed and suspended runs, running runs with a stalled step, calls whose outcome is `error`, denials, parked items and problems. Each item opens its run and call. It opens as a pane from a button in the top bar, which counts its items.
 _Avoid_: alerts, signals, triage

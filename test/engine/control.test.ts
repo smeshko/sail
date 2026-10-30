@@ -21,7 +21,9 @@ import {
   dropHandOff,
   handOffFile,
   requestStop,
+  requestStopNow,
   requestUnwatch,
+  stopNowRequested,
   takeControl,
   takeHandOff,
 } from '../../src/engine/control';
@@ -40,6 +42,20 @@ function runDir(): string {
 
 /** What the run directory holds: each file, with its text. */
 const held = (dir: string) => readdirSync(dir).map((name) => `${name}: ${readFileSync(join(dir, name), 'utf8')}`);
+
+test('an immediate stop is peeked without taking, taken as stopped, and replaceable by plain stop', () => {
+  const dir = runDir();
+  expect(stopNowRequested(dir)).toBe(false);
+  requestStopNow(dir);
+  expect(held(dir)).toEqual(['CONTROL: stopped now\n']);
+  expect(stopNowRequested(dir)).toBe(true);
+  expect(held(dir)).toEqual(['CONTROL: stopped now\n']);
+  expect(takeControl(dir)).toBe('stopped');
+  expect(stopNowRequested(dir)).toBe(false);
+  requestStopNow(dir);
+  requestStop(dir);
+  expect([held(dir), stopNowRequested(dir)]).toEqual([['CONTROL: stopped\n'], false]);
+});
 
 test('an unwatch request is written only where none is, and a stop replaces any request, never the other way round', () => {
   const dir = runDir();

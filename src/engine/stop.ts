@@ -1,7 +1,7 @@
 // `stopRun()`: the engine side of `sail stop <run>` (DECISIONS D7). It tells a live run from one nothing runs by taking
 // the run's lease, as a resume renews it:
 // - **Refused, held by this run in another live process:** the run is running. It gets a stop request in its control
-//   file, and ends `failed stopped` at its next call boundary, releasing its workspace and lease itself.
+//   file, and ends `failed stopped` at its next call boundary (ending its running call with --now).
 // - **Taken:** nothing runs the run, whether it is suspended or running with its process gone. Its STATUS is read again,
 //   since a run that ended in between is refused, and the lease given back. Then, in order: the events file's torn tail
 //   is cut, STATUS becomes `failed stopped`, the workspace and the lease are released, and `run:end` goes out through a
@@ -25,7 +25,7 @@ import { PortError } from '../ports/errors';
 import type { ResolvedAdapters } from './adapters';
 import { isPlainName } from './call-dir';
 import { type Clock, systemClock } from './clock';
-import { askToStop, requestStop } from './control';
+import { askToStop, requestStop, requestStopNow } from './control';
 import { rootRelative } from './open-run';
 import { credentialValues, redactor } from './redact';
 import { type RunStatus, readStatus, runsDir, writeStatus } from './run-dir';
@@ -33,6 +33,7 @@ import { RUN_HEADER_FILE, readRunHeader } from './run-header';
 import type { RunEnd } from './runtime';
 
 export interface StopRunOptions {
+  now?: boolean;
   /** The `.sail/` the run belongs to: the run is found beside it. */
   sailDir: string;
   runId: string;
@@ -47,7 +48,11 @@ export interface StopRunOptions {
 }
 
 /** How a stop went: the run ended now, a running or starting run was asked to stop, or the stop was refused. */
-export type Stopped = { ended: RunEnd } | { requested: { pid: number } } | { starting: true } | { refused: string };
+export type Stopped =
+  | { ended: RunEnd }
+  | { requested: { pid: number; now?: boolean } }
+  | { starting: true }
+  | { refused: string };
 
 const MESSAGE = 'stopped by sail stop';
 
@@ -97,8 +102,9 @@ export async function stopRun(options: StopRunOptions): Promise<Stopped> {
         return { refused: `the branch ${branch} could not be leased: ${error.message} (${error.code})` };
       }
       if (!leased.leased && leased.holder.runId === runId) {
-        requestStop(dir);
-        return { requested: { pid: leased.holder.pid } };
+        if (options.now) requestStopNow(dir);
+        else requestStop(dir);
+        return { requested: { pid: leased.holder.pid, ...(options.now ? { now: true } : {}) } };
       }
       if (leased.leased) {
         lease = { remote: repository.url, branch };

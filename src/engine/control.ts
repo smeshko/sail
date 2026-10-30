@@ -1,5 +1,5 @@
 // A run's control file, `<run dir>/CONTROL`: a request, from outside the run's process, to stop at its next call
-// boundary. It holds one word and a newline:
+// boundary, or end the running call with `stopped now`. It holds a request and a newline:
 // - `stopped`, which `sail stop` writes, fails the run: its workspace and lease are released, as for any failed run.
 // - `unwatched`, which the watcher writes when the run's workflow is unwatched, suspends it, keeping both.
 //
@@ -41,6 +41,21 @@ export function requestStop(runDir: string): void {
   replaceFile(join(runDir, CONTROL_FILE), 'stopped\n', own(runDir, 'tmp'));
 }
 
+/** Asks the run to end its running call now, replacing any earlier request. */
+export function requestStopNow(runDir: string): void {
+  replaceFile(join(runDir, CONTROL_FILE), 'stopped now\n', own(runDir, 'tmp'));
+}
+
+/** Reads an immediate stop without taking it: the boundary still consumes the request. */
+export function stopNowRequested(runDir: string): boolean {
+  try {
+    return readFileSync(join(runDir, CONTROL_FILE), 'utf8') === 'stopped now\n';
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
 /** Creates `file` holding an `unwatched` through a temp file in `dir`, unless it exists. True when it wrote it. */
 function createUnwatch(file: string, tmp: string): boolean {
   writeFileSync(tmp, 'unwatched\n');
@@ -70,7 +85,7 @@ function takeFile(file: string, taken: string): ControlRequest | undefined {
   }
   try {
     const text = readFileSync(taken, 'utf8');
-    return REQUESTS.find((request) => text === `${request}\n`);
+    return text === 'stopped now\n' ? 'stopped' : REQUESTS.find((request) => text === `${request}\n`);
   } finally {
     rmSync(taken, { force: true });
   }

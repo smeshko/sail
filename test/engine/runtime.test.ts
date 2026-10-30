@@ -18,7 +18,7 @@ import { join } from 'node:path';
 import type { ScriptedAnswer } from '../../src/adapters/fake/harness';
 import { BUILTINS } from '../../src/adapters/index';
 import { readConfig } from '../../src/engine/config';
-import { CONTROL_FILE, requestStop, requestUnwatch } from '../../src/engine/control';
+import { CONTROL_FILE, requestStop, requestStopNow, requestUnwatch } from '../../src/engine/control';
 import { JOURNAL_FILE, type JournalEntry, JournalError, readJournal } from '../../src/engine/journal';
 import { readStatus, writeStatus } from '../../src/engine/run-dir';
 import { RUN_HEADER_FILE } from '../../src/engine/run-header';
@@ -1568,6 +1568,106 @@ test('a resume that takes the lease after a sail stop ended the run meanwhile is
 const ranAgent = (cwd: string, options: Partial<RunWorkflowOptions> = {}): Promise<RunEnd> =>
   ran(cwd, { workflow: AGENT_WORKFLOW, ...options });
 
+test.each([false, true])(
+  'a live silent agent call obeys stop now=%s without confusing interruption',
+  async (now) => {
+    await withTempRepo(async (repo) => {
+      const sail = writeAgentFixture(repo.dir, [submits(SPEC, 0.125, { delayMs: 4000 })]);
+      edit(sail, `${SPEC_STAGE}/stage.ts`, 'maxMinutes: 10', 'maxMinutes: 10, maxIdleMinutes: 0.002');
+      const observed: unknown[] = [];
+      const control: Consumer = {
+        name: 'stop',
+        onEvent(event) {
+          if (event.type === 'step:stalled' && event.key === 'spec#1') {
+            observed.push(summaryOf(onlyRun(repo.dir))?.stalled);
+            if (now) requestStopNow(onlyRun(repo.dir));
+            else requestStop(onlyRun(repo.dir));
+          }
+        },
+      };
+      const began = Date.now();
+      const end = await ranAgent(repo.dir, { consumers: [control] });
+      expect(end).toMatchObject({
+        status: 'failed',
+        stopReason: 'stopped',
+        message: now ? 'stopped by sail stop --now during spec#1' : 'stopped by sail stop before publish#1',
+      });
+      expect(journaled(end.dir)).toEqual(
+        now ? ['intake#1 passed', 'brief#1 passed'] : ['intake#1 passed', 'brief#1 passed', 'spec#1 done'],
+      );
+      expect(observed).toEqual([[{ key: 'spec#1', since: expect.any(String) }]]);
+      expect(summaryOf(end.dir)?.stalled).toBeUndefined();
+      if (now) expect(Date.now() - began).toBeLessThan(3500);
+      expect([existsSync(join(end.dir, 'workspace')), leaseFiles(repo.dir)]).toEqual([false, []]);
+      expect(validateRunDir(end.dir).issues.map(formatIssue)).toEqual([]);
+    });
+  },
+  20_000,
+);
+
+test('an immediate stop whose control file is gone by the call boundary still fails the run stopped, with no new try (review R4)', async () => {
+  await withTempRepo(async (repo) => {
+    writeAgentFixture(repo.dir, [submits(SPEC, 0.125, { delayMs: 4000 }), submits(SPEC, 0.125)]);
+    const control: Consumer = {
+      name: 'stop',
+      onEvent(event) {
+        if (event.type === 'harness:session_start' && event.key === 'spec#1') requestStopNow(onlyRun(repo.dir));
+        if (event.type === 'harness:session_end' && event.key === 'spec#1')
+          rmSync(join(onlyRun(repo.dir), CONTROL_FILE), { force: true });
+      },
+    };
+    const end = await ranAgent(repo.dir, { consumers: [control] });
+    expect([end.status, end.stopReason, end.message]).toEqual([
+      'failed',
+      'stopped',
+      'stopped by sail stop --now during spec#1',
+    ]);
+    expect(journaled(end.dir)).toEqual(['intake#1 passed', 'brief#1 passed']);
+    expect(ofType(events(end.dir), 'harness:session_start').filter((event) => event.key === 'spec#1')).toHaveLength(1);
+  });
+}, 20_000);
+
+test('an immediate stop during a repository intake fails stopped with no intake journal line', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = writeAgentFixture(repo.dir, []);
+    write(
+      sail,
+      'workflows/own/intake.ts',
+      `import { intake, agent, z } from 'sail';
+const output = z.object({ ready: z.boolean() });
+export const own = intake('own', { accepts: ['ticket'], output, steps: [agent('shape', {
+  prompt: './prompt.md', output, budget: { maxTurns: 4, maxUsd: 2, maxMinutes: 10 },
+  permissions: { read: ['**'], write: ['$STAGE_OUT/**'], commands: [] },
+})] });
+`,
+    );
+    write(sail, 'workflows/own/prompt.md', 'Prepare the input.');
+    write(
+      sail,
+      'workflows/own/workflow.ts',
+      `import { workflow } from 'sail';
+import { own } from './intake';
+export default workflow('own', { intake: own, version: 1 }, async (run) => run.input);
+`,
+    );
+    writeHarnessScript(repo.dir, { 'intake#1': [{ outcome: 'done', output: { ready: true }, delayMs: 4000 }] });
+    const control: Consumer = {
+      name: 'stop',
+      onEvent(event) {
+        if (event.type === 'harness:session_start') requestStopNow(onlyRun(repo.dir));
+      },
+    };
+    const end = await ran(repo.dir, { workflow: 'own', consumers: [control] });
+    expect([end.status, end.stopReason, end.message]).toEqual([
+      'failed',
+      'stopped',
+      'stopped by sail stop --now during intake#1',
+    ]);
+    expect(journaled(end.dir)).toEqual([]);
+    expect([existsSync(join(end.dir, 'workspace')), leaseFiles(repo.dir)]).toEqual([false, []]);
+  });
+}, 20_000);
+
 test('an agent call is journaled once, with the output, the files and the result of its last try, and ran on the model its alias names', async () => {
   await withTempRepo(async (repo) => {
     writeAgentFixture(repo.dir, [submits(NO_TASKS, 0.125), submits(SPEC, 0.25)]);
@@ -2197,6 +2297,23 @@ const ofType = <T extends SailEvent['type']>(list: readonly SailEvent[], type: T
 /** The events a group's calls emit: those carrying one of its keys. */
 const CALL_TYPES = ['stage:', 'harness:', 'agent:', 'usage:', 'prompt:', 'input:', 'output:', 'file:'];
 
+test('an immediate stop aborts all live calls of a group without journaling them', async () => {
+  await withTempRepo(async (repo) => {
+    writeTrio(repo.dir, { a: 4000, b: 4000, c: 4000 });
+    const control: Consumer = {
+      name: 'stop',
+      onEvent(event) {
+        if (event.type === 'harness:session_start' && event.key === 'c#1') requestStopNow(onlyRun(repo.dir));
+      },
+    };
+    const end = await ranTrio(repo.dir, { consumers: [control] });
+    expect([end.status, end.stopReason]).toEqual(['failed', 'stopped']);
+    expect(journaled(end.dir)).toEqual(['intake#1 passed']);
+    expect(ofType(events(end.dir), 'all:end')).toEqual([]);
+    expect([existsSync(join(end.dir, 'workspace')), leaseFiles(repo.dir)]).toEqual([false, []]);
+  });
+}, 20_000);
+
 test('trio journal gates override the order its delays would give', async () => {
   await withTempRepo(async (repo) => {
     writeTrio(repo.dir, { a: 0, b: 200, c: 100 });
@@ -2525,6 +2642,27 @@ function stoppedTwoStep(
 const afterDescribe = (_: string, controller: AbortController) => ({
   consumers: [abortOnAppend(controller, 'publish#1/describe')],
 });
+
+test('an immediate stop in a multi-step call leaves its running step and whole call unjournaled', async () => {
+  await withTempRepo(async (repo) => {
+    writeTwoStep(repo.dir, { describe: [{ ...DESCRIBED, delayMs: 4000 } as ScriptedAnswer] });
+    const control: Consumer = {
+      name: 'stop',
+      onEvent(event) {
+        if (event.type === 'harness:session_start' && event.key === 'publish#1/describe')
+          requestStopNow(onlyRun(repo.dir));
+      },
+    };
+    const end = await ranAgent(repo.dir, { consumers: [control] });
+    expect([end.status, end.stopReason, end.message]).toEqual([
+      'failed',
+      'stopped',
+      'stopped by sail stop --now during publish#1',
+    ]);
+    expect(journaled(end.dir)).toEqual(['intake#1 passed', 'brief#1 passed', 'spec#1 done']);
+    expect([existsSync(join(end.dir, 'workspace')), leaseFiles(repo.dir)]).toEqual([false, []]);
+  });
+}, 20_000);
 
 test('a two-step stage journals each step as it finishes, then its call, and runs its agent step on the model the roster froze for it', async () => {
   await withTempRepo(async (repo) => {
