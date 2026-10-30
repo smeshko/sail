@@ -1,6 +1,8 @@
 // A run's markdown file as HTML the page can show as it is. Bun parses it, and every element is built here: text is
 // escaped, raw HTML in the file is shown as text, only an http(s) URL becomes a link, and an image is its alt text and
-// its URL, never fetched. So nothing the file holds reaches the page's markup as markup.
+// its URL, never fetched. So nothing the file holds reaches the page's markup as markup. A text nested too deep is
+// shown as text, since Bun parses some deep shapes in quadratic time.
+import { MAX_MARKDOWN_DEPTH, markdownDepth } from '../engine/markdown-depth';
 import { escapeHtml, safeHref } from './page/html';
 
 const ALIGNS = new Set(['left', 'center', 'right']);
@@ -16,6 +18,10 @@ const wrap = (tag: string) => (children: string) => `<${tag}>${children}</${tag}
 
 /** `text`, markdown, as escaped HTML. */
 export function renderMarkdown(text: string): string {
+  const depth = markdownDepth(text);
+  if (depth > MAX_MARKDOWN_DEPTH) {
+    return `<p class="md-note">Shown as text: it nests ${depth} levels deep, more than the ${MAX_MARKDOWN_DEPTH} the dashboard renders as markdown.</p>\n<pre class="md-code"><code>${escapeHtml(text)}</code></pre>\n`;
+  }
   return Bun.markdown.render(text, {
     text: (children) => escapeHtml(children),
     html: (children) => children,
