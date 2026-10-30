@@ -381,6 +381,10 @@ test.each([
   ['http://[::1]:8080', 'http://[::1]:8080'],
   ['https://localhost:1/base', 'https://localhost:1/base'],
   ['https://localhost:1/base/', 'https://localhost:1/base'],
+  ['http://localhost:9999 ', 'http://localhost:9999'],
+  [' http://localhost:9999/base/ ', 'http://localhost:9999/base'],
+  ['http://localhost:9/?x=1', 'http://localhost:9'],
+  ['http://localhost:9/base#top', 'http://localhost:9/base'],
 ])('the endpoint %s is accepted, as the base %s', (value, base) => {
   expect(typesafeEndpoint(value)).toBe(base);
 });

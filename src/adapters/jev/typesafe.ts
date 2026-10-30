@@ -79,7 +79,7 @@ export function typesafeEndpoint(value: string): string {
     return TYPESAFE_API_URL;
   }
   if ((url.protocol !== 'http:' && url.protocol !== 'https:') || !isLoopback(url.hostname)) throw refuse();
-  return value.replace(/\/+$/, '');
+  return `${url.origin}${url.pathname}`.replace(/\/+$/, '');
 }
 
 export function createTypesafeJev(options: TypesafeJevOptions): Jev {
