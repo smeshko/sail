@@ -1,5 +1,6 @@
 // The fake TicketSource: tickets in a committed seed file, with every change kept in a separate state file that later
-// instances read, so a claim made in one process is seen in the next (D1).
+// instances read, so a claim made in one process is seen in the next (D1). A ticket's comments and moves can be
+// scripted, so a test can have the provider refuse one.
 import { z } from 'zod';
 import type { ProviderEvent } from '../../events/types';
 import { PortError } from '../../ports/errors';
@@ -51,6 +52,8 @@ export function checkFakePickUp(pickUp: readonly string[]): void {
   }
 }
 
+const TicketAnswers = z.array(z.enum(['ok', 'unavailable'])).min(1);
+
 /** A ticket as the seed holds it: its URL and `raw` are derived. */
 const StoredTicket = z.object({
   ticketKey: z.string(),
@@ -62,6 +65,10 @@ const StoredTicket = z.object({
   comments: z.array(Comment),
   links: z.array(Link),
   attachments: z.array(Attachment),
+  /** What each comment or update call is answered, the last repeating: `unavailable` is the provider refusing it, a PortError. */
+  answers: z.object({ comment: TicketAnswers.optional(), update: TicketAnswers.optional() }).optional(),
+  /** How many comment and update calls the ticket has answered. Kept only for a ticket with `answers`. */
+  reads: z.object({ comment: z.number().int().default(0), update: z.number().int().default(0) }).optional(),
 });
 type StoredTicket = z.infer<typeof StoredTicket>;
 
@@ -101,15 +108,33 @@ const URL_KEY = /^fake:\/\/tickets\/(FAKE-\d+)$/;
 
 const ticketNumber = (ticketKey: string): number => Number(ticketKey.slice('FAKE-'.length));
 
-/** A copy of the stored ticket, so changing what a caller is given never reaches the store. */
+/** A copy of the stored ticket without its scripts, so changing what a caller is given never reaches the store. */
+const bare = (stored: StoredTicket): Omit<StoredTicket, 'answers' | 'reads'> => {
+  const { answers: _answers, reads: _reads, ...rest } = structuredClone(stored);
+  return rest;
+};
+
+/** Takes the answer the ticket's script gives its next `op` call, and counts the call. */
+function answerFor(ticket: StoredTicket, op: 'comment' | 'update'): 'ok' | 'unavailable' {
+  const script = ticket.answers?.[op];
+  if (script === undefined) return 'ok';
+  const reads = ticket.reads ?? { comment: 0, update: 0 };
+  const answer = script[Math.min(reads[op], script.length - 1)] as 'ok' | 'unavailable';
+  ticket.reads = { ...reads, [op]: reads[op] + 1 };
+  return answer;
+}
+
+const refused = (op: 'comment' | 'update') =>
+  new PortError('ticketSource', op, 'unavailable', `fake: ${op} refused (scripted)`);
+
 const toTicket = (stored: StoredTicket): Ticket => ({
-  ...structuredClone(stored),
+  ...bare(stored),
   url: `fake://tickets/${stored.ticketKey}`,
-  raw: structuredClone(stored),
+  raw: bare(stored),
 });
 
 const toListed = (stored: StoredTicket): ListedTicket => {
-  const { ticketKey, title, description, state, labels } = structuredClone(stored);
+  const { ticketKey, title, description, state, labels } = bare(stored);
   return {
     ticketKey,
     title,
@@ -117,7 +142,7 @@ const toListed = (stored: StoredTicket): ListedTicket => {
     state,
     labels,
     url: `fake://tickets/${ticketKey}`,
-    raw: structuredClone(stored),
+    raw: bare(stored),
   };
 };
 
@@ -140,10 +165,9 @@ export function createFakeTicketSource(options: FakeTicketSourceOptions): Ticket
       const ticket = find(world, op, ticketKey);
       const name = knownLabel(world, op, label);
       const carried = ticket.labels.includes(name);
-      if (carried === adding)
-        return { name, changed: false, ticketKey, labels: [...ticket.labels], raw: structuredClone(ticket) };
+      if (carried === adding) return { name, changed: false, ticketKey, labels: [...ticket.labels], raw: bare(ticket) };
       ticket.labels = adding ? [...ticket.labels, name] : ticket.labels.filter((each) => each !== name);
-      return { name, changed: true, ticketKey, labels: [...ticket.labels], raw: structuredClone(ticket) };
+      return { name, changed: true, ticketKey, labels: [...ticket.labels], raw: bare(ticket) };
     });
     const { name, changed: did, ...relabelled } = changed;
     if (did)
@@ -204,7 +228,7 @@ export function createFakeTicketSource(options: FakeTicketSourceOptions): Ticket
         const ticket = find(world, 'claim', ticketKey);
         const claimed = canPickUp(ticket);
         if (claimed) ticket.state = { ...STATES['in-progress'] };
-        return { claimed, state: { ...ticket.state }, raw: structuredClone(ticket) };
+        return { claimed, state: { ...ticket.state }, raw: bare(ticket) };
       });
       if (result.claimed) emit({ type: 'ticket:claimed', ticketKey, state: result.state });
       return result;
@@ -216,22 +240,26 @@ export function createFakeTicketSource(options: FakeTicketSourceOptions): Ticket
       }
       const moved = store.change((world) => {
         const ticket = find(world, 'update', ticketKey);
+        if (answerFor(ticket, 'update') === 'unavailable') return undefined;
         ticket.state =
           change.state === 'unstarted' && pickUp?.[0] !== undefined
             ? { type: 'unstarted', name: pickUp[0] }
             : { ...STATES[change.state] };
-        return { state: { ...ticket.state }, raw: structuredClone(ticket) };
+        return { state: { ...ticket.state }, raw: bare(ticket) };
       });
+      if (moved === undefined) throw refused('update');
       emit({ type: 'ticket:updated', ticketKey, change: { state: change.state }, state: moved.state });
       return moved;
     },
     async comment(ticketKey, body) {
       const posted = store.change((world) => {
         const ticket = find(world, 'comment', ticketKey);
+        if (answerFor(ticket, 'comment') === 'unavailable') return undefined;
         ticket.comments.push({ author: 'sail', body, createdAt: now().toISOString() });
         const id = `comment-${ticket.comments.length}`;
-        return { id, url: `fake://tickets/${ticketKey}#${id}`, raw: structuredClone(ticket) };
+        return { id, url: `fake://tickets/${ticketKey}#${id}`, raw: bare(ticket) };
       });
+      if (posted === undefined) throw refused('comment');
       emit({ type: 'ticket:commented', ticketKey, body });
       return posted;
     },
@@ -249,7 +277,7 @@ export function createFakeTicketSource(options: FakeTicketSourceOptions): Ticket
           attachments: [],
         };
         world.tickets.push(ticket);
-        return { ticketKey: ticket.ticketKey, url: `fake://tickets/${ticket.ticketKey}`, raw: structuredClone(ticket) };
+        return { ticketKey: ticket.ticketKey, url: `fake://tickets/${ticket.ticketKey}`, raw: bare(ticket) };
       });
       emit({ type: 'ticket:created', ticketKey: created.ticketKey, title, url: created.url });
       return created;
@@ -272,7 +300,7 @@ export function createFakeTicketSource(options: FakeTicketSourceOptions): Ticket
           title: `${INVERSE[kind]} ${ticketKey}: ${ticket.title}`,
         });
         if (kind === 'duplicate') ticket.state = { ...DUPLICATE };
-        return { state: { ...ticket.state }, raw: structuredClone(ticket) };
+        return { state: { ...ticket.state }, raw: bare(ticket) };
       });
       emit({ type: 'ticket:related', ticketKey, kind, to, state: related.state });
       return { ticketKey, kind, to, ...related };
@@ -285,7 +313,7 @@ export function createFakeTicketSource(options: FakeTicketSourceOptions): Ticket
         const ticket = find(world, 'edit', ticketKey);
         if (title !== undefined) ticket.title = title;
         if (description !== undefined) ticket.description = description;
-        return { ticketKey, url: `fake://tickets/${ticketKey}`, raw: structuredClone(ticket) };
+        return { ticketKey, url: `fake://tickets/${ticketKey}`, raw: bare(ticket) };
       });
       const fields: ('title' | 'description')[] = [];
       if (title !== undefined) fields.push('title');
