@@ -23,6 +23,7 @@ import {
   renderDocuments,
   validateDocuments as validate,
 } from '../../src/engine/documents';
+import { MAX_MARKDOWN_DEPTH } from '../../src/engine/markdown-depth';
 import { untrustedInput } from '../../src/engine/render';
 import { formatIssue, validateDocument } from '../../src/engine/schemas';
 import { countItems, doc, hasSections, noPlaceholders, type Validator } from '../../src/sdk/index';
@@ -282,6 +283,48 @@ test('validateDocuments leaves out a document the try did not produce, and refus
     validations: { 'big.md': { ok: true, checks: ['noPlaceholders'] } },
     derived: {},
     errors: [],
+  });
+});
+
+test('a document nested more than 64 levels is refused with one problem and no checks, and never parsed, however large (ADW-198)', () => {
+  const tooDeep = `nests 65 levels deep, more than the ${MAX_MARKDOWN_DEPTH} a document may nest to be validated`;
+  const out = produced({
+    'shallow.md': `${'- '.repeat(65)}x\n`,
+    'huge.md': `${'- '.repeat(MAX_DOCUMENT_BYTES / 2 - 2)}x\n`,
+  });
+  const produces = {
+    'shallow.md': doc('shallow.md', [noPlaceholders()]),
+    'huge.md': doc('huge.md', [noPlaceholders()]),
+  };
+  const started = performance.now();
+  const validated = validateDocuments({ produces, ...out });
+  expect(performance.now() - started).toBeLessThan(1000);
+  expect(validated).toEqual({
+    validations: { 'shallow.md': { ok: false, checks: [] }, 'huge.md': { ok: false, checks: [] } },
+    derived: {},
+    errors: [
+      { reason: 'invalid_output', message: `shallow.md: ${tooDeep}` },
+      {
+        reason: 'invalid_output',
+        message: `huge.md: nests ${MAX_DOCUMENT_BYTES / 2 - 2} levels deep, more than the 64 a document may nest to be validated`,
+      },
+    ],
+  });
+});
+
+// No clock here: the parse's time depends on the machine's load, and the refusal above is what keeps a parse short.
+test('a document at exactly 64 levels is read and checked, and so is 1 MiB of lines at 64 levels (ADW-198)', () => {
+  const lines = `${'- '.repeat(63)}x\n`;
+  const out = produced({
+    'edge.md': `${'- '.repeat(64)}x\n`,
+    'wide.md': lines.repeat(Math.floor(MAX_DOCUMENT_BYTES / lines.length)),
+  });
+  const produces = { 'edge.md': doc('edge.md', [noPlaceholders()]), 'wide.md': doc('wide.md', [noPlaceholders()]) };
+  const validated = validateDocuments({ produces, ...out });
+  expect(validated.errors).toEqual([]);
+  expect(validated.validations).toEqual({
+    'edge.md': { ok: true, checks: ['noPlaceholders'] },
+    'wide.md': { ok: true, checks: ['noPlaceholders'] },
   });
 });
 
