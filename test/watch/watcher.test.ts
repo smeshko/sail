@@ -853,6 +853,97 @@ test('a watcher starting over completed, failed, running, suspended interrupted 
   });
 });
 
+test.skipIf(process.getuid?.() === 0)(
+  'a watcher reports a partial sweep after its swept count and still dispatches',
+  async () => {
+    await withTempRepo(async (repo) => {
+      const w = await watched(repo, [{ name: 'a', label: 'sail-a', cap: 1 }], tickets({ 'FAKE-1': 'sail-a' }));
+      const { workspace } = w.adapters.ports;
+      const worktrees: string[] = [];
+      for (const runId of ['ended-1', 'ended-2']) {
+        const runDir = join(w.runs, runId);
+        mkdirSync(runDir, { recursive: true });
+        worktrees.push((await workspace.create({ runId, runDir }, { branch: `sail/${runId}` })).path);
+        writeStatus(runDir, 'completed');
+      }
+      const readOnly = join(w.runs, 'ended-2');
+      chmodSync(readOnly, 0o555);
+      try {
+        const watcher = await w.start(['a']);
+        try {
+          const lines = w.out.filter((line) => line.includes('swept') || line.includes('not removed'));
+          expect(lines).toHaveLength(2);
+          expect(lines[0]).toBe('09:00:00 swept 1 worktree of ended runs\n');
+          expect(lines[1]).toStartWith(
+            `09:00:00 error: the workspace ${worktrees[1]} of an ended run was not removed: `,
+          );
+          expect(lines[1]).toContain('EACCES');
+          expect(worktrees.map((path) => existsSync(path))).toEqual([false, true]);
+          await w.timers.advance(1000);
+          expect(w.order('a')).toEqual(['FAKE-1']);
+        } finally {
+          await watcher.stop();
+        }
+      } finally {
+        chmodSync(readOnly, 0o755);
+      }
+    });
+  },
+);
+
+test('a watcher distinguishes a removed workspace whose commits were not kept', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(repo, [{ name: 'a', label: 'sail-a', cap: 1 }], tickets({}));
+    const path = join(w.runs, 'gone/workspace');
+    const workspace = new Proxy(w.adapters.ports.workspace, {
+      get: (target, property) =>
+        property === 'sweep'
+          ? async () => ({ paths: [], failed: [{ path, reason: 'its commits were not kept' }], raw: null })
+          : Reflect.get(target, property),
+    });
+    const watcher = await w.start(['a'], { adapters: { ...w.adapters.ports, workspace } });
+    try {
+      expect(w.out.find((line) => line.includes(path))).toBe(
+        `09:00:00 error: the workspace ${path} of an ended run was removed, but its release failed: its commits were not kept\n`,
+      );
+    } finally {
+      await watcher.stop();
+    }
+  });
+});
+
+test('a watcher reports every sweep failure with its exact reason even when no workspace was swept', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(repo, [{ name: 'a', label: 'sail-a', cap: 1 }], tickets({ 'FAKE-1': 'sail-a' }));
+    const paths = ['a', 'b'].map((name) => join(w.runs, name, 'workspace'));
+    for (const path of paths) mkdirSync(path, { recursive: true });
+    const workspace = new Proxy(w.adapters.ports.workspace, {
+      get: (target, property) =>
+        property === 'sweep'
+          ? async () => ({
+              paths: [],
+              failed: [
+                { path: paths[0] as string, reason: 'permission denied' },
+                { path: paths[1] as string, reason: 'its commits were not kept' },
+              ],
+              raw: null,
+            })
+          : Reflect.get(target, property),
+    });
+    const watcher = await w.start(['a'], { adapters: { ...w.adapters.ports, workspace } });
+    try {
+      expect(w.out.filter((line) => line.includes('swept') || line.includes('not removed'))).toEqual([
+        `09:00:00 error: the workspace ${paths[0]} of an ended run was not removed: permission denied\n`,
+        `09:00:00 error: the workspace ${paths[1]} of an ended run was not removed: its commits were not kept\n`,
+      ]);
+      await w.timers.advance(1000);
+      expect(w.order('a')).toEqual(['FAKE-1']);
+    } finally {
+      await watcher.stop();
+    }
+  });
+});
+
 // Error isolation: one failure never stops the watcher or starves its other workflows.
 
 test("a watcher whose sweep of ended runs' worktrees fails still starts, says so, and dispatches", async () => {

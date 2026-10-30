@@ -326,19 +326,33 @@ function ended(runDir: string): boolean {
 }
 
 /**
- * Removes, through `remove`, the workspace of each ended run under `runsDir`, and gives their paths, sorted. An entry
- * that is a link is no run directory, and is never followed.
+ * Removes, through `remove`, each ended run's workspace under `runsDir`, continuing after any removal throws. Returns
+ * removed paths and failed paths with reasons, both sorted by path. A linked run directory is never followed.
  */
-export function sweepEnded(runsDir: string, remove: (runDir: string) => void): string[] {
+export function sweepEnded(
+  runsDir: string,
+  remove: (runDir: string) => void,
+): { paths: string[]; failed: { path: string; reason: string }[] } {
   const paths: string[] = [];
+  const failed: { path: string; reason: string }[] = [];
   for (const entry of existsSync(runsDir) ? readdirSync(runsDir) : []) {
     const runDir = join(runsDir, entry);
     const path = join(runDir, WORKSPACE_DIR);
     if (isLink(runDir) || !existsSync(path) || !ended(runDir)) continue;
-    remove(runDir);
-    paths.push(path);
+    try {
+      remove(runDir);
+      paths.push(path);
+    } catch (error) {
+      const reason =
+        error instanceof PortError
+          ? error.message.slice('workspace.sweep: '.length)
+          : error instanceof Error
+            ? error.message
+            : String(error);
+      failed.push({ path, reason });
+    }
   }
-  return paths.sort();
+  return { paths: paths.sort(), failed: failed.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)) };
 }
 
 /** `url` without its userinfo: `https://user:token@host/o/r` is `https://host/o/r`. Anything else is kept as it is. */
