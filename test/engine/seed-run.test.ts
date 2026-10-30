@@ -203,6 +203,20 @@ test('seeding spec copies the intake call byte for byte, journals intake#1 alone
   });
 }, 60_000);
 
+test("a seeded run keeps the clone's .sail/: an uncommitted edit reaches its definition/ copy, and its header has no definitionsSha", async () => {
+  await withTempRepo(async (repo) => {
+    const from = await source.copyInto(repo.dir);
+    const prompt = join('workflows', 'ticket-to-pr', 'stages', 'spec', 'prompt.md');
+    writeFileSync(join(repo.dir, '.sail', prompt), 'an uncommitted edit\n');
+    const opened = openedFrom(await seed(repo, { fromRun: from.runId }));
+    expect({
+      sailDir: opened.sailDir,
+      definitionsSha: readRunHeader(opened.dir).definitionsSha,
+      prompt: readFileSync(join(opened.dir, 'definition', '.sail', prompt), 'utf8'),
+    }).toEqual({ sailDir: join(repo.dir, '.sail'), definitionsSha: undefined, prompt: 'an uncommitted edit\n' });
+  });
+}, 60_000);
+
 test('seeding self-review journals every call of the source before self-review#1, and copies their call directories with every try', async () => {
   await withTempRepo(async (repo) => {
     const from = await source.copyInto(repo.dir);
