@@ -199,7 +199,7 @@ test("a stall's since is the run's clock, as every event's ts is (review R3)", a
   const clock = () => new Date('2026-09-27T09:00:00.000Z');
   await agentKind.run(step, { ...s.context(harness), clock });
   expect(s.events.filter((e) => e.type === 'step:stalled')).toEqual([
-    { type: 'step:stalled', idleMs: 60, since: '2026-09-27T09:00:00.000Z' },
+    { type: 'step:stalled', idleMs: 60, since: '2026-09-27T08:59:59.940Z' },
   ]);
 });
 

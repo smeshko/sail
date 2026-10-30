@@ -227,12 +227,15 @@ async function run(step: AgentStep, context: StepContext): Promise<StepRun> {
     if (event.type === 'prompt:rendered') armed = true;
     if (!armed) return;
     clearTimeout(timer);
-    const since = (context.clock ?? systemClock)().toISOString();
     const wait = (ms: number): void => {
       const step = Math.min(ms, LONGEST_MS);
       timer = setTimeout(() => {
         if (ms > step) wait(ms - step);
-        else context.emit?.({ type: 'step:stalled', idleMs, since });
+        else {
+          // Read only when a stall fires, so a run's clock moves for its events alone, as with no stall.
+          const since = new Date((context.clock ?? systemClock)().getTime() - idleMs).toISOString();
+          context.emit?.({ type: 'step:stalled', idleMs, since });
+        }
       }, step);
       timer.unref();
     };
