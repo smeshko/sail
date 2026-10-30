@@ -24,6 +24,7 @@ import { isPlainName } from './call-dir';
 import { type Clock, systemClock } from './clock';
 import { requestStop } from './control';
 import { rootRelative } from './open-run';
+import { credentialValues, redactor } from './redact';
 import { type RunStatus, readStatus, runsDir, writeStatus } from './run-dir';
 import { RUN_HEADER_FILE, readRunHeader } from './run-header';
 import type { RunEnd } from './runtime';
@@ -34,6 +35,8 @@ export interface StopRunOptions {
   runId: string;
   /** The Workspace port, which holds the run's lease and workspace. */
   adapters: ResolvedAdapters<'workspace'>;
+  /** The credentials masked in the events written. The environment's by default. */
+  secrets?: readonly string[];
   /** What `run:end` is stamped with. The system's by default. */
   clock?: Clock;
 }
@@ -118,14 +121,16 @@ export async function stopRun(options: StopRunOptions): Promise<Stopped> {
         said.push(`its lease on ${lease.branch} was not released: ${error.message}`);
       }
     }
+    const redact = redactor(options.secrets ?? credentialValues(process.env));
     const bus = createBus({
       runId,
       firstSeq,
       now: options.clock ?? systemClock,
       consumers: [ndjsonConsumer(dir), summaryConsumer(dir)],
+      mask: redact.value,
     });
     for (const event of collected) bus.emit(event as NewEvent);
-    const message = said.join('; ');
+    const message = redact.text(said.join('; '));
     bus.emit({ type: 'run:end', status: 'failed', stopReason: 'stopped', message, replays: 0 });
     return { ended: { runId, dir, status: 'failed', stopReason: 'stopped', message } };
   } finally {

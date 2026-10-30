@@ -21,6 +21,7 @@ import { type CallPaths, callPaths, createCallDir, runRelative, stageOut } from 
 import { type Clock, systemClock } from './clock';
 import { type ContractError, recordFiles, validateOutput } from './contract';
 import type { LoadedIntake } from './load-workflow';
+import type { Redactor } from './redact';
 import { buildResult, writeResult } from './result';
 import type { Source } from './run-dir';
 import { stepProblems } from './stage-call';
@@ -36,6 +37,7 @@ export const INTAKE_KEY = `${INTAKE_STAGE}#1`;
 const CONSUMED = { source: 'run.json#/source' };
 
 export interface IntakeRequest {
+  redact?: Redactor;
   /** The absolute run directory. */
   runDir: string;
   runId: string;
@@ -247,7 +249,7 @@ export async function runIntake(request: IntakeRequest): Promise<RanIntake> {
     startedAt,
     finishedAt,
   });
-  writeResult(paths.result, result);
+  writeResult(paths.result, result, request.redact === undefined ? {} : { redact: request.redact });
   emit({
     type: 'intake:end',
     key,

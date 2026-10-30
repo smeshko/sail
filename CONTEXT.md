@@ -415,6 +415,10 @@ _Avoid_: consumption, spend, billing, metering
 A file `bun run verify` reads: the toolchain configs, the test launcher and preload, the coverage census, the lint config and `.github/`. A pull request could change one to loosen its own `verify` check; sail's review workflow hands a pull request that changes one to a human rather than merging it.
 _Avoid_: protected file, CI file
 
+**Redaction**:
+Masking credential-named values of at least eight characters from the run's environment, their parts and URL userinfo, raw, URL-encoded and in base64, as `[redacted]` in the run header, events, summary, journal, results, completed script logs, port events and transcripts, and the terminal view. Produced files, prompts and bindings are not masked, nor are live script logs before the process ends.
+_Avoid_: scrubbing, censoring, sanitising
+
 **Guardrail**:
 Any limit the engine enforces on a run: permissions, budgets, untrusted-input wrapping, the designation label. Guardrails are enforced by code, never requested in a prompt.
 _Avoid_: policy, safety prompt, rule
@@ -546,11 +550,11 @@ A workflow that declares `watch: { every, label? }` and `maxConcurrentRuns`, whi
 _Avoid_: loop, line, daemon, pipeline
 
 **Watcher**:
-The resident process that automates one repository's watch set: it polls and it dispatches. `sail watch <workflow…>` starts it in the clone where it is run, or adds to the live one. There is one per repository. Each run it dispatches fetches before it makes its worktree, and runs start from `origin/<default>` in detached worktrees. A dispatched run, and every resume of it, reads its `.sail/` and conventions from the commit it fetched, never the clone's working tree, and records that commit as `definitionsSha`; a workflow missing or broken there is refused, naming the commit. It is sail's home in v1. Without one running, nothing starts on its own.
+The resident process that automates one repository's watch set: it polls and it dispatches. `sail watch <workflow…>` starts it in the clone where it is run, or adds to the live one; `sail watch` with no names does so for every workflow that declares a watch. There is one per repository. Each run it dispatches fetches before it makes its worktree, and runs start from `origin/<default>` in detached worktrees. A dispatched run, and every resume of it, reads its `.sail/` and conventions from the commit it fetched, never the clone's working tree, and records that commit as `definitionsSha`; a workflow missing or broken there is refused, naming the commit. It is sail's home in v1. Without one running, nothing starts on its own.
 _Avoid_: daemon, monitor, poller, scheduler
 
 **Watch set**:
-The watched workflows a watcher is watching now: exactly those named with `sail watch`, minus those removed with `sail unwatch`. It is never remembered across restarts, and the watcher exits when it becomes empty. Each change is a `watch:added` or `watch:removed` event in that workflow's queue event stream, naming the watcher's pid. Unwatching a workflow suspends its runs; stopping the watcher does not (ADR-0019).
+The watched workflows a watcher is watching now: exactly those named with `sail watch` (every workflow that declares a watch, when it names none), minus those removed with `sail unwatch` (the whole set, when it names none). It is never remembered across restarts, and the watcher exits when it becomes empty. Each change is a `watch:added` or `watch:removed` event in that workflow's queue event stream, naming the watcher's pid. Unwatching a workflow suspends its runs; stopping the watcher does not (ADR-0019).
 _Avoid_: enabled workflows, active loops, subscriptions
 
 **Watcher registry**:

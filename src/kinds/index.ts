@@ -4,6 +4,7 @@ import type { PreparedBindings } from '../engine/bindings';
 import type { CallPaths } from '../engine/call-dir';
 import type { Clock } from '../engine/clock';
 import type { ContractError, FileEntry } from '../engine/contract';
+import type { Redactor } from '../engine/redact';
 import type { CallEmit } from '../events/types';
 import type { Harness } from '../ports/harness';
 import type { Step } from '../sdk/steps';
@@ -27,6 +28,7 @@ export interface AgentTry {
 
 /** Everything a kind needs to run one step of one call. Paths are absolute. */
 export interface StepContext {
+  redact?: Redactor;
   runId: string;
   runDir: string;
   stage: string;

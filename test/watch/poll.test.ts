@@ -16,6 +16,7 @@ import {
   openWatchTarget,
   pollOnce,
   readWatch,
+  readWatches,
   systemTimers,
   type WatchTarget,
 } from '../../src/watch/poll';
@@ -589,6 +590,19 @@ test("readWatch gives a fixture copy's ticket-to-pr its label, interval and cap 
       now: manualClock(START),
     });
     expect('refused' in opened ? opened : opened.maxConcurrentRuns).toBe(2);
+  });
+});
+
+test("readWatches gives a fixture copy's ticket-to-pr and skips review, and refuses naming a workflow that won't load", async () => {
+  await withTempRepo(async (repo) => {
+    const sail = copyFixture(repo.dir);
+    expect(await readWatches({ sailDir: sail, config: { label: 'sail' } })).toEqual({
+      watches: [{ workflow: 'ticket-to-pr', kind: 'ticket', label: 'sail', everyMs: 300_000, maxConcurrentRuns: 2 }],
+    });
+    write(sail, 'workflows/broken/workflow.ts', 'export default 1;\n');
+    const refused = await readWatches({ sailDir: sail, config: { label: 'sail' } });
+    expect(refused).toEqual({ refused: expect.stringContaining('workflows/broken/workflow.ts') });
+    expect('refused' in refused ? refused.refused : '').toContain('default-exports no workflow');
   });
 });
 

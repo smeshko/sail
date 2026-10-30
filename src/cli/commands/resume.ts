@@ -17,6 +17,7 @@ import type { Raise } from '../../engine/budget';
 import { systemKeepAwake } from '../../engine/keep-awake';
 import { findWorkflowFile } from '../../engine/load-workflow';
 import { findRun } from '../../engine/open-run';
+import { credentialValues } from '../../engine/redact';
 import { DEFINITION_DIR } from '../../engine/run-dir';
 import { resumeWorkflow } from '../../engine/runtime';
 import { readEvents } from '../../events/consumers/ndjson';
@@ -91,6 +92,7 @@ export async function resume(args: Parsed, io: Io): Promise<ExitCode> {
   // Closed however the run ends, so a throw never leaves the live line or its timer behind.
   const end = await interruptibly(io, (signal) =>
     resumeWorkflow({
+      secrets: credentialValues(io.env ?? process.env),
       cwd: io.cwd,
       runId,
       ...(Object.keys(raise).length === 0 ? {} : { raise }),
