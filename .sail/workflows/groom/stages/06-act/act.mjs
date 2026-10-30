@@ -1,5 +1,9 @@
 // Applies the actions in $INPUT_ACTIONS to the ticket in $INPUT_TICKETKEY, comments report.md and an `## Actions`
-// section on it, then swaps the label in $INPUT_LABEL for the plan's outcome, `groomed` or `open-questions`. An action
+// section on it, then swaps the label in $INPUT_LABEL for the plan's outcome, `groomed` or `open-questions`. The swap is
+// tried three times, a second apart, as open.sh does for its comment, so a short provider failure after the report is
+// posted does not fail the step. The report ends with a line naming the run, and the step reads the ticket first and
+// comments only when no comment holds that line: a later try has a fresh $STAGE_OUT, so the guard lives on the ticket.
+// When the report was already posted, `comment` in the output is the ticket's URL. An action
 // the port refuses is listed as failed and stops nothing. The comment goes before the labels, so a run that fails before
 // the end leaves the ticket designated. Every action sets a whole value (a description, a state, a relation, a label), so
 // a retry that applies it again changes nothing. Prints the Acted.
@@ -30,6 +34,18 @@ function port(args) {
     });
   }
   return JSON.parse(result.stdout.trim().split('\n').at(-1));
+}
+
+/** Runs `port(args)` up to three times, a second apart, and fails with the third failure. */
+function tried(args) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return port(args);
+    } catch (error) {
+      if (attempt === 3) throw error;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
+    }
+  }
 }
 
 const scratch = mkdtempSync(join(tmpdir(), 'groom-'));
@@ -105,11 +121,14 @@ const section = [
 if (section.length === 2) section.push('- none');
 section.push('', `Labelled \`${plan.outcome}\`.`);
 
+const marker = `sail run ${process.env.RUN_ID} groomed this ticket.`;
 const body = join(process.env.STAGE_OUT, 'comment.md');
-writeFileSync(body, `${report}\n\n${section.join('\n')}\n`);
-const comment = port(['ticket-source', 'comment', ticketKey, '--body-file', body]);
-port(['ticket-source', 'add-label', ticketKey, plan.outcome]);
-const relabelled = port(['ticket-source', 'remove-label', ticketKey, label]);
+writeFileSync(body, `${report}\n\n${section.join('\n')}\n\n${marker}\n`);
+const current = port(['ticket-source', 'get', ticketKey]);
+const posted = current.comments.some((each) => each.body.split('\n').some((line) => line.trim() === marker));
+const comment = posted ? { url: current.url } : port(['ticket-source', 'comment', ticketKey, '--body-file', body]);
+tried(['ticket-source', 'add-label', ticketKey, plan.outcome]);
+const relabelled = tried(['ticket-source', 'remove-label', ticketKey, label]);
 console.log(
   JSON.stringify({
     applied,

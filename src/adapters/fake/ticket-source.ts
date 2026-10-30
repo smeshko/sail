@@ -67,10 +67,24 @@ const StoredTicket = z.object({
   comments: z.array(Comment),
   links: z.array(Link),
   attachments: z.array(Attachment),
-  /** What each comment or update call is answered, the last repeating: `unavailable` is the provider refusing it, a PortError. */
-  answers: z.object({ comment: TicketAnswers.optional(), update: TicketAnswers.optional() }).optional(),
-  /** How many comment and update calls the ticket has answered. Kept only for a ticket with `answers`. */
-  reads: z.object({ comment: z.number().int().default(0), update: z.number().int().default(0) }).optional(),
+  /** What each comment, update, add-label or remove-label call is answered, the last repeating: `unavailable` is the provider refusing it, a PortError. */
+  answers: z
+    .object({
+      comment: TicketAnswers.optional(),
+      update: TicketAnswers.optional(),
+      addLabel: TicketAnswers.optional(),
+      removeLabel: TicketAnswers.optional(),
+    })
+    .optional(),
+  /** How many comment, update, add-label and remove-label calls the ticket has answered. Kept only for a ticket with `answers`. */
+  reads: z
+    .object({
+      comment: z.number().int().default(0),
+      update: z.number().int().default(0),
+      addLabel: z.number().int().default(0),
+      removeLabel: z.number().int().default(0),
+    })
+    .optional(),
 });
 type StoredTicket = z.infer<typeof StoredTicket>;
 
@@ -116,18 +130,19 @@ const bare = (stored: StoredTicket): Omit<StoredTicket, 'answers' | 'reads'> => 
   return rest;
 };
 
+type ScriptedOp = 'comment' | 'update' | 'addLabel' | 'removeLabel';
+
 /** Takes the answer the ticket's script gives its next `op` call, and counts the call. */
-function answerFor(ticket: StoredTicket, op: 'comment' | 'update'): 'ok' | 'unavailable' {
+function answerFor(ticket: StoredTicket, op: ScriptedOp): 'ok' | 'unavailable' {
   const script = ticket.answers?.[op];
   if (script === undefined) return 'ok';
-  const reads = ticket.reads ?? { comment: 0, update: 0 };
+  const reads = ticket.reads ?? { comment: 0, update: 0, addLabel: 0, removeLabel: 0 };
   const answer = script[Math.min(reads[op], script.length - 1)] as 'ok' | 'unavailable';
   ticket.reads = { ...reads, [op]: reads[op] + 1 };
   return answer;
 }
 
-const refused = (op: 'comment' | 'update') =>
-  new PortError('ticketSource', op, 'unavailable', `fake: ${op} refused (scripted)`);
+const refused = (op: ScriptedOp) => new PortError('ticketSource', op, 'unavailable', `fake: ${op} refused (scripted)`);
 
 const toTicket = (stored: StoredTicket): Ticket => ({
   ...bare(stored),
@@ -172,11 +187,13 @@ export function createFakeTicketSource(options: FakeTicketSourceOptions): Ticket
     const changed = store.change((world) => {
       const ticket = find(world, op, ticketKey);
       const name = knownLabel(world, op, label);
+      if (answerFor(ticket, op) === 'unavailable') return undefined;
       const carried = ticket.labels.includes(name);
       if (carried === adding) return { name, changed: false, ticketKey, labels: [...ticket.labels], raw: bare(ticket) };
       ticket.labels = adding ? [...ticket.labels, name] : ticket.labels.filter((each) => each !== name);
       return { name, changed: true, ticketKey, labels: [...ticket.labels], raw: bare(ticket) };
     });
+    if (changed === undefined) throw refused(op);
     const { name, changed: did, ...relabelled } = changed;
     if (did)
       emit({
