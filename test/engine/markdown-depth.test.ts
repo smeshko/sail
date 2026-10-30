@@ -29,10 +29,17 @@ test('a marker with nothing after it to open a list does not count', () => {
   expect(markdownDepth('1234567890. x')).toBe(0);
 });
 
-test('indentation counts two columns per level, and a tab four', () => {
+test('indentation counts two columns per level, and a tab four, on a line that opens a marker', () => {
   expect(markdownDepth('- a\n  - b\n    - c')).toBe(3);
-  expect(markdownDepth('\t\tx')).toBe(4);
+  expect(markdownDepth('\t\t- x')).toBe(5);
   expect(markdownDepth('\t- x')).toBe(3);
+});
+
+test('a line that opens no marker nests nothing, however far it is indented', () => {
+  expect(markdownDepth(`# T\n\n${' '.repeat(140)}\n\ntext`)).toBe(0);
+  expect(markdownDepth(`\`\`\`json\n${' '.repeat(132)}"key": 1\n\`\`\`\n`)).toBe(0);
+  expect(markdownDepth('\t'.repeat(33))).toBe(0);
+  expect(markdownDepth('- a\n  - b\n      continued')).toBe(2);
 });
 
 test("a text's depth is its deepest line's", () => {

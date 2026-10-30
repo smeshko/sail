@@ -9,9 +9,9 @@ const isLineEnd = (code: number) => code === 0x0a || code === 0x0d || Number.isN
 const isDigit = (code: number) => code >= 0x30 && code <= 0x39;
 
 /**
- * An upper bound on how deep any line of `text` nests its containers: half its leading indentation in columns (a tab
- * to the next multiple of 4), plus the block quote and list markers it opens in a row. It is not a parse: it
- * over-counts a line in fenced code, and never under-counts what `Bun.markdown` builds.
+ * An upper bound on how deep any line of `text` nests its containers: the block quote and list markers it opens in a
+ * row, plus half its leading indentation in columns (a tab to the next multiple of 4) when it opens one. It is not a
+ * parse: it over-counts a marker line in fenced code, and never under-counts what `Bun.markdown` builds.
  */
 export function markdownDepth(text: string): number {
   let deepest = 0;
@@ -19,7 +19,7 @@ export function markdownDepth(text: string): number {
   while (i < text.length) {
     let columns = 0;
     for (; isBlank(text.charCodeAt(i)); i++) columns += text.charCodeAt(i) === 0x09 ? 4 - (columns % 4) : 1;
-    let depth = columns >> 1;
+    let markers = 0;
     for (;;) {
       const code = text.charCodeAt(i);
       let next = i + 1;
@@ -34,10 +34,12 @@ export function markdownDepth(text: string): number {
         next++;
         if (!isBlank(text.charCodeAt(next)) && !isLineEnd(text.charCodeAt(next))) break;
       } else break;
-      depth++;
+      markers++;
       i = next;
       while (isBlank(text.charCodeAt(i))) i++;
     }
+    // Indentation nests only under a marker the line opens: on any other line it is a continuation or code.
+    const depth = markers === 0 ? 0 : (columns >> 1) + markers;
     if (depth > deepest) deepest = depth;
     while (i < text.length && !isLineEnd(text.charCodeAt(i))) i++;
     i++;
