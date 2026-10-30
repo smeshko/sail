@@ -1,10 +1,13 @@
 // Masks secrets wherever an adapter could hand them on: in a message, in a provider's `raw`, in an event (DECISIONS
 // D11). Each secret is masked as written, URL-encoded and in base64, git's Basic credential `x-access-token:<secret>`
 // included, along with base64 cores behind one- and two-byte prefixes, so echoes leave as `[redacted]`.
-import { closeSync, openSync, readSync, renameSync, rmSync, writeSync } from 'node:fs';
+import { closeSync, fstatSync, openSync, readSync, renameSync, rmSync, writeSync } from 'node:fs';
 import { PortError } from '../ports/errors';
 
-/** Replaces a completed log atomically, retaining only a bounded window in memory. */
+/**
+ * Replaces a completed log atomically when it held a secret, retaining only a bounded window in memory. It works on
+ * bytes, so invalid UTF-8 and a character split between chunks pass through as they were, and keeps the log's mode.
+ */
 export function redactFile(path: string, redact: Redactor): void {
   if (redact.maxLength === 0) return;
   let input: number;
@@ -17,22 +20,27 @@ export function redactFile(path: string, redact: Redactor): void {
   const temporary = `${path}.${process.pid}.redacting`;
   let output: number | undefined;
   try {
-    output = openSync(temporary, 'wx', 0o600);
+    output = openSync(temporary, 'wx', fstatSync(input).mode & 0o777);
     const buffer = Buffer.alloc(64 * 1024);
-    const decoder = new TextDecoder();
-    let carry = '';
+    const keep = Math.max(redact.maxLength - 1, REDACTED.length);
+    let carry = Buffer.alloc(0);
+    let changed = false;
     while (true) {
       const size = readSync(input, buffer);
       if (size === 0) break;
-      const masked = redact.text(carry + decoder.decode(buffer.subarray(0, size), { stream: true }));
-      const cut = Math.max(0, masked.length - Math.max(redact.maxLength - 1, REDACTED.length));
-      writeSync(output, masked.slice(0, cut));
-      carry = masked.slice(cut);
+      const read = Buffer.concat([carry, buffer.subarray(0, size)]);
+      const masked = redact.bytes(read);
+      if (masked !== read) changed = true;
+      const cut = Math.max(0, masked.length - keep);
+      writeSync(output, masked.subarray(0, cut));
+      carry = Buffer.from(masked.subarray(cut));
     }
-    writeSync(output, redact.text(carry + decoder.decode()));
+    const last = redact.bytes(carry);
+    if (last !== carry) changed = true;
+    writeSync(output, last);
     closeSync(output);
     output = undefined;
-    renameSync(temporary, path);
+    if (changed) renameSync(temporary, path);
   } finally {
     closeSync(input);
     if (output !== undefined) closeSync(output);
@@ -79,9 +87,12 @@ export function credentialValues(env: Readonly<Record<string, string | undefined
 export const REDACTED = '[redacted]';
 
 export interface Redactor {
+  /** The longest form in UTF-8 bytes, or 0 when there is none. */
   readonly maxLength: number;
   /** `text` with every form of every secret masked. */
   text(text: string): string;
+  /** `input` with every form of every secret's UTF-8 bytes masked: `input` itself when nothing matched. */
+  bytes(input: Buffer): Buffer;
   /** A deep copy of a JSON-like value, every string and object key masked. Anything else passes through. */
   value<T>(value: T): T;
   /** A PortError with the same port, op and code, its message and `raw` masked, or any other error's message masked. */
@@ -110,6 +121,22 @@ export function redactor(secrets: readonly string[]): Redactor {
     .filter((form) => form !== '')
     .sort((a, b) => b.length - a.length);
   const text = (input: string): string => masked.reduce((out, form) => out.split(form).join(REDACTED), input);
+  const encoded = masked.map((form) => Buffer.from(form)).sort((a, b) => b.length - a.length);
+  const replacement = Buffer.from(REDACTED);
+  const bytes = (input: Buffer): Buffer =>
+    encoded.reduce((out, form) => {
+      let at = out.indexOf(form);
+      if (at === -1) return out;
+      const parts: Buffer[] = [];
+      let from = 0;
+      while (at !== -1) {
+        parts.push(out.subarray(from, at), replacement);
+        from = at + form.length;
+        at = out.indexOf(form, from);
+      }
+      parts.push(out.subarray(from));
+      return Buffer.concat(parts);
+    }, input);
   const value = <T>(input: T): T => {
     if (typeof input === 'string') return text(input) as T;
     if (Array.isArray(input)) return input.map((each) => value(each)) as T;
@@ -119,8 +146,9 @@ export function redactor(secrets: readonly string[]): Redactor {
     return input;
   };
   return {
-    maxLength: masked[0]?.length ?? 0,
+    maxLength: encoded[0]?.length ?? 0,
     text,
+    bytes,
     value,
     error(error) {
       if (error instanceof PortError) {

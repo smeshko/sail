@@ -1,6 +1,6 @@
 // The redactor: a secret masked in each form it can take, in text, in nested values and in errors (DECISIONS D11).
 import { expect, test } from 'bun:test';
-import { existsSync, lstatSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { REDACTED, redactFile, redactor } from '../../src/engine/redact';
@@ -42,6 +42,25 @@ test('whole files preserve clean bytes and missing files', () => {
   writeFileSync(path, SECRET);
   redactFile(path, redactor([]));
   expect(readFileSync(path, 'utf8')).toBe(SECRET);
+});
+
+test('whole files keep invalid UTF-8 and a character on the cut, and a clean file keeps its mode', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sail-redact-'));
+  const binary = join(dir, 'binary');
+  writeFileSync(binary, Buffer.concat([Buffer.from([0x41, 0xff, 0xfe, 0x42]), Buffer.from(` ${SECRET}\n`)]));
+  redactFile(binary, redactor([SECRET]));
+  expect(readFileSync(binary)).toEqual(
+    Buffer.concat([Buffer.from([0x41, 0xff, 0xfe, 0x42]), Buffer.from(' [redacted]\n')]),
+  );
+  const emoji = join(dir, 'emoji');
+  writeFileSync(emoji, `${'🚀'.repeat(100000)} ${SECRET}`);
+  redactFile(emoji, redactor([SECRET]));
+  expect(readFileSync(emoji, 'utf8')).toBe(`${'🚀'.repeat(100000)} [redacted]`);
+  const status = join(dir, 'status');
+  const line = `{"status":"🎉${'a'.repeat(51)}"}\n`;
+  writeFileSync(status, line, { mode: 0o644 });
+  redactFile(status, redactor(['x'.repeat(25)]));
+  expect([readFileSync(status, 'utf8'), statSync(status).mode & 0o777]).toEqual([line, 0o644]);
 });
 
 test('whole files replace a link without overwriting its target', () => {
