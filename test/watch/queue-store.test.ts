@@ -33,6 +33,7 @@ const POLICY: QueuePolicy = {
   pollBackoffMs: [60_000],
   doneKept: 2,
   usageLimitBackoffMs: 15 * 60_000,
+  portUnavailableBackoffMs: [60_000],
 };
 
 function open(runs: string, now = manualClock(START), workflow = 'ticket-to-pr'): QueueStore {

@@ -26,7 +26,7 @@
 //   (a ticket its own failed run claimed is not) is dropped: it leaves `items`, and a later poll may queue it again.
 // - A dispatched item whose run the watcher found alive is `adopted()`, and one whose run it resumed is `resumed()`: each
 //   records the pid the run is alive as now, and emits `run:adopted` or `run:resumed`.
-// - A run that hit the usage limit holds the workflow's dispatch: `hold()` keeps the later `until` in `held` and emits
+// - A run that hit the usage limit, or could not reach a provider, holds the workflow's dispatch: `hold()` keeps the later `until` in `held` and emits
 //   `queue:held` when it set or extended it, and `release()` clears it and emits `queue:released`. The items are not
 //   changed: no attempt is counted, and nothing is failed or parked.
 // - `move()` places a queued item next to another queued one and marks it `moved`: add, a priority change and a retry
@@ -115,7 +115,7 @@ export const QueueFile = z.strictObject({
       })
       .optional(),
   }),
-  /** Set while a usage limit holds the workflow's dispatch: nothing starts or resumes until `until`. */
+  /** Set while a usage limit or an unavailable port holds the workflow's dispatch: nothing starts or resumes until `until`. */
   held: z
     .strictObject({
       until: z.string(),
@@ -139,6 +139,8 @@ export interface QueuePolicy {
   doneKept: number;
   /** How long a usage limit holds the dispatch when the provider gave no reset time. */
   usageLimitBackoffMs: number;
+  /** How long a run suspended on an unavailable port holds the dispatch, by consecutive suspension; one past the end parks it. */
+  portUnavailableBackoffMs: readonly number[];
 }
 
 /** The prototype's numbers (DECISIONS D6). */
@@ -148,6 +150,7 @@ export const DEFAULT_QUEUE_POLICY: QueuePolicy = {
   pollBackoffMs: [60_000, 2 * 60_000, 5 * 60_000, 15 * 60_000, 30 * 60_000],
   doneKept: 100,
   usageLimitBackoffMs: 15 * 60_000,
+  portUnavailableBackoffMs: [60_000, 2 * 60_000, 5 * 60_000, 10 * 60_000, 30 * 60_000],
 };
 
 /** The key a queue item is known by: `ticket:<ticket key>`, or `pr:<number>@<the head sha's first 7>`. */

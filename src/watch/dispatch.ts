@@ -12,7 +12,9 @@
 //   reason is the last line of its dispatch log. Anything else, such as `suspended until`, waits for a person, holding
 //   no slot.
 // - **A held dispatch**: a run `suspended usage_limit` holds the workflow's dispatch (`queue:held`) until its reset time,
-//   or the back-off after it hit the limit. While held, nothing starts and no run is resumed, and no item's attempt is
+//   or the back-off after it hit the limit; a run `suspended port_unavailable` holds it for the back-off its place in
+//   the run of such suspensions calls for (1, 2, 5, 10 then 30 minutes), and is parked, naming the call, the count and
+//   the last port error, once it is suspended past that schedule. While held, nothing starts and no run is resumed, and no item's attempt is
 //   counted, failed or parked. A tick past the hold releases it (`queue:released`), and the run is resumed with the
 //   rest of the dispatch; a run that hits the limit again is held again.
 // - **A due pull request**, in queue order: the lease on its queued branch first, then the re-check of the pull request
@@ -88,6 +90,8 @@ export interface DispatcherOptions {
   now: () => Date;
   /** How long a usage limit holds the dispatch when the run names no reset time. */
   usageLimitBackoffMs: number;
+  /** How long a run suspended on an unavailable port holds the dispatch, by consecutive suspension; one past the end parks. */
+  portUnavailableBackoffMs: readonly number[];
   spawn: (options: SpawnRunOptions) => SpawnedRun;
   /** Starts `sail resume <run>` for a run whose process is gone. */
   resume: (options: SpawnResumeOptions) => SpawnedRun;
@@ -129,9 +133,9 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
   const logFroms = new Map<string, number>();
   /** The runs this dispatcher has resumed: each is resumed once. */
   const resumed = new Set<string>();
-  /** When this dispatcher last resumed each run from its usage limit, until the run is held again. */
+  /** When this dispatcher last resumed each run from its usage limit or an unavailable port, until the run is held again. */
   const resumedAt = new Map<string, Date>();
-  /** When this dispatcher first saw each run on its usage limit, until it resumes the run. */
+  /** When this dispatcher first saw each run on its usage limit or an unavailable port, until it resumes the run. */
   const limitedAt = new Map<string, Date>();
   /** Until the first settle is over: a live run found then is adopted. */
   let first = true;
@@ -171,7 +175,9 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
   /** Resumes the item's run as a process of its own, once, which then counts as the item's. */
   const resume = (item: QueueItem, runId: string, from: ResumedFrom) => {
     resumed.add(runId);
-    if (from.status === 'suspended' && from.stopReason === 'usage_limit') resumedAt.set(runId, now());
+    if (from.status === 'suspended' && (from.stopReason === 'usage_limit' || from.stopReason === 'port_unavailable')) {
+      resumedAt.set(runId, now());
+    }
     exits.delete(item.dedupKey);
     let spawned: SpawnedRun;
     try {
@@ -209,6 +215,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
         workspace,
         now: now(),
         backoffMs: options.usageLimitBackoffMs,
+        portBackoffMs: options.portUnavailableBackoffMs,
         ...(limitedAt.has(runId) ? { limitedAt: limitedAt.get(runId) as Date } : {}),
         first,
         resumed: resumed.has(runId),
