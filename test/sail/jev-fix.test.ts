@@ -78,10 +78,6 @@ interface Asked {
   note: string;
   threshold: number;
   answers: { id: string; yes: number }[];
-  checked: {
-    items: { finding: string; resolved: boolean; detail: string }[];
-    findings: unknown[];
-  } | null;
 }
 
 /** Runs the stage's run.sh in `repo`'s copy of `.sail/`: its exit code, and its last stdout line parsed. */
@@ -121,10 +117,10 @@ test('partial finding answers retain asked true and explain the unanswered findi
     const { output } = runStage(repo, FINDINGS, `#!/bin/sh\necho '{"answers":{"V1":{"type":"noul","noul":1}}}'\n`);
     expect(output).toMatchObject({
       asked: true,
-      checked: null,
       answers: [{ id: 'V1', yes: 1 }],
       note: 'Jev left a finding unanswered',
     });
+    expect('checked' in output).toBe(false);
   });
 });
 
@@ -132,15 +128,15 @@ const IDS = FINDINGS.map((finding) => finding.id);
 const seed = (overrides: Record<string, number> = {}) =>
   nouls(Object.fromEntries(IDS.map((id) => [id, overrides[id] ?? 0.99])));
 
-test('the stage, with Jev answering every finding a clear yes, outputs the FixChecked with every finding resolved and no new findings', async () => {
+test('the stage, with Jev answering every finding a clear yes, holds every answer and no checked', async () => {
   await withTempRepo(async (repo) => {
     writeOwnSail(repo, { jev: seed() });
     const { code, stderr, output } = runStage(repo, FINDINGS);
     expect({ code, stderr }).toEqual({ code: 0, stderr: '' });
     expect(output.asked).toBe(true);
     expect(output.answers).toEqual(IDS.map((id) => ({ id, yes: 0.99 })));
-    expect(output.checked?.items.map((item) => [item.finding, item.resolved])).toEqual(IDS.map((id) => [id, true]));
-    expect(output.checked?.findings).toEqual([]);
+    expect(output.note).toBe('');
+    expect('checked' in output).toBe(false);
   });
 }, 60_000);
 
@@ -148,13 +144,14 @@ test.each([
   ['unclear', 0.6],
   ['a no', 0.05],
 ])(
-  'the stage, with Jev answering one finding %s, has no checked and holds every answer',
+  'the stage, with Jev answering one finding %s, holds every answer and no checked',
   async (_name, yes) => {
     await withTempRepo(async (repo) => {
       writeOwnSail(repo, { jev: seed({ R2: yes }) });
       const { code, output } = runStage(repo, FINDINGS);
       expect(code).toBe(0);
-      expect(output.checked).toBeNull();
+      expect('checked' in output).toBe(false);
+      expect(output.note).toContain('not every finding is a clear yes');
       expect(output.answers).toEqual([
         { id: 'V1', yes: 0.99 },
         { id: 'R2', yes },
@@ -170,7 +167,8 @@ test('the stage, with no adapters.jev configured, exits 0 with asked false and n
     writeOwnSail(repo);
     const { code, output } = runStage(repo, FINDINGS);
     expect(code).toBe(0);
-    expect([output.asked, output.checked, output.answers]).toEqual([false, null, []]);
+    expect([output.asked, output.answers]).toEqual([false, []]);
+    expect('checked' in output).toBe(false);
     expect(output.note).not.toBe('');
   });
 }, 60_000);
