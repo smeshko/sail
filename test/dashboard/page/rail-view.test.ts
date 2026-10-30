@@ -3,10 +3,18 @@
 // workflows closing when asked unless they hold it, and every run a delegated `select-run` action.
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { index } from '../../../src/dashboard/files';
-import { railRepos } from '../../../src/dashboard/page/index-model';
+import { type RailRepo, type RailRun, railRepos } from '../../../src/dashboard/page/index-model';
 import { renderRail } from '../../../src/dashboard/page/rail-view';
 import { initialUi, pillOf } from '../../../src/dashboard/page/ui-state';
-import { FAKE_2_ID, FAKE_3_ID, GOLDEN_RUN_ID, type Machine, seedFixtures } from '../../helpers/dashboard';
+import {
+  FAKE_2_ID,
+  FAKE_3_ID,
+  GOLDEN_RUN_ID,
+  type Machine,
+  RUNNING_ID,
+  runningCopy,
+  seedFixtures,
+} from '../../helpers/dashboard';
 
 let m: Machine;
 beforeEach(() => {
@@ -94,7 +102,7 @@ test("each repository lists its workflows by name: beta's review and ticket-to-p
   expect(markup).toContain(
     '<button class="wf-q" data-action="select-queue" data-queue="beta/ticket-to-pr"><span class="qd"></span><span>queue</span><span class="n">1 waiting · polled 7d ago</span></button>',
   );
-  expect(markup.match(/data-action="select-queue"/g)).toHaveLength(1);
+  expect(markup.match(/data-action="select-queue"/g)).toHaveLength(2);
   expect(markup).toContain('data-section="beta/review:completed"');
 });
 
@@ -103,7 +111,7 @@ test("a closed repository or workflow folds, keeping only the open run's row or 
   expect(closed).toContain('<button class="lgrp-h" data-action="toggle-group" data-group="alpha">');
   expect(closed).not.toContain('data-group="alpha/ticket-to-pr"');
   expect(closed).toContain('<button class="wf-h" data-action="toggle-group" data-group="beta/ticket-to-pr">');
-  expect([shown(closed), closed.includes('select-queue')]).toEqual([[], false]);
+  expect([shown(closed), closed.includes('class="wf-q"')]).toEqual([[], false]);
   const holding = rail({ closed: ['alpha', 'alpha/ticket-to-pr'], repo: 'alpha', runId: GOLDEN_RUN_ID });
   expect(shown(holding)).toEqual([`alpha ${GOLDEN_RUN_ID} *`, `beta ${FAKE_3_ID}`]);
   const queued = rail({
@@ -117,4 +125,70 @@ test("a closed repository or workflow folds, keeping only the open run's row or 
   const repoClosed = rail({ closed: ['beta'], repo: 'beta', runId: FAKE_3_ID });
   expect(shown(repoClosed)).toEqual([`beta ${FAKE_3_ID} *`]);
   expect(repoClosed).not.toContain('data-group="beta/ticket-to-pr"');
+});
+
+const liveRows = (markup: string) =>
+  [
+    ...markup.matchAll(
+      /<button class="run live-run( sel)?"[^>]*data-action="select-run" data-repo="(\w+)" data-run="([\w-]+)"/g,
+    ),
+  ].map(([, sel, repo, run]) => `${repo} ${run}${sel ? ' *' : ''}`);
+
+const handMade = (runs: Partial<RailRun>[], waiting = 0): RailRepo[] => [
+  {
+    name: 'gamma',
+    remote: null,
+    live: false,
+    runs: runs.map((run, i) => ({ runId: `run-${i}`, status: 'completed', ...run })),
+    workflows: [
+      {
+        name: 'flow',
+        runs: runs.map((run, i) => ({ runId: `run-${i}`, status: 'completed', ...run })),
+        queue: { waiting },
+      },
+    ],
+  },
+];
+
+test('the running block lists every live run across repositories, newest first, and is absent when none is live', () => {
+  runningCopy(m, 5);
+  const markup = rail();
+  expect(liveRows(markup)).toEqual([`alpha ${RUNNING_ID}`, `beta ${FAKE_3_ID}`]);
+  expect(markup).toContain('<div class="rail-h"><span>running</span><span class="c">2</span></div>');
+  expect(markup).toContain('beta › ticket-to-pr · 6.2s · $1.06 · <span class="why">budget_exceeded</span>');
+  expect(markup).toContain('title="Escape &lt;b&gt;this&lt;/b&gt; &amp; &quot;that&quot;"');
+  const none = renderRail(handMade([{ status: 'failed' }, { status: 'completed' }]), initialUi(0), NOW).value;
+  expect(none).not.toContain('<span>running</span>');
+  expect(none).not.toContain('live-run');
+});
+
+test('the queued block lists only workflows with work waiting, and is absent when none waits', () => {
+  const markup = rail();
+  const block = markup.slice(markup.indexOf('<span>queued</span>'));
+  expect(markup).toContain('<div class="rail-h"><span>queued</span><span class="c">1</span></div>');
+  expect(markup).toContain(
+    '<button class="q-row" title="polled 7d ago" data-action="select-queue" data-queue="beta/ticket-to-pr"><span class="qd"></span><span class="nm">beta › ticket-to-pr</span><span class="n">1 waiting</span></button>',
+  );
+  expect(block.match(/class="q-row/g)).toHaveLength(1);
+  expect(rail({ queue: 'beta/ticket-to-pr' })).toContain('<button class="q-row sel" title="polled 7d ago"');
+  expect(renderRail(handMade([{}], 0), initialUi(0), NOW).value).not.toContain('<span>queued</span>');
+  expect(renderRail(handMade([{}], 3), initialUi(0), NOW).value).toContain('<span class="n">3 waiting</span>');
+});
+
+test('a pull-request run reads PR #<n> with its run id in the tooltip', () => {
+  const id = 'pr-12-01M00000000000000000000000';
+  const markup = renderRail(
+    handMade([{ runId: id, status: 'running', pr: 12, title: 'Fix it', workflow: 'flow' }]),
+    initialUi(0),
+    NOW,
+  ).value;
+  expect(markup).toContain('<span class="r-id">PR #12</span>');
+  expect(markup).toContain(`title="${id} · Fix it"`);
+});
+
+test('a run selected from the running block is marked sel', () => {
+  runningCopy(m, 5);
+  const markup = rail({ repo: 'alpha', runId: RUNNING_ID });
+  expect(markup).toContain(`<button class="run live-run sel"`);
+  expect(liveRows(markup)).toEqual([`alpha ${RUNNING_ID} *`, `beta ${FAKE_3_ID}`]);
 });

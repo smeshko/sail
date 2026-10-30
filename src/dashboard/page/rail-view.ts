@@ -2,16 +2,68 @@
 // workflow fold away when the person closes them. A watched workflow's queue is a row of its own, which opens the queue
 // in the centre. Failed runs fold into a counted `failed` section and completed ones into a `completed` section, each
 // open when the person opened it, so a long tail of finished runs never buries live work. Whatever is folded, the open
-// run's row and the open queue's row stay in sight under it, so the selection is never hidden.
+// run's row and the open queue's row stay in sight under it, so the selection is never hidden. Above the tree, a
+// `running` block lists every live run of every repository and a `queued` block every workflow with work waiting.
 import { ago, cost, duration } from './format';
 import { html, type SafeHtml } from './html';
-import type { RailRepo, RailRun, RailWorkflow } from './index-model';
+import { newestFirst, type RailRepo, type RailRun, type RailWorkflow, workflowOf } from './index-model';
 import { queueId } from './queue-view';
 import { pillOf, type UiState } from './ui-state';
 
 /** Whether `run` of `repo` is the open run: not while a queue holds the centre. */
 const isOpen = (repo: string, run: RailRun, ui: UiState) =>
   ui.queue === undefined && ui.repo === repo && ui.runId === run.runId;
+
+/** Live means neither failed nor completed: running, suspended, blocked or unknown. */
+const isLive = (run: RailRun) => run.status !== 'failed' && run.status !== 'completed';
+
+/** The ID a run is listed by: its pull request, else its ticket key, else its run id. */
+const runLabel = (run: RailRun) => (run.pr === undefined ? (run.ticketKey ?? run.runId) : `PR #${run.pr}`);
+
+/** The full title, led by the run id for a pull-request run. */
+const tooltipOf = (run: RailRun): string | undefined =>
+  run.pr === undefined ? run.title : run.title === undefined ? run.runId : `${run.runId} · ${run.title}`;
+
+function liveRow(repo: string, run: RailRun, ui: UiState): SafeHtml {
+  const tip = tooltipOf(run);
+  const facts = [duration(run.durationMs), cost(run.costUsd)].join(' · ');
+  return html`<button class="run live-run${isOpen(repo, run, ui) ? ' sel' : ''}"${
+    tip === undefined ? '' : html` title="${tip}"`
+  } data-action="select-run" data-repo="${repo}" data-run="${run.runId}">
+<span class="r-main"><span class="r-line"><span class="st ${pillOf(run.status)}"></span><span class="r-id">${runLabel(run)}</span>${
+    run.title === undefined ? '' : html` <span class="r-title">${run.title}</span>`
+  }</span><span class="r-sub">${repo} › ${workflowOf(run)} · ${facts}${
+    run.stopReason === undefined ? '' : html` · <span class="why">${run.stopReason}</span>`
+  }</span>${run.problem === undefined ? '' : html`<span class="r-problem">${run.problem}</span>`}</span></button>`;
+}
+
+function runningBlock(repos: readonly RailRepo[], ui: UiState): SafeHtml {
+  const live = newestFirst(
+    repos.flatMap((repo) => repo.runs.filter(isLive).map((run) => ({ ...run, repo: repo.name }))),
+  );
+  if (live.length === 0) return html``;
+  return html`<div class="rail-h"><span>running</span><span class="c">${live.length}</span></div>
+${live.map(({ repo, ...run }) => liveRow(repo, run, ui))}`;
+}
+
+function queuedBlock(repos: readonly RailRepo[], ui: UiState, now: number): SafeHtml {
+  const rows = repos.flatMap((repo) =>
+    repo.workflows.flatMap((workflow) =>
+      workflow.queue !== undefined && workflow.queue.waiting > 0
+        ? [{ repo: repo.name, workflow: workflow.name, queue: workflow.queue }]
+        : [],
+    ),
+  );
+  if (rows.length === 0) return html``;
+  const total = rows.reduce((sum, row) => sum + row.queue.waiting, 0);
+  return html`<div class="rail-h"><span>queued</span><span class="c">${total}</span></div>
+${rows.map(({ repo, workflow, queue }) => {
+  const id = queueId(repo, workflow);
+  return html`<button class="q-row${ui.queue === id ? ' sel' : ''}"${
+    queue.lastPolledAt === undefined ? '' : html` title="polled ${ago(queue.lastPolledAt, now)}"`
+  } data-action="select-queue" data-queue="${id}"><span class="qd"></span><span class="nm">${repo} › ${workflow}</span><span class="n">${queue.waiting} waiting</span></button>`;
+})}`;
+}
 
 function runRow(repo: string, run: RailRun, ui: UiState): SafeHtml {
   const selected = isOpen(repo, run, ui);
@@ -85,6 +137,6 @@ ${repo.workflows.map((workflow) => workflowGroup(repo.name, workflow, ui, now))}
 /** The rail from the index model. `now` is ms since the epoch, for how long ago a queue was polled. */
 export function renderRail(repos: readonly RailRepo[], ui: UiState, now: number): SafeHtml {
   const runs = repos.reduce((sum, repo) => sum + repo.runs.length, 0);
-  return html`<div class="rail-h"><span>repositories</span><span class="c">${runs} runs</span></div>
+  return html`${runningBlock(repos, ui)}${queuedBlock(repos, ui, now)}<div class="rail-h"><span>repositories</span><span class="c">${runs} runs</span></div>
 ${repos.length === 0 ? html`<div class="qempty">no repository is registered yet: run sail watch in one</div>` : ''}${repos.map((repo) => repoGroup(repo, ui, now))}`;
 }

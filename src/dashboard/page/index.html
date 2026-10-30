@@ -450,7 +450,8 @@
         border-left-color: var(--warn);
         color: var(--fg);
       }
-      .wf-q .qd {
+      .wf-q .qd,
+      .q-row .qd {
         width: 7px;
         height: 7px;
         border-radius: 50%;
@@ -459,6 +460,50 @@
       }
       .wf-q .n {
         margin-left: auto;
+      }
+      .live-run {
+        padding-left: 12px;
+      }
+      .live-run .st {
+        margin-top: 0;
+      }
+      .r-line {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+        white-space: nowrap;
+      }
+      .r-line .r-id {
+        flex: 0 0 auto;
+      }
+      .r-line .r-title {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        overflow-wrap: normal;
+      }
+      .q-row {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        width: 100%;
+        padding: 5px 12px;
+        font-family: var(--mono);
+        font-size: 10.5px;
+        color: var(--fg-3);
+        border-left: 2px solid transparent;
+      }
+      .q-row:hover {
+        background: var(--hover);
+      }
+      .q-row.sel {
+        background: var(--panel-2);
+        border-left-color: var(--warn);
+        color: var(--fg);
+      }
+      .q-row .n {
+        margin-left: auto;
+        color: var(--warn);
       }
       /* needs attention: a button in the top bar, and the pane it opens */
       .att-btn {
