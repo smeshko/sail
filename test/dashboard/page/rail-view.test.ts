@@ -159,6 +159,17 @@ const liveRows = (markup: string) =>
     ),
   ].map(([, sel, repo, run]) => `${repo} ${run}${sel ? ' *' : ''}`);
 
+test('under a folded repository the open queue’s workflow header opens and folds like any other', () => {
+  const repos = handMade([{ status: 'failed' }], 1);
+  const ui = { ...initialUi(0), queue: 'gamma/flow' };
+  const shut = renderRail(repos, ui, NOW).value;
+  expect(shut).toContain('<button class="wf-t" data-action="toggle-group" data-group="gamma/flow">');
+  expect(shut).not.toContain('class="hist"');
+  const opened = renderRail(repos, { ...ui, expanded: ['gamma/flow'] }, NOW).value;
+  expect(opened).toContain('<button class="wf-t open" data-action="toggle-group" data-group="gamma/flow">');
+  expect(opened).toContain('data-section="gamma/flow:failed">✗ 1 failed</button>');
+});
+
 const handMade = (runs: Partial<RailRun>[], waiting = 0): RailRepo[] => [
   {
     name: 'gamma',

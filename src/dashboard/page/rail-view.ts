@@ -133,16 +133,13 @@ function workflowGroup(repo: string, workflow: RailWorkflow, ui: UiState, now: n
 ${open ? historyLine(repo, group, workflow.runs, ui) : openRun(repo, workflow, ui)}</div>`;
 }
 
-/** What a folded repository still shows: the open queue's workflow header and the open finished run's row. */
+/** What a folded repository still shows: the open queue's workflow, folding as it would, and the open finished run's row. */
 function repoSelection(repo: RailRepo, ui: UiState, now: number): SafeHtml {
-  return html`${repo.workflows.map((workflow) => {
-    const group = queueId(repo.name, workflow.name);
-    const header =
-      workflow.queue !== undefined && ui.queue === group
-        ? html`<div class="wf">${workflowHeader(workflow, group, false, ui, now)}</div>`
-        : '';
-    return html`${header}${openRun(repo.name, workflow, ui)}`;
-  })}`;
+  return html`${repo.workflows.map((workflow) =>
+    workflow.queue !== undefined && ui.queue === queueId(repo.name, workflow.name)
+      ? workflowGroup(repo.name, workflow, ui, now)
+      : openRun(repo.name, workflow, ui),
+  )}`;
 }
 
 function repoGroup(repo: RailRepo, ui: UiState, now: number): SafeHtml {
