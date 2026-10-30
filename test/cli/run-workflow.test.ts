@@ -1139,10 +1139,13 @@ test("a dispatched start ignores an uncommitted edit of the clone's .sail/, and 
     expect(readFileSync(join(dispatched.dir, 'definition', '.sail', 'project.yaml'), 'utf8')).not.toContain('edited-');
   });
   await withTempRepo(async (repo) => {
-    writeStub(repo.dir, { testsPassAt: 1 });
+    const sail = writeStub(repo.dir, { testsPassAt: 1 });
     committed(repo);
+    const script = join('workflows', 'ticket-to-pr', 'stages', 'spec', 'run.sh');
+    edit(sail, script, "printf '# Spec", "# edited\nprintf '# Spec");
     const manual = await started(repo.dir, ['FAKE-1', '--workflow', 'ticket-to-pr']);
     expect({ code: manual.code, sha: manual.header.definitionsSha }).toEqual({ code: EXIT_OK, sha: undefined });
+    expect(readFileSync(join(manual.dir, 'definition', '.sail', script), 'utf8')).toContain('# edited\n');
   });
 });
 
