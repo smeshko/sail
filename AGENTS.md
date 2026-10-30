@@ -60,6 +60,18 @@ Linear, team `ADW`. Issues are `ADW-<n>`. Apply every label that fits:
 `CONTEXT.md` is the glossary. Identifiers, event names, schemas, docs, commit messages and PR text use its terms, and
 replace the synonyms each entry lists under `_Avoid_`. When a term is missing, add it to `CONTEXT.md` first, then use it.
 
+## Standing decisions
+
+Settled once: apply them rather than asking. A ticket's own Rulings section overrides them.
+
+- On-disk state and config change with a clean break: the schema version goes up and the older form is refused with a
+  clear message, since sail is upgraded with no run live or suspended. An optional field that older state lacks needs
+  no break.
+- A rule about starting a run covers every start path: `sail <ticket>`, a watched dispatch, `sail resume`, a seeded
+  run and a pull-request start, each shown by a test.
+- Guardrails target the agent and untrusted input. The repository's own config, environment and hand edits are
+  trusted; an agent changes them only through a pull request, so a guard goes on that path.
+
 ## Tests
 
 - Run tests with `bun run test`. Bun reads `HOME` once at startup, so `scripts/test.ts` starts `bun test` with a
