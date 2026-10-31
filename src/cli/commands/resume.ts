@@ -1,8 +1,8 @@
 // `sail resume <run> [--raise-budget <usd>] [--raise-minutes <minutes>] [-q|-v|-vv]`: resumes a suspended or crashed
 // run of the repository sail is run from, and runs it to its end from its journal. It takes `sail <ticket>`'s steps:
 // the run's workflow is type-checked first, so a wrongly wired stage never runs, and every refusal comes before the
-// run's STATUS changes. A workflow changed since the run started isn't refused: the determinism guard decides whether
-// the journal still fits it. It asks nothing of the ticket and claims nothing: the run's input is in its journal.
+// run's STATUS changes. The config, adapters and workflow are loaded from the run's own copy of `.sail/` in its
+// definition folder, so an edit to the checkout never reaches the run: Restart is how a run picks one up. It asks nothing of the ticket and claims nothing: the run's input is in its journal.
 //
 // A raise adds to the run's budget, and is recorded in its events before anything runs: a run suspended over its budget
 // resumes only with one that takes it back under, and a raise of a budget the run doesn't have is refused. So is a

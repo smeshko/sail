@@ -137,7 +137,7 @@ export function removeOpening(runDir: string): void {
   rmSync(join(runDir, OPENING_FILE), { force: true });
 }
 
-/** The folder of a run directory that holds its copy of the stage folders. */
+/** The folder of a run directory that holds its copy of the whole `.sail/` and the conventions. */
 export const DEFINITION_DIR = 'definition';
 
 /** The path from the repository root an origin names, or undefined for one that isn't the repository's. */
@@ -168,7 +168,7 @@ export function copyDefinitions(runDir: string, root: string, sailDir: string, c
 
 /**
  * The stage file a call of the stage whose roster origin is `origin` reads its folder beside: the run's copy, or `live`,
- * the checkout's, for a run that started before runs kept one.
+ * the checkout's, for a stage of no copy: a layout-2 run's, which a resume refuses.
  */
 export function copiedStageFile(runDir: string, origin: string | undefined, live: string): string {
   const path = repoPath(origin);
@@ -178,7 +178,7 @@ export function copiedStageFile(runDir: string, origin: string | undefined, live
 
 /**
  * The file an intake's steps read their folder beside: the run's copy of the intake's folder, or `live`, the
- * checkout's, for an intake of no copy: a run that started before runs copied an intake's folder, or a built-in.
+ * checkout's, for an intake of no copy: a built-in, or a layout-2 run's, which a resume refuses.
  */
 export function copiedIntakeFile(runDir: string, origin: string | undefined, live: string): string {
   const path = repoPath(origin);

@@ -118,8 +118,7 @@ export interface OpenedRun {
   dir: string;
   header: RunHeader;
   /**
-   * The absolute `.sail/` the run's definitions came from: the clone's, or for a run started from committed definitions
-   * the run's own copy in its definition folder.
+   * The absolute `.sail/` the run reads its definitions from: the run's own copy in its definition folder.
    */
   sailDir: string;
   /** The repository root: the clone the run directory, the lease and the workspace belong to. */

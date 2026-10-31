@@ -402,7 +402,7 @@ test('a resume restores the reused calls a crash before the run start took, each
       const summary: Summary = JSON.parse(readFileSync(join(dir, 'summary.json'), 'utf8'));
       expect(summary.calls.find((call) => call.key === 'intake#1')).toMatchObject({ fromRun: from.runId });
       expect(summary.ticket).toEqual(FAKE_TICKET);
-      expect(lostEvents({ dir, header: readRunHeader(dir), sailDir: join(dir, 'definition', '.sail') })).toEqual({
+      expect(lostEvents({ dir, header: readRunHeader(dir) })).toEqual({
         appends: [],
       });
     });

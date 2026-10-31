@@ -38,7 +38,7 @@ export interface LostEvents {
 }
 
 /** The `run:start` and `journal:append` events the run's events file lacks, from its journal and header. */
-export function lostEvents(opened: Pick<OpenedRun, 'dir' | 'header' | 'sailDir'>): LostEvents {
+export function lostEvents(opened: Pick<OpenedRun, 'dir' | 'header'>): LostEvents {
   const { dir, header } = opened;
   const events = readEvents(dir);
   const reported = new Set(events.flatMap((event) => (event.type === 'journal:append' ? [event.key] : [])));

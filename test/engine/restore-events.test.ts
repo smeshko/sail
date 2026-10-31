@@ -29,7 +29,7 @@ function copyWith(cut: (lines: string[]) => string[]): string {
   return dir;
 }
 
-const lostIn = (dir: string) => lostEvents({ dir, header: readRunHeader(dir), sailDir: join(dir, '.sail') });
+const lostIn = (dir: string) => lostEvents({ dir, header: readRunHeader(dir) });
 const isAppend = (type: string) => (line: string) => JSON.parse(line).type === type;
 
 test('a stream that lost nothing restores nothing', () => {
@@ -95,7 +95,7 @@ function seededIn(reused: number | undefined) {
     { recursive: true },
   );
   const header = { ...readRunHeader(dir), fromRun: 'FAKE-1-SOURCE', ...(reused === undefined ? {} : { reused }) };
-  return lostEvents({ dir, header, sailDir: join(root, '.sail') });
+  return lostEvents({ dir, header });
 }
 
 test("the reused journal lines are restored with fromRun, and the intake's with the source's ticket", () => {
