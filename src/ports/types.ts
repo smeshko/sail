@@ -34,6 +34,10 @@ export type Attachment = z.infer<typeof Attachment>;
 export const TicketPriority = z.enum(['urgent', 'high', 'medium', 'low', 'none']);
 export type TicketPriority = z.infer<typeof TicketPriority>;
 
+/** A ticket the ticket system says blocks another, with the state it is in. A prerequisite without a state is unreadable. */
+export const Prerequisite = z.object({ ticketKey: z.string(), state: TicketState.optional() });
+export type Prerequisite = z.infer<typeof Prerequisite>;
+
 export const Ticket = z.object({
   ticketKey: z.string(),
   title: z.string(),
@@ -45,6 +49,7 @@ export const Ticket = z.object({
   comments: z.array(Comment),
   links: z.array(Link),
   attachments: z.array(Attachment),
+  prerequisites: z.array(Prerequisite).optional(),
   raw: Raw,
 });
 export type Ticket = z.infer<typeof Ticket>;

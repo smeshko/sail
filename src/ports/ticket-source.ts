@@ -10,6 +10,7 @@ import {
   type ListedTicket,
   type Moved,
   type Posted,
+  type Prerequisite,
   type Relabelled,
   type Related,
   Ticket,
@@ -91,7 +92,11 @@ export interface TicketSource {
   readonly scope?: string;
   /** The ticket key `ref` names: a ticket key, or a URL the provider owns. Undefined for anything else. */
   parseKey(ref: string): string | undefined;
-  /** The ticket with its comments, links and attachments. Emits `ticket:fetched`. An abort rejects unavailable. */
+  /**
+   * The ticket with its comments, links and attachments, and the prerequisites that block it with their current state
+   * (`prerequisites`, left out when none). `listDesignated` reports them too. Emits `ticket:fetched`.
+   * An abort rejects unavailable.
+   */
   get(ticketKey: string, options?: { readonly signal?: AbortSignal }): Promise<Ticket>;
   isDesignated(ticket: Ticket, label: string): boolean;
   /** Whether the ticket is in one of this source's pick-up states: by default any state it reads as unstarted. */
@@ -137,6 +142,18 @@ export interface TicketSource {
    */
   attach(ticketKey: string, file: NewAttachment): Promise<Attached>;
   capabilities(): TicketSourceCapabilities;
+}
+
+/** The prerequisites that are not Done or Canceled, or that the source could not read (no state). */
+export function openPrerequisites(ticket: Pick<Ticket, 'prerequisites'>): Prerequisite[] {
+  return (ticket.prerequisites ?? []).filter(
+    (each) => each.state === undefined || (each.state.type !== 'completed' && each.state.type !== 'canceled'),
+  );
+}
+
+/** Each open prerequisite as its ticket key, or `KEY (unreadable)` when it has no state. */
+export function waitingOnText(open: readonly Prerequisite[]): string[] {
+  return open.map((each) => (each.state === undefined ? `${each.ticketKey} (unreadable)` : each.ticketKey));
 }
 
 export function fetchInterrupted(op: string, what: string): PortError {

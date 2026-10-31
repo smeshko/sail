@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { getTicket, type TicketSource } from '../../src/ports/ticket-source';
+import { getTicket, openPrerequisites, type TicketSource, waitingOnText } from '../../src/ports/ticket-source';
 import type { Ticket } from '../../src/ports/types';
 import { messageOf, portFailure, rejection } from '../helpers/ports';
 
@@ -71,4 +71,30 @@ test('without a signal getTicket still validates the adapter answer', async () =
     ),
   );
   expect(portFailure(error)).toEqual({ port: 'ticketSource', op: 'get', code: 'invalid' });
+});
+
+const stateOf = (type: 'unstarted' | 'started' | 'completed' | 'canceled') => ({ type, name: type });
+
+test('openPrerequisites keeps unstarted, started and unreadable prerequisites and drops completed and canceled ones', () => {
+  const open = openPrerequisites({
+    prerequisites: [
+      { ticketKey: 'A-1', state: stateOf('unstarted') },
+      { ticketKey: 'A-2', state: stateOf('started') },
+      { ticketKey: 'A-3', state: stateOf('completed') },
+      { ticketKey: 'A-4', state: stateOf('canceled') },
+      { ticketKey: 'A-5' },
+    ],
+  });
+  expect(open.map((each) => each.ticketKey)).toEqual(['A-1', 'A-2', 'A-5']);
+});
+
+test('openPrerequisites of a ticket with no prerequisites is empty', () => {
+  expect(openPrerequisites({})).toEqual([]);
+});
+
+test('waitingOnText names a prerequisite by its key and an unreadable one with (unreadable)', () => {
+  expect(waitingOnText([{ ticketKey: 'FAKE-1', state: stateOf('started') }, { ticketKey: 'FAKE-99' }])).toEqual([
+    'FAKE-1',
+    'FAKE-99 (unreadable)',
+  ]);
 });

@@ -426,3 +426,69 @@ test("a label answer script leaves the ticket's other calls and its raw untouche
   expect(ticket.comments.map((each) => each.body)).toEqual(['first']);
   expect(Object.keys(ticket.raw as object)).not.toContain('answers');
 });
+
+/** A seed of tickets, each Todo, `prerequisites` as seeded keys. */
+function prerequisiteSeed(): { seed: string; state: string } {
+  const dir = tempDir();
+  const seed = join(dir, 'tickets.json');
+  const todo = { type: 'unstarted', name: 'Todo' };
+  const ticket = (ticketKey: string, extra: object = {}) => ({
+    ticketKey,
+    title: `Ticket ${ticketKey}`,
+    description: '',
+    state: todo,
+    labels: ['sail'],
+    comments: [],
+    links: [],
+    attachments: [],
+    ...extra,
+  });
+  writeFileSync(
+    seed,
+    JSON.stringify({
+      tickets: [
+        ticket('FAKE-1'),
+        ticket('FAKE-2', { prerequisites: ['FAKE-1'] }),
+        ticket('FAKE-3', { prerequisites: ['FAKE-99'] }),
+        ticket('FAKE-6'),
+        ticket('FAKE-7'),
+      ],
+    }),
+  );
+  return { seed, state: join(dir, 'state', 'tickets.json') };
+}
+
+test('a seeded prerequisite is reported with its current state, and with its new one after it moves', async () => {
+  const source = createFakeTicketSource(prerequisiteSeed());
+  expect((await source.get('FAKE-2')).prerequisites).toEqual([
+    { ticketKey: 'FAKE-1', state: { type: 'unstarted', name: 'Todo' } },
+  ]);
+  await source.update('FAKE-1', { state: 'done' });
+  expect((await source.get('FAKE-2')).prerequisites).toEqual([
+    { ticketKey: 'FAKE-1', state: { type: 'completed', name: 'Done' } },
+  ]);
+  const listed = (await source.listDesignated('sail')).find((each) => each.ticketKey === 'FAKE-2');
+  expect(listed?.prerequisites).toEqual([{ ticketKey: 'FAKE-1', state: { type: 'completed', name: 'Done' } }]);
+});
+
+test('a seeded prerequisite no ticket of the world has is reported with no state', async () => {
+  const source = createFakeTicketSource(prerequisiteSeed());
+  expect((await source.get('FAKE-3')).prerequisites).toEqual([{ ticketKey: 'FAKE-99' }]);
+});
+
+test('relate blocks makes the blocking ticket a prerequisite of the other, once however often it is made', async () => {
+  const source = createFakeTicketSource(prerequisiteSeed());
+  await source.relate('FAKE-6', { kind: 'blocks', to: 'FAKE-7' });
+  await source.relate('FAKE-6', { kind: 'blocks', to: 'FAKE-7' });
+  expect((await source.get('FAKE-7')).prerequisites).toEqual([
+    { ticketKey: 'FAKE-6', state: { type: 'unstarted', name: 'Todo' } },
+  ]);
+  expect('prerequisites' in (await source.get('FAKE-6'))).toBe(false);
+  await source.relate('FAKE-1', { kind: 'related', to: 'FAKE-6' });
+  expect('prerequisites' in (await source.get('FAKE-6'))).toBe(false);
+});
+
+test('a ticket without prerequisites has no prerequisites key', async () => {
+  const source = createFakeTicketSource(prerequisiteSeed());
+  expect('prerequisites' in (await source.get('FAKE-1'))).toBe(false);
+});

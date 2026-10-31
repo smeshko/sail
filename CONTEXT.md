@@ -48,6 +48,10 @@ _Avoid_: tagged ticket, eligible ticket, allowlisted ticket
 A state a designated ticket is picked up from: by default every state the ticket source reads as unstarted (Triage, Backlog or Todo), or the ones its `pickUp` option names. The ticket source decides it with `canPickUp`; a poll, a dispatch, a claim and a start all apply that one rule, and `--force` overrides it.
 _Avoid_: ready state, eligible state
 
+**Prerequisite**:
+A ticket the ticket system says blocks another, reported by TicketSource's `get` with the state it is in now. It is *open* while that state is not completed or canceled, and also when the source can't read it. A ticket with an open prerequisite waits: it is not dispatched and its start is refused.
+_Avoid_: blocker, dependency, blocked (an outcome)
+
 **Designated pull request**:
 An open, non-draft pull request carrying the designation label, in any case, whose head branch is in the repository. A workflow that opens a pull request adds the label to hand it to a workflow that watches pull requests, and a human adds it to consent to the same. The watcher polls these, and the built-in `pr` intake accepts them.
 _Avoid_: tagged PR, labelled PR, bot PR
@@ -482,7 +486,7 @@ The engine's contract with one kind of external system, stated in sail's languag
 _Avoid_: interface (the TypeScript keyword), SPI, abstraction
 
 **TicketSource**:
-The port to the ticket system: fetch a ticket with its comments, links and attachments; list its tickets by state and label, add and remove its labels, relate it to another ticket, closing a duplicate; edit its title and description; update it; comment on it; file a new one with its labels; attach a file to it. It reports a ticket's state by type (unstarted, started, completed or canceled) and moves it to unstarted, in progress, in review or done (ADR-0015). v1 adapter: Linear. It may name its scope, the part of the provider it reads, such as a Linear team.
+The port to the ticket system: fetch a ticket with its comments, links, attachments and prerequisites; list its tickets by state and label, add and remove its labels, relate it to another ticket, closing a duplicate; edit its title and description; update it; comment on it; file a new one with its labels; attach a file to it. It reports a ticket's state by type (unstarted, started, completed or canceled) and moves it to unstarted, in progress, in review or done (ADR-0015). v1 adapter: Linear. It may name its scope, the part of the provider it reads, such as a Linear team.
 _Avoid_: tracker, task manager, board, issue source
 
 **CodeHost**:
