@@ -196,7 +196,7 @@ test('a run that keeps printing is not stopped by the watchdog', async () => {
     mkdirSync(join(repo.dir, 'test'), { recursive: true });
     writeFileSync(
       join(repo.dir, 'test/pass.test.ts'),
-      "import { expect, test } from 'bun:test';\ntest('passes', () => { expect(1).toBe(1); });\n",
+      "import { expect, test } from 'bun:test';\ntest('passes', async () => {\n  for (let at = 0; at < 8; at++) {\n    console.log('still going', at);\n    await Bun.sleep(500);\n  }\n  expect(1).toBe(1);\n});\n",
     );
     const run = await finish(launch(repo, ['./test/pass.test.ts'], { SAIL_TEST_SILENCE_SECONDS: '2' }));
     expect(run.code).toBe(0);
