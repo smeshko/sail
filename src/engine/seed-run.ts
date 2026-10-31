@@ -333,6 +333,8 @@ export async function openSeededRun(options: SeededRunOptions): Promise<OpenedRu
       branch,
       base: repository.baseSha,
       signal: options.signal,
+      // A fresh copy, not the source run's: the seeded run is a new run of the workflow as it reads now.
+      copy: (runDir) => copyDefinitions(runDir, root, found.dir, conventionPaths(config, unopened)),
     });
   });
   if ('refused' in opened) return opened;
@@ -354,8 +356,6 @@ export async function openSeededRun(options: SeededRunOptions): Promise<OpenedRu
         errorOnExist: true,
       });
     }
-    // A fresh copy, not the source run's: the seeded run is a new run of the workflow as it reads now.
-    copyDefinitions(dir, root, found.dir, conventionPaths(config, header));
     writeRunHeader(dir, header);
     createJournal(dir);
     journaled = seed.map(({ seq: _, recordedAt: __, ...entry }) => appendJournal(dir, entry, now));

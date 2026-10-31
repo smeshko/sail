@@ -238,6 +238,24 @@ test("a seeded run keeps the clone's .sail/: an uncommitted edit reaches its def
   });
 }, 60_000);
 
+test("a seeded run keeps the stage its roster was built from in definition/, though the clone's .sail/ changes it while the workspace is made", async () => {
+  await withTempRepo(async (repo) => {
+    const from = await source.copyInto(repo.dir);
+    const stage = join('workflows', 'ticket-to-pr', 'stages', 'spec', 'stage.ts');
+    const before = readFileSync(join(repo.dir, '.sail', stage), 'utf8');
+    const adapters = await fakeAdapters(repo.dir);
+    const { workspace } = adapters.ports;
+    const create = workspace.create.bind(workspace);
+    workspace.create = async (run, options) => {
+      writeFileSync(join(repo.dir, '.sail', stage), before.replace("agent('spec'", "script('spec'"));
+      return create(run, options);
+    };
+    const opened = openedFrom(await seed(repo, { fromRun: from.runId, adapters }));
+    expect(readFileSync(join(opened.dir, 'definition', '.sail', stage), 'utf8')).toBe(before);
+    expect(readRunHeader(opened.dir).stages.spec?.kind).toBe('agent');
+  });
+}, 60_000);
+
 test('seeding self-review journals every call of the source before self-review#1, and copies their call directories with every try', async () => {
   await withTempRepo(async (repo) => {
     const from = await source.copyInto(repo.dir);

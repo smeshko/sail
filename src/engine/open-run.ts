@@ -13,7 +13,7 @@
 // the ticket source must parse, hold, and show designated and in a pick-up state unless `--force`. The run's header is built and
 // checked before anything is written. Then, in order (D1):
 //   1. the lease on the run's branch, which a live run holding it refuses, naming that run;
-//   2. the run directory, then the workspace inside it;
+//   2. the run directory, its copy of the definitions, then the workspace inside it;
 //   3. a check that the start hasn't been aborted;
 //   4. `run.json`, the journal, the events file and STATUS.
 // A refusal at 2 or 3 undoes what came before it, in reverse: the workspace is released, the run directory removed and
@@ -41,6 +41,7 @@
 // clone's: every check above reads that copy, its workspace is based on that commit unless its branch is on the remote,
 // and its run directory keeps the committed `.sail/` and conventions whole in `definition/`, recording the sha as
 // `definitionsSha`. Any other start keeps the clone's `.sail/` as it reads and the conventions whole in `definition/` too,
+// copied with the run directory, before the workspace setup runs, so an edit to the clone during it doesn't reach the copy,
 // and every run, a resume included, runs from that copy: its `sailDir` is `definition/.sail`, and a workflow edited in the
 // checkout since doesn't reach it. A run of layout 2 without a `definitionsSha` has no such copy, and is refused on resume.
 //
@@ -386,7 +387,8 @@ export interface Made {
 }
 
 /**
- * Leases `branch`, makes the run directory, moves the run's hand-off file into its `CONTROL` if a request is waiting
+ * Leases `branch`, makes the run directory, runs `copy` on it (the definitions, taken before the workspace setup can
+ * change the clone), moves the run's hand-off file into its `CONTROL` if a request is waiting
  * there, makes the workspace at `base`, and checks for an abort, in that order. Left out, `base` is the branch's tip on
  * the remote when the remote has it, else `fallback`, else the default branch's tip. A refusal at any step undoes the
  * ones before it, in reverse, giving a stop in `CONTROL` back to the hand-off.
@@ -401,8 +403,10 @@ export async function startWorkspace(options: {
   base?: string;
   fallback?: string;
   signal: AbortSignal | undefined;
+  /** Fills the new run directory before the workspace is made. A throw undoes the start and is rethrown. */
+  copy?: (runDir: string) => void;
 }): Promise<{ made: Made } | { refused: string }> {
-  const { port, run, sailDir, workflow, branch, base, fallback, signal } = options;
+  const { port, run, sailDir, workflow, branch, base, fallback, signal, copy } = options;
   let repository: Repository;
   try {
     repository = await port.repository();
@@ -429,6 +433,7 @@ export async function startWorkspace(options: {
     createRunDir(sailDir, run.runId);
     writeOpening(run.runDir, { workflow, branch, remote: repository.url });
     takeHandOff(runsDir(sailDir), run.runId);
+    copy?.(run.runDir);
     workspace = await port.create(run, {
       branch,
       ...(base === undefined ? {} : { base }),
@@ -708,6 +713,21 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | Refu
       workflow: loaded.name,
       branch,
       signal: options.signal,
+      copy: (runDir) => {
+        try {
+          if (definitions === undefined) {
+            copyDefinitions(runDir, root, preflight.sailDir, conventionPaths(config, preflighted));
+          } else {
+            cpSync(dirname(preflight.sailDir), join(runDir, DEFINITION_DIR), {
+              recursive: true,
+              verbatimSymlinks: true,
+            });
+          }
+        } catch (error) {
+          const why = error instanceof Error ? error.message : String(error);
+          throw new Error(`run ${runId}'s directory was not written: ${why}`, { cause: error });
+        }
+      },
       // A pull-request run starts at the head sha it was resolved at (D4), and a ticket run from definitions at their
       // commit, so a push since they were read can't give it another commit's code, unless its branch is on the remote:
       // then it continues that branch, as any ticket run does.
@@ -729,8 +749,6 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | Refu
   const dir = run.runDir;
   try {
     assertRunHeader(header);
-    if (definitions === undefined) copyDefinitions(dir, root, preflight.sailDir, conventionPaths(config, header));
-    else cpSync(dirname(preflight.sailDir), join(dir, DEFINITION_DIR), { recursive: true, verbatimSymlinks: true });
     writeRunHeader(dir, header);
     createJournal(dir);
     createEventsFile(dir);
