@@ -2,7 +2,7 @@
 // minutes, and CI's verify runs it on every pull request.
 import { expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { fullSuiteAllowed, wholeSuite } from '../../scripts/full-suite';
+import { broadRun, fullSuiteAllowed, wholeSuite } from '../../scripts/full-suite';
 
 const LAUNCHER = join(import.meta.dir, '..', '..', 'scripts', 'test.ts');
 
@@ -24,6 +24,20 @@ test('a file, a folder under test/ or a name filter narrows the run, and a flag 
     expect({ args, whole: wholeSuite(args) }).toEqual({ args, whole: false });
   }
   expect(wholeSuite(['--timeout', 'test/cli'])).toBe(true);
+});
+
+test('a run with no path, a folder, a name filter alone or more than 5 files is broad', () => {
+  const files = (count: number) => Array.from({ length: count }, (_, at) => `./test/a${at}.test.ts`);
+  for (const args of [[], ['./test/cli'], files(6), ['-t', 'name'], ['--coverage']]) {
+    expect({ args, broad: broadRun(args) }).toEqual({ args, broad: true });
+  }
+});
+
+test('up to 5 named test files are narrow, and a flag value is no path', () => {
+  const files = (count: number) => Array.from({ length: count }, (_, at) => `./test/a${at}.test.ts`);
+  for (const args of [files(1), files(5), ['--timeout', '5', './test/a.test.ts'], ['-t', 'name', './test/a.test.ts']]) {
+    expect({ args, broad: broadRun(args) }).toEqual({ args, broad: false });
+  }
 });
 
 test('the whole suite is allowed on CI, or with SAIL_FULL_SUITE=1, and nowhere else', () => {
