@@ -17,11 +17,15 @@
 // - A hand-off file (`engine/control.ts`) the run never took is deleted when its item settles: done, failed or parked.
 //   A failure with a `stopped` hand-off, a start refused after `sail stop` reached it, parks the item instead.
 // - **A held dispatch**: a run `suspended usage_limit` holds the workflow's dispatch (`queue:held`) until its reset time,
-//   or the back-off after it hit the limit; a run `suspended port_unavailable` holds it for the back-off its place in
-//   the run of such suspensions calls for (1, 2, 5, 10 then 30 minutes), and is parked, naming the call, the count and
-//   the last port error, once it is suspended past that schedule. While held, nothing starts and no run is resumed, and no item's attempt is
+//   or the back-off after it hit the limit. While held, nothing starts and no run is resumed, and no item's attempt is
 //   counted, failed or parked. A tick past the hold releases it (`queue:released`), and the run is resumed with the
 //   rest of the dispatch; a run that hits the limit again is held again.
+// - **A held item**: a run `suspended port_unavailable` holds only its own item (`queue:held` with the item's
+//   `dedupKey`) for the back-off its place in the run of such suspensions calls for (1, 2, 5, 10 then 30 minutes),
+//   and the rest of the workflow starts and resumes as usual. It is parked, naming the call, the count and the last
+//   port error, once it is suspended past that schedule. A tick past the hold releases it (`queue:released` with the
+//   `dedupKey`) and the run is resumed. Two or more items held at once are an outage of the provider: the workflow's
+//   dispatch is held, as for a usage limit, until the later of their holds ends.
 // - **A start whose definitions need a newer sail** (its last log line says so) is neither a failure nor a park: the item
 //   goes back to queued with its attempt given back, and the workflow's dispatch is held (`queue:held`, no `until`) by
 //   the running sail's SDK fingerprint as it was when the start spawned, which its queue item records, so a restarted
@@ -102,7 +106,7 @@ export interface DispatcherOptions {
   now: () => Date;
   /** How long a usage limit holds the dispatch when the run names no reset time. */
   usageLimitBackoffMs: number;
-  /** How long a run suspended on an unavailable port holds the dispatch, by consecutive suspension; one past the end parks. */
+  /** How long a run suspended on an unavailable port holds its item, by consecutive suspension; one past the end parks. */
   portUnavailableBackoffMs: readonly number[];
   spawn: (options: SpawnRunOptions) => SpawnedRun;
   /** Starts `sail resume <run>` for a run whose process is gone. */
@@ -331,7 +335,8 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
         resumed.delete(runId);
         resumedAt.delete(runId);
         limitedAt.set(runId, limitedAt.get(runId) ?? now());
-        store.hold(answer.until, runId, answer.reason);
+        if (answer.stopReason === 'usage_limit') store.hold(answer.until, runId, answer.reason);
+        else store.holdItem(item.dedupKey, answer.until, answer.reason);
         break;
       case 'resume':
         if (holding() || options.paused?.() === true) break;
@@ -354,9 +359,23 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
         const answer = await reconcile(item);
         if (answer !== undefined) apply(item, answer);
       }
+      holdOutage();
     } finally {
       first = false;
     }
+  };
+
+  /** Holds the workflow while two or more dispatched items are held on an unavailable port: a provider outage. */
+  const holdOutage = () => {
+    const at = now().getTime();
+    const held = dispatchedItems().filter((item) => item.held !== undefined && Date.parse(item.held.until) > at);
+    if (held.length < 2) return;
+    const latest = held.reduce((a, b) => (Date.parse(b.held?.until ?? '') > Date.parse(a.held?.until ?? '') ? b : a));
+    store.hold(
+      latest.held?.until ?? '',
+      latest.runId ?? '',
+      `${held.length} runs could not reach a provider: ${latest.held?.reason ?? ''}`,
+    );
   };
 
   /** Whether a live run holds `branch`, reporting the item as skipped the first time each holder is seen. */
@@ -492,6 +511,9 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
   return {
     async tick() {
       if (store.snapshot().held !== undefined && !holding()) store.release();
+      for (const item of store.snapshot().items) {
+        if (item.held !== undefined && Date.parse(item.held.until) <= now().getTime()) store.releaseItem(item.dedupKey);
+      }
       await countManual();
       await settle();
       await dispatch();

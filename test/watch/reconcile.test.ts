@@ -287,9 +287,19 @@ test('a suspended usage_limit run is held until its reset time, or the back-off 
     await reconcileItem(item(1, DEAD), later(260)),
     await reconcileItem(item(1, DEAD), { ...later(260), resumed: true }),
   ]).toEqual([
-    { kind: 'held', until: '2026-10-28T14:20:00.000Z', reason: 'spec#1 hit the usage limit' },
-    { kind: 'held', until: '2026-10-28T10:05:00.000Z', reason: 'spec#1 hit the usage limit' },
-    { kind: 'held', until: '2026-10-28T10:15:00.000Z', reason: 'a run hit the usage limit' },
+    {
+      kind: 'held',
+      stopReason: 'usage_limit',
+      until: '2026-10-28T14:20:00.000Z',
+      reason: 'spec#1 hit the usage limit',
+    },
+    {
+      kind: 'held',
+      stopReason: 'usage_limit',
+      until: '2026-10-28T10:05:00.000Z',
+      reason: 'spec#1 hit the usage limit',
+    },
+    { kind: 'held', stopReason: 'usage_limit', until: '2026-10-28T10:15:00.000Z', reason: 'a run hit the usage limit' },
     resume,
     resume,
     resume,
@@ -316,8 +326,18 @@ test('a suspended usage_limit run whose reset time is not after the limit was hi
   runDir(w.runsDir, 2, 'suspended', 'usage_limit');
   limitedAt(w.runsDir, 2, '2026-10-28T09:50:00.000Z', '2026-10-28T09:50:00.000Z');
   expect([await reconcileItem(item(1, DEAD), w.context()), await reconcileItem(item(2, DEAD), w.context())]).toEqual([
-    { kind: 'held', until: '2026-10-28T10:05:00.000Z', reason: 'spec#1 hit the usage limit' },
-    { kind: 'held', until: '2026-10-28T10:05:00.000Z', reason: 'spec#1 hit the usage limit' },
+    {
+      kind: 'held',
+      stopReason: 'usage_limit',
+      until: '2026-10-28T10:05:00.000Z',
+      reason: 'spec#1 hit the usage limit',
+    },
+    {
+      kind: 'held',
+      stopReason: 'usage_limit',
+      until: '2026-10-28T10:05:00.000Z',
+      reason: 'spec#1 hit the usage limit',
+    },
   ]);
 });
 
@@ -334,7 +354,12 @@ test('a suspended usage_limit run this dispatcher resumed, and which hit no limi
     await reconcileItem(item(2, DEAD), w.context({ resumed: true, resumedAt })),
   ]).toEqual([
     { kind: 'park', reason: 'its resume failed: sail resume: LINEAR_API_KEY is not set' },
-    { kind: 'held', until: '2026-10-28T14:20:00.000Z', reason: 'spec#1 hit the usage limit' },
+    {
+      kind: 'held',
+      stopReason: 'usage_limit',
+      until: '2026-10-28T14:20:00.000Z',
+      reason: 'spec#1 hit the usage limit',
+    },
   ]);
 });
 
@@ -376,11 +401,13 @@ test('a suspended port_unavailable run is held for the first back-off after its 
   ]).toEqual([
     {
       kind: 'held',
+      stopReason: 'port_unavailable',
       until: '2026-10-28T10:00:30.000Z',
       reason: 'publish#1 could not reach a provider: codeHost.push: the fake code host is unreachable',
     },
     {
       kind: 'held',
+      stopReason: 'port_unavailable',
       until: '2026-10-28T10:00:30.000Z',
       reason: 'publish#1 could not reach a provider: codeHost.push: the fake code host is unreachable',
     },
@@ -429,6 +456,7 @@ test('the port error a held port_unavailable run quotes is the suspended call’
   appendFileSync(join(w.runsDir, runIdOf(1), 'events.ndjson'), `${JSON.stringify(other)}\n`);
   expect(await reconcileItem(item(1, DEAD), w.context())).toEqual({
     kind: 'held',
+    stopReason: 'port_unavailable',
     until: '2026-10-28T10:00:30.000Z',
     reason: 'publish#1 could not reach a provider: codeHost.push: the fake code host is unreachable',
   });
@@ -457,6 +485,7 @@ test('a journal:append after a port_unavailable suspension resets the count: the
   ]);
   expect(await reconcileItem(item(1, DEAD), w.context())).toEqual({
     kind: 'held',
+    stopReason: 'port_unavailable',
     until: '2026-10-28T10:00:30.000Z',
     reason: 'publish#1 could not reach a provider: codeHost.push: the fake code host is unreachable',
   });
@@ -475,5 +504,5 @@ test('a port_unavailable run this dispatcher resumed that was not suspended agai
     await reconcileItem(item(2, DEAD), w.context({ resumed: true, resumedAt })),
   ];
   expect(first).toEqual({ kind: 'park', reason: 'its resume failed: sail resume: LINEAR_API_KEY is not set' });
-  expect(second).toMatchObject({ kind: 'held', until: '2026-10-28T10:01:30.000Z' });
+  expect(second).toMatchObject({ kind: 'held', stopReason: 'port_unavailable', until: '2026-10-28T10:01:30.000Z' });
 });
