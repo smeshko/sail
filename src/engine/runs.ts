@@ -98,9 +98,9 @@ export function resolveRun(sailDir: string, name: string): { runId: string; dir:
 
 /**
  * The ids of the runs of `workflow` in `runs` that are alive now, sorted: the lease on the run's branch is its own, not
- * suspended, and held by a pid that `isAlive` reads alive. The lease decides, not STATUS: a crashed run reads `running`
- * forever, and a resume renews its lease before it writes STATUS. A run being opened, with no header yet, is found by
- * its `OPENING`. A run that has ended, whose header can't be read, or that has no branch or repository, is skipped. A
+ * suspended, and held by a pid that `isAlive` reads alive. The lease decides, not STATUS: a run killed outright reads
+ * `running` forever, and a resume renews its lease before it writes STATUS. A run being opened, with no header yet, is
+ * found by its `OPENING`. A run that has ended, whose header can't be read, or that has no branch or repository, is skipped. A
  * `PortError` from reading a lease propagates.
  */
 export async function liveRuns(
