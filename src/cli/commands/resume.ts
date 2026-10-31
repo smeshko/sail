@@ -12,7 +12,7 @@
 //
 // The terminal view shows the whole run: it reads the run's earlier events first, prints nothing for them, and opens
 // with what already ran once the resume's first event arrives. A resume refused before then prints nothing.
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import type { Raise } from '../../engine/budget';
 import { systemKeepAwake } from '../../engine/keep-awake';
 import { findWorkflowFile } from '../../engine/load-workflow';
@@ -70,17 +70,16 @@ export async function resume(args: Parsed, io: Io): Promise<ExitCode> {
 
   const run = findRun(clone.sailDir, runId);
   if ('refused' in run) return refuse(run.refused);
-  // A run started from committed definitions resumes on its own copy of them, whatever the clone's `.sail/` holds.
-  const copy =
-    run.header.definitionsSha === undefined
-      ? undefined
-      : await findProject(io, COMMAND, {
-          found: { dir: join(run.dir, DEFINITION_DIR, '.sail') },
-          label: `${run.header.definitionsSha.slice(0, 7)}:.sail/project.yaml`,
-          root: dirname(clone.sailDir),
-        });
-  if (typeof copy === 'number') return copy;
-  const project = copy ?? clone;
+  // Every run resumes on its own copy of `.sail/`, whatever the clone's holds.
+  const project = await findProject(io, COMMAND, {
+    found: { dir: join(run.dir, DEFINITION_DIR, '.sail') },
+    label:
+      run.header.definitionsSha === undefined
+        ? `${relative(dirname(clone.sailDir), run.dir)}/${DEFINITION_DIR}/.sail/project.yaml`
+        : `${run.header.definitionsSha.slice(0, 7)}:.sail/project.yaml`,
+    root: dirname(clone.sailDir),
+  });
+  if (typeof project === 'number') return project;
   const workflowFile = findWorkflowFile(project.sailDir, run.header.workflow.name);
   if ('refused' in workflowFile) return refuse(workflowFile.refused);
   const typed = await typecheckWorkflow(io, COMMAND, project.sailDir, workflowFile.file);

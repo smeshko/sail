@@ -205,6 +205,18 @@ test('seeding spec copies the intake call byte for byte, journals intake#1 alone
   });
 }, 60_000);
 
+test('a source run of layout 2 still seeds a run, which is of layout 3 and keeps its own copy of .sail/', async () => {
+  await withTempRepo(async (repo) => {
+    const from = await source.copyInto(repo.dir);
+    const path = join(from.dir, 'run.json');
+    chmodSync(path, 0o644);
+    writeFileSync(path, `${JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')), layout: 2 }, null, 2)}\n`);
+    const opened = openedFrom(await seed(repo, { fromRun: from.runId }));
+    expect(readRunHeader(opened.dir).layout).toBe(3);
+    expect(existsSync(join(opened.dir, 'definition', '.sail', 'project.yaml'))).toBe(true);
+  });
+}, 60_000);
+
 test("a seeded run keeps the clone's .sail/: an uncommitted edit reaches its definition/ copy, and its header has no definitionsSha", async () => {
   await withTempRepo(async (repo) => {
     const from = await source.copyInto(repo.dir);

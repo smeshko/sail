@@ -346,7 +346,7 @@ test('reopenRun reopens a suspended run with the header on disk and STATUS runni
       runId: run.runId,
       dir,
       header: run.header,
-      sailDir: join(repo.dir, '.sail'),
+      sailDir: join(dir, 'definition', '.sail'),
       loaded: { workflow: { name: 'ticket-to-pr' } },
     });
     expect(readStatus(dir)).toEqual({ status: 'running' });
@@ -679,7 +679,7 @@ test('reopenRun refuses a workflow that has come to reach a stage named intake, 
     // A torn tail, and a refusal that comes once the workflow is loaded: only a resume that goes ahead may cut it.
     appendFileSync(join(dir, 'events.ndjson'), '{"seq":1,"ts":"2026-09-2');
     const before = ['STATUS', 'events.ndjson'].map((file) => readFileSync(join(dir, file), 'utf8'));
-    const sail = join(repo.dir, '.sail');
+    const sail = join(dir, 'definition', '.sail');
     write(
       sail,
       'stages/intake/stage.ts',
@@ -1306,12 +1306,14 @@ test('reopenRun refuses a run whose named harness now names another adapter, nam
   await withTempRepo(async (repo) => {
     const run = await suspendedOnSecond(repo.dir);
     edit(
-      join(repo.dir, '.sail'),
+      join(repo.dir, '.sail-runs', run.runId, 'definition', '.sail'),
       'project.yaml',
       'second: { use: fake }',
       'second: { use: ./adapters/echo-harness.ts }',
     );
-    const adapters = await fakeAdapters(repo.dir, { ECHO_HARNESS_TOKEN: 'x' });
+    const adapters = await fakeAdapters(join(repo.dir, '.sail-runs', run.runId, 'definition'), {
+      ECHO_HARNESS_TOKEN: 'x',
+    });
     const refused = await reopenRun({ cwd: repo.dir, runId: run.runId, adapters });
     expect(refused).toEqual({
       refused: `run ${run.runId} can't resume on different adapters:\nharnesses.second: the run started with fake (builtin), and .sail/project.yaml now names ./adapters/echo-harness.ts (repo:.sail/adapters/echo-harness.ts)`,
@@ -1322,10 +1324,15 @@ test('reopenRun refuses a run whose named harness now names another adapter, nam
 test('reopenRun refuses a run whose named harness the config no longer defines', async () => {
   await withTempRepo(async (repo) => {
     const run = await suspendedOnSecond(repo.dir);
-    const sail = join(repo.dir, '.sail');
+    const dirOf = join(repo.dir, '.sail-runs', run.runId);
+    const sail = join(dirOf, 'definition', '.sail');
     edit(sail, 'project.yaml', 'deep: { harness: second, model: claude-opus-5-5 }', 'deep: claude-opus-5-5');
     edit(sail, 'project.yaml', 'second: { use: fake }, ', '');
-    const refused = await reopenRun({ cwd: repo.dir, runId: run.runId, adapters: await fakeAdapters(repo.dir) });
+    const refused = await reopenRun({
+      cwd: repo.dir,
+      runId: run.runId,
+      adapters: await fakeAdapters(join(dirOf, 'definition')),
+    });
     expect(refused).toEqual({
       refused: `run ${run.runId} can't resume on different adapters:\nharnesses.second: the run started with fake (builtin), and .sail/project.yaml no longer defines it`,
     });

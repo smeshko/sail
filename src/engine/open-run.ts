@@ -86,6 +86,7 @@ import {
   removeRunDir,
   runsDir,
   type Source,
+  uncopiedRefusal,
   unmarkedRefusal,
   writeOpening,
   writeStatus,
@@ -754,7 +755,7 @@ export interface ReopenRunOptions {
 
 /**
  * Finds run `runId` beside `sailDir`, with its header and STATUS. A run that has completed or failed is refused, then one
- * whose header has no layout mark, and so is an id that isn't a plain name or names no run. A STATUS or `run.json` that can't be read throws.
+ * whose header has no layout mark, then one that keeps no whole copy of `.sail/`, and so is an id that isn't a plain name or names no run. A STATUS or `run.json` that can't be read throws.
  */
 export function findRun(
   sailDir: string,
@@ -772,6 +773,8 @@ export function findRun(
   const header = readRunHeader(dir);
   const unmarked = unmarkedRefusal(runId, header, 'be resumed');
   if (unmarked !== undefined) return { refused: unmarked };
+  const uncopied = uncopiedRefusal(runId, header);
+  if (uncopied !== undefined) return { refused: uncopied };
   return { dir, header, status };
 }
 
@@ -889,18 +892,18 @@ async function refuseRenewedWorkspace(
 
 /**
  * Reopens an existing run: every check that can refuse comes first, and only then is STATUS set back to `running`. The
- * workflow is loaded as it reads now, so a stage it has come to name `intake` is refused here as at a start.
+ * config, the adapters and the workflow are loaded from the run's own copy of `.sail/`, never the clone's, so an edit of
+ * the checkout since the run started doesn't reach it. The copy gets the checks a start makes, a stage named `intake` included.
  */
 export async function reopenRun(options: ReopenRunOptions): Promise<OpenedRun | { refused: string }> {
   const { cwd, runId } = options;
   const home = findSailDir(cwd);
   if ('refused' in home) return home;
   const run = findRun(home.dir, runId);
-  // A run started from committed definitions resumes from its own copy, whatever the clone's `.sail/` holds.
-  const committed = !('refused' in run) && run.header.definitionsSha !== undefined;
-  const found = readConfigured(committed ? join(run.dir, DEFINITION_DIR, '.sail') : home.dir);
-  if ('refused' in found) return found;
   if ('refused' in run) return run;
+  // Every run resumes from its own copy of `.sail/`, whatever the clone's holds.
+  const found = readConfigured(join(run.dir, DEFINITION_DIR, '.sail'));
+  if ('refused' in found) return found;
   const budget = raiseProblem(runId, run.header.budget, readEvents(run.dir), options.raise);
   if (budget !== undefined) return { refused: budget };
   // The named harnesses the run reached, as its header froze them: one the config has dropped is changed, not resolved.
