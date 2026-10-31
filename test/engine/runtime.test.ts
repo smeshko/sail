@@ -560,7 +560,7 @@ test("run.input is the intake's output as the journal holds it, in the run that 
   });
 });
 
-test('a journal that loses its intake mid-run is an exception inside sail: no replay runs on the intake kept in memory, and STATUS stays running', async () => {
+test('a journal that loses its intake mid-run is an exception inside sail: no replay runs on the intake kept in memory, and STATUS is suspended crashed', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
     // Emptied as the intake is journaled, before the first replay reads it back.
@@ -576,7 +576,7 @@ test('a journal that loses its intake mid-run is an exception inside sail: no re
     expect(thrown).toBeInstanceOf(JournalError);
     expect(String(thrown)).toEndWith('journal.ndjson:1 is no longer intake#1: the journal changed under the run');
     expect([workflowEntries(repo.dir), stubExecutions(repo.dir)]).toEqual([0, []]);
-    expect(readStatus(onlyRun(repo.dir))).toEqual({ status: 'running' });
+    expect(readStatus(onlyRun(repo.dir))).toEqual({ status: 'suspended', stopReason: 'crashed' });
   });
 });
 
@@ -1006,7 +1006,7 @@ test('a consumer that throws is reported after each event it failed on, and the 
 });
 
 // One crash, read four ways: a journal that breaks while spec#1 is journaled is an exception inside sail.
-test('an exception inside sail propagates, leaves error:crash as the last event, STATUS and summary.json running, and lets go of the relay', async () => {
+test('an exception inside sail propagates, leaves error:crash then run:end suspended crashed, STATUS and summary.json suspended crashed, and lets go of the relay', async () => {
   await withTempRepo(async (repo) => {
     const sail = writeStub(repo.dir);
     edit(
@@ -1021,7 +1021,7 @@ test('an exception inside sail propagates, leaves error:crash as the last event,
     const [runId = ''] = runIds(repo.dir);
     const dir = join(repo.dir, '.sail-runs', runId);
     // The journal breaks while spec#1 is being journaled, so the crash names that call.
-    expect(events(dir).at(-1)).toEqual({
+    expect(events(dir).at(-2)).toEqual({
       seq: expect.any(Number),
       ts: expect.any(String),
       type: 'error:crash',
@@ -1029,9 +1029,25 @@ test('an exception inside sail propagates, leaves error:crash as the last event,
       key: 'spec#1',
       message: (error as Error).message,
     });
-    expect(readStatus(dir)).toEqual({ status: 'running' });
+    expect(events(dir).at(-1)).toMatchObject({
+      type: 'run:end',
+      status: 'suspended',
+      stopReason: 'crashed',
+      message: (error as Error).message,
+    });
+    expect(readStatus(dir)).toEqual({ status: 'suspended', stopReason: 'crashed' });
     const summary = summaryOf(dir);
-    expect([summary?.status, summary?.calls.map((call) => call.key)]).toEqual(['running', ['intake#1', 'spec#1']]);
+    expect([summary?.status, summary?.stopReason, summary?.calls.map((call) => call.key)]).toEqual([
+      'suspended',
+      'crashed',
+      ['intake#1', 'spec#1'],
+    ]);
+    expect(existsSync(join(dir, 'workspace'))).toBe(true);
+    const [leaseFile = ''] = leaseFiles(repo.dir);
+    expect(JSON.parse(readFileSync(join(repo.dir, '.sail-runs', 'fake', 'leases', leaseFile), 'utf8'))).toMatchObject({
+      runId,
+      suspended: true,
+    });
 
     const seen: ProviderEvent[] = [];
     adapters.relay.attach((event) => seen.push(event));
@@ -1039,6 +1055,49 @@ test('an exception inside sail propagates, leaves error:crash as the last event,
     expect(seen).toEqual([LEASED]);
   });
 });
+
+test('a crashed run resumes to completed, without running a journaled call again', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    let thrown = false;
+    const error = await ran(repo.dir, {
+      onCall: (entry) => {
+        if (entry.key !== 'spec#1' || thrown) return;
+        thrown = true;
+        throw new Error('a bug in sail');
+      },
+    }).catch((caught: unknown) => caught);
+    expect((error as Error).message).toBe('a bug in sail');
+    const dir = onlyRun(repo.dir);
+    expect(readStatus(dir)).toEqual({ status: 'suspended', stopReason: 'crashed' });
+    expect(summaryOf(dir)).toMatchObject({ status: 'suspended', stopReason: 'crashed' });
+    expect(validateRunDir(dir).issues).toEqual([]);
+
+    await withTempRepo(async (copy) => {
+      copyRun(repo.dir, copy.dir);
+      const resumed = await resumeWorkflow({
+        cwd: copy.dir,
+        adapters: await fakeAdapters(copy.dir),
+        runId: basename(dir),
+      });
+      expect(resumed).toMatchObject({ status: 'completed' });
+      expect(readStatus(dir.replace(repo.dir, copy.dir))).toEqual({ status: 'completed' });
+    });
+  });
+}, 30_000);
+
+test('a crash inside finish() is not finalised again as crashed: STATUS stays as finish() wrote it, and that error propagates', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const adapters = await fakeAdapters(repo.dir);
+    spyOn(adapters.ports.workspace, 'release').mockRejectedValue(new Error('the disk is gone'));
+    const error = await ran(repo.dir, { adapters }).catch((caught: unknown) => caught);
+    expect((error as Error).message).toBe('the disk is gone');
+    const dir = onlyRun(repo.dir);
+    expect(readStatus(dir)).toEqual({ status: 'completed' });
+    expect(typed(events(dir))).not.toContain('run:end');
+  });
+}, 30_000);
 
 test('a replay abandoned by an abort reports nothing after run:end, even once its workflow moves on', async () => {
   await withTempRepo(async (repo) => {
@@ -2454,7 +2513,7 @@ test("a group whose third call can't run fails the run with workflow_failed befo
   });
 }, 30_000);
 
-test('a call of a group that throws inside sail stops its siblings, and the error goes on once they have settled: no all:end, and STATUS stays running', async () => {
+test('a call of a group that throws inside sail stops its siblings, and the error goes on once they have settled: no all:end, and STATUS is suspended crashed', async () => {
   await withTempRepo(async (repo) => {
     writeTrio(repo.dir, { a: 20_000, b: 100, c: 20_000 });
     const crashed = ranTrio(repo.dir, {
@@ -2472,7 +2531,7 @@ test('a call of a group that throws inside sail stops its siblings, and the erro
     expect(performance.now() - started).toBeLessThan(10_000);
 
     const dir = onlyRun(repo.dir);
-    expect(readStatus(dir)).toEqual({ status: 'running' });
+    expect(readStatus(dir)).toEqual({ status: 'suspended', stopReason: 'crashed' });
     expect(journaled(dir)).toEqual(['intake#1 passed', 'b#1 done']);
     const list = events(dir);
     expect(ofType(list, 'all:end')).toEqual([]);
@@ -2481,8 +2540,9 @@ test('a call of a group that throws inside sail stops its siblings, and the erro
         .map((event) => event.key)
         .sort(),
     ).toEqual(['a#1', 'b#1', 'c#1']);
-    expect(list.at(-1)).toMatchObject({ type: 'error:crash', message: 'a bug in sail' });
-    expect(list.at(-1)).not.toHaveProperty('key');
+    expect(list.at(-2)).toMatchObject({ type: 'error:crash', message: 'a bug in sail' });
+    expect(list.at(-2)).not.toHaveProperty('key');
+    expect(list.at(-1)).toMatchObject({ type: 'run:end', status: 'suspended', stopReason: 'crashed' });
   });
 }, 30_000);
 
@@ -2576,7 +2636,7 @@ test("a call of a group that throws after the journal holds the group whole keep
     ).toBe('a bug in sail');
 
     const list = events(onlyRun(repo.dir));
-    expect(list.at(-1)).toMatchObject({ type: 'error:crash', message: 'a bug in sail' });
+    expect(list.at(-2)).toMatchObject({ type: 'error:crash', message: 'a bug in sail' });
     expect(ofType(list, 'all:end')).toEqual([]);
   });
 }, 30_000);
@@ -2597,7 +2657,7 @@ test("a group whose calls all completed crashes with the journal's error when it
     expect(error).toBeInstanceOf(JournalError);
 
     const list = events(onlyRun(repo.dir));
-    expect(list.at(-1)).toMatchObject({ type: 'error:crash', message: (error as JournalError).message });
+    expect(list.at(-2)).toMatchObject({ type: 'error:crash', message: (error as JournalError).message });
     expect(ofType(list, 'all:end')).toEqual([]);
   });
 }, 30_000);

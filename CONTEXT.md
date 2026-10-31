@@ -271,7 +271,7 @@ Where a run is in its life: `running`, `suspended`, `completed` or `failed`. It 
 _Avoid_: outcome, state, phase
 
 **Stop reason**:
-The named reason a run ended without completing, such as `workflow_failed`, `stage_error`, `budget_exceeded`, `determinism_violation`, `until`, `unwatched`, `stopped`, `interrupted`, `usage_limit` or `port_unavailable`. Every failed or suspended run carries exactly one.
+The named reason a run ended without completing, such as `workflow_failed`, `stage_error`, `budget_exceeded`, `determinism_violation`, `until`, `unwatched`, `stopped`, `interrupted`, `usage_limit`, `port_unavailable` or `crashed`. Every failed or suspended run carries exactly one.
 _Avoid_: error message, cause, exit reason
 
 **Refusal**:
@@ -287,7 +287,7 @@ The hold a run's process takes against the machine's sleep, from its start or re
 _Avoid_: wake lock, caffeinate, sleep assertion
 
 **Suspended**:
-The status of a run that has exited with nothing running and a resume expected, for example because the run budget was exceeded, its workflow was unwatched, it hit the provider's usage limit, a step of it ended on a provider that was unavailable, or it was interrupted by Ctrl-C or SIGTERM. It keeps its workspace and its branch lease.
+The status of a run that has exited with nothing running and a resume expected, for example because the run budget was exceeded, its workflow was unwatched, it hit the provider's usage limit, a step of it ended on a provider that was unavailable, it crashed on an exception inside sail, or it was interrupted by Ctrl-C or SIGTERM. It keeps its workspace and its branch lease.
 _Avoid_: paused, waiting, blocked, pending
 
 **Control file**:

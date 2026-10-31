@@ -1154,7 +1154,7 @@ test('a run whose journal starts with another key fails with determinism_violati
   });
 });
 
-test('a body that throws something other than a PortError crashes the run: error:crash names intake#1, STATUS stays running, and the error propagates', async () => {
+test('a body that throws something other than a PortError crashes the run: error:crash names intake#1, then run:end suspended crashed, STATUS suspended crashed, and the error propagates', async () => {
   await withTempRepo(async (repo) => {
     const breaks =
       "async (key) => { if (inRun()) throw new TypeError('the ticket source broke'); return fake.get(key); }";
@@ -1171,7 +1171,7 @@ test('a body that throws something other than a PortError crashes the run: error
     expect((error as Error).message).toBe('the ticket source broke');
     const [runId = ''] = readdirSync(join(repo.dir, '.sail-runs')).filter((name) => name !== 'fake');
     const dir = join(repo.dir, '.sail-runs', runId);
-    expect(events(dir).at(-1)).toEqual({
+    expect(events(dir).at(-2)).toEqual({
       seq: expect.any(Number),
       ts: expect.any(String),
       type: 'error:crash',
@@ -1179,7 +1179,8 @@ test('a body that throws something other than a PortError crashes the run: error
       key: 'intake#1',
       message: 'the ticket source broke',
     });
-    expect(readStatus(dir)).toEqual({ status: 'running' });
+    expect(events(dir).at(-1)).toMatchObject({ type: 'run:end', status: 'suspended', stopReason: 'crashed' });
+    expect(readStatus(dir)).toEqual({ status: 'suspended', stopReason: 'crashed' });
     expect(keys(dir)).toEqual([]);
     expect(workflowEntries(repo.dir)).toBe(0);
   });

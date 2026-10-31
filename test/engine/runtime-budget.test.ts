@@ -417,7 +417,7 @@ test("a workflow that waits past the run's minutes before its first stage is sus
   });
 });
 
-test("a session's end that can't be confirmed on disk crashes the run before its call is journaled, and STATUS stays running", async () => {
+test("a session's end that can't be confirmed on disk crashes the run before its call is journaled, and STATUS is suspended crashed", async () => {
   await withTempRepo(async (repo) => {
     fixtureWith(repo.dir, '{ maxUsd: 25 }');
     const events = join(repo.dir, '.sail-runs');
@@ -444,7 +444,7 @@ test("a session's end that can't be confirmed on disk crashes the run before its
     }).toEqual({
       crashed: 'events.ndjson ends with event n, not harness:session_end n: it is not on disk',
       journal: ['intake#1'],
-      status: 'running\n',
+      status: 'suspended crashed\n',
     });
   });
 });
