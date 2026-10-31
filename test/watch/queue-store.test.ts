@@ -806,6 +806,7 @@ test('releaseItem() clears the item hold and emits queue:released with the dedup
 });
 
 test.each([
+  ['adopted', (store: QueueStore) => store.adopted('ticket:FAKE-1', 4243)],
   [
     'resumed',
     (store: QueueStore) =>

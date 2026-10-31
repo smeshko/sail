@@ -25,7 +25,7 @@
 //   `spawned()` adds the process's pid once it does, emitting `queue:dispatched`. An item a re-check finds ineligible
 //   (a ticket its own failed run claimed is not) is dropped: it leaves `items`, and a later poll may queue it again.
 // - A dispatched item whose run the watcher found alive is `adopted()`, and one whose run it resumed is `resumed()`: each
-//   records the pid the run is alive as now, and emits `run:adopted` or `run:resumed`.
+//   records the pid the run is alive as now, clears the item's hold, and emits `run:adopted` or `run:resumed`.
 // - A run that hit the usage limit, or several that could not reach a provider at once, hold the workflow's dispatch:
 //   `hold()` keeps the later `until` in `held` and emits `queue:held` when it set or extended it, and `release()` clears it and emits `queue:released`. The items are not
 //   changed: no attempt is counted, and nothing is failed or parked. A run refused for definitions that need a newer
@@ -372,13 +372,13 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
     if (item === undefined) throw new Error(`${workflow}'s queue has no item ${key}`);
     return item;
   };
-  /** Records `pid` on the dispatched item `key`, and gives the item. One not dispatched throws. */
-  const dispatchedWith = (key: string, pid: number, clearHold = false): QueueItem =>
+  /** Records `pid` on the dispatched item `key`, clears its hold, and gives the item. One not dispatched throws. */
+  const dispatchedWith = (key: string, pid: number): QueueItem =>
     change((next) => {
       const item = find(next, key);
       if (item.state !== 'dispatched') throw new Error(`${workflow}'s item ${key} is ${item.state}, not dispatched`);
       item.pid = pid;
-      if (clearHold) delete item.held;
+      delete item.held;
       return { ...item };
     });
   const emitAdded = (added: readonly QueueItem[]) =>
@@ -520,7 +520,7 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
       stream.emit({ type: 'run:adopted', workflow, dedupKey: key, run: item.runId ?? '', pid });
     },
     resumed(key, pid, from) {
-      const item = dispatchedWith(key, pid, true);
+      const item = dispatchedWith(key, pid);
       stream.emit({ type: 'run:resumed', workflow, dedupKey: key, run: item.runId ?? '', pid, from });
     },
     parked(key, reason) {
