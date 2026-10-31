@@ -109,6 +109,15 @@ test('the Bun version preflight script is a gate file', async () => {
   });
 });
 
+test('the silence watchdog the test launcher runs is a gate file', async () => {
+  await withTempRepo((repo) => {
+    const base = setup(repo);
+    put(repo, 'scripts/test-watchdog.ts');
+    commit(repo, 'scripts/test-watchdog.ts');
+    expect(stage(repo, base)).toEqual({ code: 0, output: { base, touched: ['scripts/test-watchdog.ts'] } });
+  });
+});
+
 test('a deleted tsconfig is named', async () => {
   await withTempRepo((repo) => {
     const base = setup(repo);
