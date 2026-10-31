@@ -561,7 +561,11 @@ test("result.json and script:exec record the workspace and the branch, with ever
       exec: exec?.type === 'script:exec' ? { cwd: exec.cwd, branch: exec.envKeys.includes('BRANCH') } : exec,
     }).toEqual({
       command: '.sail/workflows/ticket-to-pr/stages/spec/run.sh',
-      env: { WORKSPACE: `.sail-runs/${end.runId}/workspace`, BRANCH, SAIL_CONFIG: '.sail/project.yaml' },
+      env: {
+        WORKSPACE: `.sail-runs/${end.runId}/workspace`,
+        BRANCH,
+        SAIL_CONFIG: `.sail-runs/${end.runId}/definition/.sail/project.yaml`,
+      },
       exec: { cwd: `.sail-runs/${end.runId}/workspace`, branch: true },
     });
   });

@@ -57,7 +57,8 @@
         "stopped",
         "interrupted",
         "usage_limit",
-        "port_unavailable"
+        "port_unavailable",
+        "crashed"
       ]
     },
     "message": {

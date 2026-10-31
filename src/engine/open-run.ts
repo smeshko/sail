@@ -40,7 +40,9 @@
 // A start given `definitions`, as a dispatched one is, runs on the `.sail/` committed at their sha rather than the
 // clone's: every check above reads that copy, its workspace is based on that commit unless its branch is on the remote,
 // and its run directory keeps the committed `.sail/` and conventions whole in `definition/`, recording the sha as
-// `definitionsSha`.
+// `definitionsSha`. Any other start keeps the clone's `.sail/` as it reads and the conventions whole in `definition/` too,
+// and every run, a resume included, runs from that copy: its `sailDir` is `definition/.sail`, and a workflow edited in the
+// checkout since doesn't reach it. A run of layout 2 without a `definitionsSha` has no such copy, and is refused on resume.
 //
 // Every start checks designation against the workflow's label: its `watch.label`, then `project.yaml`'s, then sail's,
 // the label its watcher polls.
@@ -75,7 +77,7 @@ import { isAlive } from './process';
 import { credentialValues, type Redactor, redactor } from './redact';
 import { buildRoster, harnessesReached, modelProblems } from './roster';
 import {
-  copyStageFolders,
+  copyDefinitions,
   createRunDir,
   DEFINITION_DIR,
   type RunStatus,
@@ -84,6 +86,7 @@ import {
   removeRunDir,
   runsDir,
   type Source,
+  uncopiedRefusal,
   unmarkedRefusal,
   writeOpening,
   writeStatus,
@@ -115,8 +118,7 @@ export interface OpenedRun {
   dir: string;
   header: RunHeader;
   /**
-   * The absolute `.sail/` the run's definitions came from: the clone's, or for a run started from committed definitions
-   * the run's own copy in its definition folder.
+   * The absolute `.sail/` the run reads its definitions from: the run's own copy in its definition folder.
    */
   sailDir: string;
   /** The repository root: the clone the run directory, the lease and the workspace belong to. */
@@ -447,7 +449,7 @@ export interface Preflight {
  * Every convention file the run's prompts may read: the config's list, or the defaults, and each agent step's own list.
  * A step's list replaces the config's, so each is a file the committed definitions must carry.
  */
-function conventionPaths(config: ProjectConfig, header: Pick<RunHeader, 'intake' | 'stages'>): string[] {
+export function conventionPaths(config: ProjectConfig, header: Pick<RunHeader, 'intake' | 'stages'>): string[] {
   const entries = [header.intake, ...Object.values(header.stages)];
   const own = entries.flatMap((entry) => [entry, ...(entry.steps ?? [])].flatMap((each) => each.conventions ?? []));
   return [...new Set([...(config.conventions ?? DEFAULT_CONVENTIONS), ...own])];
@@ -703,7 +705,7 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
   const dir = run.runDir;
   try {
     assertRunHeader(header);
-    if (definitions === undefined) copyStageFolders(dir, root, header);
+    if (definitions === undefined) copyDefinitions(dir, root, preflight.sailDir, conventionPaths(config, header));
     else cpSync(dirname(preflight.sailDir), join(dir, DEFINITION_DIR), { recursive: true, verbatimSymlinks: true });
     writeRunHeader(dir, header);
     createJournal(dir);
@@ -721,7 +723,7 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
     dir,
     header,
     redact,
-    sailDir: definitions === undefined ? preflight.sailDir : join(dir, DEFINITION_DIR, '.sail'),
+    sailDir: join(dir, DEFINITION_DIR, '.sail'),
     root,
     adapters: options.adapters.ports,
     portVariables: options.adapters.portVariables,
@@ -752,7 +754,7 @@ export interface ReopenRunOptions {
 
 /**
  * Finds run `runId` beside `sailDir`, with its header and STATUS. A run that has completed or failed is refused, then one
- * whose header has no layout mark, and so is an id that isn't a plain name or names no run. A STATUS or `run.json` that can't be read throws.
+ * whose header has no layout mark, then one that keeps no whole copy of `.sail/`, and so is an id that isn't a plain name or names no run. A STATUS or `run.json` that can't be read throws.
  */
 export function findRun(
   sailDir: string,
@@ -770,6 +772,8 @@ export function findRun(
   const header = readRunHeader(dir);
   const unmarked = unmarkedRefusal(runId, header, 'be resumed');
   if (unmarked !== undefined) return { refused: unmarked };
+  const uncopied = uncopiedRefusal(runId, header);
+  if (uncopied !== undefined) return { refused: uncopied };
   return { dir, header, status };
 }
 
@@ -887,18 +891,18 @@ async function refuseRenewedWorkspace(
 
 /**
  * Reopens an existing run: every check that can refuse comes first, and only then is STATUS set back to `running`. The
- * workflow is loaded as it reads now, so a stage it has come to name `intake` is refused here as at a start.
+ * config, the adapters and the workflow are loaded from the run's own copy of `.sail/`, never the clone's, so an edit of
+ * the checkout since the run started doesn't reach it. The copy gets the checks a start makes, a stage named `intake` included.
  */
 export async function reopenRun(options: ReopenRunOptions): Promise<OpenedRun | { refused: string }> {
   const { cwd, runId } = options;
   const home = findSailDir(cwd);
   if ('refused' in home) return home;
   const run = findRun(home.dir, runId);
-  // A run started from committed definitions resumes from its own copy, whatever the clone's `.sail/` holds.
-  const committed = !('refused' in run) && run.header.definitionsSha !== undefined;
-  const found = readConfigured(committed ? join(run.dir, DEFINITION_DIR, '.sail') : home.dir);
-  if ('refused' in found) return found;
   if ('refused' in run) return run;
+  // Every run resumes from its own copy of `.sail/`, whatever the clone's holds.
+  const found = readConfigured(join(run.dir, DEFINITION_DIR, '.sail'));
+  if ('refused' in found) return found;
   const budget = raiseProblem(runId, run.header.budget, readEvents(run.dir), options.raise);
   if (budget !== undefined) return { refused: budget };
   // The named harnesses the run reached, as its header froze them: one the config has dropped is changed, not resolved.

@@ -8,12 +8,12 @@
 //   dispatched item to `reconcile.ts`, which answers by its run directory, its dispatch log and its lease: a live run is
 //   in flight, and adopted with `run:adopted` on this dispatcher's first tick, its control file left to it;
 //   `completed` is done; `failed stopped` parks the item at once; any other `failed` is a failed attempt, retried later
-//   or parked; a dead `running`, or a `suspended interrupted` or `unwatched` run, is resumed once as a detached `sail
-//   resume`, with `run:resumed`, after any `unwatched` it never took is taken back, and counts while its resume lives,
-//   unless a live process holds its lease, which is adopted instead, or the cap is reached, when it waits for a slot;
-//   a resume that leaves the run unended parks the item with why; no `run.json` is a start that was refused, whose
-//   reason is the last line of its dispatch log. Anything else, such as `suspended until`, waits for a person, holding
-//   no slot.
+//   or parked; a dead `running`, or a `suspended interrupted`, `unwatched` or `crashed` run, is resumed once as a
+//   detached `sail resume`, with `run:resumed`, after any `unwatched` it never took is taken back, and counts while its
+//   resume lives, unless a live process holds its lease, which is adopted instead, or the cap is reached, when it waits
+//   for a slot; a resume that leaves the run unended parks the item with why, or with the `error:crash` message it left
+//   when it crashed; no `run.json` is a start that was refused, whose reason is the last line of its dispatch log.
+//   Anything else, such as `suspended until`, waits for a person, holding no slot.
 // - A hand-off file (`engine/control.ts`) the run never took is deleted when its item settles: done, failed or parked.
 //   A failure with a `stopped` hand-off, a start refused after `sail stop` reached it, parks the item instead.
 // - **A held dispatch**: a run `suspended usage_limit` holds the workflow's dispatch (`queue:held`) until its reset time,
@@ -153,6 +153,8 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
   const resumed = new Set<string>();
   /** When this dispatcher last resumed each run from its usage limit or an unavailable port, until the run is held again. */
   const resumedAt = new Map<string, Date>();
+  /** When this dispatcher last resumed each run, whatever from: dates the `error:crash` its resume left. */
+  const resumeStartedAt = new Map<string, Date>();
   /** When this dispatcher first saw each run on its usage limit or an unavailable port, until it resumes the run. */
   const limitedAt = new Map<string, Date>();
   const sail = options.sail ?? sdkFingerprint;
@@ -227,6 +229,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
     if (from.status === 'suspended' && (from.stopReason === 'usage_limit' || from.stopReason === 'port_unavailable')) {
       resumedAt.set(runId, now());
     }
+    resumeStartedAt.set(runId, now());
     exits.delete(item.dedupKey);
     let spawned: SpawnedRun;
     try {
@@ -270,6 +273,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
         first,
         resumed: resumed.has(runId),
         ...(resumedAt.has(runId) ? { resumedAt: resumedAt.get(runId) as Date } : {}),
+        ...(resumeStartedAt.has(runId) ? { resumeStartedAt: resumeStartedAt.get(runId) as Date } : {}),
         ...(exits.has(item.dedupKey) ? { exited: exited ?? null } : {}),
         ...(logFrom === undefined ? {} : { logFrom }),
       });

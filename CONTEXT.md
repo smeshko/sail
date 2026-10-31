@@ -271,7 +271,7 @@ Where a run is in its life: `running`, `suspended`, `completed` or `failed`. It 
 _Avoid_: outcome, state, phase
 
 **Stop reason**:
-The named reason a run ended without completing, such as `workflow_failed`, `stage_error`, `budget_exceeded`, `determinism_violation`, `until`, `unwatched`, `stopped`, `interrupted`, `usage_limit` or `port_unavailable`. Every failed or suspended run carries exactly one.
+The named reason a run ended without completing, such as `workflow_failed`, `stage_error`, `budget_exceeded`, `determinism_violation`, `until`, `unwatched`, `stopped`, `interrupted`, `usage_limit`, `port_unavailable` or `crashed`. Every failed or suspended run carries exactly one.
 _Avoid_: error message, cause, exit reason
 
 **Refusal**:
@@ -287,7 +287,7 @@ The hold a run's process takes against the machine's sleep, from its start or re
 _Avoid_: wake lock, caffeinate, sleep assertion
 
 **Suspended**:
-The status of a run that has exited with nothing running and a resume expected, for example because the run budget was exceeded, its workflow was unwatched, it hit the provider's usage limit, a step of it ended on a provider that was unavailable, or it was interrupted by Ctrl-C or SIGTERM. It keeps its workspace and its branch lease.
+The status of a run that has exited with nothing running and a resume expected, for example because the run budget was exceeded, its workflow was unwatched, it hit the provider's usage limit, a step of it ended on a provider that was unavailable, it crashed on an exception inside sail, or it was interrupted by Ctrl-C or SIGTERM. It keeps its workspace and its branch lease.
 _Avoid_: paused, waiting, blocked, pending
 
 **Control file**:
@@ -299,7 +299,7 @@ _Avoid_: signal file, kill file, flag
 _Avoid_: pending control, mailbox
 
 **Resume**:
-Continuing a suspended or interrupted run from its journal. Every journaled call is replayed, and the first one that is not journaled runs.
+Continuing a suspended or interrupted run from its journal. Every journaled call is replayed, and the first one that is not journaled runs. A resume runs the run's own copy of `.sail/` in its `definition/`, never the checkout's, so a workflow edited since the run started changes nothing for it.
 _Avoid_: restart, rerun, retry, continue
 
 **Raise**:
@@ -307,7 +307,7 @@ What is added to a suspended run's budget, in dollars or minutes, given to `sail
 _Avoid_: top-up, extension, bump
 
 **Seeded run**:
-A new run whose journal starts with another run's calls, those before a named stage, so they aren't paid for again. `sail run --from-run <run> --stage <stage>` starts one. It runs that stage and stops, suspended with `until`, unless `--continue`. Its run header records the run it came from as `fromRun` and how many journal lines it reused as `reused`, and a resume restores the reports of reused calls its events lost. It claims nothing, and works on a branch of its own.
+A new run whose journal starts with another run's calls, those before a named stage, so they aren't paid for again. `sail run --from-run <run> --stage <stage>` starts one. It runs that stage and stops, suspended with `until`, unless `--continue`. Its run header records the run it came from as `fromRun` and how many journal lines it reused as `reused`, and a resume restores the reports of reused calls its events lost. It claims nothing, and works on a branch of its own. Its copy of `.sail/` is the clone's as it reads at its start.
 _Avoid_: rerun, fork, clone, replay
 
 **Reused call**:
@@ -335,7 +335,7 @@ Always the git branch, such as the one a run's workspace sits on. A workflow's r
 _Avoid_: using "branch" for a route or a fork in the workflow
 
 **Run directory**:
-Everything a run wrote: the run header, the journal, the events, the summary, `definition/`, a copy of each roster stage's folder as the run started, which its calls read their prompts, templates and scripts from (for a run started from the `.sail/` committed at the default branch, as a dispatched one is, the whole of that `.sail/` and its conventions), and one directory per call holding the engine's records of it (result, logs, prompt, transcript, later tries) beside an `out/` with the files it produced.
+Everything a run wrote: the run header, the journal, the events, the summary, `definition/`, a copy of the whole `.sail/` and its conventions as the run started (a dispatched run's from the default branch's commit, any other's from the checkout), which its calls and every resume read from, and one directory per call holding the engine's records of it (result, logs, prompt, transcript, later tries) beside an `out/` with the files it produced.
 _Avoid_: run folder, output directory, artifacts
 
 **Run header**:

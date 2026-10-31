@@ -4,7 +4,7 @@
 // answer in `.sail/fake/harness.json` stands in for the different output an edited prompt would get (DECISIONS D10).
 import { afterAll, expect, test } from 'bun:test';
 import { chmodSync, existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { EXIT_OK, EXIT_REFUSED, EXIT_SUSPENDED } from '../../src/cli/exit-codes';
 import { readJournal } from '../../src/engine/journal';
 import { recordingKeepAwake } from '../../src/engine/keep-awake';
@@ -311,7 +311,10 @@ test('sail run --from-run masks credentials from its own io.env in run.json and 
     expect(readFileSync(join(ran.dir, '01-spec', 'call-1', 'session.log'), 'utf8')).toBe(
       'assistant: echo [redacted]\n',
     );
-    const files = readdirSync(ran.dir, { recursive: true, withFileTypes: true }).filter((file) => file.isFile());
+    const files = readdirSync(ran.dir, { recursive: true, withFileTypes: true }).filter(
+      // definition/ is a copy of the repository's own files, which hold the marker as written.
+      (file) => file.isFile() && !relative(ran.dir, file.parentPath).startsWith('definition'),
+    );
     expect(
       files
         .filter((file) => readFileSync(join(file.parentPath, file.name), 'utf8').includes(marker))

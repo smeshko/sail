@@ -82,14 +82,14 @@ const call = (stage: string, index: number): NewJournalEntry => ({
 
 test('a run opened from a subdirectory gets .sail-runs/FAKE-1-<ulid>/ with its header, an empty journal and STATUS', async () => {
   await withTempRepo(async (repo) => {
-    const sail = copyFixture(repo.dir);
+    copyFixture(repo.dir);
     const cwd = join(repo.dir, 'src', 'deep');
     mkdirSync(cwd, { recursive: true });
     const run = await opened(cwd);
 
     // Which reading of its clock the id and startedAt are has a case of its own.
     expect(run.runId).toMatch(/^FAKE-1-[0-9A-HJKMNP-TV-Z]{26}$/);
-    expect([run.sailDir, run.loaded.workflow.name]).toEqual([sail, 'ticket-to-pr']);
+    expect([run.sailDir, run.loaded.workflow.name]).toEqual([join(run.dir, 'definition', '.sail'), 'ticket-to-pr']);
     expect(run.dir).toBe(join(repo.dir, '.sail-runs', run.runId));
     expect(readStatus(run.dir)).toEqual({ status: 'running' });
     expect(readJournal(run.dir)).toEqual({ entries: [], torn: false });
@@ -346,7 +346,7 @@ test('reopenRun reopens a suspended run with the header on disk and STATUS runni
       runId: run.runId,
       dir,
       header: run.header,
-      sailDir: join(repo.dir, '.sail'),
+      sailDir: join(dir, 'definition', '.sail'),
       loaded: { workflow: { name: 'ticket-to-pr' } },
     });
     expect(readStatus(dir)).toEqual({ status: 'running' });
@@ -679,7 +679,7 @@ test('reopenRun refuses a workflow that has come to reach a stage named intake, 
     // A torn tail, and a refusal that comes once the workflow is loaded: only a resume that goes ahead may cut it.
     appendFileSync(join(dir, 'events.ndjson'), '{"seq":1,"ts":"2026-09-2');
     const before = ['STATUS', 'events.ndjson'].map((file) => readFileSync(join(dir, file), 'utf8'));
-    const sail = join(repo.dir, '.sail');
+    const sail = join(dir, 'definition', '.sail');
     write(
       sail,
       'stages/intake/stage.ts',
@@ -1306,12 +1306,14 @@ test('reopenRun refuses a run whose named harness now names another adapter, nam
   await withTempRepo(async (repo) => {
     const run = await suspendedOnSecond(repo.dir);
     edit(
-      join(repo.dir, '.sail'),
+      join(repo.dir, '.sail-runs', run.runId, 'definition', '.sail'),
       'project.yaml',
       'second: { use: fake }',
       'second: { use: ./adapters/echo-harness.ts }',
     );
-    const adapters = await fakeAdapters(repo.dir, { ECHO_HARNESS_TOKEN: 'x' });
+    const adapters = await fakeAdapters(join(repo.dir, '.sail-runs', run.runId, 'definition'), {
+      ECHO_HARNESS_TOKEN: 'x',
+    });
     const refused = await reopenRun({ cwd: repo.dir, runId: run.runId, adapters });
     expect(refused).toEqual({
       refused: `run ${run.runId} can't resume on different adapters:\nharnesses.second: the run started with fake (builtin), and .sail/project.yaml now names ./adapters/echo-harness.ts (repo:.sail/adapters/echo-harness.ts)`,
@@ -1322,10 +1324,15 @@ test('reopenRun refuses a run whose named harness now names another adapter, nam
 test('reopenRun refuses a run whose named harness the config no longer defines', async () => {
   await withTempRepo(async (repo) => {
     const run = await suspendedOnSecond(repo.dir);
-    const sail = join(repo.dir, '.sail');
+    const dirOf = join(repo.dir, '.sail-runs', run.runId);
+    const sail = join(dirOf, 'definition', '.sail');
     edit(sail, 'project.yaml', 'deep: { harness: second, model: claude-opus-5-5 }', 'deep: claude-opus-5-5');
     edit(sail, 'project.yaml', 'second: { use: fake }, ', '');
-    const refused = await reopenRun({ cwd: repo.dir, runId: run.runId, adapters: await fakeAdapters(repo.dir) });
+    const refused = await reopenRun({
+      cwd: repo.dir,
+      runId: run.runId,
+      adapters: await fakeAdapters(join(dirOf, 'definition')),
+    });
     expect(refused).toEqual({
       refused: `run ${run.runId} can't resume on different adapters:\nharnesses.second: the run started with fake (builtin), and .sail/project.yaml no longer defines it`,
     });
@@ -1417,15 +1424,24 @@ test('a run opened with definitions bases its workspace on their commit, though 
   });
 });
 
-test('a run opened without definitions has no definitionsSha and its root is the clone', async () => {
+test('a run opened without definitions has no definitionsSha, its root is the clone and its sailDir is its own copy', async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
+    writeFileSync(join(repo.dir, 'AGENTS.md'), 'house rules\n');
     const run = await opened(repo.dir);
-    expect([
-      run.header.definitionsSha,
-      run.root,
-      existsSync(join(run.dir, 'definition', '.sail', 'project.yaml')),
-    ]).toEqual([undefined, repo.dir, false]);
+    const copy = join(run.dir, 'definition');
+    expect([run.header.definitionsSha, run.header.layout, run.root, run.sailDir]).toEqual([
+      undefined,
+      3,
+      repo.dir,
+      join(copy, '.sail'),
+    ]);
+    expect(readFileSync(join(copy, '.sail', 'project.yaml'), 'utf8')).toBe(
+      readFileSync(join(repo.dir, '.sail', 'project.yaml'), 'utf8'),
+    );
+    expect(existsSync(join(copy, '.sail', 'workflows', 'ticket-to-pr', 'workflow.ts'))).toBe(true);
+    expect(readFileSync(join(copy, 'AGENTS.md'), 'utf8')).toBe('house rules\n');
+    expect(JSON.parse(readFileSync(join(run.dir, 'run.json'), 'utf8')).layout).toBe(3);
   });
 });
 

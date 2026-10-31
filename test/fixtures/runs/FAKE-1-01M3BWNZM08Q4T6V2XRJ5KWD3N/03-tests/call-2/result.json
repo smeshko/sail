@@ -38,7 +38,7 @@
     "STAGE_OUT": ".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/03-tests/call-2/out",
     "WORKSPACE": ".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/workspace",
     "BRANCH": "sail/FAKE-1-add-a-shout-flag-to-the-greet-command",
-    "SAIL_CONFIG": ".sail/project.yaml",
+    "SAIL_CONFIG": ".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/definition/.sail/project.yaml",
     "SAIL_EVENTS": ".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/03-tests/call-2/port-events.ndjson"
   }
 }

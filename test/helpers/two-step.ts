@@ -28,7 +28,11 @@ export const PUBLISH_CALL = '03-publish/call-1';
 const shell = (purpose: string, body: string) => `#!/usr/bin/env bash
 # ${purpose}
 set -euo pipefail
-STUB="$(dirname "$(dirname "$SAIL_CONFIG")")/.stub"
+case "$SAIL_CONFIG" in
+  */.sail-runs/*) ROOT="\${SAIL_CONFIG%%/.sail-runs/*}" ;;
+  *) ROOT="$(dirname "$(dirname "$SAIL_CONFIG")")" ;;
+esac
+STUB="$ROOT/.stub"
 mkdir -p "$STUB"
 echo "$STAGE#$CALL" >>"$STUB/executions.log"
 if [ -f "$STUB/sleep-at" ] && [ "$(cat "$STUB/sleep-at")" = "$STAGE#$CALL" ]; then

@@ -205,9 +205,10 @@ test('run: an unknown key is not allowed and a missing source is required', () =
   ]);
 });
 
-test('run: layout 2 validates, layout 3 breaks the schema, and a header without it still validates', () => {
+test('run: layout 2 and 3 validate, layout 4 breaks the schema, and a header without it still validates', () => {
   expect(validateDocument('sail.run.v1', { ...run, layout: 2 })).toEqual([]);
-  expect(validateDocument('sail.run.v1', { ...run, layout: 3 })).toHaveLength(1);
+  expect(validateDocument('sail.run.v1', { ...run, layout: 3 })).toEqual([]);
+  expect(validateDocument('sail.run.v1', { ...run, layout: 4 })).toHaveLength(1);
   expect(validateDocument('sail.run.v1', run)).toEqual([]);
 });
 

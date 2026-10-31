@@ -1,7 +1,7 @@
 {
   "schema": "sail.run.v1",
   "runId": "FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N",
-  "layout": 2,
+  "layout": 3,
   "source": {
     "kind": "ticket",
     "ticketKey": "FAKE-1",
