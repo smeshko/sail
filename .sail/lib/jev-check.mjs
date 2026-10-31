@@ -7,8 +7,13 @@ import { spawnSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-/** The probability of yes at or above which an answer is clear. Conservative until the agreement data sets it. */
-export const CLEAR_YES = 0.95;
+/**
+ * The probability of yes at or above which an answer is clear: just above Jev's highest yes on a task the check agent
+ * found not implemented, and never below 0.8 (ADW-396). On 51 live check-tasks calls (123 tasks) the agent said no
+ * once, where Jev's yes was 0.58, so the floor holds: no false yeses, and 23 of the 51 calls Jev could have answered.
+ * Measure again as noes come in.
+ */
+export const CLEAR_YES = 0.8;
 /** The most characters of one diff in a request, so a large change can't make it unaskable. */
 export const MAX_DIFF = 40_000;
 /** The branch's base, as the check agents read it. */
