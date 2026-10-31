@@ -149,7 +149,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
   /** Whether a usage limit holds the dispatch now. */
   const holding = (): boolean => {
     const { held } = store.snapshot();
-    return held !== undefined && now().getTime() < Date.parse(held.until);
+    return held?.until !== undefined && now().getTime() < Date.parse(held.until);
   };
 
   const alive = (item: QueueItem) => item.pid !== undefined && isAlive(item.pid);

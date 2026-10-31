@@ -92,7 +92,10 @@ function list(io: Io, runs: string, workflow: string): ExitCode {
   if (queue === undefined) return refuseAs(io, COMMAND)(noQueue(workflow));
   const { label, lastPolledAt, paused } = queue.polling;
   const pause = paused === undefined ? '' : `, paused: ${clean(paused.message)}`;
-  const held = queue.held === undefined ? '' : `, dispatch held until ${queue.held.until}`;
+  const held =
+    queue.held === undefined
+      ? ''
+      : `, dispatch held${queue.held.until === undefined ? `: ${queue.held.reason}` : ` until ${queue.held.until}`}`;
   io.stdout(`${workflow}: label ${label}, last polled ${lastPolledAt ?? 'never'}${pause}${held}\n`);
   for (const item of queue.items) io.stdout(`${itemLine(item)}\n`);
   return EXIT_OK;

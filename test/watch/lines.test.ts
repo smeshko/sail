@@ -117,6 +117,20 @@ test('run:adopted, run:resumed from running and from suspended, and queue:requeu
   ]);
 });
 
+test('an untimed queue:held prints dispatch held: <reason>, with no time', () => {
+  const event: QueueEvent = {
+    ...envelope,
+    type: 'queue:held',
+    run: RUN,
+    reason: 'definitions at abc1234 need a newer sail: pull /work/clone',
+  };
+  const line = queueLine(event);
+  expect(line === undefined ? undefined : utc(line)).toBe(
+    '08:09:10 a  dispatch held: definitions at abc1234 need a newer sail: pull /work/clone\n',
+  );
+  expect(validateDocument('sail.event.v1', event)).toEqual([]);
+});
+
 test('queue:held prints when the dispatch resumes and why, and queue:released prints that it is released', () => {
   const events: QueueEvent[] = [
     {

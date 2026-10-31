@@ -680,6 +680,81 @@ test('hold() persists held and emits queue:held once, extends only to a later ti
   expect(queueEventIssues(queueDir(runs, 'ticket-to-pr'))).toEqual([]);
 });
 
+test('holdForSail() keeps held with the fingerprint and no until, emits queue:held without until, a later hold() leaves it, and release() clears it', () => {
+  const runs = runsDir();
+  const store = open(runs);
+  store.add([ticket('FAKE-1')]);
+  store.holdForSail('print-1', RUN, 'definitions at abc1234 need a newer sail: pull /clone');
+  store.hold('2026-10-14T13:20:00.000Z', RUN_2, 'spec#1 hit the usage limit');
+  const reopened = open(runs);
+  expect({
+    held: store.snapshot().held,
+    reopened: reopened.snapshot().held,
+    held_events: queueEvents(queueDir(runs, 'ticket-to-pr')).filter((event) => event.type === 'queue:held'),
+  }).toEqual({
+    held: { sail: 'print-1', runId: RUN, reason: 'definitions at abc1234 need a newer sail: pull /clone', at: START },
+    reopened: {
+      sail: 'print-1',
+      runId: RUN,
+      reason: 'definitions at abc1234 need a newer sail: pull /clone',
+      at: START,
+    },
+    held_events: [
+      expect.objectContaining({
+        type: 'queue:held',
+        run: RUN,
+        reason: 'definitions at abc1234 need a newer sail: pull /clone',
+      }),
+    ],
+  });
+  expect(queueEvents(queueDir(runs, 'ticket-to-pr')).find((event) => event.type === 'queue:held')).not.toHaveProperty(
+    'until',
+  );
+  store.release();
+  expect({ held: store.snapshot().held, types: typesIn(runs).filter((type) => type === 'queue:released') }).toEqual({
+    held: undefined,
+    types: ['queue:released'],
+  });
+  expect(queueEventIssues(queueDir(runs, 'ticket-to-pr'))).toEqual([]);
+});
+
+test('holdForSail() replaces a timed hold', () => {
+  const store = open(runsDir());
+  store.hold('2026-10-14T13:20:00.000Z', RUN_2, 'spec#1 hit the usage limit');
+  store.holdForSail('print-1', RUN, 'needs a newer sail');
+  expect(store.snapshot().held).toEqual({ sail: 'print-1', runId: RUN, reason: 'needs a newer sail', at: START });
+});
+
+test('deferred() puts a dispatched item back queued with the attempt uncounted and nothing of its run, in queue order, emitting nothing', () => {
+  const runs = runsDir();
+  const store = open(runs);
+  store.add([ticket('FAKE-1'), ticket('FAKE-2')]);
+  store.dispatched('ticket:FAKE-1', RUN);
+  store.spawned('ticket:FAKE-1', 4242);
+  store.failed('ticket:FAKE-1', 'spec blocked');
+  store.dispatched('ticket:FAKE-1', RUN_2);
+  store.spawned('ticket:FAKE-1', 4243);
+  const before = typesIn(runs);
+  store.deferred('ticket:FAKE-1');
+  const item = store.snapshot().items.find((each) => each.dedupKey === 'ticket:FAKE-1');
+  expect(item).toEqual(
+    expect.objectContaining({ dedupKey: 'ticket:FAKE-1', state: 'queued', attempts: 1, reason: 'spec blocked' }),
+  );
+  expect(item).not.toHaveProperty('runId');
+  expect(item).not.toHaveProperty('pid');
+  expect(keys(store)).toEqual(['ticket:FAKE-1 queued', 'ticket:FAKE-2 queued']);
+  expect(typesIn(runs)).toEqual(before);
+  expect(store.due().map((each) => each.dedupKey)).toEqual(['ticket:FAKE-1', 'ticket:FAKE-2']);
+});
+
+test('deferred() on an item that is not dispatched throws naming its state and changes nothing', () => {
+  const store = open(runsDir());
+  store.add([ticket('FAKE-1')]);
+  const before = store.snapshot();
+  expect(() => store.deferred('ticket:FAKE-1')).toThrow("ticket-to-pr's item ticket:FAKE-1 is queued, not dispatched");
+  expect(store.snapshot()).toEqual(before);
+});
+
 test('requeue puts a parked or a failed item back queued with no attempts and nothing of its last run, with queue:requeued, and a queued, dispatched or done item throws naming its state and changes nothing', () => {
   const runs = runsDir();
   const store = open(runs);

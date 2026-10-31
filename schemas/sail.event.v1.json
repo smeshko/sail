@@ -1814,7 +1814,7 @@
       "unevaluatedProperties": false
     },
     "queueHeld": {
-      "description": "a workflow's dispatch held until a time because a run hit the usage limit or could not reach a provider: nothing starts or resumes until then, and the queue is unchanged",
+      "description": "a workflow's dispatch held because a run hit the usage limit or could not reach a provider, until a time, or, with no until, because its definitions need a newer sail, until the running sail changes: nothing starts or resumes meanwhile, and the queue is unchanged",
       "type": "object",
       "$ref": "#/$defs/queueEnvelope",
       "properties": {
@@ -1822,7 +1822,7 @@
         "run": { "type": "string", "minLength": 1 },
         "reason": { "type": "string", "pattern": "\\S" }
       },
-      "required": ["until", "run", "reason"],
+      "required": ["run", "reason"],
       "unevaluatedProperties": false
     },
     "queueReleased": {

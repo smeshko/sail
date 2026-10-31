@@ -1704,6 +1704,21 @@ test.each(QUEUED.map((sample) => [sample.type, sample] as const))(
   },
 );
 
+test('queue:held validates with or without until, and still needs run and reason', () => {
+  const held = {
+    ...queueEnvelope,
+    type: 'queue:held',
+    workflow: 'ticket-to-pr',
+    run: RUN_ID,
+    reason: 'needs a newer sail',
+  };
+  expect(paths('sail.event.v1', held)).toEqual([]);
+  expect(paths('sail.event.v1', { ...held, until: '2026-10-14T13:20:00.000Z' })).toEqual([]);
+  expect(paths('sail.event.v1', { ...held, until: 'soon' })).toEqual(['/until']);
+  expect(paths('sail.event.v1', omit(held, 'reason'))).toEqual(['/reason']);
+  expect(paths('sail.event.v1', omit(held, 'run'))).toEqual(['/run']);
+});
+
 test('a queue event refuses a runId, needs its workflow, and keeps retryInMs and dedupKey to their rules', () => {
   const [polled, added, , error] = QUEUED.map((sample) => ({ ...queueEnvelope, ...sample }));
   expect(paths('sail.event.v1', { ...polled, runId: RUN_ID })).toEqual(['/runId']);
