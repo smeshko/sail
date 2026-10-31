@@ -6,7 +6,7 @@
 // take the fix passes left. Every merge is preceded by gate-files; a gate change is handed to a human instead.
 // Triage cases show Jev decisions surviving omissions and judge overrides winning.
 import { expect, test } from 'bun:test';
-import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readJournal } from '../src/engine/journal';
 import { readEvents } from '../src/events/consumers/ndjson';
@@ -29,7 +29,7 @@ const seed = (overrides: Record<string, number> = {}) =>
   });
 
 /** The repository's own `.sail/` on fakes, with fake pull request #7 pointed at commits the repository holds. */
-function setUp(repo: TempRepo, jev?: object, glossary?: string, gateFile = false): void {
+function setUp(repo: TempRepo, jev?: object, glossary?: string, gateFile?: string): void {
   writeOwnSail(repo, jev === undefined ? {} : { jev });
   if (glossary !== undefined) {
     writeFileSync(join(repo.dir, 'CONTEXT.md'), glossary);
@@ -39,9 +39,10 @@ function setUp(repo: TempRepo, jev?: object, glossary?: string, gateFile = false
   const base = repo.git('rev-parse', 'HEAD').trim();
   writeFileSync(join(repo.dir, 'notes.txt'), 'a change\n');
   repo.git('add', 'notes.txt');
-  if (gateFile) {
-    writeFileSync(join(repo.dir, 'bunfig.toml'), '# a gate change\n');
-    repo.git('add', 'bunfig.toml');
+  if (gateFile !== undefined) {
+    if (gateFile.startsWith('.sail/')) appendFileSync(join(repo.dir, gateFile), '\n// a gate change\n');
+    else writeFileSync(join(repo.dir, gateFile), '# a gate change\n');
+    repo.git('add', gateFile);
   }
   repo.git('commit', '-m', 'the pull request');
   const head = repo.git('rev-parse', 'HEAD').trim();
@@ -404,7 +405,7 @@ test('a pull request that changes a gate file is handed to a human before any me
   await withTempRepo(async (repo) => {
     const answers = seed() as { answers: Record<string, unknown> };
     answers.answers['leak-3'] = { type: 'noul', noul: 0 };
-    setUp(repo, answers, undefined, true);
+    setUp(repo, answers, undefined, 'bunfig.toml');
     const { code, keys } = await review(repo);
     expect(code).toBe(1);
     expect(keys.filter((key) => key.startsWith('merge#'))).toEqual([]);
@@ -415,6 +416,22 @@ test('a pull request that changes a gate file is handed to a human before any me
     expect(pr.comments.at(-1)).toContain(
       'The review stopped: the pull request changes gate files: bunfig.toml; a person merges it',
     );
+  });
+}, 120_000);
+
+test('a pull request that changes the gate-file guard is handed to a human before any merge', async () => {
+  await withTempRepo(async (repo) => {
+    const guard = '.sail/workflows/review/stages/22-gate-files/gate-files.mjs';
+    const answers = seed() as { answers: Record<string, unknown> };
+    answers.answers['leak-3'] = { type: 'noul', noul: 0 };
+    setUp(repo, answers, undefined, guard);
+    const { code, keys } = await review(repo);
+    expect(code).toBe(1);
+    expect(keys.filter((key) => key.startsWith('merge#'))).toEqual([]);
+    expect(keys.slice(-2)).toEqual(['gate-files#1', 'hand-over#1']);
+    const pr = await pullRequest(repo);
+    expect(pr.labels.includes('needs-human')).toBe(true);
+    expect(pr.comments.at(-1)).toContain(guard);
   });
 }, 120_000);
 
