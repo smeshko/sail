@@ -1,7 +1,7 @@
 // `sail <ticket> [--workflow <name>] [--force] [--ignore-prerequisites] [--until <stage>] [-q|-v|-vv]`: starts a run from a ticket in the
 // repository sail is run from, and runs its workflow to its end, or to the stage `--until` names. The workflow is
 // type-checked first, so a wrongly wired stage never runs. Every refusal is one `sail <ticket as typed>: <message>` line
-// with exit code 3, and comes before the run directory exists: the config and its adapters, the workflow, its types,
+// with exit code 3, or 5 for a ticket that waits on an open prerequisite, and comes before the run directory exists: the config and its adapters, the workflow, its types,
 // and then what the engine refuses of the workflow and of the ticket. This module parses, hands the run's events to
 // the terminal view and maps the run's status to an exit code; the run is the engine's, and so are the ticket's checks
 // and, in `intake#1`, its claim. Everything the command prints during the run comes from its events.

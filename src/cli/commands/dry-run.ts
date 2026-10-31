@@ -1,7 +1,7 @@
 // `sail <ticket> --dry-run`: the start's whole preflight, then the roster the run would freeze, printed. The config, its
 // adapters and the type check are `sail <ticket>`'s own steps, before this module is reached. The engine's `dryRun()`
 // then runs every check a start runs and reads the branch's lease. A refusal reads as the start's, `sail <ticket>:
-// <message>` with exit 3. Otherwise the roster goes to stdout with exit 0. Nothing is written: no run directory,
+// <message>` with exit 3, or 5 for a ticket that waits on an open prerequisite. Otherwise the roster goes to stdout with exit 0. Nothing is written: no run directory,
 // workspace, lease, claim, comment or registry entry.
 //
 // The lines are the dry run's own, built here from the header a start would freeze, never derived again: the run's
