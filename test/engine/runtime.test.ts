@@ -14,7 +14,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { basename, join } from 'node:path';
+import { basename, join, relative } from 'node:path';
 import type { ScriptedAnswer } from '../../src/adapters/fake/harness';
 import { BUILTINS } from '../../src/adapters/index';
 import { readConfig } from '../../src/engine/config';
@@ -215,7 +215,10 @@ test('completed calls leave no credential in run files and terminal tails', asyn
       ],
     });
     expect(end.status).toBe('completed');
-    const files = readdirSync(end.dir, { recursive: true, withFileTypes: true }).filter((file) => file.isFile());
+    // definition/ is a copy of the repository's own files, which hold the marker as written.
+    const files = readdirSync(end.dir, { recursive: true, withFileTypes: true }).filter(
+      (file) => file.isFile() && !relative(end.dir, file.parentPath).startsWith('definition'),
+    );
     expect(files.length > 10).toBe(true);
     expect(
       files

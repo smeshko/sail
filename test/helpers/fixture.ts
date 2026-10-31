@@ -166,7 +166,11 @@ export const groom = intake('groom', {
   [`workflows/${workflow}/fetch.sh`]: `#!/usr/bin/env bash
 # fetch: writes the brief of the ticket the run came from, and names it.
 set -euo pipefail
-STUB="$(dirname "$(dirname "$SAIL_CONFIG")")/.stub"
+case "$SAIL_CONFIG" in
+  */.sail-runs/*) ROOT="\${SAIL_CONFIG%%/.sail-runs/*}" ;;
+  *) ROOT="$(dirname "$(dirname "$SAIL_CONFIG")")" ;;
+esac
+STUB="$ROOT/.stub"
 mkdir -p "$STUB"
 echo "$STAGE#$CALL/fetch" >>"$STUB/executions.log"
 key=$("\${SAIL_BUN:-bun}" -e 'console.log(JSON.parse(await Bun.file(process.argv[1]).text()).ticketKey)' "$INPUT_SOURCE")

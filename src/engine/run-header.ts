@@ -33,7 +33,7 @@ export interface RunHeader {
   schema: 'sail.run.v1';
   runId: string;
   /** The run directory's layout. A run without it kept its calls' records inside their `$STAGE_OUT`. */
-  layout?: typeof RUN_LAYOUT;
+  layout?: 2 | typeof RUN_LAYOUT;
   source: Source;
   /** The run a seeded run reused calls from. */
   fromRun?: string;

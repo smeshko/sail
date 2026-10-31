@@ -4,7 +4,7 @@
 import { expect, test } from 'bun:test';
 import { chmodSync, existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename, join, relative } from 'node:path';
 import { EXIT_FAILED, EXIT_OK, EXIT_REFUSED, EXIT_SUSPENDED, type ExitCode } from '../../src/cli/exit-codes';
 import { readJournal } from '../../src/engine/journal';
 import { recordingKeepAwake } from '../../src/engine/keep-awake';
@@ -125,8 +125,9 @@ test('sail resume masks credentials from its own io.env in newly written calls',
     expect(captured.stdout.includes('│ token [redacted]')).toBe(true);
     expect(captured.stdout.includes('│ stderr token [redacted]')).toBe(true);
     expect(specFile(runDirIn(repo.dir), 'session.log')).toBe('assistant: echo [redacted]\n');
-    const files = readdirSync(runDirIn(repo.dir), { recursive: true, withFileTypes: true }).filter((file) =>
-      file.isFile(),
+    // definition/ is a copy of the repository's own files, which hold the marker as written.
+    const files = readdirSync(runDirIn(repo.dir), { recursive: true, withFileTypes: true }).filter(
+      (file) => file.isFile() && !relative(runDirIn(repo.dir), file.parentPath).startsWith('definition'),
     );
     expect(files.length > 10).toBe(true);
     expect(

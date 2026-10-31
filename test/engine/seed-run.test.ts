@@ -215,7 +215,14 @@ test("a seeded run keeps the clone's .sail/: an uncommitted edit reaches its def
       sailDir: opened.sailDir,
       definitionsSha: readRunHeader(opened.dir).definitionsSha,
       prompt: readFileSync(join(opened.dir, 'definition', '.sail', prompt), 'utf8'),
-    }).toEqual({ sailDir: join(repo.dir, '.sail'), definitionsSha: undefined, prompt: 'an uncommitted edit\n' });
+    }).toEqual({
+      sailDir: join(opened.dir, 'definition', '.sail'),
+      definitionsSha: undefined,
+      prompt: 'an uncommitted edit\n',
+    });
+    expect(readRunHeader(opened.dir).layout).toBe(3);
+    expect(existsSync(join(opened.dir, 'definition', '.sail', 'project.yaml'))).toBe(true);
+    expect(existsSync(join(opened.dir, 'definition', '.sail', 'workflows', 'ticket-to-pr', 'workflow.ts'))).toBe(true);
   });
 }, 60_000);
 

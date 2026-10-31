@@ -1,26 +1,26 @@
 // A run's directory, `.sail-runs/<ticket key>-<ulid>/` beside `.sail/`, and its STATUS file, which holds the run's
 // status and, for a failed or suspended run, its stop reason. The run id's ticket key comes from the run's source.
 //
-// A run also keeps `definition/`: a copy of each stage folder its roster reaches, at its path from the repository root,
-// made as the run starts. Its workflow's modules are imported once, then, but a call reads its stage's prompt, templates
-// and scripts as it runs, so a call reads them from the copy: a stage folder renamed or edited in the checkout mid-run
-// changes nothing the run does, a resume included. A script's command is still recorded at its checkout path. The
-// folders are what `workflow.sha256` hashes, so the copy is what the header vouches for. `.sail/lib/` and the shared
-// prompt fragments are left where they are: a script finds the one beside `$SAIL_CONFIG`, which `sail port` also reads
-// its adapters from, and neither belongs to one stage.
+// A run also keeps `definition/`: a copy of the clone's whole `.sail/` and the conventions its prompts read, each at its
+// path from the repository root, made as the run starts. A call reads its stage's prompt, templates and scripts from the
+// copy, and the run reads `.sail/lib/`, the shared prompt fragments and `$SAIL_CONFIG` from it too, so a workflow edited
+// in the checkout mid-run changes nothing the run does, and a resume loads the run's workflow, config and adapters from
+// the copy as well. Restart is how a run picks up an edit. A script's command is still recorded at its checkout path.
+// The stage folders are what `workflow.sha256` hashes, so the copy is what the header vouches for.
 //
-// A run started from committed definitions, as a dispatched one is, keeps more: its `definition/` holds the whole
-// committed `.sail/` and the conventions `project.yaml` names, and the run, its resumes included, reads `.sail/lib/`, the
-// fragments and `$SAIL_CONFIG` from that copy.
+// A run started from committed definitions, as a dispatched one is, copies the committed `.sail/` and conventions;
+// any other start copies the clone's working tree. A layout-2 run kept the whole copy only when it was dispatched.
 import { cpSync, existsSync, readFileSync, rmSync } from 'node:fs';
 import { basename, dirname, join, relative, sep } from 'node:path';
 import { createDir, replaceFile } from './durable';
-import type { Roster } from './roster';
 
 export const RUNS_DIR = '.sail-runs';
 
-/** The run directory layout a run's header marks: each call's records sit beside its `$STAGE_OUT`, `out/`. */
-export const RUN_LAYOUT = 2;
+/**
+ * The run directory layout a run's header marks: each call's records sit beside its `$STAGE_OUT`, `out/` (layout 2), and
+ * `definition/` holds the whole `.sail/` (layout 3).
+ */
+export const RUN_LAYOUT = 3;
 
 /**
  * Why a run whose header is `header` can't be resumed or seed a run, or undefined when it is marked with the layout.
@@ -31,9 +31,23 @@ export function unmarkedRefusal(
   header: { layout?: number },
   what: 'be resumed' | 'seed a run',
 ): string | undefined {
-  if (header.layout === RUN_LAYOUT) return undefined;
+  if (header.layout !== undefined) return undefined;
   const stop = what === 'be resumed' ? `. sail stop ${runId} ends it` : '';
   return `run ${runId} keeps its calls' records inside their $STAGE_OUT, as runs did before sail moved them to out/: it can't ${what}${stop}`;
+}
+
+/** Whether a run whose header is `header` keeps the whole `.sail/` in `definition/`, and so resumes from it. */
+export function resumesFromCopy(header: { layout?: number; definitionsSha?: string }): boolean {
+  return header.layout === RUN_LAYOUT || header.definitionsSha !== undefined;
+}
+
+/** Why a run whose header is `header` can't be resumed for want of a whole copy of `.sail/`, or undefined when it has one. */
+export function uncopiedRefusal(
+  runId: string,
+  header: { layout?: number; definitionsSha?: string },
+): string | undefined {
+  if (resumesFromCopy(header)) return undefined;
+  return `run ${runId} started before runs kept their whole .sail/ in definition/: it can't be resumed. sail stop ${runId} ends it, and sail run --from-run ${runId} --stage <stage> --continue restarts it`;
 }
 
 /** Where runs live: beside `sailDir`, in the directory that holds it. `sail stage run` writes there too. */
@@ -134,18 +148,20 @@ const repoPath = (origin: string | undefined) =>
 const intakeFolder = (path: string): string => (path.endsWith('.ts') ? dirname(path) : path);
 
 /**
- * Copies each stage folder `roster` reaches, from `root`, the directory holding `.sail/`, into `runDir`'s definition,
- * and the folder of the intake when it is the repository's own: a private intake's workflow folder, or a shared one's.
+ * Copies `sailDir`, the clone's `.sail/`, without its `node_modules`, and each of `conventions` that exists under `root`
+ * into `runDir`'s definition, each at its path from `root`. Symlinks are copied as they are.
  */
-export function copyStageFolders(runDir: string, root: string, roster: Pick<Roster, 'intake' | 'stages'>): void {
-  const intake = repoPath(roster.intake.origin);
-  if (intake !== undefined) {
-    const folder = intakeFolder(intake);
-    cpSync(join(root, folder), join(runDir, DEFINITION_DIR, folder), { recursive: true });
-  }
-  for (const { origin } of Object.values(roster.stages)) {
-    const path = repoPath(origin);
-    if (path !== undefined) cpSync(join(root, path), join(runDir, DEFINITION_DIR, path), { recursive: true });
+export function copyDefinitions(runDir: string, root: string, sailDir: string, conventions: string[]): void {
+  const definition = join(runDir, DEFINITION_DIR);
+  cpSync(sailDir, join(definition, relative(root, sailDir)), {
+    recursive: true,
+    verbatimSymlinks: true,
+    filter: (source) => basename(source) !== 'node_modules',
+  });
+  for (const path of conventions) {
+    if (existsSync(join(root, path))) {
+      cpSync(join(root, path), join(definition, path), { recursive: true, verbatimSymlinks: true });
+    }
   }
 }
 
