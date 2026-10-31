@@ -1720,6 +1720,24 @@ test('queue:held validates with or without until, and still needs run and reason
   expect(paths('sail.event.v1', omit(held, 'run'))).toEqual(['/run']);
 });
 
+test('queue:held and queue:released validate with a dedupKey for one held item, and refuse a malformed one', () => {
+  const held = {
+    ...queueEnvelope,
+    type: 'queue:held',
+    workflow: 'ticket-to-pr',
+    dedupKey: 'ticket:FAKE-1',
+    until: '2026-10-14T09:01:00.000Z',
+    run: RUN_ID,
+    reason: 'push could not reach github',
+  };
+  const released = { ...queueEnvelope, type: 'queue:released', workflow: 'ticket-to-pr' };
+  expect(paths('sail.event.v1', held)).toEqual([]);
+  expect(paths('sail.event.v1', { ...held, dedupKey: 'FAKE-1' })).toEqual(['/dedupKey']);
+  expect(paths('sail.event.v1', released)).toEqual([]);
+  expect(paths('sail.event.v1', { ...released, dedupKey: 'ticket:FAKE-1' })).toEqual([]);
+  expect(paths('sail.event.v1', { ...released, dedupKey: 'FAKE-1' })).toEqual(['/dedupKey']);
+});
+
 test('a queue event refuses a runId, needs its workflow, and keeps retryInMs and dedupKey to their rules', () => {
   const [polled, added, , error] = QUEUED.map((sample) => ({ ...queueEnvelope, ...sample }));
   expect(paths('sail.event.v1', { ...polled, runId: RUN_ID })).toEqual(['/runId']);

@@ -254,6 +254,34 @@ test("the stream's error is drawn as an escaped code bad div, and none is drawn 
   expect(healthy).not.toContain('code bad');
 });
 
+test("a held item's row shows held until its time and its reason, and its queue:held and queue:released lines name the item", () => {
+  const [panel] = queuePanels(index(m.registryDir));
+  if (panel === undefined) throw new Error('beta has no queue');
+  const held = {
+    until: '2026-09-24T11:01:00.000Z',
+    reason: 'publish#1 could not reach a provider',
+    at: '2026-09-24T11:00:00.000Z',
+  };
+  const items = panel.items.map((item) => (item.dedupKey === 'ticket:FAKE-3' ? { ...item, held } : item));
+  const markup = renderQueue({ ...panel, items }, undefined, initialUi(0), NOW).value;
+  expect(markup).toContain(' · held until 11:01:00 · <span class="why">publish#1 could not reach a provider</span>');
+  expect(renderQueue(panel, undefined, initialUi(0), NOW).value).not.toContain('held until');
+  const at = { seq: 20, ts: '2026-09-24T12:00:00.000Z', workflow: QUEUE_WORKFLOW };
+  expect(
+    queueEventLine({
+      ...at,
+      type: 'queue:held',
+      dedupKey: 'ticket:FAKE-3',
+      until: held.until,
+      run: 'r',
+      reason: held.reason,
+    } as QueueEvent),
+  ).toBe(`ticket:FAKE-3 until ${held.until}: publish#1 could not reach a provider`);
+  expect(queueEventLine({ ...at, type: 'queue:released', dedupKey: 'ticket:FAKE-3' } as QueueEvent)).toBe(
+    'ticket:FAKE-3 released',
+  );
+});
+
 test('an untimed hold shows a held: chip with its reason, and its queue:held a held: line', () => {
   const [panel] = queuePanels(index(m.registryDir));
   if (panel === undefined) throw new Error('beta has no queue');

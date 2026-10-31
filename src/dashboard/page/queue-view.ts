@@ -3,7 +3,8 @@
 // its recent events from the queue's own stream, folded until the person opens them, and the error that stream sent. A failed or parked item shows the
 // commands that requeue or drop it, to copy, and an item whose run the rail lists opens it. A waiting item shows its
 // priority and has ▲ and ▼ buttons to move it before or after its waiting neighbour: the dashboard's first control,
-// which asks the watcher and changes nothing itself. A refused move shows its reason beside the header.
+// which asks the watcher and changes nothing itself. A refused move shows its reason beside the header. A held item
+// shows when its hold ends and why, and its hold's events name it.
 import type { QueueEvent } from '../../events/types';
 import type { QueueItemState } from '../../watch/queue-store';
 import { parkedCommands } from './commands';
@@ -43,10 +44,12 @@ export function queueEventLine(event: QueueEvent): string {
       return `${text(fields.dedupKey)} after ${count(fields.attempts)} attempts: ${text(fields.reason)}`;
     case 'queue:error':
       return `${text(fields.port)} ${text(fields.adapter)}: ${text(fields.message)}${fields.paused === true ? ' (paused)' : ''}`;
-    case 'queue:held':
-      return `${fields.until === undefined ? 'held' : `until ${text(fields.until)}`}: ${text(fields.reason)}`;
+    case 'queue:held': {
+      const hold = `${fields.until === undefined ? 'held' : `until ${text(fields.until)}`}: ${text(fields.reason)}`;
+      return typeof fields.dedupKey === 'string' ? `${fields.dedupKey} ${hold}` : hold;
+    }
     case 'queue:released':
-      return 'dispatch released';
+      return typeof fields.dedupKey === 'string' ? `${fields.dedupKey} released` : 'dispatch released';
     case 'queue:moved': {
       const place = typeof fields.before === 'string' ? `before ${fields.before}` : `after ${text(fields.after)}`;
       return `${text(fields.dedupKey)} moved ${place}: ${text(fields.reason)}`;
@@ -93,6 +96,10 @@ function itemRow(panel: QueuePanel, item: PanelItem, ui: UiState): SafeHtml {
     item.priority === undefined || item.priority === 'none' ? '' : ` · priority ${item.priority}`
   }${item.moved === true ? ' · moved' : ''}${
     item.retryAt === undefined ? '' : html` · retry at ${clock(item.retryAt, ui.tz)}`
+  }${
+    item.held === undefined
+      ? ''
+      : html` · held until ${clock(item.held.until, ui.tz)} · <span class="why">${item.held.reason}</span>`
   }${item.reason === undefined ? '' : html` · <span class="why">${item.reason}</span>`}</span>${
     item.state === 'parked' || item.state === 'failed' ? commands(panel, item) : ''
   }</span>${moveButtons(panel, item)}${run}</div>`;

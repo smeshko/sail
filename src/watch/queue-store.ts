@@ -25,13 +25,16 @@
 //   `spawned()` adds the process's pid once it does, emitting `queue:dispatched`. An item a re-check finds ineligible
 //   (a ticket its own failed run claimed is not) is dropped: it leaves `items`, and a later poll may queue it again.
 // - A dispatched item whose run the watcher found alive is `adopted()`, and one whose run it resumed is `resumed()`: each
-//   records the pid the run is alive as now, and emits `run:adopted` or `run:resumed`.
-// - A run that hit the usage limit, or could not reach a provider, holds the workflow's dispatch: `hold()` keeps the later `until` in `held` and emits
-//   `queue:held` when it set or extended it, and `release()` clears it and emits `queue:released`. The items are not
+//   records the pid the run is alive as now, clears the item's hold, and emits `run:adopted` or `run:resumed`.
+// - A run that hit the usage limit, or several that could not reach a provider at once, hold the workflow's dispatch:
+//   `hold()` keeps the later `until` in `held` and emits `queue:held` when it set or extended it, and `release()` clears it and emits `queue:released`. The items are not
 //   changed: no attempt is counted, and nothing is failed or parked. A run refused for definitions that need a newer
 //   sail holds it with no time limit instead: `holdForSail()` keeps the running sail's SDK fingerprint in `held.sail`,
 //   replaces a timed hold, and a `hold()` leaves it. Its refused item goes back through `deferred()`, as queued with the
 //   attempt `dispatched()` counted taken back.
+// - One run that could not reach a provider holds only its own item: `holdItem()` keeps the later `until` in the item's
+//   `held` and emits `queue:held` with its `dedupKey`, and `releaseItem()` clears it and emits `queue:released` with it.
+//   A resume, a park, a finish, a failure and a requeue clear it.
 // - `move()` places a queued item next to another queued one and marks it `moved`: add, a priority change and a retry
 //   leave a moved item where it is, and its dispatch clears the mark. It emits `queue:moved`.
 // - `skippedLeased()`, `watched()` and `unwatched()` only emit their events: none of them changes `queue.json`.
@@ -95,6 +98,8 @@ export const QueueItem = z.strictObject({
   priority: TicketPriority.optional(),
   /** Placed by hand: it keeps its place, whatever its priority, until it is dispatched or dropped. */
   moved: z.literal(true).optional(),
+  /** Set while its suspended run waits out a back-off on an unavailable port: only this item waits, until `until`. */
+  held: z.strictObject({ until: z.string(), reason: z.string(), at: z.string() }).optional(),
 });
 export type QueueItem = z.infer<typeof QueueItem>;
 
@@ -226,7 +231,8 @@ export interface QueueStore {
   /** Takes the item out of the queue, and emits `queue:dropped` with the reason. An unknown key throws. */
   drop(key: string, reason: string): void;
   /**
-   * Holds the workflow's dispatch until `until` because run `runId` hit the usage limit, and emits `queue:held`. A hold
+   * Holds the workflow's dispatch until `until` because run `runId` hit the usage limit or several runs could not
+   * reach a provider, and emits `queue:held`. A hold
    * already set to a later time stays as it is, and emits nothing.
    */
   hold(until: string, runId: string, reason: string): void;
@@ -243,6 +249,14 @@ export interface QueueStore {
   deferred(key: string): void;
   /** Clears the hold and emits `queue:released`. A queue not held changes nothing. */
   release(): void;
+  /**
+   * Holds one item until `until` because its run `item.runId` could not reach a provider, and emits `queue:held` with
+   * its `dedupKey`. The workflow's dispatch and the queue's other items are unchanged. A hold already set to the same
+   * or a later time stays as it is, and emits nothing.
+   */
+  holdItem(key: string, until: string, reason: string): void;
+  /** Clears the item's hold and emits `queue:released` with its `dedupKey`. An item not held changes nothing. */
+  releaseItem(key: string): void;
   /** Emits `queue:skipped_leased`: the due item waits, since run `heldBy` holds `branch`. The queue is unchanged. */
   skippedLeased(key: string, branch: string, heldBy: string): void;
   /** Emits `watch:added`: watcher `pid` watches the workflow now. The queue is unchanged. */
@@ -358,12 +372,13 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
     if (item === undefined) throw new Error(`${workflow}'s queue has no item ${key}`);
     return item;
   };
-  /** Records `pid` on the dispatched item `key`, and gives the item. One not dispatched throws. */
+  /** Records `pid` on the dispatched item `key`, clears its hold, and gives the item. One not dispatched throws. */
   const dispatchedWith = (key: string, pid: number): QueueItem =>
     change((next) => {
       const item = find(next, key);
       if (item.state !== 'dispatched') throw new Error(`${workflow}'s item ${key} is ${item.state}, not dispatched`);
       item.pid = pid;
+      delete item.held;
       return { ...item };
     });
   const emitAdded = (added: readonly QueueItem[]) =>
@@ -515,6 +530,7 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
         parking.reason = reason;
         parking.finishedAt = now().toISOString();
         delete parking.retryAt;
+        delete parking.held;
         return { ...parking };
       });
       stream.emit({ type: 'queue:parked', workflow, dedupKey: key, attempts: item.attempts, reason });
@@ -527,7 +543,8 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
         }
         item.state = 'queued';
         item.attempts = 0;
-        for (const field of ['reason', 'retryAt', 'finishedAt', 'runId', 'pid', 'sail'] as const) delete item[field];
+        for (const field of ['reason', 'retryAt', 'finishedAt', 'runId', 'pid', 'sail', 'held'] as const)
+          delete item[field];
         place(next, item);
       });
       stream.emit({ type: 'queue:requeued', workflow, dedupKey: key, reason });
@@ -589,6 +606,23 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
       });
       stream.emit({ type: 'queue:released', workflow });
     },
+    holdItem(key, until, reason) {
+      const current = find(queue, key).held;
+      if (current !== undefined && Date.parse(current.until) >= Date.parse(until)) return;
+      const item = change((next) => {
+        const holding = find(next, key);
+        holding.held = { until, reason, at: now().toISOString() };
+        return { ...holding };
+      });
+      stream.emit({ type: 'queue:held', workflow, dedupKey: key, until, run: item.runId ?? '', reason });
+    },
+    releaseItem(key) {
+      if (find(queue, key).held === undefined) return;
+      change((next) => {
+        delete find(next, key).held;
+      });
+      stream.emit({ type: 'queue:released', workflow, dedupKey: key });
+    },
     skippedLeased(key, branch, heldBy) {
       stream.emit({ type: 'queue:skipped_leased', workflow, dedupKey: key, branch, heldBy });
     },
@@ -604,6 +638,7 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
         item.state = 'done';
         item.finishedAt = now().toISOString();
         delete item.retryAt;
+        delete item.held;
         // Oldest finished first: the sort is stable, so items finished together keep their order.
         const done = next.items
           .filter((each) => each.state === 'done')
@@ -616,6 +651,7 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
       const item = change((next) => {
         const failing = find(next, key);
         failing.reason = reason;
+        delete failing.held;
         if (failing.attempts >= policy.maxAttempts) {
           failing.state = 'parked';
           failing.finishedAt = now().toISOString();

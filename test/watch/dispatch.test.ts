@@ -387,7 +387,12 @@ test('a run suspended on the usage limit holds the workflow: nothing starts and 
       spawned: spawnedKeys(w.spawner),
       resumes: w.spawner.resumes.length,
       items: w.store.snapshot().items.map((item) => [sourceKey(item), item.state, item.attempts]),
-      held: eventsOf(w.runs, 'queue:held').map(({ until, run, reason }) => ({ until, run, reason })),
+      held: eventsOf(w.runs, 'queue:held').map(({ dedupKey, until, run, reason }) => ({
+        dedupKey,
+        until,
+        run,
+        reason,
+      })),
       settled: w.settled,
     };
     w.clock.advance(16 * 60_000);
@@ -414,7 +419,9 @@ test('a run suspended on the usage limit holds the workflow: nothing starts and 
           ['FAKE-3', 'done', 1],
           ['FAKE-4', 'queued', 0],
         ],
-        held: [{ until: '2026-10-15T09:15:00.000Z', run: run1, reason: 'a run hit the usage limit' }],
+        held: [
+          { dedupKey: undefined, until: '2026-10-15T09:15:00.000Z', run: run1, reason: 'a run hit the usage limit' },
+        ],
         settled: [
           { dedupKey: 'ticket:FAKE-3', ticketKey: 'FAKE-3', runId: w.spawner.run('FAKE-3').runId, outcome: 'done' },
         ],
@@ -1509,7 +1516,12 @@ function suspendOnPort(w: World, runId: string) {
   appendFileSync(file, lines.map((line) => `${JSON.stringify(line)}\n`).join(''));
 }
 
-test('a run suspended on an unavailable port holds the workflow for a minute, is resumed once queue:released, and a second suspension holds it for two', async () => {
+const PORT_REASON = 'publish#1 could not reach a provider: codeHost.push: the fake code host is unreachable';
+const heldOf = (w: World, key: string) => w.store.snapshot().items.find((item) => sourceKey(item) === key)?.held;
+const itemEvents = (runs: string, type: string) =>
+  eventsOf(runs, type).map(({ dedupKey, until }) => ({ dedupKey, until }));
+
+test('a run suspended on an unavailable port holds only its item for a minute, is resumed once queue:released, and a second suspension holds it for two', async () => {
   await withTempRepo(async (repo) => {
     const w = await world(repo, 2, 2);
     const dispatcher = w.dispatcher();
@@ -1518,15 +1530,22 @@ test('a run suspended on an unavailable port holds the workflow for a minute, is
     suspendOnPort(w, runId);
     await w.spawner.end('FAKE-1', { status: 'suspended', stopReason: 'port_unavailable' });
     await dispatcher.tick();
-    const reason = 'publish#1 could not reach a provider: codeHost.push: the fake code host is unreachable';
     const first = {
-      held: eventsOf(w.runs, 'queue:held').map(({ until, run, reason }) => ({ until, run, reason })),
+      held: eventsOf(w.runs, 'queue:held').map(({ dedupKey, until, run, reason }) => ({
+        dedupKey,
+        until,
+        run,
+        reason,
+      })),
+      item: heldOf(w, 'FAKE-1'),
+      workflow: w.store.snapshot().held,
       resumes: w.spawner.resumes.length,
     };
     w.clock.advance(61_000);
     await dispatcher.tick();
     const second = {
-      released: eventsOf(w.runs, 'queue:released').length,
+      released: itemEvents(w.runs, 'queue:released'),
+      item: heldOf(w, 'FAKE-1'),
       resumed: eventsOf(w.runs, 'run:resumed').map(({ dedupKey, from }) => [dedupKey, from]),
     };
     w.clock.advance(1000);
@@ -1536,14 +1555,113 @@ test('a run suspended on an unavailable port holds the workflow for a minute, is
     expect({
       first,
       second,
-      held: eventsOf(w.runs, 'queue:held').map(({ until }) => until),
+      held: itemEvents(w.runs, 'queue:held'),
+      item: heldOf(w, 'FAKE-1')?.until,
+      workflow: w.store.snapshot().held,
       items: states(w.store).slice(0, 1),
       issues: queueEventIssues(queueDir(w.runs, 'a')),
     }).toEqual({
-      first: { held: [{ until: '2026-10-15T09:01:00.000Z', run: runId, reason }], resumes: 0 },
-      second: { released: 1, resumed: [['ticket:FAKE-1', { status: 'suspended', stopReason: 'port_unavailable' }]] },
-      held: ['2026-10-15T09:01:00.000Z', '2026-10-15T09:03:02.000Z'],
+      first: {
+        held: [{ dedupKey: 'ticket:FAKE-1', until: '2026-10-15T09:01:00.000Z', run: runId, reason: PORT_REASON }],
+        item: { until: '2026-10-15T09:01:00.000Z', reason: PORT_REASON, at: START },
+        workflow: undefined,
+        resumes: 0,
+      },
+      second: {
+        released: [{ dedupKey: 'ticket:FAKE-1', until: undefined }],
+        item: undefined,
+        resumed: [['ticket:FAKE-1', { status: 'suspended', stopReason: 'port_unavailable' }]],
+      },
+      held: [
+        { dedupKey: 'ticket:FAKE-1', until: '2026-10-15T09:01:00.000Z' },
+        { dedupKey: 'ticket:FAKE-1', until: '2026-10-15T09:03:02.000Z' },
+      ],
+      item: '2026-10-15T09:03:02.000Z',
+      workflow: undefined,
       items: ['FAKE-1 dispatched 1'],
+      issues: [],
+    });
+  });
+});
+
+test('while one item is held on an unavailable port, the workflow starts its other due items and resumes its other suspended runs', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 3, 2);
+    const dispatcher = w.dispatcher();
+    await dispatcher.tick();
+    suspendOnPort(w, w.spawner.run('FAKE-1').runId);
+    await w.spawner.end('FAKE-1', { status: 'suspended', stopReason: 'port_unavailable' });
+    await w.spawner.end('FAKE-2', { status: 'suspended', stopReason: 'interrupted' });
+    await dispatcher.tick();
+    expect({
+      spawned: spawnedKeys(w.spawner),
+      resumes: w.spawner.resumes.map(({ runId }) => runId),
+      held: heldOf(w, 'FAKE-1')?.until,
+      workflow: w.store.snapshot().held,
+      items: states(w.store),
+    }).toEqual({
+      spawned: ['FAKE-1', 'FAKE-2', 'FAKE-3'],
+      resumes: [w.spawner.run('FAKE-2').runId],
+      held: '2026-10-15T09:01:00.000Z',
+      workflow: undefined,
+      items: ['FAKE-1 dispatched 1', 'FAKE-2 dispatched 1', 'FAKE-3 dispatched 1'],
+    });
+  });
+});
+
+test('a second item held on an unavailable port holds the workflow until the later of the two holds ends: nothing starts or resumes meanwhile', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 3, 2);
+    const dispatcher = w.dispatcher();
+    await dispatcher.tick();
+    suspendOnPort(w, w.spawner.run('FAKE-1').runId);
+    w.clock.advance(30_000);
+    suspendOnPort(w, w.spawner.run('FAKE-2').runId);
+    await w.spawner.end('FAKE-1', { status: 'suspended', stopReason: 'port_unavailable' });
+    await w.spawner.end('FAKE-2', { status: 'suspended', stopReason: 'port_unavailable' });
+    await dispatcher.tick();
+    const escalated = {
+      workflow: w.store.snapshot().held,
+      workflowEvents: eventsOf(w.runs, 'queue:held')
+        .filter((event) => event.dedupKey === undefined)
+        .map(({ until, run, reason }) => ({ until, run, reason })),
+      spawned: spawnedKeys(w.spawner),
+    };
+    // Past the first item's hold, inside the workflow's.
+    w.clock.advance(40_000);
+    await dispatcher.tick();
+    const inside = { spawned: spawnedKeys(w.spawner), resumes: w.spawner.resumes.length };
+    w.clock.advance(21_000);
+    await dispatcher.tick();
+    expect({
+      escalated: { ...escalated, workflow: escalated.workflow?.until },
+      inside,
+      after: {
+        workflow: w.store.snapshot().held,
+        released: eventsOf(w.runs, 'queue:released').filter((event) => event.dedupKey === undefined).length,
+        resumes: w.spawner.resumes.map(({ runId }) => runId).sort(),
+        spawned: spawnedKeys(w.spawner),
+      },
+      issues: queueEventIssues(queueDir(w.runs, 'a')),
+    }).toEqual({
+      escalated: {
+        workflow: '2026-10-15T09:01:30.000Z',
+        workflowEvents: [
+          {
+            until: '2026-10-15T09:01:30.000Z',
+            run: w.spawner.run('FAKE-2').runId,
+            reason: `2 runs could not reach a provider: ${PORT_REASON}`,
+          },
+        ],
+        spawned: ['FAKE-1', 'FAKE-2'],
+      },
+      inside: { spawned: ['FAKE-1', 'FAKE-2'], resumes: 0 },
+      after: {
+        workflow: undefined,
+        released: 1,
+        resumes: [w.spawner.run('FAKE-1').runId, w.spawner.run('FAKE-2').runId].sort(),
+        spawned: ['FAKE-1', 'FAKE-2'],
+      },
       issues: [],
     });
   });
@@ -1604,7 +1722,8 @@ test('a fixture run whose push is unavailable once is suspended, resumed by the 
     await dispatcher.tick();
     const suspended = {
       status: readFileSync(join(runs, runId, 'STATUS'), 'utf8').trim(),
-      held: store.snapshot().held?.reason,
+      held: store.snapshot().items[0]?.held?.reason,
+      workflow: store.snapshot().held,
     };
     clock.advance(2 * 60_000);
     await dispatcher.tick();
@@ -1619,7 +1738,11 @@ test('a fixture run whose push is unavailable once is suspended, resumed by the 
       settled: settled.map((each) => each.outcome),
       issues: queueEventIssues(queueDir(runs, 'ticket-to-pr')),
     }).toEqual({
-      suspended: { status: 'suspended port_unavailable', held: expect.stringContaining('publish#1 could not reach') },
+      suspended: {
+        status: 'suspended port_unavailable',
+        held: expect.stringContaining('publish#1 could not reach'),
+        workflow: undefined,
+      },
       stops: ['port_unavailable'],
       end: 'completed',
       states: ['FAKE-1 done 1'],

@@ -71,12 +71,15 @@ function textOf(event: QueueEvent, afterError: boolean): { text: string; alert?:
       return { text: `${keyOf(event.dedupKey)} moved ${place}: ${event.reason}` };
     }
     case 'queue:held':
+      if (event.dedupKey !== undefined) {
+        return { text: `${keyOf(event.dedupKey)} held until ${event.until ?? ''}: ${event.reason}`, alert: true };
+      }
       return {
         text: `dispatch held${event.until === undefined ? '' : ` until ${event.until}`}: ${event.reason}`,
         alert: true,
       };
     case 'queue:released':
-      return { text: 'dispatch released' };
+      return { text: event.dedupKey === undefined ? 'dispatch released' : `${keyOf(event.dedupKey)} released` };
     default: {
       const unknown: never = event;
       return unknown;

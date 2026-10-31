@@ -725,6 +725,122 @@ test('holdForSail() replaces a timed hold', () => {
   expect(store.snapshot().held).toEqual({ sail: 'print-1', runId: RUN, reason: 'needs a newer sail', at: START });
 });
 
+const ITEM_UNTIL = '2026-10-14T09:01:00.000Z';
+const heldEvents = (runs: string) =>
+  queueEvents(queueDir(runs, 'ticket-to-pr'))
+    .filter((event) => event.type === 'queue:held' || event.type === 'queue:released')
+    .map(({ seq, ts, ...event }) => event);
+
+function dispatchedStore(runs: string, clock = manualClock(START)): QueueStore {
+  const store = open(runs, clock);
+  store.add([ticket('FAKE-1'), ticket('FAKE-2')]);
+  store.dispatched('ticket:FAKE-1', RUN);
+  store.spawned('ticket:FAKE-1', 4242);
+  return store;
+}
+
+test('holdItem() records held on its item only, survives a reopen, and emits one queue:held with the dedupKey', () => {
+  const runs = runsDir();
+  const store = dispatchedStore(runs);
+  store.holdItem('ticket:FAKE-1', ITEM_UNTIL, 'push could not reach github');
+  store.holdItem('ticket:FAKE-1', ITEM_UNTIL, 'again');
+  const [first, second] = store.snapshot().items;
+  expect({
+    held: first?.held,
+    other: second?.held,
+    workflow: store.snapshot().held,
+    reopened: open(runs).snapshot().items[0]?.held,
+    events: heldEvents(runs),
+  }).toEqual({
+    held: { until: ITEM_UNTIL, reason: 'push could not reach github', at: START },
+    other: undefined,
+    workflow: undefined,
+    reopened: { until: ITEM_UNTIL, reason: 'push could not reach github', at: START },
+    events: [
+      {
+        type: 'queue:held',
+        workflow: 'ticket-to-pr',
+        dedupKey: 'ticket:FAKE-1',
+        until: ITEM_UNTIL,
+        run: RUN,
+        reason: 'push could not reach github',
+      },
+    ],
+  });
+  expect(queueEventIssues(queueDir(runs, 'ticket-to-pr'))).toEqual([]);
+});
+
+test('holdItem() extends to a later until, ignores an earlier one, and throws for an unknown key', () => {
+  const runs = runsDir();
+  const store = dispatchedStore(runs);
+  store.holdItem('ticket:FAKE-1', ITEM_UNTIL, 'first');
+  store.holdItem('ticket:FAKE-1', '2026-10-14T09:00:30.000Z', 'earlier');
+  expect(store.snapshot().items[0]?.held?.until).toBe(ITEM_UNTIL);
+  store.holdItem('ticket:FAKE-1', '2026-10-14T09:03:00.000Z', 'later');
+  expect(store.snapshot().items[0]?.held).toEqual({
+    until: '2026-10-14T09:03:00.000Z',
+    reason: 'later',
+    at: START,
+  });
+  expect(heldEvents(runs).map((event) => event.type)).toEqual(['queue:held', 'queue:held']);
+  expect(() => store.holdItem('ticket:FAKE-9', ITEM_UNTIL, 'x')).toThrow(
+    "ticket-to-pr's queue has no item ticket:FAKE-9",
+  );
+});
+
+test('releaseItem() clears the item hold and emits queue:released with the dedupKey, and an item not held emits nothing', () => {
+  const runs = runsDir();
+  const store = dispatchedStore(runs);
+  store.releaseItem('ticket:FAKE-1');
+  expect(heldEvents(runs)).toEqual([]);
+  store.holdItem('ticket:FAKE-1', ITEM_UNTIL, 'down');
+  store.releaseItem('ticket:FAKE-1');
+  store.releaseItem('ticket:FAKE-1');
+  expect(store.snapshot().items[0]?.held).toBeUndefined();
+  expect(open(runs).snapshot().items[0]?.held).toBeUndefined();
+  expect(heldEvents(runs).map(({ type, ...rest }) => [type, 'dedupKey' in rest ? rest.dedupKey : null])).toEqual([
+    ['queue:held', 'ticket:FAKE-1'],
+    ['queue:released', 'ticket:FAKE-1'],
+  ]);
+  expect(queueEventIssues(queueDir(runs, 'ticket-to-pr'))).toEqual([]);
+});
+
+test.each([
+  ['adopted', (store: QueueStore) => store.adopted('ticket:FAKE-1', 4243)],
+  [
+    'resumed',
+    (store: QueueStore) =>
+      store.resumed('ticket:FAKE-1', 4243, { status: 'suspended', stopReason: 'port_unavailable' }),
+  ],
+  ['parked', (store: QueueStore) => store.parked('ticket:FAKE-1', 'unavailable for good')],
+  ['done', (store: QueueStore) => store.done('ticket:FAKE-1')],
+  ['failed', (store: QueueStore) => void store.failed('ticket:FAKE-1', 'run failed')],
+])('%s leaves no hold on the item', (_name, settle) => {
+  const store = dispatchedStore(runsDir());
+  store.holdItem('ticket:FAKE-1', ITEM_UNTIL, 'down');
+  settle(store);
+  expect(store.snapshot().items.find((item) => item.dedupKey === 'ticket:FAKE-1')?.held).toBeUndefined();
+});
+
+test('requeue() clears the hold of a failed item', () => {
+  const store = dispatchedStore(runsDir());
+  store.failed('ticket:FAKE-1', 'run failed');
+  const item = store.snapshot().items.find((each) => each.dedupKey === 'ticket:FAKE-1');
+  expect(item?.state).toBe('failed');
+  store.holdItem('ticket:FAKE-1', ITEM_UNTIL, 'down');
+  store.requeue('ticket:FAKE-1', 'by hand');
+  const requeued = store.snapshot().items.find((each) => each.dedupKey === 'ticket:FAKE-1');
+  expect([requeued?.state, requeued?.held]).toEqual(['queued', undefined]);
+});
+
+test('releasing the workflow hold leaves an item hold, and the item hold leaves the workflow hold', () => {
+  const store = dispatchedStore(runsDir());
+  store.holdItem('ticket:FAKE-1', ITEM_UNTIL, 'down');
+  store.hold('2026-10-14T09:05:00.000Z', RUN, 'usage limit');
+  store.release();
+  expect(store.snapshot().items[0]?.held?.until).toBe(ITEM_UNTIL);
+});
+
 test('deferred() puts a dispatched item back queued with the attempt uncounted and nothing of its run, in queue order, emitting nothing', () => {
   const runs = runsDir();
   const store = open(runs);

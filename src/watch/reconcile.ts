@@ -10,8 +10,8 @@
 // | `failed stopped` | parked at once: a person stopped it, and a stopped run is never retried |
 // | `failed` otherwise | a failed attempt, retried later or parked |
 // | `running` with its pid dead, `suspended interrupted`, `suspended unwatched`, `suspended crashed` | adopted under its lease's pid when a live process holds its lease, else resumed, once; a resume of a crashed run that crashed again is parked with the `error:crash` message it left, and with why when it left none |
-// | `suspended usage_limit` | adopted when a live process holds its lease; else held while now is before its reset time (or the back-off after it hit the limit), then resumed, even when this dispatcher resumed it before, unless its resume hit no limit since: then parked with why |
-// | `suspended port_unavailable` | adopted when a live process holds its lease; else held for the back-off its suspension's place in the run of them calls for (1, 2, 5, 10 then 30 minutes), then resumed; parked with why when its resume was not suspended again, and parked with the call, the count and the last port error once it has been suspended past the schedule |
+// | `suspended usage_limit` | adopted when a live process holds its lease; else held, and with it the whole dispatch, while now is before its reset time (or the back-off after it hit the limit), then resumed, even when this dispatcher resumed it before, unless its resume hit no limit since: then parked with why |
+// | `suspended port_unavailable` | adopted when a live process holds its lease; else held, as its item alone, for the back-off its suspension's place in the run of them calls for (1, 2, 5, 10 then 30 minutes), then resumed; parked with why when its resume was not suspended again, and parked with the call, the count and the last port error once it has been suspended past the schedule |
 // | anything else, such as `suspended until` or `budget_exceeded` | left: a person resumes or stops it |
 //
 // A limit with no event to date it by is dated by when the dispatcher first saw it (`limitedAt`). The suspensions of
@@ -74,7 +74,7 @@ export type Reconciled =
   | { kind: 'wait' }
   | { kind: 'adopt'; pid: number }
   | { kind: 'resume'; from: ResumedFrom }
-  | { kind: 'held'; until: string; reason: string };
+  | { kind: 'held'; stopReason: 'usage_limit' | 'port_unavailable'; until: string; reason: string };
 
 function statusOf(runDir: string): RunStatus | undefined {
   try {
@@ -231,7 +231,7 @@ export async function reconcileItem(item: QueueItem, context: ReconcileContext):
     if (context.resumedAt !== undefined && (at === undefined || at <= context.resumedAt.getTime())) {
       return { kind: 'park', reason: why(context, runId, 'its resume failed') ?? 'its resume failed' };
     }
-    if (context.now.getTime() < Date.parse(until)) return { kind: 'held', until, reason };
+    if (context.now.getTime() < Date.parse(until)) return { kind: 'held', stopReason: 'usage_limit', until, reason };
     return { kind: 'resume', from: { status: 'suspended', stopReason: 'usage_limit' } };
   }
   if (status.status === 'suspended' && status.stopReason === 'port_unavailable') {
@@ -247,7 +247,12 @@ export async function reconcileItem(item: QueueItem, context: ReconcileContext):
       return { kind: 'park', reason: `${call} on ${count} suspensions in a row${last}` };
     }
     if (context.now.getTime() < Date.parse(until)) {
-      return { kind: 'held', until, reason: error === undefined ? call : `${call}: ${error}` };
+      return {
+        kind: 'held',
+        stopReason: 'port_unavailable',
+        until,
+        reason: error === undefined ? call : `${call}: ${error}`,
+      };
     }
     return { kind: 'resume', from: { status: 'suspended', stopReason: 'port_unavailable' } };
   }

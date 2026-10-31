@@ -62,7 +62,7 @@ function queueOf(runs: string, workflow: string): QueueFile | undefined {
 
 /**
  * One item: `<state> <dedup key> <title>`, then what applies of its priority (unless none), run, attempts, retry time,
- * `forced`, `moved` and reason.
+ * hold, `forced`, `moved` and reason.
  */
 function itemLine(item: QueueItem): string {
   const details = [
@@ -70,6 +70,7 @@ function itemLine(item: QueueItem): string {
     item.runId === undefined ? undefined : `run ${item.runId}`,
     item.attempts === 0 ? undefined : plural(item.attempts, 'attempt'),
     item.retryAt === undefined ? undefined : `retry at ${item.retryAt}`,
+    item.held === undefined ? undefined : `held until ${item.held.until}: ${clean(item.held.reason)}`,
     item.forced === true ? 'forced' : undefined,
     item.moved === true ? 'moved' : undefined,
     item.reason === undefined ? undefined : clean(item.reason),
