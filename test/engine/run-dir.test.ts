@@ -196,6 +196,17 @@ test('copyDefinitions copies a symlink verbatim instead of following it', () => 
   expect(readlinkSync(join(runDir, 'definition', '.sail/alias'))).toBe('real');
 });
 
+test("copyDefinitions copies a convention that is a symlink as its target's content, which the copy can't reach", () => {
+  const root = repoWith(['.sail/project.yaml', 'AGENTS.md', 'docs/agents.md']);
+  symlinkSync('AGENTS.md', join(root, 'CLAUDE.md'));
+  rmSync(join(root, 'AGENTS.md'));
+  symlinkSync('docs/agents.md', join(root, 'AGENTS.md'));
+  const runDir = tempDir();
+  copyDefinitions(runDir, root, join(root, '.sail'), ['CLAUDE.md']);
+  expect(readFileSync(join(runDir, 'definition', 'CLAUDE.md'), 'utf8')).toBe('docs/agents.md');
+  expect(existsSync(join(runDir, 'definition', 'docs/agents.md'))).toBe(false);
+});
+
 test('a run resumes from its own copy with layout 3, or with a definitionsSha, and not as a layout-2 hand start', () => {
   expect(resumesFromCopy({ layout: 3 })).toBe(true);
   expect(resumesFromCopy({ layout: 2, definitionsSha: 'abc' })).toBe(true);

@@ -149,7 +149,8 @@ const intakeFolder = (path: string): string => (path.endsWith('.ts') ? dirname(p
 
 /**
  * Copies `sailDir`, the clone's `.sail/`, without its `node_modules`, and each of `conventions` that exists under `root`
- * into `runDir`'s definition, each at its path from `root`. Symlinks are copied as they are.
+ * into `runDir`'s definition, each at its path from `root`. Symlinks under `.sail/` are copied as they are; a
+ * convention is copied as what it reads, since a symlink to a file outside the copy would dangle there.
  */
 export function copyDefinitions(runDir: string, root: string, sailDir: string, conventions: string[]): void {
   const definition = join(runDir, DEFINITION_DIR);
@@ -160,7 +161,7 @@ export function copyDefinitions(runDir: string, root: string, sailDir: string, c
   });
   for (const path of conventions) {
     if (existsSync(join(root, path))) {
-      cpSync(join(root, path), join(definition, path), { recursive: true, verbatimSymlinks: true });
+      cpSync(join(root, path), join(definition, path), { recursive: true, dereference: true });
     }
   }
 }
