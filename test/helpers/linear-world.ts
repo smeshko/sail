@@ -307,7 +307,10 @@ export function createLinearWorld(seed: LinearWorldSeed): LinearWorld {
     const inverse = tickets.flatMap((other) =>
       (other.relations ?? [])
         .filter((relation) => relation.number === ticket.number)
-        .map((relation) => ({ type: relation.type, issue: related(other.number) })),
+        .map((relation) => {
+          const { name, type } = stateOf(other);
+          return { type: relation.type, issue: { ...related(other.number), state: { name, type } } };
+        }),
     );
     return {
       id: `issue-${ticket.number}`,
