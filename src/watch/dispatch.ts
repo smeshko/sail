@@ -340,6 +340,13 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
         options.onHeld?.();
         break;
       }
+      case 'waiting':
+        // A prerequisite opened after the dispatch's re-check: the start never ran, so its attempt is given back, and
+        // the next re-check reads the ticket and holds the item as waiting.
+        dropHandOff(options.runsDir, runId);
+        waitingReadAt.delete(item.dedupKey);
+        store.deferred(item.dedupKey);
+        break;
       case 'held':
         // The run will be resumed once, and again if it is held again, so it is not one this dispatcher resumed.
         resumed.delete(runId);

@@ -1955,3 +1955,28 @@ test('a waiting ticket is read again only once the re-check interval has passed,
     expect(reads.filter((key) => key === 'FAKE-2').length).toBeGreaterThan(first);
   });
 });
+
+test.each([
+  ['its exit code', true],
+  ['its message alone, from a dispatcher that did not see it exit', false],
+])(
+  'a start refused because its ticket waits on a prerequisite, known by %s, goes back to queued with no attempt counted, and waits',
+  async (_, sameDispatcher) => {
+    await withTempRepo(async (repo) => {
+      const w = await world(repo, 1, 1, { claiming: false });
+      const spawner = w.dispatcher();
+      await spawner.tick();
+      // The prerequisite appears between the dispatch's re-check and the run's own read.
+      patchTicket(join(repo.dir, '.sail'), 'FAKE-1', { prerequisites: ['FAKE-9'] });
+      const dispatcher = sameDispatcher ? spawner : w.dispatcher();
+      const waits =
+        'sail FAKE-1: the ticket waits on FAKE-9 (unreadable), a prerequisite that is not Done or Canceled. --ignore-prerequisites runs it anyway';
+      await w.spawner.end('FAKE-1', { refused: waits, code: 5 });
+      await dispatcher.tick();
+      expect(states(w.store)).toEqual(['FAKE-1 queued 0']);
+      expect(w.store.snapshot().items[0]?.waitingOn).toEqual(['FAKE-9 (unreadable)']);
+      expect(w.settled).toEqual([]);
+      expect(spawnedKeys(w.spawner)).toEqual(['FAKE-1']);
+    });
+  },
+);

@@ -177,13 +177,17 @@ export interface Refusal {
   waitingOn?: string[];
 }
 
+const WAITING_END = 'not Done or Canceled. --ignore-prerequisites runs it anyway';
+
 /** The refusal of a ticket that waits on `on`, the labels of its open prerequisites. */
 function waiting(on: string[]): Refusal {
   const noun = on.length === 1 ? 'a prerequisite that is' : 'prerequisites that are';
-  return {
-    refused: `the ticket waits on ${on.join(', ')}, ${noun} not Done or Canceled. --ignore-prerequisites runs it anyway`,
-    waitingOn: on,
-  };
+  return { refused: `the ticket waits on ${on.join(', ')}, ${noun} ${WAITING_END}`, waitingOn: on };
+}
+
+/** Whether `message` is the refusal of a ticket that waits on open prerequisites, as `waiting()` words it. */
+export function isWaitingRefusal(message: string): boolean {
+  return message.startsWith('the ticket waits on ') && message.endsWith(WAITING_END);
 }
 
 export interface OpenRunOptions {
