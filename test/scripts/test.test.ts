@@ -204,3 +204,42 @@ test('a run that keeps printing is not stopped by the watchdog', async () => {
     expect(run.stderr).not.toContain('printed nothing');
   });
 }, 60_000);
+
+test('a passing run whose leftover process holds the output pipes exits with the code bun test exited with', async () => {
+  await withTempRepo(async (repo) => {
+    lockDir(repo);
+    mkdirSync(join(repo.dir, 'test'), { recursive: true });
+    const pidFile = join(repo.home, 'leftover.pid');
+    writeFileSync(
+      join(repo.dir, 'test/leftover.test.ts'),
+      `import { expect, test } from 'bun:test';
+test('leaves a process behind', () => {
+  Bun.spawnSync(['sh', '-c', 'sleep 30 & echo $! > ${pidFile}'], { stdio: ['ignore', 'inherit', 'inherit'] });
+  expect(1).toBe(1);
+});
+`,
+    );
+    const started = Date.now();
+    try {
+      const run = await finish(launch(repo, ['./test/leftover.test.ts'], { SAIL_TEST_SILENCE_SECONDS: '15' }));
+      expect(run.stderr).not.toContain('printed nothing');
+      expect(run.code).toBe(0);
+      expect(Date.now() - started).toBeLessThan(12_000);
+    } finally {
+      const pid = Number(
+        (
+          await Bun.file(pidFile)
+            .text()
+            .catch(() => '')
+        ).trim(),
+      );
+      if (pid) {
+        try {
+          process.kill(pid, 'SIGKILL');
+        } catch {
+          // already gone
+        }
+      }
+    }
+  });
+}, 60_000);

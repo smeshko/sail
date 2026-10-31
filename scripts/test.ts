@@ -128,10 +128,12 @@ if (silence === undefined) {
 
 const child = Bun.spawn(command, { env, stdio: ['inherit', 'pipe', 'pipe'] });
 let timer: ReturnType<typeof setTimeout> | undefined;
+let ended = false;
 let arm = () => {};
 const stopped = new Promise<void>((resolve) => {
   arm = () => {
     clearTimeout(timer);
+    if (ended) return;
     timer = setTimeout(resolve, silence * 1000);
   };
   arm();
@@ -144,8 +146,11 @@ const forward = async (stream: ReadableStream<Uint8Array>, sink: NodeJS.WriteStr
 };
 const forwarded = Promise.all([forward(child.stdout, process.stdout), forward(child.stderr, process.stderr)]);
 
+// A process the run left behind may hold the pipes open, so once bun test has exited its output gets 2 s to drain.
 const exited = child.exited.then(async (code) => {
-  await forwarded;
+  ended = true;
+  clearTimeout(timer);
+  await Promise.race([forwarded, Bun.sleep(2000)]);
   return { code };
 });
 const outcome = await Promise.race([exited, stopped.then(() => undefined)]);
