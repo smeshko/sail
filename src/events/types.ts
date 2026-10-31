@@ -494,7 +494,7 @@ export interface QueuePayloads {
   'run:adopted': { workflow: string; dedupKey: string; run: string; pid: number };
   /**
    * The watcher started `sail resume <run>` as process `pid`, for a run it found `running` with its process gone, or
-   * `suspended` with `interrupted`, `unwatched`, `usage_limit` or `port_unavailable`.
+   * `suspended` with `interrupted`, `unwatched`, `usage_limit`, `port_unavailable` or `crashed`.
    */
   'run:resumed': { workflow: string; dedupKey: string; run: string; pid: number; from: ResumedFrom };
   /** A parked or failed item put back in the queue by hand, with no attempts. */
@@ -513,7 +513,7 @@ export interface QueuePayloads {
 /** Where a resumed run was: running with its process gone, or suspended, with why. */
 export type ResumedFrom =
   | { status: 'running' }
-  | { status: 'suspended'; stopReason: 'interrupted' | 'unwatched' | 'usage_limit' | 'port_unavailable' };
+  | { status: 'suspended'; stopReason: 'interrupted' | 'unwatched' | 'usage_limit' | 'port_unavailable' | 'crashed' };
 
 type QueuePayloadOf<T extends QueueEventType> = QueuePayloads[T];
 

@@ -7,7 +7,8 @@
 //   before `run:end`, and a resume sets it back to `running` before it emits anything, so a `run:end` in the middle of
 //   a resumed run's file never ends the follow. A consumer that failed on `run:end` reports after it, and changes
 //   nothing.
-// - A crashed run keeps STATUS `running` with no process behind it, so it is followed until the signal aborts.
+// - A crashed run is suspended `crashed` before its `run:end`, so its follow ends like any run's. A run killed outright
+//   keeps STATUS `running` with no process behind it, so it is followed until the signal aborts.
 import { readStatus } from '../engine/run-dir';
 import { readEventsFrom, START } from './consumers/ndjson';
 import type { SailEvent } from './types';

@@ -36,7 +36,8 @@
 // A run that completes or fails releases its workspace, then its lease, once STATUS says how it ended and before
 // `run:end`. A workspace that can't be removed doesn't keep the lease: it is left for a sweep, and `run:end` says so. A
 // lease that can't be released doesn't keep `run:end` from the stream either, which says so too. A suspended run keeps
-// both, marking its lease as held by no process after `run:end`. A crashed run keeps both without the mark.
+// both, marking its lease as held by no process after `run:end`. A run that crashes on an exception inside sail is
+// suspended `crashed` the same way, after its `error:crash`, unless the exception came out of this finish itself.
 //
 // A request from outside the run's process comes through its control file (`control.ts`), taken before the intake and
 // before each call, right after the abort check: `unwatched` suspends the run with that stop reason, keeping its
@@ -100,7 +101,7 @@
 // Every event of the run goes through one bus to `events.ndjson`, then to `summary.json`, which is rewritten after every
 // call, and then to any consumers passed in. The runtime emits
 // `run:start` for a fresh run, `journal:append` for each call it journals, `run:end` once STATUS says how the run
-// ended, and `error:crash` before an exception inside sail propagates. The call emits its own events, and the replay
+// ended, and `error:crash` then a `run:end` suspended `crashed` before an exception inside sail propagates. The call emits its own events, and the replay
 // the loop and route events of the moves past the journal's end. A resume continues the file's `seq` with no marker.
 // `run:end` ends the stream: a replay abandoned by an interrupt or budget may move on once its workflow stops waiting,
 // but nothing it reports after that is emitted. The bin exits once the command returns, ending any leftover handles.
@@ -542,7 +543,9 @@ async function drive(
    * reports it. A suspend marks its kept lease as held by no process as its last act, after run:end. The events are
    * synced before STATUS and after run:end, since no resume restores the stream of a run that has ended.
    */
+  let finishing = false;
   const finish = async (end: RunEnd): Promise<RunEnd> => {
+    finishing = true;
     syncEvents(dir);
     writeStatus(dir, end.status, end.stopReason);
     const { status, stopReason } = end;
@@ -1087,6 +1090,13 @@ async function drive(
     }
   } catch (error) {
     bus.emit({ type: 'error:crash', message: messageOf(error), ...(running === undefined ? {} : { key: running }) });
+    if (!finishing) {
+      try {
+        await finish({ runId, dir, status: 'suspended', stopReason: 'crashed', message: messageOf(error) });
+      } catch {
+        // The original error is the one to report.
+      }
+    }
     throw error;
   } finally {
     detach();

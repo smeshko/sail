@@ -125,9 +125,9 @@ test("the golden run's STATUS reads completed", () => {
   expect(readStatus(GOLDEN)).toEqual({ status: 'completed' });
 });
 
-test('port_unavailable is the last stop reason, so STATUS can say a suspended run ended on an unavailable port', () => {
+test('crashed is the last stop reason, so STATUS can say a suspended run ended on an exception inside sail', () => {
   expect(STOP_REASONS.join(' ')).toBe(
-    'workflow_failed stage_error budget_exceeded determinism_violation until unwatched stopped interrupted usage_limit port_unavailable',
+    'workflow_failed stage_error budget_exceeded determinism_violation until unwatched stopped interrupted usage_limit port_unavailable crashed',
   );
 });
 
