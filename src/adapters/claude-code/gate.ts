@@ -1,7 +1,9 @@
 // The gate every tool call of a Claude Code session passes before it runs (D1). Its `PreToolUse` hook sees each call,
 // maps it to sail's ToolCall and answers with decide()'s verdict: allow, or deny with the reason, which the model
 // reads. `canUseTool` is the fail-closed fallback: whatever reaches it the gate never decided, so it is denied, unless
-// it is the submission. Each denial is reported with its rule, the step's permissions under it and the reason (D9, D11).
+// it is the submission, or the very call the hook just allowed: Claude Code's own check on its protected paths, such as
+// `.claude/`, still asks after a hook allows, and that call, with the same id and input, runs as the hook decided.
+// Each denial is reported with its rule, the step's permissions under it and the reason (D9, D11).
 // A Grep of a folder reads every file below it, so it also needs a read glob that covers them all. A Read of a file in the
 // session's own `tool-results/` folder, where Claude Code saves a long tool output and tells the agent to read it, runs
 // whatever the read globs say; no other path outside the workspace does.
@@ -34,6 +36,15 @@ export function ruleOf(kind: ToolKind): DenialRule {
 }
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
+/** One call's tool and input as a string, or undefined when the input can't be read: such a call never matches. */
+function inputKey(tool: string, input: unknown): string | undefined {
+  try {
+    return JSON.stringify([tool, input]);
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * The folder below which a read glob matches every path: `` for `**` and `**\/*`, `src` for `src/**` and `src/**\/*`;
@@ -100,6 +111,8 @@ export function createGate(options: GateOptions): Gate {
   // Bun's realpathSync('') is the process's own directory, so an empty root would place sail's cwd in the call's
   // directories: a gate without all three roots decides nothing, and denies.
   const rootless = [ctx.worktree, ctx.stageIn, ctx.stageOut].some((root) => root.trim() === '');
+  /** The input of each call the hook allowed, by its tool-use id, until canUseTool asks about it. */
+  const allowedInputs = new Map<string, string>();
 
   /** Reports a denial of `tool` under `rule`. A listener that throws doesn't turn a denial into an allow. */
   const denied = (toolUseId: string, tool: string, rule: DenialRule, reason: string): void => {
@@ -161,12 +174,21 @@ export function createGate(options: GateOptions): Gate {
         session,
         input.mcp_server?.name,
       );
-      if (denial === undefined) return decision('allow');
+      if (denial === undefined) {
+        const key = inputKey(input.tool_name, input.tool_input);
+        if (key !== undefined) allowedInputs.set(input.tool_use_id, key);
+        return decision('allow');
+      }
       denied(input.tool_use_id, input.tool_name, denial.rule, denial.reason);
       return decision('deny', denial.reason);
     },
     async canUseTool(name, input, { toolUseID }): Promise<PermissionResult> {
       if (name === SUBMIT_TOOL) return { behavior: 'allow', updatedInput: input };
+      const allowedInput = allowedInputs.get(toolUseID);
+      allowedInputs.delete(toolUseID);
+      if (allowedInput !== undefined && allowedInput === inputKey(name, input)) {
+        return { behavior: 'allow', updatedInput: input };
+      }
       let kind: ToolKind = 'other';
       try {
         const mapped = toToolCall(name, input, ctx.worktree);
