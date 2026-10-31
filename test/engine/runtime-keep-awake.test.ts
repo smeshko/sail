@@ -189,7 +189,7 @@ test('the hold is released when an exception inside sail propagates', async () =
     const { keepAwake, moments } = watching(repo.dir);
     await expect(ran(repo.dir, { keepAwake })).rejects.toThrow();
     expect(moments.map((moment) => moment.at)).toEqual(['acquire', 'release']);
-    expect(moments[1]?.lastEvent).toBe('error:crash');
+    expect(moments[1]?.lastEvent).toBe('run:end');
   });
 });
 
