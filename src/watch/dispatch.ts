@@ -153,6 +153,8 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
   const resumed = new Set<string>();
   /** When this dispatcher last resumed each run from its usage limit or an unavailable port, until the run is held again. */
   const resumedAt = new Map<string, Date>();
+  /** When this dispatcher last resumed each run, whatever from: dates the `error:crash` its resume left. */
+  const resumeStartedAt = new Map<string, Date>();
   /** When this dispatcher first saw each run on its usage limit or an unavailable port, until it resumes the run. */
   const limitedAt = new Map<string, Date>();
   const sail = options.sail ?? sdkFingerprint;
@@ -224,12 +226,10 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
   /** Resumes the item's run as a process of its own, once, which then counts as the item's. */
   const resume = (item: QueueItem, runId: string, from: ResumedFrom) => {
     resumed.add(runId);
-    if (
-      from.status === 'suspended' &&
-      (from.stopReason === 'usage_limit' || from.stopReason === 'port_unavailable' || from.stopReason === 'crashed')
-    ) {
+    if (from.status === 'suspended' && (from.stopReason === 'usage_limit' || from.stopReason === 'port_unavailable')) {
       resumedAt.set(runId, now());
     }
+    resumeStartedAt.set(runId, now());
     exits.delete(item.dedupKey);
     let spawned: SpawnedRun;
     try {
@@ -273,6 +273,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
         first,
         resumed: resumed.has(runId),
         ...(resumedAt.has(runId) ? { resumedAt: resumedAt.get(runId) as Date } : {}),
+        ...(resumeStartedAt.has(runId) ? { resumeStartedAt: resumeStartedAt.get(runId) as Date } : {}),
         ...(exits.has(item.dedupKey) ? { exited: exited ?? null } : {}),
         ...(logFrom === undefined ? {} : { logFrom }),
       });

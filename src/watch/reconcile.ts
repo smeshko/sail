@@ -56,6 +56,8 @@ export interface ReconcileContext {
   resumed: boolean;
   /** When this dispatcher last resumed the item's run from a hold: no limit hit nor suspension on an unavailable port since means it failed. */
   resumedAt?: Date;
+  /** When this dispatcher last resumed the item's run, whatever from: an `error:crash` before it is not this resume's. */
+  resumeStartedAt?: Date;
   /** How the process this dispatcher last started for the item exited, once it has. */
   exited?: number | null;
   /** Where the output of the process this dispatcher last started for the item begins in its dispatch log. */
@@ -254,7 +256,7 @@ export async function reconcileItem(item: QueueItem, context: ReconcileContext):
   const holder = await liveHolder(runDir, runId, context);
   if (holder !== undefined) return { kind: 'adopt', pid: holder };
   if (context.resumed) {
-    const crash = status.stopReason === 'crashed' ? crashedSince(runDir, context.resumedAt) : undefined;
+    const crash = status.stopReason === 'crashed' ? crashedSince(runDir, context.resumeStartedAt) : undefined;
     const reason =
       crash === undefined
         ? (why(context, runId, 'its resume failed') ?? 'its resume failed')

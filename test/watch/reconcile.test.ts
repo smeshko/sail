@@ -237,7 +237,7 @@ test("a crashed run whose resume crashed again is parked with that resume's erro
   expect(
     await reconcileItem(
       item(1, DEAD),
-      w.context({ resumed: true, resumedAt: new Date('2026-10-28T09:15:00.000Z'), exited: 1 }),
+      w.context({ resumed: true, resumeStartedAt: new Date('2026-10-28T09:15:00.000Z'), exited: 1 }),
     ),
   ).toEqual({ kind: 'park', reason: 'its resume failed: the journal broke at line 4' });
 });
@@ -250,7 +250,7 @@ test("a crashed run whose resume failed without a new crash is parked with the l
   expect(
     await reconcileItem(
       item(1, DEAD),
-      w.context({ resumed: true, resumedAt: new Date('2026-10-28T09:15:00.000Z'), exited: 3 }),
+      w.context({ resumed: true, resumeStartedAt: new Date('2026-10-28T09:15:00.000Z'), exited: 3 }),
     ),
   ).toEqual({ kind: 'park', reason: 'its resume failed: sail resume: LINEAR_API_KEY is not set' });
 });

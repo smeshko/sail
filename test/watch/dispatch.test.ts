@@ -472,6 +472,35 @@ test('a run that crashed is resumed once, and a resume that crashes again parks 
   });
 });
 
+test("a run whose resume from an interruption crashed is parked with the error:crash message, not the log's stack frame", async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 1, 1);
+    const dispatcher = w.dispatcher();
+    await dispatcher.tick();
+    await w.spawner.end('FAKE-1', { status: 'suspended', stopReason: 'interrupted' });
+    await dispatcher.tick();
+    const runId = w.spawner.run('FAKE-1').runId;
+    expect(w.spawner.resumes.map((resume) => resume.runId)).toEqual([runId]);
+
+    w.clock.advance(60_000);
+    const crash = {
+      seq: 1,
+      ts: w.clock().toISOString(),
+      runId,
+      type: 'error:crash',
+      key: 'spec#1',
+      message: 'journal broke',
+    };
+    writeFileSync(join(w.runs, runId, 'events.ndjson'), `${JSON.stringify(crash)}\n`);
+    w.spawner.endResume(runId, { status: 'suspended', stopReason: 'crashed', log: '    at drive (runtime.ts:817:31)' });
+    await dispatcher.tick();
+    expect(w.spawner.resumes).toHaveLength(1);
+    expect(w.store.snapshot().items.map((item) => [item.state, item.reason])).toEqual([
+      ['parked', 'its resume failed: journal broke'],
+    ]);
+  });
+});
+
 test('a resumed run that hits the usage limit again is held again and resumed again past it; one whose resume left it on the same limit is parked; and once held again, it is not a run this dispatcher resumed', async () => {
   await withTempRepo(async (repo) => {
     const w = await world(repo, 2, 2);
