@@ -10,7 +10,7 @@ import { EXIT_OK, EXIT_REFUSED, EXIT_SUSPENDED } from '../../src/cli/exit-codes'
 import { recordingKeepAwake } from '../../src/engine/keep-awake';
 import { readStatus } from '../../src/engine/run-dir';
 import { readEvents } from '../../src/events/consumers/ndjson';
-import { write } from '../helpers/fixture';
+import { patchTicket, write } from '../helpers/fixture';
 import { useNewerSdk } from '../helpers/newer-sdk';
 import { commitBranch, seedPullRequests, writePrWorkflow } from '../helpers/pr-workflow';
 import { fakeInterrupts, runCaptured } from '../helpers/run-captured';
@@ -123,6 +123,15 @@ test("sail '#1' --workflow review-pr runs to completion in a workspace at the he
       prompt: true,
       claimed: 0,
     });
+  });
+});
+
+test("sail '#1' --workflow review-pr runs a pull request whose ticket has an open prerequisite: a pull-request start checks no prerequisites", async () => {
+  await withTempRepo(async (repo) => {
+    const { sail } = stub(repo);
+    patchTicket(sail, 'FAKE-1', { prerequisites: ['FAKE-4'] });
+    const { code, stderr } = await runCaptured(['#1', '--workflow', 'review-pr'], repo.dir);
+    expect({ code, stderr, runs: runIds(repo.dir).length }).toEqual({ code: EXIT_OK, stderr: '', runs: 1 });
   });
 });
 

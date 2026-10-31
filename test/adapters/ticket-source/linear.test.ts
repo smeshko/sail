@@ -1359,3 +1359,14 @@ test.each<[unknown, string]>([
   );
   expect(messageOf(error)).toBe(message);
 });
+
+test('get asks for the state of each inverse relation, and reports the ticket blocking it as a prerequisite with that state', async () => {
+  const { world, adapter } = linear();
+  const ticket = await adapter.get('ADW-2');
+  expect(ticket.prerequisites).toEqual([{ ticketKey: 'ADW-1', state: { type: 'unstarted', name: 'Ready' } }]);
+  const sent = world.requests.find((request) => request.operationName === 'SailTicket')?.query ?? '';
+  expect(sent.replace(/\s+/g, ' ')).toContain(
+    'inverseRelations(first: 250) { nodes { type issue { identifier title url state { name type } } } }',
+  );
+  expect('prerequisites' in (await adapter.get('ADW-1'))).toBe(false);
+});

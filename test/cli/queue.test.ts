@@ -441,6 +441,19 @@ test("sail queue ls a prints a held item's hold, until when and why, on its line
   });
 });
 
+test("sail queue ls a prints what a waiting item waits on after its other details, and nothing for an item that doesn't wait", async () => {
+  await withTempRepo(async (repo) => {
+    const { env } = repository(repo, []);
+    const path = writeQueue(join(repo.dir, '.sail-runs'));
+    const queue = JSON.parse(readFileSync(path, 'utf8'));
+    queue.items[0] = { ...queue.items[0], waitingOn: ['FAKE-1', 'FAKE-99 (unreadable)'] };
+    writeFileSync(path, `${JSON.stringify(queue)}\n`);
+    const lines = (await runCaptured(['queue', 'ls', 'a'], repo.dir, { env })).stdout.split('\n');
+    expect(lines[1]).toBe('queued ticket:FAKE-1 Add a greeting · waiting on FAKE-1, FAKE-99 (unreadable), forced');
+    expect(lines.slice(2).join('\n')).not.toContain('waiting on');
+  });
+});
+
 test('sail queue ls a prints dispatch held until <time> on its first line while the queue is held, and not otherwise', async () => {
   await withTempRepo(async (repo) => {
     const { env } = repository(repo, []);

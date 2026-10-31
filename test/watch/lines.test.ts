@@ -291,3 +291,16 @@ test('queue:moved prints the item, which side of the other item it went, and the
     '08:09:10 a  FAKE-7 moved after FAKE-6: moved by hand\n',
   ]);
 });
+
+test('queue:waiting prints the item and the prerequisites it waits on', () => {
+  const line = queueLine({
+    ...envelope,
+    type: 'queue:waiting',
+    dedupKey: 'ticket:FAKE-2',
+    on: ['FAKE-1', 'FAKE-99 (unreadable)'],
+  });
+  if (line === undefined) throw new Error('queue:waiting prints a line');
+  expect(utc(line)).toBe(
+    '08:09:10 a  FAKE-2 waits on FAKE-1, FAKE-99 (unreadable): its prerequisites are not Done or Canceled\n',
+  );
+});

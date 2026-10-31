@@ -243,3 +243,17 @@ export function commitGreet(repo: TempRepo): void {
   repo.git('add', 'src/greet.ts');
   repo.git('commit', '-q', '-m', 'add greet');
 }
+
+/**
+ * Merges `patch` into the ticket `ticketKey` of the copy `sail`'s fake world, such as its `prerequisites` or `state`: in
+ * the state file once a run has made one, which the fake reads instead of the seed, else in the seed.
+ */
+export function patchTicket(sail: string, ticketKey: string, patch: Record<string, unknown>): void {
+  const state = join(dirname(sail), '.sail-runs', 'fake', 'tickets.json');
+  const file = existsSync(state) ? state : join(sail, 'fake', 'tickets.json');
+  const world = JSON.parse(readFileSync(file, 'utf8')) as { tickets: Record<string, unknown>[] };
+  const ticket = world.tickets.find((each) => each.ticketKey === ticketKey);
+  if (ticket === undefined) throw new Error(`fake/tickets.json has no ${ticketKey}`);
+  Object.assign(ticket, patch);
+  writeFileSync(file, `${JSON.stringify(world, null, 2)}\n`);
+}

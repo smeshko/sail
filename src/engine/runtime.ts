@@ -149,6 +149,7 @@ import {
   type OpenedRun,
   type OpenRunOptions,
   openRun,
+  type Refusal,
   type ReopenRunOptions,
   reopenRun,
   rootRelative,
@@ -459,7 +460,7 @@ async function gitDiffs(
 }
 
 /** Opens a run of the workflow and runs it to its end. A refusal to open passes through, and nothing is written. */
-export async function runWorkflow(options: RunWorkflowOptions): Promise<RunEnd | { refused: string }> {
+export async function runWorkflow(options: RunWorkflowOptions): Promise<RunEnd | Refusal> {
   return awake(options, async (hold) => {
     const opened = await openRun(options);
     if ('refused' in opened) return opened;

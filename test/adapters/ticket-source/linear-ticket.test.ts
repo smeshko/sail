@@ -165,3 +165,63 @@ test('a priority number outside 0 to 4 is invalid for the operation, naming the 
     "ticketSource.listDesignated: Linear's priority 7 is not one sail knows",
   ]);
 });
+
+const blockedBy = (identifier: string, state: { name: string; type: string } | undefined) => ({
+  type: 'blocks',
+  issue: { identifier, title: `Ticket ${identifier}`, url: `https://linear.app/other-team/issue/${identifier}`, state },
+});
+
+test('a blocks inverse relation is a prerequisite with its state type, from any team: In Progress is started, Done completed, Canceled canceled', () => {
+  const node = nodeWith({
+    inverseRelations: {
+      nodes: [
+        blockedBy('OPS-4', { name: 'In Progress', type: 'started' }),
+        blockedBy('OPS-5', { name: 'Done', type: 'completed' }),
+        blockedBy('OPS-6', { name: 'Won’t do', type: 'canceled' }),
+        blockedBy('OPS-7', { name: 'Duplicate', type: 'duplicate' }),
+        blockedBy('OPS-8', { name: 'Triage', type: 'triage' }),
+      ],
+    },
+  });
+  expect(ticketOf(node).prerequisites).toEqual([
+    { ticketKey: 'OPS-4', state: { type: 'started', name: 'In Progress' } },
+    { ticketKey: 'OPS-5', state: { type: 'completed', name: 'Done' } },
+    { ticketKey: 'OPS-6', state: { type: 'canceled', name: 'Won’t do' } },
+    { ticketKey: 'OPS-7', state: { type: 'canceled', name: 'Duplicate' } },
+    { ticketKey: 'OPS-8', state: { type: 'unstarted', name: 'Triage' } },
+  ]);
+});
+
+test('a related inverse relation is no prerequisite, and a ticket with none has no prerequisites key', () => {
+  expect('prerequisites' in ticketOf(nodeWith({}))).toBe(false);
+  const node = nodeWith({
+    inverseRelations: {
+      nodes: [
+        { ...blockedBy('OPS-4', { name: 'In Progress', type: 'started' }), type: 'related' },
+        { ...blockedBy('OPS-5', { name: 'Done', type: 'completed' }), type: 'duplicate' },
+      ],
+    },
+  });
+  expect('prerequisites' in ticketOf(node)).toBe(false);
+});
+
+test('a blocks inverse relation whose issue is null is an unreadable prerequisite, and the parse and the links survive it', () => {
+  const node = nodeWith({
+    inverseRelations: {
+      nodes: [{ type: 'blocks', issue: null }, blockedBy('OPS-4', { name: 'Done', type: 'completed' })],
+    },
+  });
+  const ticket = ticketOf(node);
+  expect(ticket.prerequisites).toEqual([
+    { ticketKey: 'unknown' },
+    { ticketKey: 'OPS-4', state: { type: 'completed', name: 'Done' } },
+  ]);
+  expect(ticket.links.map((link) => link.title)).toContain('blocks OPS-4: Ticket OPS-4');
+  expect(ticket.links.filter((link) => link.title?.includes('unknown'))).toEqual([]);
+});
+
+test('a blocks inverse relation whose issue carries no state is an unreadable prerequisite', () => {
+  expect(ticketOf(nodeWith({ inverseRelations: { nodes: [blockedBy('OPS-4', undefined)] } })).prerequisites).toEqual([
+    { ticketKey: 'OPS-4' },
+  ]);
+});

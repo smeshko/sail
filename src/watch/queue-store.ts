@@ -37,6 +37,8 @@
 //   A resume, a park, a finish, a failure and a requeue clear it.
 // - `move()` places a queued item next to another queued one and marks it `moved`: add, a priority change and a retry
 //   leave a moved item where it is, and its dispatch clears the mark. It emits `queue:moved`.
+// - `waiting()` records the open prerequisites that hold a queued item at dispatch in its `waitingOn`, and emits
+//   `queue:waiting` when the list changes; an empty list clears it silently. A dispatch and a requeue clear it too.
 // - `skippedLeased()`, `watched()` and `unwatched()` only emit their events: none of them changes `queue.json`.
 // - Every event the store emits is handed to `onEvent` once it is appended, in order: the watcher's terminal lines. A
 //   hook that throws is ignored, so the terminal never breaks the queue.
@@ -100,6 +102,8 @@ export const QueueItem = z.strictObject({
   moved: z.literal(true).optional(),
   /** Set while its suspended run waits out a back-off on an unavailable port: only this item waits, until `until`. */
   held: z.strictObject({ until: z.string(), reason: z.string(), at: z.string() }).optional(),
+  /** The open prerequisites of its ticket, as the last dispatch check named them: it is not dispatched while any are open. */
+  waitingOn: z.array(z.string()).optional(),
 });
 export type QueueItem = z.infer<typeof QueueItem>;
 
@@ -257,6 +261,12 @@ export interface QueueStore {
   holdItem(key: string, until: string, reason: string): void;
   /** Clears the item's hold and emits `queue:released` with its `dedupKey`. An item not held changes nothing. */
   releaseItem(key: string): void;
+  /**
+   * Records which open prerequisites (as `waitingOnText` names them) hold the queued item at dispatch. A list that
+   * differs from the item's `waitingOn` replaces it and emits `queue:waiting`; the same list changes nothing. An empty
+   * list clears `waitingOn` and emits nothing.
+   */
+  waiting(key: string, on: readonly string[]): void;
   /** Emits `queue:skipped_leased`: the due item waits, since run `heldBy` holds `branch`. The queue is unchanged. */
   skippedLeased(key: string, branch: string, heldBy: string): void;
   /** Emits `watch:added`: watcher `pid` watches the workflow now. The queue is unchanged. */
@@ -492,6 +502,7 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
         item.attempts += 1;
         item.runId = runId;
         delete item.moved;
+        delete item.waitingOn;
         delete item.retryAt;
         delete item.pid;
         if (sail === undefined) delete item.sail;
@@ -543,7 +554,7 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
         }
         item.state = 'queued';
         item.attempts = 0;
-        for (const field of ['reason', 'retryAt', 'finishedAt', 'runId', 'pid', 'sail', 'held'] as const)
+        for (const field of ['reason', 'retryAt', 'finishedAt', 'runId', 'pid', 'sail', 'held', 'waitingOn'] as const)
           delete item[field];
         place(next, item);
       });
@@ -622,6 +633,16 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
         delete find(next, key).held;
       });
       stream.emit({ type: 'queue:released', workflow, dedupKey: key });
+    },
+    waiting(key, on) {
+      const current = find(queue, key).waitingOn ?? [];
+      if (current.length === on.length && current.every((each, index) => each === on[index])) return;
+      change((next) => {
+        const item = find(next, key);
+        if (on.length === 0) delete item.waitingOn;
+        else item.waitingOn = [...on];
+      });
+      if (on.length > 0) stream.emit({ type: 'queue:waiting', workflow, dedupKey: key, on: [...on] });
     },
     skippedLeased(key, branch, heldBy) {
       stream.emit({ type: 'queue:skipped_leased', workflow, dedupKey: key, branch, heldBy });

@@ -48,6 +48,10 @@ _Avoid_: tagged ticket, eligible ticket, allowlisted ticket
 A state a designated ticket is picked up from: by default every state the ticket source reads as unstarted (Triage, Backlog or Todo), or the ones its `pickUp` option names. The ticket source decides it with `canPickUp`; a poll, a dispatch, a claim and a start all apply that one rule, and `--force` overrides it.
 _Avoid_: ready state, eligible state
 
+**Prerequisite**:
+A ticket the ticket system says blocks another, reported by TicketSource's `get` with the state it is in now. It is *open* while that state is not completed or canceled, and also when the source can't read it. A ticket with an open prerequisite waits: it is not dispatched and its start is refused.
+_Avoid_: blocker, dependency, blocked (an outcome)
+
 **Designated pull request**:
 An open, non-draft pull request carrying the designation label, in any case, whose head branch is in the repository. A workflow that opens a pull request adds the label to hand it to a workflow that watches pull requests, and a human adds it to consent to the same. The watcher polls these, and the built-in `pr` intake accepts them.
 _Avoid_: tagged PR, labelled PR, bot PR
@@ -275,11 +279,11 @@ The named reason a run ended without completing, such as `workflow_failed`, `sta
 _Avoid_: error message, cause, exit reason
 
 **Refusal**:
-A command's end before a run starts, with exit code 3: an invalid config, missing credentials, type errors, no workflow, a source the intake doesn't accept, a source that isn't designated or is already claimed, a leased branch, or a workspace that can't be made. A refusal leaves no run directory.
+A command's end before a run starts, with exit code 3: an invalid config, missing credentials, type errors, no workflow, a source the intake doesn't accept, a source that isn't designated or is already claimed, a leased branch, or a workspace that can't be made. A refusal leaves no run directory. A ticket that waits on an open prerequisite is refused with exit code 5 instead, a distinct code so a script can tell waiting from a refusal; `--ignore-prerequisites` starts it, and `--force` doesn't.
 _Avoid_: rejection, abort, error (an outcome)
 
 **Dry run**:
-`sail <ticket> --dry-run`: the start's whole preflight (the config, credentials, the type check, the ticket and its designation, the branch lease) and the roster the run would freeze, printed. It writes nothing: no run directory, workspace, lease or comment, and no claim. It exits 0, or 3 with the start's own refusal.
+`sail <ticket> --dry-run`: the start's whole preflight (the config, credentials, the type check, the ticket and its designation, the branch lease) and the roster the run would freeze, printed. It writes nothing: no run directory, workspace, lease or comment, and no claim. It exits 0, or 3 (5 for a ticket that waits on an open prerequisite) with the start's own refusal.
 _Avoid_: preview, simulation, plan
 
 **Keep-awake**:
@@ -482,7 +486,7 @@ The engine's contract with one kind of external system, stated in sail's languag
 _Avoid_: interface (the TypeScript keyword), SPI, abstraction
 
 **TicketSource**:
-The port to the ticket system: fetch a ticket with its comments, links and attachments; list its tickets by state and label, add and remove its labels, relate it to another ticket, closing a duplicate; edit its title and description; update it; comment on it; file a new one with its labels; attach a file to it. It reports a ticket's state by type (unstarted, started, completed or canceled) and moves it to unstarted, in progress, in review or done (ADR-0015). v1 adapter: Linear. It may name its scope, the part of the provider it reads, such as a Linear team.
+The port to the ticket system: fetch a ticket with its comments, links, attachments and prerequisites; list its tickets by state and label, add and remove its labels, relate it to another ticket, closing a duplicate; edit its title and description; update it; comment on it; file a new one with its labels; attach a file to it. It reports a ticket's state by type (unstarted, started, completed or canceled) and moves it to unstarted, in progress, in review or done (ADR-0015). v1 adapter: Linear. It may name its scope, the part of the provider it reads, such as a Linear team.
 _Avoid_: tracker, task manager, board, issue source
 
 **CodeHost**:
@@ -602,7 +606,7 @@ The order a queue dispatches its items in, and the order `queue.json` keeps them
 _Avoid_: ranking, sort, schedule
 
 **Queue event stream**:
-A watched workflow's own event stream, `.sail-runs/queue/<workflow>/events.ndjson`: polls, queue items, dispatches, skips, parking and errors, in the run's envelope without `runId`, and append-only across restarts.
+A watched workflow's own event stream, `.sail-runs/queue/<workflow>/events.ndjson`: polls, queue items, dispatches, skips, a ticket waiting on its prerequisites, parking and errors, in the run's envelope without `runId`, and append-only across restarts.
 _Avoid_: queue log, daemon log
 
 **Dedup key**:
@@ -626,7 +630,7 @@ A request to the live watcher, a JSON file dropped in `.sail-runs/watcher/comman
 _Avoid_: message, signal, IPC
 
 **Dispatch**:
-The watcher taking the next queued source and starting an ordinary run, only while the workflow's live runs in the clone, those started by hand included, are under its maximum of concurrent runs and after re-checking the source is still eligible. A source whose branch a live run's lease holds waits, using no slot. For a ticket, the dispatched run's intake claims the ticket, as a run started by hand does. A ticket claimed by the workflow's own run that then failed or was stopped stays eligible, so its retry and its requeue run again, and that run starts with `--force`.
+The watcher taking the next queued source and starting an ordinary run, only while the workflow's live runs in the clone, those started by hand included, are under its maximum of concurrent runs and after re-checking the source is still eligible. A source whose branch a live run's lease holds waits, using no slot. A ticket with an open prerequisite waits too, using no slot and counting no attempt, and the next tick re-checks it fresh; the queue names what it waits on and says so once per change. For a ticket, the dispatched run's intake claims the ticket, as a run started by hand does. A ticket claimed by the workflow's own run that then failed or was stopped stays eligible, so its retry and its requeue run again, and that run starts with `--force`.
 _Avoid_: pickup, schedule, spawn
 
 **Dashboard**:

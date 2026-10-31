@@ -67,6 +67,8 @@ const StoredTicket = z.object({
   comments: z.array(Comment),
   links: z.array(Link),
   attachments: z.array(Attachment),
+  /** The keys of the tickets that block this one. A key no ticket of the world has is an unreadable prerequisite. */
+  prerequisites: z.array(z.string()).optional(),
   /** What each comment, update, add-label or remove-label call is answered, the last repeating: `unavailable` is the provider refusing it, a PortError. */
   answers: z
     .object({
@@ -144,11 +146,22 @@ function answerFor(ticket: StoredTicket, op: ScriptedOp): 'ok' | 'unavailable' {
 
 const refused = (op: ScriptedOp) => new PortError('ticketSource', op, 'unavailable', `fake: ${op} refused (scripted)`);
 
-const toTicket = (stored: StoredTicket): Ticket => ({
-  ...bare(stored),
-  url: `fake://tickets/${stored.ticketKey}`,
-  raw: bare(stored),
-});
+const toTicket = (stored: StoredTicket, world: World): Ticket => {
+  const { prerequisites, ...rest } = bare(stored);
+  return {
+    ...rest,
+    ...(prerequisites === undefined || prerequisites.length === 0
+      ? {}
+      : {
+          prerequisites: prerequisites.map((ticketKey) => {
+            const found = world.tickets.find((each) => each.ticketKey === ticketKey);
+            return found === undefined ? { ticketKey } : { ticketKey, state: { ...found.state } };
+          }),
+        }),
+    url: `fake://tickets/${stored.ticketKey}`,
+    raw: bare(stored),
+  };
+};
 
 const toListed = (stored: StoredTicket): ListedTicket => {
   const { ticketKey, title, description, state, labels } = bare(stored);
@@ -211,7 +224,8 @@ export function createFakeTicketSource(options: FakeTicketSourceOptions): Ticket
     async get(ticketKey, options) {
       if (options?.signal?.aborted) throw fetchInterrupted('get', ticketKey);
       const started = now().getTime();
-      const ticket = toTicket(find(store.read(), 'get', ticketKey));
+      const world = store.read();
+      const ticket = toTicket(find(world, 'get', ticketKey), world);
       emit({
         type: 'ticket:fetched',
         ticketKey,
@@ -228,11 +242,11 @@ export function createFakeTicketSource(options: FakeTicketSourceOptions): Ticket
     canPickUp,
     async listDesignated(label, options) {
       if (options?.signal?.aborted) throw fetchInterrupted('listDesignated', `the tickets labelled ${label}`);
-      return store
-        .read()
-        .tickets.filter((ticket) => ticket.labels.includes(label) && canPickUp(ticket))
+      const world = store.read();
+      return world.tickets
+        .filter((ticket) => ticket.labels.includes(label) && canPickUp(ticket))
         .sort((a, b) => ticketNumber(a.ticketKey) - ticketNumber(b.ticketKey))
-        .map(toTicket);
+        .map((ticket) => toTicket(ticket, world));
     },
     async list(filter) {
       if (filter.state !== undefined && !TicketStateType.safeParse(filter.state).success) {
@@ -324,6 +338,9 @@ export function createFakeTicketSource(options: FakeTicketSourceOptions): Ticket
           url: `fake://tickets/${ticketKey}`,
           title: `${INVERSE[kind]} ${ticketKey}: ${ticket.title}`,
         });
+        if (kind === 'blocks' && !(other.prerequisites ?? []).includes(ticketKey)) {
+          other.prerequisites = [...(other.prerequisites ?? []), ticketKey];
+        }
         if (kind === 'duplicate') ticket.state = { ...DUPLICATE };
         return { state: { ...ticket.state }, raw: bare(ticket) };
       });

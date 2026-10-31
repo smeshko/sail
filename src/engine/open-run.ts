@@ -58,6 +58,7 @@ import type { ProviderEvent } from '../events/types';
 import type { PortAdapters } from '../ports/adapter';
 import { PortError } from '../ports/errors';
 import type { Harness } from '../ports/harness';
+import { openPrerequisites, waitingOnText } from '../ports/ticket-source';
 import type { Repository, Workspace } from '../ports/types';
 import type { RunRef, WorkspacePort } from '../ports/workspace';
 import type { SourceKind } from '../sdk/intake';
@@ -170,6 +171,25 @@ export interface OpenedWorkspace {
   remote: string;
 }
 
+/** A start's refusal. `waitingOn` is set when the ticket waits on open prerequisites: the start exits 5, not 3. */
+export interface Refusal {
+  refused: string;
+  waitingOn?: string[];
+}
+
+const WAITING_END = 'not Done or Canceled. --ignore-prerequisites runs it anyway';
+
+/** The refusal of a ticket that waits on `on`, the labels of its open prerequisites. */
+function waiting(on: string[]): Refusal {
+  const noun = on.length === 1 ? 'a prerequisite that is' : 'prerequisites that are';
+  return { refused: `the ticket waits on ${on.join(', ')}, ${noun} ${WAITING_END}`, waitingOn: on };
+}
+
+/** Whether `message` is the refusal of a ticket that waits on open prerequisites, as `waiting()` words it. */
+export function isWaitingRefusal(message: string): boolean {
+  return message.startsWith('the ticket waits on ') && message.endsWith(WAITING_END);
+}
+
 export interface OpenRunOptions {
   secrets?: readonly string[];
   /** Where the run starts from: `.sail/` is found from here up to the git root. */
@@ -183,6 +203,8 @@ export interface OpenRunOptions {
    * maxConcurrentRuns, and records which check it overrode.
    */
   force?: boolean;
+  /** Runs a ticket that waits on an open prerequisite. `--force` does not: it overrides three other checks. */
+  ignorePrerequisites?: boolean;
   /** The stage after whose first call the run stops, suspended. One the workflow doesn't reach is refused. */
   until?: string;
   /**
@@ -489,7 +511,7 @@ async function checkCap(options: {
  * A start's preflight: every check that can refuse, in the order the header comment gives, then the run id, the branch
  * and the header, built and checked. It writes nothing, but it claims the `.sail/` for the process.
  */
-export async function preflightRun(options: OpenRunOptions): Promise<Preflight | { refused: string }> {
+export async function preflightRun(options: OpenRunOptions): Promise<Preflight | Refusal> {
   const { cwd, workflow, ticket, force = false, dispatch } = options;
   // Read before anything can refuse, so the run id's time is the clock's first reading whatever else reads it later.
   const now = (options.clock ?? systemClock)();
@@ -625,6 +647,8 @@ export async function preflightRun(options: OpenRunOptions): Promise<Preflight |
   });
   if (options.signal?.aborted) return { refused: 'stopped before the run was opened' };
   if ('refused' in resolved) return resolved;
+  const open = options.ignorePrerequisites === true ? [] : openPrerequisites(resolved.ticket);
+  if (open.length > 0) return waiting(waitingOnText(open));
   const { ticketKey } = resolved;
   const runId = runIdOf(ticketKey);
   if (typeof runId !== 'string') return runId;
@@ -663,7 +687,7 @@ export async function preflightRun(options: OpenRunOptions): Promise<Preflight |
  * A `.sail/` is claimed for the process once its config reads, before the workflow is imported, so even a refused load
  * claims it. Opening a second run from a claimed `.sail/` throws: that is a bug in the caller, never a refusal.
  */
-export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { refused: string }> {
+export async function openRun(options: OpenRunOptions): Promise<OpenedRun | Refusal> {
   const preflight = await preflightRun(options);
   if ('refused' in preflight) return preflight;
   const { config, loaded, source, runId, branch, header: preflighted, harnesses } = preflight;

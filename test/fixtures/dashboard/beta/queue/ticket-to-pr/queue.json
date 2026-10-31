@@ -19,7 +19,8 @@
       "state": "queued",
       "attempts": 0,
       "addedAt": "2026-09-24T10:55:00.000Z",
-      "priority": "urgent"
+      "priority": "urgent",
+      "waitingOn": ["FAKE-1", "FAKE-99 (unreadable)"]
     },
     {
       "dedupKey": "ticket:FAKE-3",

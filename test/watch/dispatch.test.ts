@@ -19,7 +19,7 @@ import { createDispatcher, type Settled } from '../../src/watch/dispatch';
 import { openQueue, type QueueStore, queueDir } from '../../src/watch/queue-store';
 import { dispatchLog, spawnResume, spawnRun } from '../../src/watch/spawn';
 import { fakeAdapters } from '../helpers/adapters';
-import { copyFixture } from '../helpers/fixture';
+import { copyFixture, patchTicket } from '../helpers/fixture';
 import { writeLiveRun } from '../helpers/live-run';
 import { commitBranch, seedPullRequests } from '../helpers/pr-workflow';
 import { manualClock, queueEventIssues, queueEvents, sourceKey, ticket } from '../helpers/queue';
@@ -1851,3 +1851,132 @@ test('a dispatcher that settles a refused start an earlier one spawned holds by 
     expect(spawnedKeys(w.spawner)).toEqual(['FAKE-1', 'FAKE-1']);
   });
 });
+
+const DONE = { type: 'completed', name: 'Done' };
+
+test('a queued ticket whose prerequisite is open is held without a slot or an attempt, says so once across ticks, and the next due item starts', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 3, 3, { claiming: false });
+    patchTicket(join(repo.dir, '.sail'), 'FAKE-2', { prerequisites: ['FAKE-1'] });
+    const dispatcher = w.dispatcher();
+    await dispatcher.tick();
+    expect(spawnedKeys(w.spawner)).toEqual(['FAKE-1', 'FAKE-3']);
+    expect(states(w.store)).toEqual(['FAKE-1 dispatched 1', 'FAKE-2 queued 0', 'FAKE-3 dispatched 1']);
+    expect(w.store.snapshot().items[1]?.waitingOn).toEqual(['FAKE-1']);
+    w.clock.advance(FIVE_MINUTES);
+    await dispatcher.tick();
+    expect(spawnedKeys(w.spawner)).toEqual(['FAKE-1', 'FAKE-3']);
+    expect(eventsOf(w.runs, 'queue:waiting')).toEqual([{ dedupKey: 'ticket:FAKE-2', on: ['FAKE-1'] }]);
+    expect(eventsOf(w.runs, 'queue:dropped')).toEqual([]);
+    expect(queueEventIssues(queueDir(w.runs, 'a'))).toEqual([]);
+  });
+});
+
+test.each([
+  ['Done', DONE],
+  ['Canceled', { type: 'canceled', name: 'Canceled' }],
+])(
+  'a ticket waiting on a prerequisite starts on the tick after the prerequisite is %s, and waitingOn is cleared',
+  async (_, state) => {
+    await withTempRepo(async (repo) => {
+      const w = await world(repo, 2, 2, { claiming: false });
+      const sail = join(repo.dir, '.sail');
+      patchTicket(sail, 'FAKE-2', { prerequisites: ['FAKE-1'] });
+      const dispatcher = w.dispatcher();
+      await dispatcher.tick();
+      expect(spawnedKeys(w.spawner)).toEqual(['FAKE-1']);
+      expect(w.store.snapshot().items[1]?.waitingOn).toEqual(['FAKE-1']);
+      patchTicket(sail, 'FAKE-1', { state });
+      w.clock.advance(FIVE_MINUTES);
+      await dispatcher.tick();
+      expect(spawnedKeys(w.spawner)).toEqual(['FAKE-1', 'FAKE-2']);
+      expect(states(w.store)).toEqual(['FAKE-1 dispatched 1', 'FAKE-2 dispatched 1']);
+      expect(w.store.snapshot().items[1]?.waitingOn).toBeUndefined();
+    });
+  },
+);
+
+test('a prerequisite the source does not know keeps the ticket waiting, named as unreadable', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 1, 1, { claiming: false });
+    patchTicket(join(repo.dir, '.sail'), 'FAKE-1', { prerequisites: ['FAKE-99'] });
+    await w.dispatcher().tick();
+    expect(spawnedKeys(w.spawner)).toEqual([]);
+    expect(eventsOf(w.runs, 'queue:waiting')).toEqual([{ dedupKey: 'ticket:FAKE-1', on: ['FAKE-99 (unreadable)'] }]);
+  });
+});
+
+test('a forced item waits on an open prerequisite at its first dispatch too, and starts once it is Done', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 2, 2, { claiming: false });
+    const sail = join(repo.dir, '.sail');
+    patchTicket(sail, 'FAKE-2', { prerequisites: ['FAKE-1'] });
+    w.store.drop('ticket:FAKE-2', 'to be added again, forced');
+    w.store.add([await w.ticketSource.get('FAKE-2')], { forced: true });
+    const dispatcher = w.dispatcher();
+    await dispatcher.tick();
+    expect(spawnedKeys(w.spawner)).toEqual(['FAKE-1']);
+    expect(eventsOf(w.runs, 'queue:waiting')).toEqual([{ dedupKey: 'ticket:FAKE-2', on: ['FAKE-1'] }]);
+    patchTicket(sail, 'FAKE-1', { state: DONE });
+    w.clock.advance(FIVE_MINUTES);
+    await dispatcher.tick();
+    expect(w.spawner.runs.map((run) => [run.ticketKey, run.force])).toEqual([
+      ['FAKE-1', false],
+      ['FAKE-2', true],
+    ]);
+  });
+});
+
+test('a waiting ticket is read again only once the re-check interval has passed, not on every tick', async () => {
+  await withTempRepo(async (repo) => {
+    const reads: string[] = [];
+    const w = await world(repo, 2, 2, {
+      claiming: false,
+      source: (own) => ({
+        ...own,
+        get: (key, ...rest) => {
+          reads.push(key);
+          return own.get(key, ...rest);
+        },
+      }),
+    });
+    patchTicket(join(repo.dir, '.sail'), 'FAKE-2', { prerequisites: ['FAKE-1'] });
+    const dispatcher = w.dispatcher();
+    await dispatcher.tick();
+    const first = reads.filter((key) => key === 'FAKE-2').length;
+    expect(w.store.snapshot().items[1]?.waitingOn).toEqual(['FAKE-1']);
+    for (let tick = 0; tick < 5; tick++) {
+      w.clock.advance(1000);
+      await dispatcher.tick();
+    }
+    expect(reads.filter((key) => key === 'FAKE-2')).toHaveLength(first);
+    w.clock.advance(FIVE_MINUTES);
+    await dispatcher.tick();
+    expect(reads.filter((key) => key === 'FAKE-2').length).toBeGreaterThan(first);
+  });
+});
+
+test.each([
+  ['its exit code', true],
+  ['its message alone, from a dispatcher that did not see it exit', false],
+])(
+  'a start refused because its ticket waits on a prerequisite, known by %s, goes back to queued with no attempt counted, and waits',
+  async (_, sameDispatcher) => {
+    await withTempRepo(async (repo) => {
+      const w = await world(repo, 1, 1, { claiming: false });
+      const spawner = w.dispatcher();
+      await spawner.tick();
+      // The prerequisite appears between the dispatch's re-check and the run's own read.
+      patchTicket(join(repo.dir, '.sail'), 'FAKE-1', { prerequisites: ['FAKE-9'] });
+      const dispatcher = sameDispatcher ? spawner : w.dispatcher();
+      const waits =
+        'sail FAKE-1: the ticket waits on FAKE-9 (unreadable), a prerequisite that is not Done or Canceled. --ignore-prerequisites runs it anyway';
+      await w.spawner.end('FAKE-1', { refused: waits, code: 5 });
+      await dispatcher.tick();
+      expect(states(w.store)).toEqual(['FAKE-1 queued 0']);
+      expect(w.store.snapshot().items[0]?.waitingOn).toEqual(['FAKE-9 (unreadable)']);
+      expect(w.settled).toEqual([]);
+      expect(spawnedKeys(w.spawner)).toEqual(['FAKE-1']);
+    });
+  },
+);

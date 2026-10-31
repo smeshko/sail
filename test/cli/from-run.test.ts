@@ -10,7 +10,7 @@ import { readJournal } from '../../src/engine/journal';
 import { recordingKeepAwake } from '../../src/engine/keep-awake';
 import { readStatus } from '../../src/engine/run-dir';
 import { readEvents } from '../../src/events/consumers/ndjson';
-import { edit } from '../helpers/fixture';
+import { edit, patchTicket } from '../helpers/fixture';
 import { type CaptureOptions, fakeInterrupts, runCaptured } from '../helpers/run-captured';
 import { cutJournal, runIds, sharedSource } from '../helpers/seeded';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
@@ -56,6 +56,16 @@ test('a seeded run holds the keep-awake once and releases it at its end, with --
       expect(held).toEqual([expect.objectContaining({ held: true, by: 'fake' })]);
     });
   }
+});
+
+test('a seeded run of a ticket that has gained an open prerequisite starts: a seeded run checks no prerequisites', async () => {
+  await withTempRepo(async (repo) => {
+    const from = await source.copyInto(repo.dir);
+    patchTicket(join(repo.dir, '.sail'), 'FAKE-1', { prerequisites: ['FAKE-2'] });
+    const ran = await sailRun(repo, from.runId, ['--from-run', from.runId, '--stage', 'spec']);
+    expect({ code: ran.code, stderr: ran.stderr }).toEqual({ code: EXIT_SUSPENDED, stderr: '' });
+    expect(ran.runId).not.toBe('');
+  });
 });
 
 test('sail run --from-run --stage spec, after an edit of the spec prompt, reruns spec alone on the reused brief and stops suspended: its prompt carries the edit and its output is its own', async () => {
@@ -250,7 +260,9 @@ test('Ctrl-C during the spec session suspends the seeded run with interrupted, a
 test('the usage lists sail run --from-run and what --continue does, and still lists sail <ticket> first', async () => {
   const { stdout } = await runCaptured(['--help']);
   const commands = stdout.split('\n').filter((line) => line.startsWith('  sail '));
-  expect(commands[0]).toBe('  sail <ticket> [--workflow <name>] [--force] [--until <stage>] [-q|-v|-vv]');
+  expect(commands[0]).toBe(
+    '  sail <ticket> [--workflow <name>] [--force] [--ignore-prerequisites] [--until <stage>] [-q|-v|-vv]',
+  );
   expect(stdout).toMatch(
     /^ {2}sail run --from-run <run> --stage <stage> \[--continue\] \[--run-id <id>\]\n {2,}Rerun one stage on another run's earlier calls: a seeded run$/m,
   );

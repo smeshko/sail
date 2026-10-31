@@ -5,11 +5,16 @@ import {
   EXIT_OK,
   EXIT_REFUSED,
   EXIT_SUSPENDED,
+  EXIT_WAITING,
   exitCodeFor,
 } from '../../src/cli/exit-codes';
 
 test('the exit codes are design.md §4 codes 0 to 4', () => {
   expect([EXIT_OK, EXIT_FAILED, EXIT_SUSPENDED, EXIT_REFUSED, EXIT_INTERNAL]).toEqual([0, 1, 2, 3, 4]);
+});
+
+test('a ticket waiting on an open prerequisite exits 5, apart from every refusal', () => {
+  expect(EXIT_WAITING).toBe(5);
 });
 
 test("a finished run's status gives its exit code", () => {

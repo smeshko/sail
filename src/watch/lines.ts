@@ -70,6 +70,10 @@ function textOf(event: QueueEvent, afterError: boolean): { text: string; alert?:
       const place = event.before !== undefined ? `before ${keyOf(event.before)}` : `after ${keyOf(event.after ?? '')}`;
       return { text: `${keyOf(event.dedupKey)} moved ${place}: ${event.reason}` };
     }
+    case 'queue:waiting':
+      return {
+        text: `${keyOf(event.dedupKey)} waits on ${event.on.join(', ')}: its prerequisites are not Done or Canceled`,
+      };
     case 'queue:held':
       if (event.dedupKey !== undefined) {
         return { text: `${keyOf(event.dedupKey)} held until ${event.until ?? ''}: ${event.reason}`, alert: true };

@@ -3,12 +3,23 @@
 // links in the text, so they are found there and listed beside Linear's own attachments.
 import { z } from 'zod';
 import { PortError } from '../../ports/errors';
-import type { Attachment, Comment, Link, Ticket, TicketPriority, TicketStateType } from '../../ports/types';
+import type {
+  Attachment,
+  Comment,
+  Link,
+  Prerequisite,
+  Ticket,
+  TicketPriority,
+  TicketStateType,
+} from '../../ports/types';
 
 /** The fields of a comment, for the ticket query and the comment pages. */
 export const COMMENT_FIELDS = 'id body createdAt user { name } botActor { name }';
 
-/** The fields of a ticket every query selects. */
+/**
+ * The fields of a ticket every query selects. The inverse relations carry their issue's state, which is what makes a
+ * `blocks` one a prerequisite with a state: a scalar object per relation, no new connection, so the complexity stays put.
+ */
 export const TICKET_FIELDS = `id identifier number title description url priority
   state { id name type }
   team { key }
@@ -16,7 +27,7 @@ export const TICKET_FIELDS = `id identifier number title description url priorit
   labels(first: 250) { nodes { name } }
   comments(first: 250) { nodes { ${COMMENT_FIELDS} } pageInfo { hasNextPage endCursor } }
   relations(first: 250) { nodes { type relatedIssue { identifier title url } } }
-  inverseRelations(first: 250) { nodes { type issue { identifier title url } } }
+  inverseRelations(first: 250) { nodes { type issue { identifier title url state { name type } } } }
   attachments(first: 250) { nodes { title url } }`;
 
 const STATE_TYPES: Record<string, TicketStateType> = {
@@ -50,6 +61,7 @@ function priorityOf(number: number, op: string): TicketPriority {
 }
 
 const Related = z.object({ identifier: z.string(), title: z.string(), url: z.string() });
+const Blocker = Related.extend({ state: z.object({ name: z.string(), type: z.string() }).nullish() });
 
 export const LinearComment = z.object({
   body: z.string(),
@@ -68,7 +80,7 @@ const LinearTicketNode = z.object({
   state: z.object({ name: z.string(), type: z.string() }),
   labels: z.object({ nodes: z.array(z.object({ name: z.string() })) }),
   relations: z.object({ nodes: z.array(z.object({ type: z.string(), relatedIssue: Related })) }),
-  inverseRelations: z.object({ nodes: z.array(z.object({ type: z.string(), issue: Related })) }),
+  inverseRelations: z.object({ nodes: z.array(z.object({ type: z.string(), issue: Blocker.nullable() })) }),
   attachments: z.object({ nodes: z.array(z.object({ title: z.string(), url: z.string() })) }),
 });
 
@@ -108,15 +120,26 @@ export function toTicket(node: unknown, comments: readonly unknown[], op: string
       url: to.url,
       title: `${type} ${to.identifier}: ${to.title}`,
     })),
-    ...ticket.inverseRelations.nodes.map(({ type, issue: from }) => ({
-      url: from.url,
-      title: `${type} ${from.identifier}: ${from.title}`,
-    })),
+    ...ticket.inverseRelations.nodes.flatMap(({ type, issue: from }) =>
+      from === null ? [] : [{ url: from.url, title: `${type} ${from.identifier}: ${from.title}` }],
+    ),
     ...ticket.attachments.nodes.map(({ title, url }) => ({ url, title })),
   ];
   const files = [description, ...sorted.map((comment) => comment.body)].flatMap(uploadsIn);
   const attachments: Attachment[] = [...ticket.attachments.nodes.map(({ title, url }) => ({ name: title, url }))];
   for (const file of files) if (!attachments.some((known) => known.url === file.url)) attachments.push(file);
+  const prerequisites: Prerequisite[] = ticket.inverseRelations.nodes
+    .filter(({ type }) => type === 'blocks')
+    .map(({ issue }) =>
+      issue === null
+        ? { ticketKey: 'unknown' }
+        : issue.state == null
+          ? { ticketKey: issue.identifier }
+          : {
+              ticketKey: issue.identifier,
+              state: { type: stateTypeOf(issue.state.type, op), name: issue.state.name },
+            },
+    );
   const raw = node as Record<string, unknown>;
   const rawComments = (raw.comments ?? {}) as Record<string, unknown>;
   return {
@@ -132,6 +155,7 @@ export function toTicket(node: unknown, comments: readonly unknown[], op: string
     ),
     links,
     attachments,
+    ...(prerequisites.length === 0 ? {} : { prerequisites }),
     raw: { ...raw, comments: { ...rawComments, nodes: [...comments] } },
   };
 }

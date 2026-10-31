@@ -40,7 +40,7 @@ export interface Io {
 const USAGE = `sail: a software factory. A ticket goes in and a pull request comes out.
 
 Usage:
-  sail <ticket> [--workflow <name>] [--force] [--until <stage>] [-q|-v|-vv]
+  sail <ticket> [--workflow <name>] [--force] [--ignore-prerequisites] [--until <stage>] [-q|-v|-vv]
                                                              Start a run from a ticket: its key, or its URL
   sail '#<pr>' [--workflow <name>] [--force] [-q|-v|-vv]     Start a run from a pull request: #12, 12, or its URL
   sail init                                                  Write .sail/ here: a config and the editor's setup, no workflow
@@ -86,6 +86,7 @@ Usage:
 
 Starting a run from a ticket:
   --force          Runs a ticket that is not designated, not in a pick-up state, or whose workflow's live runs fill its maxConcurrentRuns, and records which check it overrode; a pull request that is unlabelled, closed or a draft
+  --ignore-prerequisites  Runs a ticket that waits on a prerequisite that is not Done or Canceled; without it the start exits 5
   --until <stage>  Stops the run after that stage's first call, suspended: sail resume takes it to its end
   --dry-run        Runs every check a start runs and prints the roster it would freeze; writes nothing
   --record <dir>   Writes each agent session to <dir> as a recording; sail resume takes it too
@@ -284,6 +285,7 @@ const TICKET: CommandSpec = {
   options: {
     workflow: { type: 'string' },
     force: { type: 'boolean' },
+    'ignore-prerequisites': { type: 'boolean' },
     until: { type: 'string' },
     'dry-run': { type: 'boolean' },
     record: { type: 'string' },

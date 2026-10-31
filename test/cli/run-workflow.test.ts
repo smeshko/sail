@@ -7,7 +7,14 @@ import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { basename, join, sep } from 'node:path';
 import { findProject, verbosityOf } from '../../src/cli/commands/run-workflow';
-import { EXIT_FAILED, EXIT_INTERNAL, EXIT_OK, EXIT_REFUSED, EXIT_SUSPENDED } from '../../src/cli/exit-codes';
+import {
+  EXIT_FAILED,
+  EXIT_INTERNAL,
+  EXIT_OK,
+  EXIT_REFUSED,
+  EXIT_SUSPENDED,
+  EXIT_WAITING,
+} from '../../src/cli/exit-codes';
 import type { Io, Parsed } from '../../src/cli/index';
 import { readJournal } from '../../src/engine/journal';
 import { recordingKeepAwake } from '../../src/engine/keep-awake';
@@ -36,7 +43,7 @@ import {
   usageOf,
   writeAgentFixture,
 } from '../helpers/agent-fixture';
-import { copyFixture, edit, FIXTURE_SAIL, write } from '../helpers/fixture';
+import { copyFixture, edit, FIXTURE_SAIL, patchTicket, write } from '../helpers/fixture';
 import { writeLiveRun } from '../helpers/live-run';
 import { type NewerSdk, useNewerSdk } from '../helpers/newer-sdk';
 import {
@@ -507,6 +514,45 @@ test.each<[string, string, Forced[]]>([
     expect(header.source).toEqual({ kind: 'ticket', ticketKey, via: 'cli', forced });
     expect([claim?.claimed, ticket.state]).toEqual([forced.length === 1, IN_PROGRESS]);
   });
+});
+
+const WAITS = 'sail FAKE-1: the ticket waits on';
+const IGNORE = 'a prerequisite that is not Done or Canceled. --ignore-prerequisites runs it anyway\n';
+
+test.each<[string, string, string]>([
+  ['In Progress', 'FAKE-4', `${WAITS} FAKE-4, ${IGNORE}`],
+  ['unreadable', 'FAKE-99', `${WAITS} FAKE-99 (unreadable), ${IGNORE}`],
+])(
+  'sail FAKE-1 with a prerequisite that is %s exits 5 naming it, and writes nothing',
+  async (_, prerequisite, message) => {
+    const { code, stdout, stderr, touched } = await sailIn(['FAKE-1'], { testsPassAt: 1 }, (sail) =>
+      patchTicket(sail, 'FAKE-1', { prerequisites: [prerequisite] }),
+    );
+    expect({ code, stdout, stderr, touched }).toEqual({
+      code: EXIT_WAITING,
+      stdout: '',
+      stderr: message,
+      touched: false,
+    });
+  },
+);
+
+test('sail FAKE-1 --ignore-prerequisites runs a ticket whose prerequisite is open', async () => {
+  const { code, stderr, runs } = await sailIn(['FAKE-1', '--ignore-prerequisites'], { testsPassAt: 1 }, (sail) =>
+    patchTicket(sail, 'FAKE-1', { prerequisites: ['FAKE-4'] }),
+  );
+  expect({ code, stderr, runs: runs.length }).toEqual({ code: EXIT_OK, stderr: '', runs: 1 });
+});
+
+test.each<[string, Record<string, unknown>]>([
+  ['Done', {}],
+  ['Canceled', { state: { type: 'canceled', name: 'Canceled' } }],
+])('sail FAKE-1 runs once its prerequisite is %s', async (_, patch) => {
+  const { code, stderr, runs } = await sailIn(['FAKE-1'], { testsPassAt: 1 }, (sail) => {
+    patchTicket(sail, 'FAKE-5', patch);
+    patchTicket(sail, 'FAKE-1', { prerequisites: ['FAKE-5'] });
+  });
+  expect({ code, stderr, runs: runs.length }).toEqual({ code: EXIT_OK, stderr: '', runs: 1 });
 });
 
 /** A repository holding the stub and one completed run of `FAKE-1`, copied into `to` so a second command can run there. */

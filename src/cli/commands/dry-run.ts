@@ -1,7 +1,7 @@
 // `sail <ticket> --dry-run`: the start's whole preflight, then the roster the run would freeze, printed. The config, its
 // adapters and the type check are `sail <ticket>`'s own steps, before this module is reached. The engine's `dryRun()`
 // then runs every check a start runs and reads the branch's lease. A refusal reads as the start's, `sail <ticket>:
-// <message>` with exit 3. Otherwise the roster goes to stdout with exit 0. Nothing is written: no run directory,
+// <message>` with exit 3, or 5 for a ticket that waits on an open prerequisite. Otherwise the roster goes to stdout with exit 0. Nothing is written: no run directory,
 // workspace, lease, claim, comment or registry entry.
 //
 // The lines are the dry run's own, built here from the header a start would freeze, never derived again: the run's
@@ -11,7 +11,7 @@ import type { ResolvedAdapters } from '../../engine/adapters';
 import { dryRun } from '../../engine/dry-run';
 import type { IntakeEntry, RosterEntry, StepRosterEntry } from '../../engine/roster';
 import type { RunHeader } from '../../engine/run-header';
-import { EXIT_OK, EXIT_REFUSED, type ExitCode } from '../exit-codes';
+import { EXIT_OK, EXIT_REFUSED, EXIT_WAITING, type ExitCode } from '../exit-codes';
 import type { Io } from '../index';
 
 const NOTHING_WRITTEN = 'dry run: nothing was written: no run directory, workspace, lease, claim or comment';
@@ -100,6 +100,7 @@ export interface DryRunTicket {
   workflow: string;
   ticket: string;
   force: boolean;
+  ignorePrerequisites?: boolean;
   until?: string;
 }
 
@@ -115,12 +116,13 @@ export async function dryRunTicket(
     workflow: options.workflow,
     ticket: options.ticket,
     force: options.force,
+    ...(options.ignorePrerequisites === true ? { ignorePrerequisites: true } : {}),
     ...(options.until === undefined ? {} : { until: options.until }),
     adapters: project.adapters,
   });
   if ('refused' in result) {
     io.stderr(`${command}: ${result.refused}\n`);
-    return EXIT_REFUSED;
+    return result.waitingOn === undefined ? EXIT_REFUSED : EXIT_WAITING;
   }
   const from = result.ticket ?? result.pullRequest;
   if (from === undefined) throw new Error('a dry run found neither a ticket nor a pull request');
