@@ -28,6 +28,9 @@
 // the lease, and is thrown on: it is a bug or a disk fault, not a refusal. Then `run.json`, the journal holding the
 // seed, the events file and STATUS `running` are written.
 //
+// The seeded run keeps its own copy of the clone's `.sail/` and conventions in `definition/`, as the clone reads them now,
+// not its source's, and runs and resumes from it.
+//
 // The workspace starts at the source's base: the source's code changes are not carried. A reused call's commits are not
 // in the seeded workspace, so a later stage that consumes a gitDiff sees only what the seeded run changed. Its workspace
 // setup runs as any run's does, so what the setup installed in the source's workspace is there again.
@@ -46,6 +49,7 @@ import { loadWorkflow } from './load-workflow';
 import {
   claim,
   collecting,
+  conventionPaths,
   findConfigured,
   intakeNameTaken,
   type OpenedRun,
@@ -55,7 +59,15 @@ import {
 } from './open-run';
 import { credentialValues, redactor } from './redact';
 import { harnessesReached, modelProblems } from './roster';
-import { copyStageFolders, removeOpening, runsDir, type Source, unmarkedRefusal, writeStatus } from './run-dir';
+import {
+  copyDefinitions,
+  DEFINITION_DIR,
+  removeOpening,
+  runsDir,
+  type Source,
+  unmarkedRefusal,
+  writeStatus,
+} from './run-dir';
 import {
   assertRunHeader,
   buildRunHeader,
@@ -343,7 +355,7 @@ export async function openSeededRun(options: SeededRunOptions): Promise<OpenedRu
       });
     }
     // A fresh copy, not the source run's: the seeded run is a new run of the workflow as it reads now.
-    copyStageFolders(dir, root, header);
+    copyDefinitions(dir, root, found.dir, conventionPaths(config, header));
     writeRunHeader(dir, header);
     createJournal(dir);
     journaled = seed.map(({ seq: _, recordedAt: __, ...entry }) => appendJournal(dir, entry, now));
@@ -359,7 +371,7 @@ export async function openSeededRun(options: SeededRunOptions): Promise<OpenedRu
     dir,
     header,
     redact,
-    sailDir: found.dir,
+    sailDir: join(dir, DEFINITION_DIR, '.sail'),
     root,
     adapters: options.adapters.ports,
     portVariables: options.adapters.portVariables,

@@ -8,8 +8,8 @@
     "schema": { "const": "sail.run.v1" },
     "runId": { "type": "string" },
     "layout": {
-      "description": "the run directory's layout: 2 keeps each call's records beside its $STAGE_OUT, out/. A run without it kept them inside, and can't be resumed or seed a run",
-      "const": 2
+      "description": "the run directory's layout: 2 keeps each call's records beside its $STAGE_OUT, out/; 3 also keeps the whole .sail/ in definition/. A run without it kept the records inside, and can't be resumed or seed a run",
+      "enum": [2, 3]
     },
     "source": {
       "description": "what the run was started from, a ticket or a pull request; intake resolves it into the input",

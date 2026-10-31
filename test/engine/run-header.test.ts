@@ -83,9 +83,9 @@ async function fixtureHeader(
   });
 }
 
-test("a new run's header carries layout 2, right after its run id, and validates", async () => {
+test("a new run's header carries layout 3, right after its run id, and validates", async () => {
   const header = await fixtureHeader();
-  expect(header.layout).toBe(2);
+  expect(header.layout).toBe(3);
   expect(Object.keys(header).slice(0, 3)).toEqual(['schema', 'runId', 'layout']);
   expect(validateRunHeader(header)).toEqual([]);
 });

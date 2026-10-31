@@ -5,23 +5,28 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  readlinkSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   copiedIntakeFile,
-  copyStageFolders,
+  copyDefinitions,
   createRunDir,
   RUNS_DIR,
   type RunStatus,
   readStatus,
+  resumesFromCopy,
   runsDir,
   STOP_REASONS,
   type Status,
   type StopReason,
+  uncopiedRefusal,
+  unmarkedRefusal,
   writeStatus,
 } from '../../src/engine/run-dir';
 import { newRunId } from '../../src/engine/run-id';
@@ -145,31 +150,78 @@ function repoWith(files: string[]): string {
   return root;
 }
 
-const stageEntry = { origin: 'repo:.sail/stages/echo' };
-
-test("copyStageFolders copies a private intake's workflow folder and a shared intake's folder into the definition", () => {
+test('copyDefinitions copies the whole .sail/ at its path from the root, a stage folder and a lib file alike', () => {
   const root = repoWith([
-    '.sail/workflows/groom/intake.ts',
-    '.sail/workflows/groom/fetch.sh',
-    '.sail/intakes/shared/intake.ts',
-    '.sail/intakes/shared/fetch.sh',
+    '.sail/project.yaml',
     '.sail/stages/echo/stage.ts',
+    '.sail/lib/util.ts',
+    '.sail/workflows/w/workflow.ts',
   ]);
-  for (const origin of ['repo:.sail/workflows/groom/intake.ts', 'repo:.sail/intakes/shared']) {
-    const runDir = tempDir();
-    copyStageFolders(runDir, root, { intake: { name: 'groom', origin }, stages: { echo: stageEntry } });
-    const copied = (path: string) => existsSync(join(runDir, 'definition', path));
-    expect(copied('.sail/stages/echo/stage.ts')).toBe(true);
-    const folder = origin.endsWith('.ts') ? '.sail/workflows/groom' : '.sail/intakes/shared';
-    expect(copied(`${folder}/fetch.sh`)).toBe(true);
-  }
+  const runDir = tempDir();
+  copyDefinitions(runDir, root, join(root, '.sail'), []);
+  const copied = (path: string) => readFileSync(join(runDir, 'definition', path), 'utf8');
+  expect(copied('.sail/project.yaml')).toBe('.sail/project.yaml');
+  expect(copied('.sail/stages/echo/stage.ts')).toBe('.sail/stages/echo/stage.ts');
+  expect(copied('.sail/lib/util.ts')).toBe('.sail/lib/util.ts');
+  expect(copied('.sail/workflows/w/workflow.ts')).toBe('.sail/workflows/w/workflow.ts');
 });
 
-test('copyStageFolders copies no folder for a built-in intake', () => {
-  const root = repoWith(['.sail/stages/echo/stage.ts']);
+test('copyDefinitions leaves out every node_modules under .sail/', () => {
+  const root = repoWith([
+    '.sail/stages/echo/stage.ts',
+    '.sail/node_modules/a/index.js',
+    '.sail/stages/echo/node_modules/b/index.js',
+  ]);
   const runDir = tempDir();
-  copyStageFolders(runDir, root, { intake: { name: 'ticket', origin: 'builtin' }, stages: { echo: stageEntry } });
-  expect(readdirSync(join(runDir, 'definition', '.sail'))).toEqual(['stages']);
+  copyDefinitions(runDir, root, join(root, '.sail'), []);
+  expect(existsSync(join(runDir, 'definition', '.sail/stages/echo/stage.ts'))).toBe(true);
+  expect(existsSync(join(runDir, 'definition', '.sail/node_modules'))).toBe(false);
+  expect(existsSync(join(runDir, 'definition', '.sail/stages/echo/node_modules'))).toBe(false);
+});
+
+test('copyDefinitions copies a convention at its path, and skips one the root lacks', () => {
+  const root = repoWith(['.sail/project.yaml', 'AGENTS.md', 'docs/rules.md']);
+  const runDir = tempDir();
+  copyDefinitions(runDir, root, join(root, '.sail'), ['AGENTS.md', 'CLAUDE.md', 'docs/rules.md']);
+  expect(readFileSync(join(runDir, 'definition', 'AGENTS.md'), 'utf8')).toBe('AGENTS.md');
+  expect(readFileSync(join(runDir, 'definition', 'docs/rules.md'), 'utf8')).toBe('docs/rules.md');
+  expect(existsSync(join(runDir, 'definition', 'CLAUDE.md'))).toBe(false);
+});
+
+test('copyDefinitions copies a symlink verbatim instead of following it', () => {
+  const root = repoWith(['.sail/project.yaml', '.sail/real/file.txt']);
+  symlinkSync('real', join(root, '.sail/alias'));
+  const runDir = tempDir();
+  copyDefinitions(runDir, root, join(root, '.sail'), []);
+  expect(readlinkSync(join(runDir, 'definition', '.sail/alias'))).toBe('real');
+});
+
+test("copyDefinitions copies a convention that is a symlink as its target's content, which the copy can't reach", () => {
+  const root = repoWith(['.sail/project.yaml', 'AGENTS.md', 'docs/agents.md']);
+  symlinkSync('AGENTS.md', join(root, 'CLAUDE.md'));
+  rmSync(join(root, 'AGENTS.md'));
+  symlinkSync('docs/agents.md', join(root, 'AGENTS.md'));
+  const runDir = tempDir();
+  copyDefinitions(runDir, root, join(root, '.sail'), ['CLAUDE.md']);
+  expect(readFileSync(join(runDir, 'definition', 'CLAUDE.md'), 'utf8')).toBe('docs/agents.md');
+  expect(existsSync(join(runDir, 'definition', 'docs/agents.md'))).toBe(false);
+});
+
+test('a run resumes from its own copy with layout 3, or with a definitionsSha, and not as a layout-2 hand start', () => {
+  expect(resumesFromCopy({ layout: 3 })).toBe(true);
+  expect(resumesFromCopy({ layout: 2, definitionsSha: 'abc' })).toBe(true);
+  expect(resumesFromCopy({ layout: 2 })).toBe(false);
+});
+
+test('unmarkedRefusal refuses only a header with no layout, and uncopiedRefusal only a layout-2 header with no definitionsSha', () => {
+  expect(unmarkedRefusal('R', {}, 'be resumed')).toContain("run R keeps its calls' records inside their $STAGE_OUT");
+  expect(unmarkedRefusal('R', { layout: 2 }, 'seed a run')).toBeUndefined();
+  expect(unmarkedRefusal('R', { layout: 3 }, 'be resumed')).toBeUndefined();
+  expect(uncopiedRefusal('R', { layout: 3 })).toBeUndefined();
+  expect(uncopiedRefusal('R', { layout: 2, definitionsSha: 'abc' })).toBeUndefined();
+  expect(uncopiedRefusal('R', { layout: 2 })).toBe(
+    "run R started before runs kept their whole .sail/ in definition/: it can't be resumed. sail stop R ends it, and sail run --from-run R --stage <stage> --continue restarts it",
+  );
 });
 
 test("copiedIntakeFile is a file beside the run's copy of the intake's folder, or the live file when the run has no copy", () => {
@@ -177,16 +229,12 @@ test("copiedIntakeFile is a file beside the run's copy of the intake's folder, o
   const runDir = tempDir();
   const live = join(root, '.sail/workflows/groom/intake.ts');
   expect(copiedIntakeFile(runDir, 'repo:.sail/workflows/groom/intake.ts', live)).toBe(live);
-  copyStageFolders(runDir, root, {
-    intake: { name: 'groom', origin: 'repo:.sail/workflows/groom/intake.ts' },
-    stages: {},
-  });
+  copyDefinitions(runDir, root, join(root, '.sail'), []);
   expect(copiedIntakeFile(runDir, 'repo:.sail/workflows/groom/intake.ts', live)).toBe(
     join(runDir, 'definition', '.sail/workflows/groom/intake.ts'),
   );
   const shared = join(root, '.sail/intakes/shared/intake.ts');
-  expect(copiedIntakeFile(runDir, 'repo:.sail/intakes/shared', shared)).toBe(shared);
-  copyStageFolders(runDir, root, { intake: { name: 'shared', origin: 'repo:.sail/intakes/shared' }, stages: {} });
+  expect(copiedIntakeFile(tempDir(), 'repo:.sail/intakes/shared', shared)).toBe(shared);
   expect(copiedIntakeFile(runDir, 'repo:.sail/intakes/shared', shared)).toBe(
     join(runDir, 'definition', '.sail/intakes/shared/intake.ts'),
   );

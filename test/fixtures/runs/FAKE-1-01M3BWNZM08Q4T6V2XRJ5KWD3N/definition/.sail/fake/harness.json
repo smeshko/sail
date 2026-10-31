@@ -1,0 +1,247 @@
+{
+  "spec": [
+    {
+      "outcome": "done",
+      "output": {
+        "summary": "Add an optional shout flag to greet() and the CLI; with it the whole greeting is upper-cased.",
+        "tasks": [
+          {
+            "title": "Add the shout option to greet() and the --shout flag to the CLI",
+            "files": ["src/greet.ts", "src/cli.ts"]
+          },
+          {
+            "title": "Cover --shout and its help text in tests",
+            "files": ["test/greet.test.ts"]
+          }
+        ]
+      },
+      "files": {
+        "spec.md": "# Spec: Add a --shout flag to the greet command\n\n## Requirements\n\n- `greet(name, { shout: true })` returns the whole greeting in upper case, the name included.\n- Without the option, `greet` behaves exactly as before.\n- `greet --help` lists `--shout`.\n\n## Tasks\n\n1. Add the shout option to greet() and the --shout flag to the CLI (`src/greet.ts`, `src/cli.ts`)\n2. Cover --shout and its help text in tests (`test/greet.test.ts`)\n"
+      },
+      "messages": ["Spec written: two tasks, greet() and the CLI first, then the tests."],
+      "turns": 4,
+      "usage": {
+        "inputTokens": 5200,
+        "cacheReadTokens": 18400,
+        "cacheWriteTokens": 3100,
+        "outputTokens": 1450,
+        "costUsd": 0.3125
+      }
+    }
+  ],
+  "implement#1": [
+    {
+      "outcome": "done",
+      "output": {
+        "commits": [
+          {
+            "sha": "89541459e5b0696a12a6adb712334ea24cff1a31",
+            "message": "feat: add a shout option to greet"
+          },
+          {
+            "sha": "17c569cb442d288920415d862cfabdb2bb335469",
+            "message": "test: cover greet --shout"
+          }
+        ],
+        "files": ["src/greet.ts", "src/cli.ts", "test/greet.test.ts"],
+        "notes": "The push was denied; publishing pushes the branch."
+      },
+      "files": {
+        "diff.patch": "diff --git a/src/greet.ts b/src/greet.ts\n--- a/src/greet.ts\n+++ b/src/greet.ts\n@@ -1,3 +1,4 @@\n-export function greet(name: string): string {\n-  return `Hello, ${name.trim() || 'world'}!`;\n+export function greet(name: string, options: { shout?: boolean } = {}): string {\n+  const greeting = options.shout ? 'HELLO' : 'Hello';\n+  return `${greeting}, ${name.trim() || 'world'}!`;\n }\ndiff --git a/src/cli.ts b/src/cli.ts\n--- a/src/cli.ts\n+++ b/src/cli.ts\n@@ -3,5 +3,6 @@\n const args = process.argv.slice(2);\n-console.log(greet(args[0] ?? ''));\n+const shout = args.includes('--shout');\n+console.log(greet(args.find((arg) => !arg.startsWith('--')) ?? '', { shout }));\ndiff --git a/test/greet.test.ts b/test/greet.test.ts\n--- a/test/greet.test.ts\n+++ b/test/greet.test.ts\n@@ -12,3 +12,11 @@\n+test('greet --shout › uppercases the name', () => {\n+  expect(greet('Ada', { shout: true })).toBe('HELLO, ADA!');\n+});\n+\n+test('greet --shout › keeps the exclamation mark', () => {\n+  expect(greet('Ada', { shout: true })).toEndWith('!');\n+});\n"
+      },
+      "messages": ["Implemented both tasks in two commits. Pushing is not allowed here, so the branch stays local."],
+      "turns": 5,
+      "usage": {
+        "inputTokens": 9800,
+        "cacheReadTokens": 64000,
+        "cacheWriteTokens": 7400,
+        "outputTokens": 3900,
+        "costUsd": 0.476
+      }
+    }
+  ],
+  "implement#2": [
+    {
+      "outcome": "done",
+      "output": {
+        "commits": [
+          {
+            "sha": "b4efb0c5de84d87c1455d4504b8b75b095a8e10b",
+            "message": "fix: upper-case the name when shouting"
+          }
+        ],
+        "files": ["src/greet.ts", "test/cli.test.ts"],
+        "notes": "bun test passes locally: 7 of 7."
+      },
+      "files": {
+        "diff.patch": "diff --git a/src/greet.ts b/src/greet.ts\n--- a/src/greet.ts\n+++ b/src/greet.ts\n@@ -1,4 +1,4 @@\n export function greet(name: string, options: { shout?: boolean } = {}): string {\n-  const greeting = options.shout ? 'HELLO' : 'Hello';\n-  return `${greeting}, ${name.trim() || 'world'}!`;\n+  const line = `Hello, ${name.trim() || 'world'}!`;\n+  return options.shout ? line.toUpperCase() : line;\n }\ndiff --git a/test/cli.test.ts b/test/cli.test.ts\n--- a/test/cli.test.ts\n+++ b/test/cli.test.ts\n@@ -8,3 +8,7 @@\n+test('cli › lists --shout in help', () => {\n+  expect(run(['--help']).stdout).toContain('--shout');\n+});\n"
+      },
+      "messages": ["Fixed: the whole line is upper-cased. Added a test for the help text."],
+      "turns": 4,
+      "usage": {
+        "inputTokens": 6100,
+        "cacheReadTokens": 71500,
+        "cacheWriteTokens": 2200,
+        "outputTokens": 1700,
+        "costUsd": 0.239
+      }
+    }
+  ],
+  "self-review": [
+    {
+      "outcome": "done",
+      "output": {
+        "summary": "The change meets the spec. Two minor findings, nothing that blocks.",
+        "findings": [
+          {
+            "severity": "low",
+            "file": "src/cli.ts",
+            "title": "Unknown flags are treated as missing names",
+            "detail": "An argument such as --loud is skipped rather than reported."
+          },
+          {
+            "severity": "nit",
+            "file": "test/greet.test.ts",
+            "title": "Test names could mention the option",
+            "detail": "The shout tests could say \"{ shout: true }\" to match the spec."
+          }
+        ]
+      },
+      "files": {
+        "review.md": "# Review: FAKE-1\n\n## Findings\n\n- **low**, `src/cli.ts`: Unknown flags are treated as missing names. An argument such as --loud is skipped rather than reported.\n- **nit**, `test/greet.test.ts`: Test names could mention the option. The shout tests could say \"{ shout: true }\" to match the spec.\n\n## Verdict\n\nThe change meets the spec. Two minor findings, nothing that blocks.\n"
+      },
+      "messages": ["Every requirement is met. One low finding and one nit."],
+      "turns": 4,
+      "usage": {
+        "inputTokens": 4300,
+        "cacheReadTokens": 22800,
+        "cacheWriteTokens": 1900,
+        "outputTokens": 1100,
+        "costUsd": 0.2215
+      }
+    }
+  ],
+  "publish/describe": [
+    {
+      "outcome": "done",
+      "output": {
+        "title": "Add a --shout flag to the greet command (FAKE-1)",
+        "bodyFile": "pr-body.md"
+      },
+      "files": {
+        "pr-body.md": "## Summary\n\nAdds `--shout` to the `greet` command: with it, the whole greeting is printed in upper case.\n\n## Changes\n\n- `greet()` takes `{ shout }` and upper-cases the whole line.\n- The CLI reads `--shout`, and `--help` lists it.\n- Tests cover both, plus the help text.\n\n## Testing\n\n`bun test`: 7 of 7 pass.\n\nTicket: [FAKE-1](fake://tickets/FAKE-1)\n"
+      },
+      "messages": ["PR description written."],
+      "turns": 4,
+      "usage": {
+        "inputTokens": 3000,
+        "cacheReadTokens": 12500,
+        "cacheWriteTokens": 900,
+        "outputTokens": 800,
+        "costUsd": 0.101
+      }
+    }
+  ],
+  "style": [
+    {
+      "outcome": "done",
+      "output": {
+        "summary": "The change reads like the code around it.",
+        "findings": []
+      },
+      "messages": ["style review done: no findings."],
+      "turns": 1,
+      "usage": {
+        "inputTokens": 1200,
+        "outputTokens": 200,
+        "costUsd": 0.02
+      },
+      "delayMs": 600
+    }
+  ],
+  "architecture": [
+    {
+      "outcome": "done",
+      "output": {
+        "summary": "The flag sits where the other options do.",
+        "findings": []
+      },
+      "messages": ["architecture review done: no findings."],
+      "turns": 1,
+      "usage": {
+        "inputTokens": 1200,
+        "outputTokens": 200,
+        "costUsd": 0.02
+      },
+      "delayMs": 500
+    }
+  ],
+  "side-effects": [
+    {
+      "outcome": "done",
+      "output": {
+        "summary": "Nothing outside greet() and the CLI changes.",
+        "findings": []
+      },
+      "messages": ["side-effects review done: no findings."],
+      "turns": 1,
+      "usage": {
+        "inputTokens": 1200,
+        "outputTokens": 200,
+        "costUsd": 0.02
+      },
+      "delayMs": 400
+    }
+  ],
+  "performance": [
+    {
+      "outcome": "done",
+      "output": {
+        "summary": "Upper-casing one line costs nothing to speak of.",
+        "findings": []
+      },
+      "messages": ["performance review done: no findings."],
+      "turns": 1,
+      "usage": {
+        "inputTokens": 1200,
+        "outputTokens": 200,
+        "costUsd": 0.02
+      },
+      "delayMs": 300
+    }
+  ],
+  "security": [
+    {
+      "outcome": "done",
+      "output": {
+        "summary": "The flag takes no input of its own.",
+        "findings": []
+      },
+      "messages": ["security review done: no findings."],
+      "turns": 1,
+      "usage": {
+        "inputTokens": 1200,
+        "outputTokens": 200,
+        "costUsd": 0.02
+      },
+      "delayMs": 200
+    }
+  ],
+  "coverage": [
+    {
+      "outcome": "done",
+      "output": {
+        "summary": "Both paths of the flag are tested.",
+        "findings": []
+      },
+      "messages": ["coverage review done: no findings."],
+      "turns": 1,
+      "usage": {
+        "inputTokens": 1200,
+        "outputTokens": 200,
+        "costUsd": 0.02
+      },
+      "delayMs": 100
+    }
+  ]
+}

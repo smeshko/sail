@@ -3,9 +3,9 @@
 // case has a temp repository of its own, because a process opens one run per .sail/, and a refusal claims it too. So a
 // second command on the same ticket runs in a copy of the first one's repository.
 import { expect, test } from 'bun:test';
-import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename, join, sep } from 'node:path';
 import { findProject, verbosityOf } from '../../src/cli/commands/run-workflow';
 import { EXIT_FAILED, EXIT_INTERNAL, EXIT_OK, EXIT_REFUSED, EXIT_SUSPENDED } from '../../src/cli/exit-codes';
 import type { Io, Parsed } from '../../src/cli/index';
@@ -139,8 +139,9 @@ test('sail masks io.env credentials in agent echoes and script tails and leaves 
     expect(captured.stdout.includes('│ token [redacted]')).toBe(true);
     expect(captured.stdout.includes('│ stderr token [redacted]')).toBe(true);
     expect(specFile(runDirIn(repo.dir), 'session.log')).toBe('assistant: echo [redacted]\n');
-    const files = readdirSync(join(repo.dir, '.sail-runs'), { recursive: true, withFileTypes: true }).filter((file) =>
-      file.isFile(),
+    // definition/ is a copy of the repository's own files, the scripted harness's included, which hold the marker as written.
+    const files = readdirSync(join(repo.dir, '.sail-runs'), { recursive: true, withFileTypes: true }).filter(
+      (file) => file.isFile() && !file.parentPath.includes(`${sep}definition`),
     );
     expect(files.length > 10).toBe(true);
     expect(
@@ -1189,8 +1190,14 @@ test("a dispatched start ignores an uncommitted edit of the clone's .sail/, and 
     committed(repo);
     const script = join('workflows', 'ticket-to-pr', 'stages', 'spec', 'run.sh');
     edit(sail, script, "printf '# Spec", "# edited\nprintf '# Spec");
+    writeFileSync(join(repo.dir, 'AGENTS.md'), 'house rules\n');
     const manual = await started(repo.dir, ['FAKE-1', '--workflow', 'ticket-to-pr']);
     expect({ code: manual.code, sha: manual.header.definitionsSha }).toEqual({ code: EXIT_OK, sha: undefined });
+    expect(manual.header.layout).toBe(3);
+    expect(readFileSync(join(manual.dir, 'definition', '.sail', 'project.yaml'), 'utf8')).toBe(
+      readFileSync(join(sail, 'project.yaml'), 'utf8'),
+    );
+    expect(readFileSync(join(manual.dir, 'definition', 'AGENTS.md'), 'utf8')).toBe('house rules\n');
     expect(readFileSync(join(manual.dir, 'definition', '.sail', script), 'utf8')).toContain('# edited\n');
   });
 });

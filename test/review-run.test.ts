@@ -134,12 +134,12 @@ test('a review killed once three reviewers finished resumes with sail resume, wh
 
 test('a review killed mid-group whose reviewers were reordered since fails its resume with determinism_violation, naming both key lists', async () => {
   await withTempRepo(async (repo) => {
-    const sail = writeReviewFixture(repo.dir);
+    writeReviewFixture(repo.dir);
     setReviewerDelays(repo.dir, { style: 20_000 });
     const dir = await killedAt(repo, 6);
     expect(keysOf(dir)).not.toContain('style#1');
 
-    swapReviewers(sail);
+    swapReviewers(join(dir, 'definition', '.sail'));
     const resumed = await runCaptured(['resume', dir.split('/').at(-1) as string], repo.dir, { env: repo.env });
     expect(resumed.code).toBe(EXIT_FAILED);
     expect(readStatus(dir)).toEqual({ status: 'failed', stopReason: 'determinism_violation' });
