@@ -15,6 +15,7 @@ import { type RegistryEntry, readEntry, recordEntry } from '../../src/watch/regi
 import { QUEUE_LEASE_DIR, startWatcher, type Watcher, type WatcherOptions } from '../../src/watch/watcher';
 import { fakeAdapters } from '../helpers/adapters';
 import { fakeTimers } from '../helpers/fake-timers';
+import { patchTicket } from '../helpers/fixture';
 import { seedPullRequests, writePrWorkflow } from '../helpers/pr-workflow';
 import { queueEventIssues, queueEvents } from '../helpers/queue';
 import { writeStub } from '../helpers/stub-workflow';
@@ -1543,6 +1544,29 @@ test('a fast-forward that has not answered holds up no dispatch, and none starts
     await w.timers.advance(1000);
     expect(w.out.some((line) => line.includes('clone fast-forwarded to b1c2d3e'))).toBe(true);
     expect(ff.calls).toHaveLength(2);
+    await watcher.stop();
+  });
+});
+
+test('a watcher over the fake source holds a ticket whose prerequisite is open, prints one waiting line across ticks, and starts it once the prerequisite is Done', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(
+      repo,
+      [{ name: 'a', label: 'sail-a', cap: 2 }],
+      tickets({ 'FAKE-1': 'sail-a', 'FAKE-2': 'sail-a' }),
+    );
+    patchTicket(w.sail, 'FAKE-2', { prerequisites: ['FAKE-1'] });
+    const watcher = await w.start(['a']);
+    await w.timers.advance(1000);
+    await w.timers.advance(3000);
+    expect(w.order('a')).toEqual(['FAKE-1']);
+    expect(w.out.filter((line) => line.includes('waits on'))).toEqual([
+      '09:00:01 a  FAKE-2 waits on FAKE-1: its prerequisites are not Done or Canceled\n',
+    ]);
+    patchTicket(w.sail, 'FAKE-1', { state: { type: 'completed', name: 'Done' } });
+    await w.timers.advance(3000);
+    expect(w.order('a')).toEqual(['FAKE-1', 'FAKE-2']);
+    expect(queueEventIssues(queueDir(w.runs, 'a'))).toEqual([]);
     await watcher.stop();
   });
 });

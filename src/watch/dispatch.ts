@@ -45,6 +45,11 @@
 //   re-check on its first dispatch: only the lease holds it back, and its run starts with `--force`. What `--force`
 //   started is that dispatch, so once it has an attempt its retry is re-checked as any item's is, and a ticket another
 //   run moved on meanwhile is dropped rather than run a second time.
+// - **A waiting item**: a ticket with a prerequisite that is not Done or Canceled (or one the source can't read) is
+//   held where it is, once it is eligible otherwise: it uses no slot, counts no attempt and is dropped for nothing. The
+//   item's `waitingOn` names the open prerequisites and `queue:waiting` says so when that list changes. The ticket is
+//   read fresh on every tick, so the first tick past the last prerequisite closing starts it and clears `waitingOn`. A
+//   forced item's first dispatch reads the ticket for this alone, and waits too.
 // - **The start** is recorded before the process exists (`dispatched`, which counts the attempt and names the run),
 //   and its pid after (`spawned`, which emits `queue:dispatched`). The run's intake claims the ticket (D2), in `intake#1`:
 //   the dispatch only reads the ticket.
@@ -65,7 +70,7 @@ import type { ResumedFrom } from '../events/types';
 import type { CodeHost } from '../ports/code-host';
 import { PortError } from '../ports/errors';
 import { holdsLabel } from '../ports/labels';
-import { getTicket, type TicketSource } from '../ports/ticket-source';
+import { getTicket, openPrerequisites, type TicketSource, waitingOnText } from '../ports/ticket-source';
 import type { Ticket } from '../ports/types';
 import type { WorkspacePort } from '../ports/workspace';
 import type { QueueItem, QueueStore } from './queue-store';
@@ -432,6 +437,13 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
     }
   };
 
+  /** Whether the ticket has no open prerequisite. Otherwise the item waits, with them named, and starts nothing. */
+  const prerequisitesDone = (item: QueueItem, ticket: Ticket): boolean => {
+    const open = openPrerequisites(ticket);
+    store.waiting(item.dedupKey, waitingOnText(open));
+    return open.length === 0;
+  };
+
   /**
    * Whether the item may start now, and whether its run must be forced: its branches are free, and its ticket is still
    * designated and in a pick-up state, or started by this clone's own failed run, which a forced start takes over. A forced
@@ -442,7 +454,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
     const { ticketKey } = item.source;
     const branch = branchFor(options.branchPrefix, ticketKey, item.title);
     if (await leased(item, remote, branch)) return false;
-    if (item.forced === true && item.attempts === 0) return { force: true };
+    const firstForced = item.forced === true && item.attempts === 0;
     let ticket: Awaited<ReturnType<typeof getTicket>>;
     try {
       ticket = await getTicket(ticketSource, ticketKey);
@@ -451,6 +463,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
       store.drop(item.dedupKey, `it no longer exists: ${error.message}`);
       return false;
     }
+    if (firstForced) return prerequisitesDone(item, ticket) && { force: true };
     if (!ticketSource.isDesignated(ticket, label)) {
       store.drop(item.dedupKey, `it is not designated: it carries no '${label}' label`);
       return false;
@@ -460,6 +473,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
       store.drop(item.dedupKey, `it is ${ticket.state.name}`);
       return false;
     }
+    if (!prerequisitesDone(item, ticket)) return false;
     const fresh = branchFor(options.branchPrefix, ticketKey, ticket.title);
     return (fresh === branch || !(await leased(item, remote, fresh))) && { force: own };
   };

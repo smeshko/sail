@@ -1272,3 +1272,38 @@ test('dispatchedItem finds the dispatched item that names a run id across two wo
 test('dispatchedItem finds nothing when there is no queue directory', () => {
   expect(dispatchedItem(runsDir(), 'FAKE-1-01A')).toBeUndefined();
 });
+
+test('waiting records the open prerequisites on the item and emits queue:waiting once per change, and an empty list clears it silently', () => {
+  const runs = runsDir();
+  const store = open(runs);
+  store.add([ticket('FAKE-2')]);
+  const waitingEvents = () =>
+    queueEvents(queueDir(runs, 'ticket-to-pr'))
+      .filter((event) => event.type === 'queue:waiting')
+      .map(({ seq, ts, ...event }) => event);
+  store.waiting('ticket:FAKE-2', ['FAKE-1']);
+  store.waiting('ticket:FAKE-2', ['FAKE-1']);
+  expect(store.snapshot().items[0]?.waitingOn).toEqual(['FAKE-1']);
+  expect(waitingEvents()).toEqual([
+    { type: 'queue:waiting', workflow: 'ticket-to-pr', dedupKey: 'ticket:FAKE-2', on: ['FAKE-1'] },
+  ]);
+  store.waiting('ticket:FAKE-2', ['FAKE-1', 'FAKE-3']);
+  expect(waitingEvents()).toHaveLength(2);
+  store.waiting('ticket:FAKE-2', []);
+  store.waiting('ticket:FAKE-2', []);
+  expect(store.snapshot().items[0]?.waitingOn).toBeUndefined();
+  expect(waitingEvents()).toHaveLength(2);
+  expect(queueEventIssues(queueDir(runs, 'ticket-to-pr'))).toEqual([]);
+});
+
+test('dispatching a waiting item clears waitingOn, and a requeue does too', () => {
+  const store = open(runsDir());
+  store.add([ticket('FAKE-2')]);
+  store.waiting('ticket:FAKE-2', ['FAKE-1']);
+  store.dispatched('ticket:FAKE-2', 'run-1');
+  expect(store.snapshot().items[0]?.waitingOn).toBeUndefined();
+  store.waiting('ticket:FAKE-2', ['FAKE-1']);
+  store.parked('ticket:FAKE-2', 'by hand');
+  store.requeue('ticket:FAKE-2', 'again');
+  expect(store.snapshot().items[0]?.waitingOn).toBeUndefined();
+});

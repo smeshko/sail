@@ -1979,3 +1979,27 @@ test('queue:moved validates closed in a queue stream with exactly one of before 
     runId: ['/runId'],
   });
 });
+
+test('queue:waiting validates closed in a queue stream with a dedup key and a non-empty list of prerequisite names', () => {
+  const waiting: NewQueueEvent = {
+    type: 'queue:waiting',
+    workflow: 'ticket-to-pr',
+    dedupKey: 'ticket:FAKE-2',
+    on: ['FAKE-1', 'FAKE-99 (unreadable)'],
+  };
+  expect({
+    ok: paths('sail.event.v1', { ...queueEnvelope, ...waiting }),
+    empty: broken(waiting, { on: [] }),
+    badKey: broken(waiting, { dedupKey: 'FAKE-2' }),
+    noOn: broken(waiting, {}, 'on'),
+    surprise: broken(waiting, { surprise: 1 }),
+    runId: broken(waiting, { runId: RUN_ID }),
+  }).toEqual({
+    ok: [],
+    empty: ['/on'],
+    badKey: ['/dedupKey'],
+    noOn: ['/on'],
+    surprise: ['/surprise'],
+    runId: ['/runId'],
+  });
+});

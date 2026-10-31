@@ -606,7 +606,7 @@ The order a queue dispatches its items in, and the order `queue.json` keeps them
 _Avoid_: ranking, sort, schedule
 
 **Queue event stream**:
-A watched workflow's own event stream, `.sail-runs/queue/<workflow>/events.ndjson`: polls, queue items, dispatches, skips, parking and errors, in the run's envelope without `runId`, and append-only across restarts.
+A watched workflow's own event stream, `.sail-runs/queue/<workflow>/events.ndjson`: polls, queue items, dispatches, skips, a ticket waiting on its prerequisites, parking and errors, in the run's envelope without `runId`, and append-only across restarts.
 _Avoid_: queue log, daemon log
 
 **Dedup key**:
@@ -630,7 +630,7 @@ A request to the live watcher, a JSON file dropped in `.sail-runs/watcher/comman
 _Avoid_: message, signal, IPC
 
 **Dispatch**:
-The watcher taking the next queued source and starting an ordinary run, only while the workflow's live runs in the clone, those started by hand included, are under its maximum of concurrent runs and after re-checking the source is still eligible. A source whose branch a live run's lease holds waits, using no slot. For a ticket, the dispatched run's intake claims the ticket, as a run started by hand does. A ticket claimed by the workflow's own run that then failed or was stopped stays eligible, so its retry and its requeue run again, and that run starts with `--force`.
+The watcher taking the next queued source and starting an ordinary run, only while the workflow's live runs in the clone, those started by hand included, are under its maximum of concurrent runs and after re-checking the source is still eligible. A source whose branch a live run's lease holds waits, using no slot. A ticket with an open prerequisite waits too, using no slot and counting no attempt, and the next tick re-checks it fresh; the queue names what it waits on and says so once per change. For a ticket, the dispatched run's intake claims the ticket, as a run started by hand does. A ticket claimed by the workflow's own run that then failed or was stopped stays eligible, so its retry and its requeue run again, and that run starts with `--force`.
 _Avoid_: pickup, schedule, spawn
 
 **Dashboard**:
