@@ -1548,7 +1548,7 @@ test('a fast-forward that has not answered holds up no dispatch, and none starts
   });
 });
 
-test('a watcher over the fake source holds a ticket whose prerequisite is open, prints one waiting line across ticks, and starts it once the prerequisite is Done', async () => {
+test('a watcher over the fake source holds a ticket whose prerequisite is open, prints one waiting line across ticks, and starts it on the poll interval after the prerequisite is Done', async () => {
   await withTempRepo(async (repo) => {
     const w = await watched(
       repo,
@@ -1565,6 +1565,9 @@ test('a watcher over the fake source holds a ticket whose prerequisite is open, 
     ]);
     patchTicket(w.sail, 'FAKE-1', { state: { type: 'completed', name: 'Done' } });
     await w.timers.advance(3000);
+    expect(w.order('a')).toEqual(['FAKE-1']);
+    // A waiting ticket is read again once per poll interval, 30 s here, not on every tick.
+    await w.timers.advance(30_000);
     expect(w.order('a')).toEqual(['FAKE-1', 'FAKE-2']);
     expect(queueEventIssues(queueDir(w.runs, 'a'))).toEqual([]);
     await watcher.stop();

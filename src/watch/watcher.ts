@@ -394,6 +394,7 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
       onSettled: (settled) => print(settledLine(workflow, settled, now())),
       onError: (message) => print(errorLine(workflow, message, now())),
       onExit: kick,
+      waitingRecheckMs: target.everyMs,
       paused: () => configProblem !== undefined,
       pullBlocked: () => notFastForwarded,
       onHeld: () => {

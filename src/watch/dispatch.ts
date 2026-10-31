@@ -48,8 +48,8 @@
 // - **A waiting item**: a ticket with a prerequisite that is not Done or Canceled (or one the source can't read) is
 //   held where it is, once it is eligible otherwise: it uses no slot, counts no attempt and is dropped for nothing. The
 //   item's `waitingOn` names the open prerequisites and `queue:waiting` says so when that list changes. The ticket is
-//   read fresh on every tick, so the first tick past the last prerequisite closing starts it and clears `waitingOn`. A
-//   forced item's first dispatch reads the ticket for this alone, and waits too.
+//   read fresh once per poll interval, not on every tick, so the first re-read past the last prerequisite closing
+//   starts it and clears `waitingOn`. A forced item's first dispatch reads the ticket for this alone, and waits too.
 // - **The start** is recorded before the process exists (`dispatched`, which counts the attempt and names the run),
 //   and its pid after (`spawned`, which emits `queue:dispatched`). The run's intake claims the ticket (D2), in `intake#1`:
 //   the dispatch only reads the ticket.
@@ -131,6 +131,8 @@ export interface DispatcherOptions {
   pullBlocked?: () => string | undefined;
   /** Hears the dispatch hold for definitions that need a newer sail: the watcher may fast-forward the clone at once. */
   onHeld?: () => void;
+  /** How long a waiting item goes before its ticket is read again: the watcher's poll interval. A minute by default. */
+  waitingRecheckMs?: number;
 }
 
 export interface Dispatcher {
@@ -166,6 +168,9 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
   const resumeStartedAt = new Map<string, Date>();
   /** When this dispatcher first saw each run on its usage limit or an unavailable port, until it resumes the run. */
   const limitedAt = new Map<string, Date>();
+  /** When each waiting item's ticket was last read, by dedup key: it is read again only after `waitingRecheckMs`. */
+  const waitingReadAt = new Map<string, number>();
+  const waitingRecheckMs = options.waitingRecheckMs ?? 60_000;
   const sail = options.sail ?? sdkFingerprint;
   /** Until the first settle is over: a live run found then is adopted. */
   let first = true;
@@ -441,6 +446,8 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
   const prerequisitesDone = (item: QueueItem, ticket: Ticket): boolean => {
     const open = openPrerequisites(ticket);
     store.waiting(item.dedupKey, waitingOnText(open));
+    if (open.length > 0) waitingReadAt.set(item.dedupKey, now().getTime());
+    else waitingReadAt.delete(item.dedupKey);
     return open.length === 0;
   };
 
@@ -454,6 +461,9 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
     const { ticketKey } = item.source;
     const branch = branchFor(options.branchPrefix, ticketKey, item.title);
     if (await leased(item, remote, branch)) return false;
+    const readAt = waitingReadAt.get(item.dedupKey);
+    if (item.waitingOn !== undefined && readAt !== undefined && now().getTime() - readAt < waitingRecheckMs)
+      return false;
     const firstForced = item.forced === true && item.attempts === 0;
     let ticket: Awaited<ReturnType<typeof getTicket>>;
     try {

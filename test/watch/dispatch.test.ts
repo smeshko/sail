@@ -1926,3 +1926,32 @@ test('a forced item waits on an open prerequisite at its first dispatch too, and
     ]);
   });
 });
+
+test('a waiting ticket is read again only once the re-check interval has passed, not on every tick', async () => {
+  await withTempRepo(async (repo) => {
+    const reads: string[] = [];
+    const w = await world(repo, 2, 2, {
+      claiming: false,
+      source: (own) => ({
+        ...own,
+        get: (key, ...rest) => {
+          reads.push(key);
+          return own.get(key, ...rest);
+        },
+      }),
+    });
+    patchTicket(join(repo.dir, '.sail'), 'FAKE-2', { prerequisites: ['FAKE-1'] });
+    const dispatcher = w.dispatcher();
+    await dispatcher.tick();
+    const first = reads.filter((key) => key === 'FAKE-2').length;
+    expect(w.store.snapshot().items[1]?.waitingOn).toEqual(['FAKE-1']);
+    for (let tick = 0; tick < 5; tick++) {
+      w.clock.advance(1000);
+      await dispatcher.tick();
+    }
+    expect(reads.filter((key) => key === 'FAKE-2')).toHaveLength(first);
+    w.clock.advance(FIVE_MINUTES);
+    await dispatcher.tick();
+    expect(reads.filter((key) => key === 'FAKE-2').length).toBeGreaterThan(first);
+  });
+});
