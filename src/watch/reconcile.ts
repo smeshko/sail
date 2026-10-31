@@ -9,7 +9,7 @@
 // | `completed` | done |
 // | `failed stopped` | parked at once: a person stopped it, and a stopped run is never retried |
 // | `failed` otherwise | a failed attempt, retried later or parked |
-// | `running` with its pid dead, `suspended interrupted`, `suspended unwatched` | adopted under its lease's pid when a live process holds its lease, else resumed, once |
+// | `running` with its pid dead, `suspended interrupted`, `suspended unwatched`, `suspended crashed` | adopted under its lease's pid when a live process holds its lease, else resumed, once; a resume of a crashed run that crashed again is parked with the `error:crash` message it left, and with why when it left none |
 // | `suspended usage_limit` | adopted when a live process holds its lease; else held while now is before its reset time (or the back-off after it hit the limit), then resumed, even when this dispatcher resumed it before, unless its resume hit no limit since: then parked with why |
 // | `suspended port_unavailable` | adopted when a live process holds its lease; else held for the back-off its suspension's place in the run of them calls for (1, 2, 5, 10 then 30 minutes), then resumed; parked with why when its resume was not suspended again, and parked with the call, the count and the last port error once it has been suspended past the schedule |
 // | anything else, such as `suspended until` or `budget_exceeded` | left: a person resumes or stops it |
@@ -147,7 +147,10 @@ const callKeyOf = (key: string): string => key.split('/')[0] ?? key;
 function resumable(status: RunStatus): ResumedFrom | undefined {
   if (status.status === 'running') return { status: 'running' };
   const { stopReason } = status;
-  if (status.status === 'suspended' && (stopReason === 'interrupted' || stopReason === 'unwatched')) {
+  if (
+    status.status === 'suspended' &&
+    (stopReason === 'interrupted' || stopReason === 'unwatched' || stopReason === 'crashed')
+  ) {
     return { status: 'suspended', stopReason };
   }
   return undefined;
@@ -178,6 +181,13 @@ export async function liveHolder(
   if (lease === undefined) return undefined;
   const holder = await context.workspace.holder(lease.remote, lease.branch);
   return holder?.runId === runId && !holder.suspended && context.isAlive(holder.pid) ? holder.pid : undefined;
+}
+
+/** The message of the run's last `error:crash` after `since`, or undefined when it has none: an older crash is not this resume's. */
+function crashedSince(runDir: string, since: Date | undefined): string | undefined {
+  if (since === undefined) return undefined;
+  const crash = readEvents(runDir).findLast((event) => event.type === 'error:crash');
+  return crash?.type === 'error:crash' && Date.parse(crash.ts) > since.getTime() ? crash.message : undefined;
 }
 
 /**
@@ -244,7 +254,11 @@ export async function reconcileItem(item: QueueItem, context: ReconcileContext):
   const holder = await liveHolder(runDir, runId, context);
   if (holder !== undefined) return { kind: 'adopt', pid: holder };
   if (context.resumed) {
-    const reason = why(context, runId, 'its resume failed') ?? 'its resume failed';
+    const crash = status.stopReason === 'crashed' ? crashedSince(runDir, context.resumedAt) : undefined;
+    const reason =
+      crash === undefined
+        ? (why(context, runId, 'its resume failed') ?? 'its resume failed')
+        : `its resume failed: ${crash}`;
     return { kind: 'park', reason };
   }
   return { kind: 'resume', from };

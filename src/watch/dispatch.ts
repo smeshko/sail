@@ -224,7 +224,10 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
   /** Resumes the item's run as a process of its own, once, which then counts as the item's. */
   const resume = (item: QueueItem, runId: string, from: ResumedFrom) => {
     resumed.add(runId);
-    if (from.status === 'suspended' && (from.stopReason === 'usage_limit' || from.stopReason === 'port_unavailable')) {
+    if (
+      from.status === 'suspended' &&
+      (from.stopReason === 'usage_limit' || from.stopReason === 'port_unavailable' || from.stopReason === 'crashed')
+    ) {
       resumedAt.set(runId, now());
     }
     exits.delete(item.dedupKey);

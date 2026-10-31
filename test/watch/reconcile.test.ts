@@ -211,6 +211,50 @@ test("a suspended run whose marked lease's pid is alive is resumed, not adopted"
   }
 });
 
+/** Appends an `error:crash` with `message` at `ts` to run `n`'s events.ndjson. */
+function crashedAt(runsDir: string, n: number, ts: string, message: string): void {
+  const event = { seq: 1, ts, runId: runIdOf(n), type: 'error:crash', key: 'spec#1', message };
+  appendFileSync(join(runsDir, runIdOf(n), 'events.ndjson'), `${JSON.stringify(event)}\n`);
+}
+
+test('a suspended crashed run is resumed once from where it was; a live holder of its lease adopts it instead', async () => {
+  const w = world();
+  runDir(w.runsDir, 1, 'suspended', 'crashed');
+  const dir = runDir(w.runsDir, 2, 'suspended', 'crashed');
+  takeLease(w.leases, REMOTE, branchOf(2), { runId: runIdOf(2), runDir: dir, pid: process.pid });
+  expect([await reconcileItem(item(1, DEAD), w.context()), await reconcileItem(item(2, DEAD), w.context())]).toEqual([
+    { kind: 'resume', from: { status: 'suspended', stopReason: 'crashed' } },
+    { kind: 'adopt', pid: process.pid },
+  ]);
+});
+
+test("a crashed run whose resume crashed again is parked with that resume's error:crash message, not the log's stack frame", async () => {
+  const w = world();
+  runDir(w.runsDir, 1, 'suspended', 'crashed');
+  crashedAt(w.runsDir, 1, '2026-10-28T09:00:00.000Z', 'the first crash');
+  crashedAt(w.runsDir, 1, '2026-10-28T09:30:00.000Z', 'the journal broke at line 4');
+  logLine(w.runsDir, 1, '      at drive (/work/src/engine/runtime.ts:817:31)');
+  expect(
+    await reconcileItem(
+      item(1, DEAD),
+      w.context({ resumed: true, resumedAt: new Date('2026-10-28T09:15:00.000Z'), exited: 1 }),
+    ),
+  ).toEqual({ kind: 'park', reason: 'its resume failed: the journal broke at line 4' });
+});
+
+test("a crashed run whose resume failed without a new crash is parked with the log's line, never the old crash", async () => {
+  const w = world();
+  runDir(w.runsDir, 1, 'suspended', 'crashed');
+  crashedAt(w.runsDir, 1, '2026-10-28T09:00:00.000Z', 'the first crash');
+  logLine(w.runsDir, 1, 'sail resume: LINEAR_API_KEY is not set');
+  expect(
+    await reconcileItem(
+      item(1, DEAD),
+      w.context({ resumed: true, resumedAt: new Date('2026-10-28T09:15:00.000Z'), exited: 3 }),
+    ),
+  ).toEqual({ kind: 'park', reason: 'its resume failed: sail resume: LINEAR_API_KEY is not set' });
+});
+
 /** Writes run `n`'s events.ndjson with one `run:suspended` on the usage limit, at `ts`, with the reset time if any. */
 function limitedAt(runsDir: string, n: number, ts: string, resetsAt?: string): void {
   const event = {
