@@ -99,7 +99,9 @@ clean compile or a diff that looks right is not the bar.
 
 This repository is public. Design docs, ADRs and plans stay outside git, as `.gitignore` shows. Committed files, commit
 messages and PR bodies name only sail and its `ADW-<n>` issues. Private projects and other trackers' tickets stay out,
-including as examples in this file.
+including as examples in this file. A run's workspace holds a gitignored, local copy of the clone's `docs/`: read it,
+cite an ADR or plan decision by its number, and never copy its private context into a committed file, a commit message
+or a pull request body.
 
 ## Layout
 

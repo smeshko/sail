@@ -16,8 +16,10 @@ adapters:
   ticketSource: { use: linear, team: ADW, inReview: In Review }
   codeHost: { use: github }
   harness: { use: claude-code }
-  # Each run's workspace is a fresh worktree: its setup installs the dependencies before any stage runs.
-  workspace: { use: git-worktree, setup: bun install --frozen-lockfile }
+  # Each run's workspace is a fresh worktree: its setup installs the dependencies before any stage runs, then copies the
+  # clone's docs/ Markdown (ADRs, plans, epics) in for agents to read; git ignores the copy. The guard is for a branch
+  # from before scripts/workspace-docs.ts, which lacks it.
+  workspace: { use: git-worktree, setup: 'bun install --frozen-lockfile && { [ ! -f scripts/workspace-docs.ts ] || bun scripts/workspace-docs.ts; }' }
   # Jev answers check-tasks and check-fix before their agents run, and groom's duplicates stage asks it. Without
   # TYPESAFE_API_KEY the check agents run as before, and a groom run fails at its duplicates stage.
   jev: { use: typesafe }

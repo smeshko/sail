@@ -12,7 +12,9 @@ it, then keeping it.
 The checks overreach in both directions. Read the ticket and the repository (`git grep`, `git log`) and confirm what each
 check says before you rely on it. A duplicate needs the same change as the other ticket, not the same area; a merge needs
 work that one pull request would naturally do; a staleness claim needs evidence you have verified yourself; a question the
-repository answers is not open.
+repository answers is not open. That includes `docs/`, a local copy of the design docs (ADRs in `docs/adr/`, plans and
+their decisions in `docs/artifacts/plans/`, epics in `docs/artifacts/epics/`): drop a question a decision there answers,
+and quote the decision.
 
 ## 2. Write the report
 

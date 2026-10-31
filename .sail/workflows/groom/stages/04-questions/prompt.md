@@ -4,7 +4,9 @@ which you don't need here.
 Imagine a planner who must turn this ticket into a plan with the repository open and nobody to ask. List what they could
 not settle from the ticket and the repository: a choice between two behaviours, a missing acceptance criterion, a term
 the ticket uses and the repository doesn't, a dependency on something undecided. Read the repository first, and ask
-only what it can't answer.
+only what it can't answer. The repository includes `docs/`, a local copy of the design docs: ADRs in `docs/adr/`, plans
+and their decisions in `docs/artifacts/plans/` (finished ones in `archive/`), epics in `docs/artifacts/epics/`. A
+question that a decision there settles is not open: quote the decision and cite it as `docs/…:line` instead of asking.
 
 Each question stands alone: a person reading only it knows what to answer. Don't ask for confirmation of what the
 ticket already says, and don't ask about style. A clear ticket has no questions, and an empty list is the right answer.
