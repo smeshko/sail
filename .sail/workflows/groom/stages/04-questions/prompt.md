@@ -13,4 +13,12 @@ You only read. Don't change any file.
 
 ## Submit
 
-Submit the `questions`, one string each.
+Submit the `questions`. Each one has:
+
+- `ask`: the question, containing a `?`
+- `options`: two to four, each with the `option` (a short name) and what choosing it `means` day to day
+- `recommend`: the text of one option, exactly as in `options`, the one you would choose
+- `why`: why you recommend it
+- `cites`: at least one `file:line` (or `file:line-line`) in the repository that your recommendation rests on
+
+A question that breaks one of these is rejected and you must submit again.

@@ -45,10 +45,33 @@ test('a groom run on fakes reads FAKE-2 unclaimed, comments the report and swaps
       '## Duplicates',
       '## Staleness',
       '## Labels',
+      '## Assumptions',
       '## Open questions',
     ]) {
       expect(comment).toContain(heading);
     }
+    expect(comment.indexOf('## Open questions')).toBeLessThan(comment.indexOf('## Actions'));
+    expect(comment).toContain('1. Should the total include the calls a seeded run reused from the run it came from?');
+    expect(comment).toContain('2. Should a run that made no agent calls print a total line at all?');
+    expect(comment).toContain("  - include reused: the total is the whole run's cost, as if every call had run here");
+    expect(comment).toContain('  - **exclude reused (recommended)**: the total is what this run spent');
+    expect(comment).toContain('  - **print $0.00 (recommended)**: every run ends the same way');
+    expect(comment.match(/\(recommended\)/g)).toHaveLength(2);
+    expect(comment).toContain('  Why: reused calls cost the seeded run nothing');
+    expect(comment).toContain('(`src/cli/commands/show.ts:40`)');
+    // CommonMark continues a `1. ` item only at three spaces in, and a line after a nested list joins its last bullet
+    // unless a blank line parts them: so the options nest under their question and its Why stands apart from them.
+    expect(comment).toContain(
+      [
+        '1. Should the total include the calls a seeded run reused from the run it came from?',
+        "   - include reused: the total is the whole run's cost, as if every call had run here",
+        "   - **exclude reused (recommended)**: the total is what this run spent, and a seeded run's total is smaller",
+        '',
+        '   Why: reused calls cost the seeded run nothing, so the total should say what it spent (`src/cli/commands/show.ts:40`)',
+        '',
+        '2. Should a run that made no agent calls print a total line at all?',
+      ].join('\n'),
+    );
     expect(comment).toContain('## Actions');
     expect(comment).toContain('Labelled `open-questions`.');
     expect(comment.trimEnd().split('\n').at(-1)).toBe(`sail run ${basename(dir)} groomed this ticket.`);
@@ -449,7 +472,9 @@ test('groom labels a ticket with no open question groomed', async () => {
     expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
 
     expect(fakeTicket(repo.dir, 'FAKE-2').labels).toEqual(['groomed']);
-    expect(lastComment(repo.dir)).toContain('Labelled `groomed`.');
+    const comment = lastComment(repo.dir);
+    expect(comment).toContain('Labelled `groomed`.');
+    expect(comment).toContain('## Open questions\n\n- none\n\n## Actions');
   });
 }, 120_000);
 
@@ -468,7 +493,10 @@ test('groom cancels a ticket the worth check gave cancel at the threshold, and l
     const ticket = fakeTicket(repo.dir, 'FAKE-2');
     expect(ticket.state).toEqual({ type: 'canceled', name: 'Canceled' });
     expect(ticket.labels).toEqual(['groomed']);
-    expect(lastComment(repo.dir)).toContain('- applied: cancel (a tidy-up nobody would notice)');
+    const comment = lastComment(repo.dir);
+    expect(comment).toContain('- applied: cancel (a tidy-up nobody would notice)');
+    expect(comment).toContain('## Open questions\n\n- none\n\n## Actions');
+    expect(comment).not.toContain('(recommended)');
   });
 }, 120_000);
 
@@ -751,5 +779,83 @@ test('a groom run suspended after its report posts no second report on resume, a
     expect(after.labels).toEqual(['open-questions']);
     expect(after.comments).toHaveLength(2);
     expect(reports(repo.dir)).toHaveLength(1);
+  });
+}, 120_000);
+
+const question = (ask: string) => ({
+  ask,
+  options: [
+    { option: 'include', means: 'the total counts every call, reused ones too' },
+    { option: 'exclude', means: 'the total counts only the calls this run made' },
+  ],
+  recommend: 'exclude',
+  why: 'summary.json marks reused calls apart from the run its own calls',
+  cites: ['src/cli/commands/show.ts:40'],
+});
+
+/** The `output:invalid` events of the run for `key`. */
+const invalidFor = (repoDir: string, key: string) =>
+  readEvents(onlyRun(repoDir)).filter((event) => event.type === 'output:invalid' && event.key === key);
+
+const fault = question('Count reused calls?');
+
+test.each([
+  ['an ask with no question mark', { ...fault, ask: 'Count reused calls' }],
+  ['one option', { ...fault, options: fault.options.slice(0, 1) }],
+  [
+    'five options',
+    { ...fault, options: [...fault.options, ...['a', 'b', 'c'].map((option) => ({ option, means: option }))] },
+  ],
+  ['no cite', { ...fault, cites: [] }],
+  ['a cite with no line', { ...fault, cites: ['src/cli/commands/show.ts'] }],
+])(
+  'a question with %s gets a corrective try',
+  async (_, malformedQuestion) => {
+    await withTempRepo(async (repo) => {
+      const sailDir = writeGroomRepo(repo);
+      const [answer] = JSON.parse(readFileSync(join(sailDir, 'fake', 'harness.json'), 'utf8')).questions;
+      const malformed = { ...answer, output: { questions: [malformedQuestion] } };
+      const valid = { ...answer, output: { questions: [question('Count reused calls?')] } };
+      seedHarness(sailDir, 'questions', [malformed, valid]);
+      const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
+      expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+
+      expect(invalidFor(repo.dir, 'questions#1')).toHaveLength(1);
+      const entry = readJournal(onlyRun(repo.dir)).entries.find((each) => each.key === 'questions#1');
+      expect(entry?.output).toEqual({ questions: [question('Count reused calls?')] });
+    });
+  },
+  120_000,
+);
+
+test('a question whose recommendation is not among its options gets a corrective try', async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeGroomRepo(repo);
+    const [answer] = JSON.parse(readFileSync(join(sailDir, 'fake', 'harness.json'), 'utf8')).questions;
+    const wrong = { ...answer, output: { questions: [{ ...question('Count reused calls?'), recommend: 'neither' }] } };
+    const valid = { ...answer, output: { questions: [question('Count reused calls?')] } };
+    seedHarness(sailDir, 'questions', [wrong, valid]);
+    const { code } = await runCaptured(RUN, repo.dir, { env: repo.env });
+    expect(code).toBe(EXIT_OK);
+    expect(invalidFor(repo.dir, 'questions#1')).toHaveLength(1);
+  });
+}, 120_000);
+
+test('a decision with three questions gets a corrective try', async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeGroomRepo(repo);
+    const [answer] = JSON.parse(readFileSync(join(sailDir, 'fake', 'harness.json'), 'utf8')).decide;
+    const three = {
+      ...answer,
+      output: { ...answer.output, questions: ['A?', 'B?', 'C?'].map((ask) => question(ask)) },
+    };
+    const two = { ...answer, output: { ...answer.output, questions: ['A?', 'B?'].map((ask) => question(ask)) } };
+    seedHarness(sailDir, 'decide', [three, two]);
+    const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+
+    expect(invalidFor(repo.dir, 'decide#1')).toHaveLength(1);
+    const entry = readJournal(onlyRun(repo.dir)).entries.find((each) => each.key === 'decide#1');
+    expect((entry?.output as { questions: unknown[] } | undefined)?.questions).toHaveLength(2);
   });
 }, 120_000);
