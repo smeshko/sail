@@ -577,7 +577,24 @@
     {
       "outcome": "done",
       "output": {
-        "questions": ["Should the total include the calls a seeded run reused from the run it came from?"]
+        "questions": [
+          {
+            "ask": "Should the total include the calls a seeded run reused from the run it came from?",
+            "options": [
+              {
+                "option": "include reused",
+                "means": "the total is the whole run's cost, as if every call had run here"
+              },
+              {
+                "option": "exclude reused",
+                "means": "the total is what this run spent, and a seeded run's total is smaller"
+              }
+            ],
+            "recommend": "exclude reused",
+            "why": "reused calls cost the seeded run nothing, so the total should say what it spent",
+            "cites": ["src/cli/commands/show.ts:40"]
+          }
+        ]
       },
       "turns": 4,
       "usage": {
@@ -604,7 +621,24 @@
             "title": "Show the run's total cost in sail show's footer"
           }
         ],
-        "questions": ["Should the total include the calls a seeded run reused from the run it came from?"]
+        "questions": [
+          {
+            "ask": "Should the total include the calls a seeded run reused from the run it came from?",
+            "options": [
+              {
+                "option": "include reused",
+                "means": "the total is the whole run's cost, as if every call had run here"
+              },
+              {
+                "option": "exclude reused",
+                "means": "the total is what this run spent, and a seeded run's total is smaller"
+              }
+            ],
+            "recommend": "exclude reused",
+            "why": "reused calls cost the seeded run nothing, so the total should say what it spent",
+            "cites": ["src/cli/commands/show.ts:40"]
+          }
+        ]
       },
       "files": {
         "report.md": "## Grooming report\n\nFAKE-2 reads as a vaguer FAKE-1: both want a total cost line in `sail show`.\n\n## Worth\n\nKept at 0.70: nothing prints a run's total today, and a reader of `sail show` asks for it.\n\n## Merges\n\n- FAKE-1 at confidence 0.60: the same footer line; likely one ticket, but the check is not sure enough to merge.\n\n## Duplicates\n\n- FAKE-1 at confidence 0.60: the same footer line, but FAKE-2 does not say where the total goes.\n\n## Staleness\n\nNot stale: `show.ts` lists each call's cost and prints no total.\n\n## Labels\n\nFAKE-2 carries no type or platform: it is a `feature` of the `cli`.\n\n## Open questions\n\n- Should the total include the calls a seeded run reused from the run it came from?\n"

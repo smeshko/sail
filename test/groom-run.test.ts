@@ -753,3 +753,71 @@ test('a groom run suspended after its report posts no second report on resume, a
     expect(reports(repo.dir)).toHaveLength(1);
   });
 }, 120_000);
+
+const question = (ask: string) => ({
+  ask,
+  options: [
+    { option: 'include', means: 'the total counts every call, reused ones too' },
+    { option: 'exclude', means: 'the total counts only the calls this run made' },
+  ],
+  recommend: 'exclude',
+  why: 'summary.json marks reused calls apart from the run its own calls',
+  cites: ['src/cli/commands/show.ts:40'],
+});
+
+/** The `output:invalid` events of the run for `key`. */
+const invalidFor = (repoDir: string, key: string) =>
+  readEvents(onlyRun(repoDir)).filter((event) => event.type === 'output:invalid' && event.key === key);
+
+test('a malformed question gets a corrective try', async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeGroomRepo(repo);
+    const [answer] = JSON.parse(readFileSync(join(sailDir, 'fake', 'harness.json'), 'utf8')).questions;
+    const malformed = {
+      ...answer,
+      output: {
+        questions: [{ ...question('Count reused calls'), options: [{ option: 'include', means: 'all' }], cites: [] }],
+      },
+    };
+    const valid = { ...answer, output: { questions: [question('Count reused calls?')] } };
+    seedHarness(sailDir, 'questions', [malformed, valid]);
+    const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+
+    expect(invalidFor(repo.dir, 'questions#1')).toHaveLength(1);
+    const entry = readJournal(onlyRun(repo.dir)).entries.find((each) => each.key === 'questions#1');
+    expect(entry?.output).toEqual({ questions: [question('Count reused calls?')] });
+  });
+}, 120_000);
+
+test('a question whose recommendation is not among its options gets a corrective try', async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeGroomRepo(repo);
+    const [answer] = JSON.parse(readFileSync(join(sailDir, 'fake', 'harness.json'), 'utf8')).questions;
+    const wrong = { ...answer, output: { questions: [{ ...question('Count reused calls?'), recommend: 'neither' }] } };
+    const valid = { ...answer, output: { questions: [question('Count reused calls?')] } };
+    seedHarness(sailDir, 'questions', [wrong, valid]);
+    const { code } = await runCaptured(RUN, repo.dir, { env: repo.env });
+    expect(code).toBe(EXIT_OK);
+    expect(invalidFor(repo.dir, 'questions#1')).toHaveLength(1);
+  });
+}, 120_000);
+
+test('a decision with three questions gets a corrective try', async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeGroomRepo(repo);
+    const [answer] = JSON.parse(readFileSync(join(sailDir, 'fake', 'harness.json'), 'utf8')).decide;
+    const three = {
+      ...answer,
+      output: { ...answer.output, questions: ['A?', 'B?', 'C?'].map((ask) => question(ask)) },
+    };
+    const two = { ...answer, output: { ...answer.output, questions: ['A?', 'B?'].map((ask) => question(ask)) } };
+    seedHarness(sailDir, 'decide', [three, two]);
+    const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+
+    expect(invalidFor(repo.dir, 'decide#1')).toHaveLength(1);
+    const entry = readJournal(onlyRun(repo.dir)).entries.find((each) => each.key === 'decide#1');
+    expect((entry?.output as { questions: unknown[] } | undefined)?.questions).toHaveLength(2);
+  });
+}, 120_000);

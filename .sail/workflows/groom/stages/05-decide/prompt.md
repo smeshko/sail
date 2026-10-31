@@ -58,9 +58,11 @@ ticket that needs no action has an empty `actions` list.
 
 ## 4. List the open questions
 
-`questions` lists the open questions you confirmed, each standing alone, which a person must answer before the ticket can
-be planned. The ticket is labelled `open-questions` while any remain, and `groomed` otherwise. A ticket you cancel or
-merge away has none.
+`questions` lists the open questions you confirmed which a person must answer before the ticket can be planned, **at most
+two**. Each has the shape the questions check uses: an `ask` containing a `?`, two to four `options` each with what
+choosing it `means` day to day, `recommend` (one option's text, exactly), `why`, and `cites` of at least one `file:line`.
+A question that breaks the shape, or a third question, is rejected and you must submit again. The ticket is labelled
+`open-questions` while any remain, and `groomed` otherwise. A ticket you cancel or merge away has none.
 
 ## Submit
 
