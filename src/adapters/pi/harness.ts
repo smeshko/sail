@@ -182,7 +182,7 @@ export function createPiHarness(options: PiHarnessOptions): Harness {
     return { ...ended.result, transcript };
   }
 
-  /** The error result of a throw the session's own handling didn't catch: a session that started still ends. */
+  /** The error result of a throw the session's own handling didn't catch: a session that started still ends; one that never started still reports its error. */
   function failedOutright(
     request: HarnessRequest,
     reader: PiSessionReader | undefined,
@@ -192,19 +192,21 @@ export function createPiHarness(options: PiHarnessOptions): Harness {
     const message = `pi: ${messageOf(error)}`;
     const state = reader?.state();
     const usage = state?.spent ?? { costUsd: 0 };
-    if (progress.started && !progress.ended && !progress.deaf && state !== undefined) {
+    if (!progress.ended && !progress.deaf) {
       try {
         request.onEvent?.({ type: 'error:harness', message });
-        request.onEvent?.({
-          type: 'harness:session_end',
-          ...(state.sessionId === undefined ? {} : { sessionId: state.sessionId }),
-          outcome: 'error',
-          reason: 'failed',
-          turns: state.turns,
-          toolCalls: state.toolCalls,
-          denials: state.denials,
-          usage,
-        });
+        if (progress.started && state !== undefined) {
+          request.onEvent?.({
+            type: 'harness:session_end',
+            ...(state.sessionId === undefined ? {} : { sessionId: state.sessionId }),
+            outcome: 'error',
+            reason: 'failed',
+            turns: state.turns,
+            toolCalls: state.toolCalls,
+            denials: state.denials,
+            usage,
+          });
+        }
       } catch {
         // An onEvent that throws hears no more.
       }

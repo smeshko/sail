@@ -466,7 +466,7 @@ test('a session that ends without submitting is an error, and a provider failure
   ]);
 });
 
-test('a session that cannot start (no such model) is an error naming it, with no session to end', async () => {
+test('a session that cannot start (no such model) is an error naming it, emitting error:harness with no session to end', async () => {
   const harness = createPiHarness({
     env: {},
     createSession: async () => {
@@ -475,10 +475,33 @@ test('a session that cannot start (no such model) is an error naming it, with no
   });
   const capture = captureEvents<HarnessEvent>();
   const result = await harness.run({ ...request('done'), onEvent: capture.emit });
-  expect({ result: summary(result), types: capture.events.map((e) => e.type) }).toEqual({
+  expect({
+    result: summary(result),
+    types: capture.events.map((e) => e.type),
+    messages: capture.events.map((e) => (e.type === 'error:harness' ? e.message : undefined)),
+    issues: eventIssues(capture.stamped('spec#1')),
+  }).toEqual({
     result: 'error: pi: no model groq/nope',
-    types: [],
+    types: ['error:harness'],
+    messages: ['pi: no model groq/nope'],
+    issues: [],
   });
+});
+
+test('an onEvent that throws on the error of a session that cannot start never rejects', async () => {
+  const harness = createPiHarness({
+    env: {},
+    createSession: async () => {
+      throw new Error('no model groq/nope');
+    },
+  });
+  const result = await harness.run({
+    ...request('done'),
+    onEvent: (event) => {
+      if (event.type === 'error:harness') throw new Error('listener broke');
+    },
+  });
+  expect(summary(result)).toBe('error: pi: no model groq/nope');
 });
 
 test('an onEvent that throws fails the session, which still ends and never rejects', async () => {
