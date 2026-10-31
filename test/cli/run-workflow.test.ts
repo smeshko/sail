@@ -38,6 +38,7 @@ import {
 } from '../helpers/agent-fixture';
 import { copyFixture, edit, FIXTURE_SAIL, write } from '../helpers/fixture';
 import { writeLiveRun } from '../helpers/live-run';
+import { type NewerSdk, useNewerSdk } from '../helpers/newer-sdk';
 import {
   type Captured,
   type CaptureOptions,
@@ -1229,6 +1230,60 @@ test('a dispatched start whose commit lacks the workflow exits 3 naming the comm
     expect(run.stderr).toContain(`(in the .sail/ committed at ${sha.slice(0, 7)})`);
     expect(run.stderr).toContain("no workflow 'ticket-to-pr'");
     expect(existsSync(join(repo.dir, '.sail-runs', 'fake', 'leases'))).toBe(false);
+  });
+});
+
+// A committed `.sail/` that needs a newer sail than the one running (ADW-449): it type-checks against the commit's own
+// `types/` and not against the running sail's, so the start is refused in a line the watcher reads, and holds on.
+
+/** The stub, using `demoOption` as `options` says, committed on main; gives the commit's sha. */
+function committedNeedingNewer(repo: TempRepo, options: NewerSdk = {}): string {
+  const sail = writeStub(repo.dir, { testsPassAt: 1 });
+  useNewerSdk(repo, sail, 'workflows/ticket-to-pr/workflow.ts', options);
+  repo.git('add', '.sail', 'package.json', ...(existsSync(join(repo.dir, 'types')) ? ['types'] : []));
+  repo.git('commit', '-q', '-m', 'definitions');
+  return repo.git('rev-parse', 'HEAD');
+}
+
+test('a dispatched start whose .sail/ type-checks only against its own types exits 3, ending on the newer-sail line, with no run directory', async () => {
+  await withTempRepo(async (repo) => {
+    const sha = committedNeedingNewer(repo);
+    const run = await runCaptured(['FAKE-1', '--workflow', 'ticket-to-pr', '--dispatch', DISPATCHED], repo.dir);
+    const lines = run.stderr.trimEnd().split('\n');
+    expect({ code: run.code, last: lines.at(-1), runs: runIds(repo.dir) }).toEqual({
+      code: EXIT_REFUSED,
+      last: `sail FAKE-1: definitions at ${sha.slice(0, 7)} need a newer sail: pull ${repo.dir}`,
+      runs: [],
+    });
+    expect(lines.length).toBeGreaterThan(1);
+    expect(lines[0]).toContain('TS2322');
+  });
+});
+
+test.each([
+  ['fails against its own types too', { use: '1' }],
+  ['holds no types/', { types: 'none' }],
+  ['is another package', { name: 'someone-elses' }],
+] as [string, NewerSdk][])(
+  'a dispatched start whose commit %s refuses with its type errors, not as needing a newer sail',
+  async (_name, options) => {
+    await withTempRepo(async (repo) => {
+      committedNeedingNewer(repo, options);
+      const run = await runCaptured(['FAKE-1', '--workflow', 'ticket-to-pr', '--dispatch', DISPATCHED], repo.dir);
+      const last = run.stderr.trimEnd().split('\n').at(-1) ?? '';
+      expect({ code: run.code, runs: runIds(repo.dir) }).toEqual({ code: EXIT_REFUSED, runs: [] });
+      expect(last).toMatch(/^sail FAKE-1: \d+ type errors? in .*workflow\.ts$/);
+    });
+  },
+);
+
+test('a manual start with the same definitions refuses with its type errors, not as needing a newer sail', async () => {
+  await withTempRepo(async (repo) => {
+    committedNeedingNewer(repo);
+    const run = await runCaptured(['FAKE-1', '--workflow', 'ticket-to-pr'], repo.dir);
+    expect(run.code).toBe(EXIT_REFUSED);
+    expect(run.stderr).not.toContain('newer sail');
+    expect(run.stderr.trimEnd().split('\n').at(-1)).toMatch(/^sail FAKE-1: \d+ type errors? in /);
   });
 });
 

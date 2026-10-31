@@ -18,10 +18,12 @@
 //
 // A dispatched start runs on the `.sail/` committed at the default branch's fetched tip, read into a scratch directory
 // the command removes at its end, and not on the clone's working tree; the run keeps its own copy of it, and so does
-// every resume. A refusal on the way names that commit.
+// every resume. A refusal on the way names that commit. A commit of sail's own package that holds its `types/` is also
+// read for them: when its `.sail/` fails the type check here but passes against the commit's own `types/`, the running
+// sail is the one that is behind, and the refusal's last line says so, for the watcher to hold on.
 //
 // `sail resume` takes the same steps: the helpers exported here are the ones both commands run, so they can't drift.
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir, userInfo } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { BUILTINS } from '../../adapters/index';
@@ -36,6 +38,7 @@ import { runsDir } from '../../engine/run-dir';
 import { type RunEnd, runWorkflow } from '../../engine/runtime';
 import { findSailDir } from '../../engine/sail-dir';
 import { formatIssue } from '../../engine/schemas';
+import { newerSailRefusal, sailPackageName } from '../../engine/sdk-version';
 import { typecheck } from '../../engine/typecheck';
 import { type TerminalConsumer, terminalConsumer, type Verbosity } from '../../events/consumers/terminal';
 import type { ProviderEmit, SailEvent } from '../../events/types';
@@ -118,8 +121,22 @@ export interface CommittedProject {
   readonly definitions: { sailDir: string; sha: string; port: WorkspacePort };
   /** Says whose commit a refusal is about: `(in the .sail/ committed at <sha7>)`. */
   readonly where: string;
+  /** The commit's own `types/` in the scratch, when the commit is sail's own package and holds them. */
+  readonly sdk?: string;
   /** Removes the scratch directory. */
   dispose(): void;
+}
+
+/** The `types/` read into `scratch`, when its `package.json` names sail's package and both declarations exist. */
+function ownTypes(scratch: string): string | undefined {
+  const types = join(scratch, 'types');
+  if (!existsSync(join(types, 'index.d.ts')) || !existsSync(join(types, 'intakes.d.ts'))) return undefined;
+  try {
+    const { name } = JSON.parse(readFileSync(join(scratch, 'package.json'), 'utf8')) as { name?: unknown };
+    return name === sailPackageName() ? types : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -136,7 +153,10 @@ export async function committedProject(
   const scratch = mkdtempSync(join(tmpdir(), 'sail-definitions-'));
   const dispose = () => rmSync(scratch, { recursive: true, force: true });
   try {
-    const { sha } = await port.readTree(scratch, { paths: ['.sail'], ...(signal === undefined ? {} : { signal }) });
+    const { sha } = await port.readTree(scratch, {
+      paths: ['.sail', 'types', 'package.json'],
+      ...(signal === undefined ? {} : { signal }),
+    });
     const where = `(in the .sail/ committed at ${sha.slice(0, 7)})`;
     const sailDir = join(scratch, '.sail');
     if (!existsSync(join(sailDir, 'project.yaml'))) {
@@ -152,7 +172,8 @@ export async function committedProject(
       dispose();
       return project;
     }
-    return { project, definitions: { sailDir, sha, port }, where, dispose };
+    const sdk = ownTypes(scratch);
+    return { project, definitions: { sailDir, sha, port }, where, ...(sdk === undefined ? {} : { sdk }), dispose };
   } catch (error) {
     dispose();
     return refuseAs(
@@ -164,13 +185,16 @@ export async function committedProject(
 
 /**
  * Type-checks what runs: the workflow's import graph, so a half-edited file elsewhere doesn't block it. Undefined when
- * it type-checks. Type errors print and refuse, and a `tsc` that can't run is internal.
+ * it type-checks. Type errors print and refuse, and a `tsc` that can't run is internal. With `newer`, type errors are
+ * checked again against that commit's own declarations; when they pass, the refusal says the definitions need a newer
+ * sail, naming `clone` to pull.
  */
 export async function typecheckWorkflow(
   io: Io,
   command: string,
   sailDir: string,
   workflowFile: string,
+  newer?: { sdk: string; sha: string; clone: string },
 ): Promise<ExitCode | undefined> {
   const types = await typecheck(sailDir, {
     files: [workflowFile],
@@ -182,6 +206,14 @@ export async function typecheckWorkflow(
   }
   if (types.ok) return undefined;
   for (const diagnostic of types.diagnostics) io.stderr(`${formatDiagnostic(diagnostic, (path) => at(io, path))}\n`);
+  if (newer !== undefined) {
+    const own = await typecheck(sailDir, {
+      files: [workflowFile],
+      sdk: newer.sdk,
+      ...(io.tsc === undefined ? {} : { tsc: io.tsc }),
+    });
+    if ('ok' in own && own.ok) return refuseAs(io, command)(newerSailRefusal(newer.sha, newer.clone));
+  }
   const errors = types.diagnostics.filter((diagnostic) => diagnostic.code !== '').length;
   return refuseAs(io, command)(`${count(errors, 'type error')} in ${at(io, workflowFile)}`);
 }
@@ -326,7 +358,11 @@ async function startRun(
   if (dry && dispatch !== undefined) return refuse("--dry-run and --dispatch can't be combined");
   if (dry && headSha !== undefined) return refuse("--dry-run and --head-sha can't be combined");
   if (dry && args.values.record !== undefined) return refuse("--record and --dry-run can't be combined");
-  const typed = await typecheckWorkflow(io, command, project.sailDir, workflowFile.file);
+  const newer =
+    committed?.sdk === undefined
+      ? undefined
+      : { sdk: committed.sdk, sha: committed.definitions.sha, clone: dirname(clone.sailDir) };
+  const typed = await typecheckWorkflow(io, command, project.sailDir, workflowFile.file, newer);
   if (typed !== undefined) return typed;
   if (dry) {
     const force = args.values.force === true;

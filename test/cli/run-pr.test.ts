@@ -11,6 +11,7 @@ import { recordingKeepAwake } from '../../src/engine/keep-awake';
 import { readStatus } from '../../src/engine/run-dir';
 import { readEvents } from '../../src/events/consumers/ndjson';
 import { write } from '../helpers/fixture';
+import { useNewerSdk } from '../helpers/newer-sdk';
 import { commitBranch, seedPullRequests, writePrWorkflow } from '../helpers/pr-workflow';
 import { fakeInterrupts, runCaptured } from '../helpers/run-captured';
 import { copyRun, writeStub } from '../helpers/stub-workflow';
@@ -393,5 +394,28 @@ test("a dispatched pull-request start runs the .sail/ committed at main, not the
     });
     expect(existsSync(join(dir, 'definition', '.sail', 'workflows', 'review-pr', 'workflow.ts'))).toBe(true);
     expect(existsSync(join(dir, 'definition', '.sail', 'head-marker.txt'))).toBe(false);
+  });
+});
+
+test('a dispatched pull-request start whose committed .sail/ type-checks only against its own types exits 3 on the newer-sail line, with no run directory', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = writeStub(repo.dir);
+    writePrWorkflow(sail, 'review-pr', { delayMs: 0 });
+    const headSha = commitBranch(repo, BRANCH, 'greet.txt');
+    seedPullRequests(sail, repo, [{ number: 1, head: BRANCH, title: 'Add a greeting', ticketKey: 'FAKE-1' }]);
+    useNewerSdk(repo, sail, 'workflows/review-pr/workflow.ts');
+    repo.git('add', '.sail', 'types', 'package.json');
+    repo.git('commit', '-q', '-m', 'definitions');
+    const sha = repo.git('rev-parse', 'HEAD');
+    const runId = 'pr-1-01M3BWNZM08Q4T6V2XRJ5KWD3N';
+    const { code, stderr } = await runCaptured(
+      ['#1', '--workflow', 'review-pr', '--dispatch', runId, '--head-sha', headSha],
+      repo.dir,
+    );
+    expect({ code, last: stderr.trimEnd().split('\n').at(-1), runs: runIds(repo.dir) }).toEqual({
+      code: EXIT_REFUSED,
+      last: `sail #1: definitions at ${sha.slice(0, 7)} need a newer sail: pull ${repo.dir}`,
+      runs: [],
+    });
   });
 });

@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 
-const PACKAGE_ROOT = join(import.meta.dir, '..', '..');
+export const PACKAGE_ROOT = join(import.meta.dir, '..', '..');
 
 /**
  * sail's house rules, the options sail holds its own code to. The check never extends a repository's
@@ -34,6 +34,19 @@ export const SDK_TYPES = {
   sail: [join(PACKAGE_ROOT, 'types', 'index.d.ts')],
   'sail/intakes': [join(PACKAGE_ROOT, 'types', 'intakes.d.ts')],
 };
+
+/**
+ * `SDK_TYPES` for declarations kept in `dir`, such as a commit's own `types/`. They sit outside sail's package tree, so
+ * their `import … from 'zod'` is mapped back to sail's own: unresolved, it would degrade silently to `any` under
+ * `skipLibCheck`.
+ */
+function sdkTypes(dir: string): Record<string, string[]> {
+  return {
+    sail: [join(dir, 'index.d.ts')],
+    'sail/intakes': [join(dir, 'intakes.d.ts')],
+    zod: [dirname(Bun.resolveSync('zod/package.json', import.meta.dir))],
+  };
+}
 
 /** One thing `tsc` reported. `file` is absolute, and a global diagnostic has no location. */
 export interface Diagnostic {
@@ -86,18 +99,19 @@ export function parseDiagnostics(output: string, cwd: string): Diagnostic[] {
 
 /**
  * Runs `tsc` under the house rules on `dir`'s TypeScript, or `files` and their imports, from `dirname(dir)`, with
- * `args` after its own. The config is a temp file under `tmp`, `tmpdir()` unless given, removed afterwards. Throws when `tsc` can't be spawned.
+ * `args` after its own. The config is a temp file under `tmp`, `tmpdir()` unless given, removed afterwards. `sdk` is a
+ * directory of declarations to check against instead of sail's own. Throws when `tsc` can't be spawned.
  */
 export async function spawnTsc(
   dir: string,
-  options: { tsc?: string; files?: string[]; args?: string[]; tmp?: string } = {},
+  options: { tsc?: string; files?: string[]; args?: string[]; tmp?: string; sdk?: string } = {},
 ): Promise<{ code: number; stdout: string; stderr: string; cwd: string }> {
   const configDir = mkdtempSync(join(options.tmp ?? tmpdir(), 'sail-check-'));
   try {
     const config = join(configDir, 'tsconfig.json');
     // The include is absolute because `tsc` skips dot-directories under a pattern, unless the literal base path holds
     // them.
-    const compilerOptions = { ...CHECK_OPTIONS, paths: SDK_TYPES };
+    const compilerOptions = { ...CHECK_OPTIONS, paths: options.sdk === undefined ? SDK_TYPES : sdkTypes(options.sdk) };
     const roots = options.files === undefined ? { include: [join(dir, '**', '*.ts')] } : { files: options.files };
     writeFileSync(config, JSON.stringify({ compilerOptions, ...roots }));
 
@@ -118,11 +132,12 @@ export async function spawnTsc(
 
 /**
  * Checks every `**\/*.ts` under `dir`, a `.sail/`, under the house rules, or only `options.files` and what they import.
- * `tsc` runs from the repository, the parent of `dir`, and every file it reports comes back absolute.
+ * `tsc` runs from the repository, the parent of `dir`, and every file it reports comes back absolute. `sdk` is a
+ * directory holding `index.d.ts` and `intakes.d.ts` to check against instead of sail's own `types/`.
  */
 export async function typecheck(
   dir: string,
-  options: { tsc?: string; files?: string[]; tmp?: string } = {},
+  options: { tsc?: string; files?: string[]; tmp?: string; sdk?: string } = {},
 ): Promise<TypecheckResult> {
   // `tsc` fails an empty include with TS18003, and the `.sail/` that `sail init` writes has no TypeScript yet.
   const files = options.files?.length ?? [...new Bun.Glob('**/*.ts').scanSync({ cwd: dir })].length;
