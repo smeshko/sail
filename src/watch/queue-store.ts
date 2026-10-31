@@ -28,7 +28,10 @@
 //   records the pid the run is alive as now, and emits `run:adopted` or `run:resumed`.
 // - A run that hit the usage limit, or could not reach a provider, holds the workflow's dispatch: `hold()` keeps the later `until` in `held` and emits
 //   `queue:held` when it set or extended it, and `release()` clears it and emits `queue:released`. The items are not
-//   changed: no attempt is counted, and nothing is failed or parked.
+//   changed: no attempt is counted, and nothing is failed or parked. A run refused for definitions that need a newer
+//   sail holds it with no time limit instead: `holdForSail()` keeps the running sail's SDK fingerprint in `held.sail`,
+//   replaces a timed hold, and a `hold()` leaves it. Its refused item goes back through `deferred()`, as queued with the
+//   attempt `dispatched()` counted taken back.
 // - `move()` places a queued item next to another queued one and marks it `moved`: add, a priority change and a retry
 //   leave a moved item where it is, and its dispatch clears the mark. It emits `queue:moved`.
 // - `skippedLeased()`, `watched()` and `unwatched()` only emit their events: none of them changes `queue.json`.
@@ -81,6 +84,8 @@ export const QueueItem = z.strictObject({
   runId: z.string().optional(),
   /** The process of that run, once it was spawned. */
   pid: z.number().int().positive().optional(),
+  /** The running sail's SDK fingerprint when that run was dispatched: a newer-sail hold for it lasts until it changes. */
+  sail: z.string().optional(),
   /** Why it last failed. */
   reason: z.string().optional(),
   finishedAt: z.string().optional(),
@@ -115,10 +120,14 @@ export const QueueFile = z.strictObject({
       })
       .optional(),
   }),
-  /** Set while a usage limit or an unavailable port holds the workflow's dispatch: nothing starts or resumes until `until`. */
+  /**
+   * Set while a usage limit or an unavailable port holds the workflow's dispatch: nothing starts or resumes until
+   * `until`. One with no `until` holds until the running sail's SDK fingerprint is no longer `sail`.
+   */
   held: z
     .strictObject({
-      until: z.string(),
+      until: z.string().optional(),
+      sail: z.string().optional(),
       runId: z.string(),
       reason: z.string(),
       at: z.string(),
@@ -194,7 +203,7 @@ export interface QueueStore {
   /** The items a dispatch may start: queued ones, and failed ones past their `retryAt`, in the order `items` holds. */
   due(): QueueItem[];
   /** Records a dispatch of the item, which counts an attempt. */
-  dispatched(key: string, runId: string): void;
+  dispatched(key: string, runId: string, sail?: string): void;
   /** Records the pid of the dispatched item's process, and emits `queue:dispatched`. An item not dispatched throws. */
   spawned(key: string, pid: number): void;
   /** Records the pid the dispatched item's run is alive as, and emits `run:adopted`. An item not dispatched throws. */
@@ -221,6 +230,17 @@ export interface QueueStore {
    * already set to a later time stays as it is, and emits nothing.
    */
   hold(until: string, runId: string, reason: string): void;
+  /**
+   * Holds the workflow's dispatch with no time limit while the running sail's SDK fingerprint is `sail`, because run
+   * `runId` was refused for definitions that need a newer sail, and emits `queue:held` with no `until`. It replaces a
+   * timed hold, and a later `hold()` leaves it alone.
+   */
+  holdForSail(sail: string, runId: string, reason: string): void;
+  /**
+   * Puts the dispatched item back as queued with the attempt `dispatched()` counted taken back, in queue order, and
+   * emits nothing. Any other state throws, naming it.
+   */
+  deferred(key: string): void;
   /** Clears the hold and emits `queue:released`. A queue not held changes nothing. */
   release(): void;
   /** Emits `queue:skipped_leased`: the due item waits, since run `heldBy` holds `branch`. The queue is unchanged. */
@@ -450,7 +470,7 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
       const at = now().getTime();
       return structuredClone(queue.items.filter((item) => isDue(item, at)));
     },
-    dispatched(key, runId) {
+    dispatched(key, runId, sail) {
       change((next) => {
         const item = find(next, key);
         item.state = 'dispatched';
@@ -459,6 +479,8 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
         delete item.moved;
         delete item.retryAt;
         delete item.pid;
+        if (sail === undefined) delete item.sail;
+        else item.sail = sail;
       });
     },
     spawned(key, pid) {
@@ -505,7 +527,7 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
         }
         item.state = 'queued';
         item.attempts = 0;
-        for (const field of ['reason', 'retryAt', 'finishedAt', 'runId', 'pid'] as const) delete item[field];
+        for (const field of ['reason', 'retryAt', 'finishedAt', 'runId', 'pid', 'sail'] as const) delete item[field];
         place(next, item);
       });
       stream.emit({ type: 'queue:requeued', workflow, dedupKey: key, reason });
@@ -535,11 +557,30 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
     },
     hold(until, runId, reason) {
       const current = queue.held;
-      if (current !== undefined && Date.parse(current.until) >= Date.parse(until)) return;
+      if (current?.until === undefined && current !== undefined) return;
+      if (current?.until !== undefined && Date.parse(current.until) >= Date.parse(until)) return;
       change((next) => {
         next.held = { until, runId, reason, at: now().toISOString() };
       });
       stream.emit({ type: 'queue:held', workflow, until, run: runId, reason });
+    },
+    holdForSail(sail, runId, reason) {
+      change((next) => {
+        next.held = { sail, runId, reason, at: now().toISOString() };
+      });
+      stream.emit({ type: 'queue:held', workflow, run: runId, reason });
+    },
+    deferred(key) {
+      change((next) => {
+        const item = find(next, key);
+        if (item.state !== 'dispatched') throw new Error(`${workflow}'s item ${key} is ${item.state}, not dispatched`);
+        item.state = 'queued';
+        item.attempts -= 1;
+        delete item.runId;
+        delete item.pid;
+        delete item.sail;
+        place(next, item);
+      });
     },
     release() {
       if (queue.held === undefined) return;

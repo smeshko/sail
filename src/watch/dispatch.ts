@@ -22,6 +22,11 @@
 //   the last port error, once it is suspended past that schedule. While held, nothing starts and no run is resumed, and no item's attempt is
 //   counted, failed or parked. A tick past the hold releases it (`queue:released`), and the run is resumed with the
 //   rest of the dispatch; a run that hits the limit again is held again.
+// - **A start whose definitions need a newer sail** (its last log line says so) is neither a failure nor a park: the item
+//   goes back to queued with its attempt given back, and the workflow's dispatch is held (`queue:held`, no `until`) by
+//   the running sail's SDK fingerprint as it was when the start spawned, which its queue item records, so a restarted
+//   watcher holds by it too. The tick that finds the fingerprint changed releases the hold (`queue:released`), so an
+//   item whose start spawned before a pull dispatches again on the tick after the hold. `pullBlocked` adds why the watcher can't pull to the hold's reason.
 // - **A due pull request**, in queue order: the lease on its queued branch first, then the re-check of the pull request
 //   through the CodeHost. One that is closed, merged, a draft, unlabelled, a fork or moved to another sha is dropped
 //   with why, and its run starts as `sail '#<n>' --head-sha <sha>`, pinned to the queued sha. It claims nothing.
@@ -50,6 +55,7 @@ import { getPullRequestDetails } from '../engine/pr-source';
 import { readStatus } from '../engine/run-dir';
 import { newRunId } from '../engine/run-id';
 import { liveRuns } from '../engine/runs';
+import { sdkFingerprint } from '../engine/sdk-version';
 import { claimedBy } from '../engine/source';
 import type { ResumedFrom } from '../events/types';
 import type { CodeHost } from '../ports/code-host';
@@ -110,6 +116,12 @@ export interface DispatcherOptions {
   onExit?: () => void;
   /** Whether the dispatch is paused, as while the config names a model no harness runs: nothing starts or resumes. */
   paused?: () => boolean;
+  /** The running sail's SDK fingerprint: a hold for definitions that need a newer sail lasts until it changes. */
+  sail?: () => string;
+  /** Why the watcher can't bring the clone to a newer sail itself, said in that hold's reason; undefined when it can. */
+  pullBlocked?: () => string | undefined;
+  /** Hears the dispatch hold for definitions that need a newer sail: the watcher may fast-forward the clone at once. */
+  onHeld?: () => void;
 }
 
 export interface Dispatcher {
@@ -143,13 +155,16 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
   const resumedAt = new Map<string, Date>();
   /** When this dispatcher first saw each run on its usage limit or an unavailable port, until it resumes the run. */
   const limitedAt = new Map<string, Date>();
+  const sail = options.sail ?? sdkFingerprint;
   /** Until the first settle is over: a live run found then is adopted. */
   let first = true;
 
-  /** Whether a usage limit holds the dispatch now. */
+  /** Whether a usage limit holds the dispatch now, or definitions that need a newer sail while the running sail is unchanged. */
   const holding = (): boolean => {
     const { held } = store.snapshot();
-    return held !== undefined && now().getTime() < Date.parse(held.until);
+    if (held === undefined) return false;
+    if (held.sail !== undefined) return sail() === held.sail;
+    return held.until !== undefined && now().getTime() < Date.parse(held.until);
   };
 
   const alive = (item: QueueItem) => item.pid !== undefined && isAlive(item.pid);
@@ -294,6 +309,19 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
       case 'park':
         park(item, runId, answer.reason);
         break;
+      case 'outdated': {
+        // The start never ran, so its attempt is given back; the hold ends when the running sail's SDK changes.
+        dropHandOff(options.runsDir, runId);
+        store.deferred(item.dedupKey);
+        const blocked = options.pullBlocked?.();
+        store.holdForSail(
+          item.sail ?? sail(),
+          runId,
+          blocked === undefined ? answer.reason : `${answer.reason} (the watcher can't: ${blocked})`,
+        );
+        options.onHeld?.();
+        break;
+      }
       case 'held':
         // The run will be resumed once, and again if it is held again, so it is not one this dispatcher resumed.
         resumed.delete(runId);
@@ -416,7 +444,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
   const start = (item: QueueItem, force: boolean) => {
     const { source } = item;
     const runId = newRunId(source.kind === 'pr' ? `pr-${source.number}` : source.ticketKey, now().getTime());
-    store.dispatched(item.dedupKey, runId);
+    store.dispatched(item.dedupKey, runId, sail());
     let spawned: SpawnedRun;
     try {
       spawned = options.spawn({

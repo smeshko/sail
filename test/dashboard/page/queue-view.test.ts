@@ -253,3 +253,24 @@ test("the stream's error is drawn as an escaped code bad div, and none is drawn 
   expect(failed).toContain('<div class="code bad">events.ndjson:2 can&#39;t be read: &lt;b&gt;x&lt;/b&gt;</div>');
   expect(healthy).not.toContain('code bad');
 });
+
+test('an untimed hold shows a held: chip with its reason, and its queue:held a held: line', () => {
+  const [panel] = queuePanels(index(m.registryDir));
+  if (panel === undefined) throw new Error('beta has no queue');
+  const held = {
+    sail: 'print-1',
+    runId: 'r',
+    reason: 'definitions at abc1234 need a newer sail: pull /work/clone',
+    at: '2026-09-24T11:00:00.000Z',
+  };
+  const queue = { ...(panel.queue as NonNullable<typeof panel.queue>), held };
+  const markup = renderQueue({ ...panel, queue }, undefined, initialUi(0), NOW).value;
+  expect(markup).toContain(
+    '<span class="warnchip">held: definitions at abc1234 need a newer sail: pull /work/clone</span>',
+  );
+  expect(markup).not.toContain('held until');
+  const at = { seq: 20, ts: '2026-09-24T12:00:00.000Z', workflow: QUEUE_WORKFLOW };
+  expect(queueEventLine({ ...at, type: 'queue:held', run: 'r', reason: held.reason } as QueueEvent)).toBe(
+    `held: ${held.reason}`,
+  );
+});

@@ -441,6 +441,25 @@ test('sail queue ls a prints dispatch held until <time> on its first line while 
   });
 });
 
+test('sail queue ls a prints dispatch held: <reason> on its first line while the hold has no time', async () => {
+  await withTempRepo(async (repo) => {
+    const { env } = repository(repo, []);
+    const path = writeQueue(join(repo.dir, '.sail-runs'));
+    const queue = JSON.parse(readFileSync(path, 'utf8'));
+    const held = {
+      sail: 'print-1',
+      runId: RUN,
+      reason: 'definitions at abc1234 need a newer sail: pull /c',
+      at: START,
+    };
+    writeFileSync(path, `${JSON.stringify({ ...queue, held })}\n`);
+    const listed = await runCaptured(['queue', 'ls', 'a'], repo.dir, { env });
+    expect(listed.stdout.split('\n')[0]).toBe(
+      `a: label sail-a, last polled ${START}, paused: key expired, dispatch held: ${held.reason}`,
+    );
+  });
+});
+
 test('sail queue move a FAKE-3 --before FAKE-2, with the watcher live, puts the item first among the queued, prints it as moved, and exits 0', async () => {
   await withTempRepo(async (repo) => {
     const w = await running(repo, designated('FAKE-1', 'FAKE-2', 'FAKE-3'));

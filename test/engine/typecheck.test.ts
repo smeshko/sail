@@ -181,3 +181,48 @@ test('with files, only those files and their imports are checked', async () => {
     });
   });
 });
+
+// An SDK other than the running sail's: the declarations a committed `.sail/` was written against.
+
+const DEMO_WORKFLOW = [
+  "import { workflow } from 'sail';",
+  "import { ticket } from 'sail/intakes';",
+  "export default workflow('w', { intake: ticket, version: 1, demoOption: 'x' }, async (run) => run.fail('x'));",
+  '',
+].join('\n');
+
+/** A `.sail/` holding `DEMO_WORKFLOW`, and a copy of sail's `types/` outside sail's tree that declares `demoOption`. */
+function demo(repoDir: string): { sail: string; sdk: string; workflow: string } {
+  const sail = join(repoDir, '.sail');
+  mkdirSync(join(sail, 'workflows', 'w'), { recursive: true });
+  const workflow = join(sail, 'workflows', 'w', 'workflow.ts');
+  writeFileSync(workflow, DEMO_WORKFLOW);
+  const sdk = join(repoDir, 'sdk-types');
+  cpSync(join(import.meta.dir, '..', '..', 'types'), sdk, { recursive: true });
+  const declarations = join(sdk, 'workflow.d.ts');
+  const source = readFileSync(declarations, 'utf8');
+  const marker = '    readonly version?: number;\n';
+  expect(source).toContain(marker);
+  writeFileSync(declarations, source.replace(marker, `${marker}    readonly demoOption?: string;\n`));
+  return { sail, sdk, workflow };
+}
+
+test("the running sail's types refuse an option only another copy of the types declares, and that copy passes it", async () => {
+  await withTempRepo(async (repo) => {
+    const { sail, sdk, workflow } = demo(repo.dir);
+    expect(await typecheck(sail, { files: [workflow] })).toMatchObject({ ok: false });
+    expect(await typecheck(sail, { files: [workflow], sdk })).toEqual({ ok: true, files: 1 });
+  });
+});
+
+test("a zod-typed misuse still fails against a copy of the types outside sail's tree", async () => {
+  await withTempRepo(async (repo) => {
+    const { sail, sdk, workflow } = demo(repo.dir);
+    writeFileSync(
+      workflow,
+      `import { z } from 'sail';\nexport const wrong: string = z.number().parse(1);\n${DEMO_WORKFLOW}`,
+    );
+    const result = await typecheck(sail, { files: [workflow], sdk });
+    expect(result).toMatchObject({ ok: false, diagnostics: [{ file: workflow, line: 2, code: 'TS2322' }] });
+  });
+});

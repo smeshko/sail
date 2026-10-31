@@ -4,7 +4,8 @@
 // | The item's run | The answer |
 // |---|---|
 // | its pid alive | in flight, counting against the cap; adopted on the dispatcher's first settle |
-// | no `run.json` | a start that was refused, failed with the last line the start logged, or its exit code |
+// | no `run.json`, the start's last line saying the definitions need a newer sail | outdated: the item is deferred and the dispatch held until the running sail changes, no attempt counted |
+// | no `run.json` otherwise | a start that was refused, failed with the last line the start logged, or its exit code |
 // | `completed` | done |
 // | `failed stopped` | parked at once: a person stopped it, and a stopped run is never retried |
 // | `failed` otherwise | a failed attempt, retried later or parked |
@@ -28,6 +29,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { type RunStatus, readStatus } from '../engine/run-dir';
 import { RUN_HEADER_FILE } from '../engine/run-header';
+import { parseNewerSail } from '../engine/sdk-version';
 import { readEvents } from '../events/consumers/ndjson';
 import type { ResumedFrom } from '../events/types';
 import type { WorkspacePort } from '../ports/workspace';
@@ -66,6 +68,7 @@ export type Reconciled =
   | { kind: 'done' }
   | { kind: 'failed'; reason: string }
   | { kind: 'park'; reason: string }
+  | { kind: 'outdated'; reason: string }
   | { kind: 'wait' }
   | { kind: 'adopt'; pid: number }
   | { kind: 'resume'; from: ResumedFrom }
@@ -193,6 +196,10 @@ export async function reconcileItem(item: QueueItem, context: ReconcileContext):
   const runId = item.runId ?? '';
   const runDir = join(context.runsDir, runId);
   if (!existsSync(join(runDir, RUN_HEADER_FILE))) {
+    const line = lastLine(dispatchLog(context.runsDir, context.workflow, runId), context.logFrom);
+    // The start prints `sail <ref>: <message>`; the message is what `newerSailRefusal()` made.
+    const message = line?.replace(/^sail \S+: /, '');
+    if (message !== undefined && parseNewerSail(message) !== undefined) return { kind: 'outdated', reason: message };
     return {
       kind: 'failed',
       reason: why(context, runId, 'its start was refused') ?? 'its start left no run directory',

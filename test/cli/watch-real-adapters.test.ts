@@ -429,7 +429,7 @@ test(
 );
 
 test(
-  "afterwards each run released its worktree and lease, HOME holds no lease, the clone has only itself as a worktree, and the clone's HEAD and status are what they were",
+  "afterwards each run released its worktree and lease, HOME holds no lease, the clone has only itself as a worktree, and the clean clone was fast-forwarded to the origin's tip with its status unchanged",
   async () => {
     const run = await watched();
     expect({
@@ -447,9 +447,10 @@ test(
       ],
       leases: [],
       worktrees: [run.repo.dir],
-      head: run.before.head,
+      head: run.repo.git('rev-parse', 'origin/main'),
       status: run.before.status,
     });
+    expect(run.repo.git('rev-parse', 'HEAD')).not.toBe(run.before.head);
   },
   TIMEOUT_MS,
 );

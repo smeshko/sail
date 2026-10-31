@@ -1,6 +1,6 @@
 // The machine's gate lock: taking it, waiting for a live holder with and without a cap, taking over a dead holder's.
 import { expect, test } from 'bun:test';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
 
@@ -8,7 +8,10 @@ const MODULE = join(import.meta.dir, '../../.sail/lib/gate-lock.mjs');
 const lib = (await import(MODULE)) as {
   HOLDER_ENV: string;
   lockPath(): string;
+  holder(): { pid: number; dir: string } | undefined;
+  isAlive(pid: number): boolean;
   heldBy(pid: number): boolean;
+  lock(options: { label: string; waiting: (dir: string) => string; seconds?: number }): Promise<boolean>;
 };
 
 function tmp(repo: TempRepo): string {
@@ -145,4 +148,90 @@ test('heldBy is true for the live holder, false for another pid, and false with 
       else process.env.TMPDIR = before;
     }
   });
+});
+
+/** Runs `body` in this process with TMPDIR at the repository's own temp directory, so `lockPath()` is under it. */
+async function inProcess(repo: TempRepo, body: (dir: string) => Promise<void>): Promise<void> {
+  const dir = tmp(repo);
+  const before = process.env.TMPDIR;
+  process.env.TMPDIR = dir;
+  try {
+    await body(dir);
+  } finally {
+    rmSync(join(dir, 'sail-validate.lock'), { recursive: true, force: true });
+    if (before === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = before;
+  }
+}
+
+/** What `lock` writes to stderr while `body` runs. */
+async function stderrOf(body: () => Promise<unknown>): Promise<{ value: unknown; err: string }> {
+  const write = process.stderr.write;
+  let err = '';
+  process.stderr.write = ((chunk: string | Uint8Array) => {
+    err += String(chunk);
+    return true;
+  }) as typeof process.stderr.write;
+  try {
+    return { value: await body(), err };
+  } finally {
+    process.stderr.write = write;
+  }
+}
+
+test('in process, lock takes a free lock, a second lock with a cap waits once, naming the holder, then gives up, and exiting frees it', async () => {
+  await withTempRepo(async (repo) => {
+    await inProcess(repo, async () => {
+      expect(lib.holder()).toBeUndefined();
+      const before = new Set(process.listeners('exit'));
+      expect(await lib.lock({ label: 'x', waiting: () => 'w' })).toBe(true);
+      const onExit = process.listeners('exit').filter((listener) => !before.has(listener));
+      expect(onExit).toHaveLength(1);
+      expect(lib.holder()).toEqual({ pid: process.pid, dir: process.cwd() });
+      expect(lib.heldBy(process.pid)).toBe(true);
+      const again = await stderrOf(() =>
+        lib.lock({ label: 'probe', waiting: (dir) => `waiting in ${dir}`, seconds: 0.1 }),
+      );
+      expect(again).toEqual({ value: false, err: `probe: waiting in ${process.cwd()}\n` });
+      for (const listener of onExit) {
+        process.off('exit', listener);
+        listener(0);
+      }
+      expect(existsSync(lib.lockPath())).toBe(false);
+    });
+  });
+});
+
+test('in process, a lock whose holder pid is dead is taken over', async () => {
+  await withTempRepo(async (repo) => {
+    await inProcess(repo, async () => {
+      const dead = Bun.spawn([process.execPath, '-e', '']);
+      await dead.exited;
+      mkdirSync(lib.lockPath());
+      writeFileSync(join(lib.lockPath(), 'holder'), `${dead.pid} /gone\n`);
+      expect(lib.isAlive(dead.pid)).toBe(false);
+      const taken = await stderrOf(() => lib.lock({ label: 'x', waiting: () => 'w', seconds: 5 }));
+      expect(taken).toEqual({ value: true, err: '' });
+      expect(lib.holder()?.pid).toBe(process.pid);
+      expect(existsSync(`${lib.lockPath()}.${process.pid}`)).toBe(false);
+    });
+  });
+});
+
+test('in process, a lock with no holder written is waited on while fresh and taken over once 10 s old', async () => {
+  await withTempRepo(async (repo) => {
+    await inProcess(repo, async () => {
+      mkdirSync(lib.lockPath());
+      const fresh = await stderrOf(() => lib.lock({ label: 'x', waiting: (dir) => dir, seconds: 0 }));
+      expect(fresh).toEqual({ value: false, err: '' });
+      const old = (Date.now() - 60_000) / 1000;
+      utimesSync(lib.lockPath(), old, old);
+      expect(await lib.lock({ label: 'x', waiting: () => 'w', seconds: 5 })).toBe(true);
+      expect(lib.holder()?.pid).toBe(process.pid);
+    });
+  });
+});
+
+test('isAlive is true for a process this one may not signal', () => {
+  expect(lib.isAlive(1)).toBe(true);
 });
