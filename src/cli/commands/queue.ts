@@ -3,7 +3,7 @@
 //
 // - `ls` reads its queue file, with or without a watcher: the workflow's polling, then each item in queue order with its
 //   state, its dedup key, its title and what applies of its priority (unless none), run, attempts, retry time,
-//   `forced`, `moved` and reason.
+//   what it waits on, `forced`, `moved` and reason.
 // - `move` puts a queued item directly before or after another queued one, exactly one of `--before` and `--after`;
 //   the two flags belong to it alone. It is refused unless both items are queued and different.
 // - `add`, `requeue`, `drop`, `poll` and `move` change the queue only through the live watcher of this repository, and only for
@@ -62,7 +62,7 @@ function queueOf(runs: string, workflow: string): QueueFile | undefined {
 
 /**
  * One item: `<state> <dedup key> <title>`, then what applies of its priority (unless none), run, attempts, retry time,
- * hold, `forced`, `moved` and reason.
+ * hold, what it waits on, `forced`, `moved` and reason.
  */
 function itemLine(item: QueueItem): string {
   const details = [
@@ -71,6 +71,7 @@ function itemLine(item: QueueItem): string {
     item.attempts === 0 ? undefined : plural(item.attempts, 'attempt'),
     item.retryAt === undefined ? undefined : `retry at ${item.retryAt}`,
     item.held === undefined ? undefined : `held until ${item.held.until}: ${clean(item.held.reason)}`,
+    item.waitingOn === undefined ? undefined : `waiting on ${item.waitingOn.map(clean).join(', ')}`,
     item.forced === true ? 'forced' : undefined,
     item.moved === true ? 'moved' : undefined,
     item.reason === undefined ? undefined : clean(item.reason),

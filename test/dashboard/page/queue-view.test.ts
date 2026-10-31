@@ -175,6 +175,7 @@ function waiting() {
   const copy = (key: string, fields: Record<string, unknown> = {}) => ({
     ...queued,
     priority: undefined,
+    waitingOn: undefined,
     dedupKey: `ticket:${key}`,
     ...fields,
   });
@@ -301,4 +302,16 @@ test('an untimed hold shows a held: chip with its reason, and its queue:held a h
   expect(queueEventLine({ ...at, type: 'queue:held', run: 'r', reason: held.reason } as QueueEvent)).toBe(
     `held: ${held.reason}`,
   );
+});
+
+test('a waiting item with open prerequisites shows waiting on their keys in its row, and queue:waiting has a line', () => {
+  const [panel] = queuePanels(index(m.registryDir));
+  if (panel === undefined) throw new Error('beta has no queue');
+  const markup = renderQueue(panel, undefined, initialUi(0), NOW).value;
+  expect(markup).toContain(' · waiting on FAKE-1, FAKE-99 (unreadable)');
+  expect(markup.split(' · waiting on ')).toHaveLength(2);
+  const at = { seq: 21, ts: '2026-09-24T12:00:00.000Z', workflow: QUEUE_WORKFLOW };
+  expect(
+    queueEventLine({ ...at, type: 'queue:waiting', dedupKey: 'ticket:FAKE-5', on: ['FAKE-1'] } as QueueEvent),
+  ).toBe('ticket:FAKE-5 waiting on FAKE-1');
 });
