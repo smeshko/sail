@@ -797,26 +797,36 @@ const question = (ask: string) => ({
 const invalidFor = (repoDir: string, key: string) =>
   readEvents(onlyRun(repoDir)).filter((event) => event.type === 'output:invalid' && event.key === key);
 
-test('a malformed question gets a corrective try', async () => {
-  await withTempRepo(async (repo) => {
-    const sailDir = writeGroomRepo(repo);
-    const [answer] = JSON.parse(readFileSync(join(sailDir, 'fake', 'harness.json'), 'utf8')).questions;
-    const malformed = {
-      ...answer,
-      output: {
-        questions: [{ ...question('Count reused calls'), options: [{ option: 'include', means: 'all' }], cites: [] }],
-      },
-    };
-    const valid = { ...answer, output: { questions: [question('Count reused calls?')] } };
-    seedHarness(sailDir, 'questions', [malformed, valid]);
-    const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
-    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+const fault = question('Count reused calls?');
 
-    expect(invalidFor(repo.dir, 'questions#1')).toHaveLength(1);
-    const entry = readJournal(onlyRun(repo.dir)).entries.find((each) => each.key === 'questions#1');
-    expect(entry?.output).toEqual({ questions: [question('Count reused calls?')] });
-  });
-}, 120_000);
+test.each([
+  ['an ask with no question mark', { ...fault, ask: 'Count reused calls' }],
+  ['one option', { ...fault, options: fault.options.slice(0, 1) }],
+  [
+    'five options',
+    { ...fault, options: [...fault.options, ...['a', 'b', 'c'].map((option) => ({ option, means: option }))] },
+  ],
+  ['no cite', { ...fault, cites: [] }],
+  ['a cite with no line', { ...fault, cites: ['src/cli/commands/show.ts'] }],
+])(
+  'a question with %s gets a corrective try',
+  async (_, malformedQuestion) => {
+    await withTempRepo(async (repo) => {
+      const sailDir = writeGroomRepo(repo);
+      const [answer] = JSON.parse(readFileSync(join(sailDir, 'fake', 'harness.json'), 'utf8')).questions;
+      const malformed = { ...answer, output: { questions: [malformedQuestion] } };
+      const valid = { ...answer, output: { questions: [question('Count reused calls?')] } };
+      seedHarness(sailDir, 'questions', [malformed, valid]);
+      const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
+      expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+
+      expect(invalidFor(repo.dir, 'questions#1')).toHaveLength(1);
+      const entry = readJournal(onlyRun(repo.dir)).entries.find((each) => each.key === 'questions#1');
+      expect(entry?.output).toEqual({ questions: [question('Count reused calls?')] });
+    });
+  },
+  120_000,
+);
 
 test('a question whose recommendation is not among its options gets a corrective try', async () => {
   await withTempRepo(async (repo) => {
