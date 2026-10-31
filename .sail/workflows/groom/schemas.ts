@@ -23,8 +23,29 @@ export const Duplicates = z.object({
 /** Whether the repository already does what the ticket asks. */
 export const Staleness = z.object({ stale: z.boolean(), evidence: z.string() });
 
+/**
+ * One open question, answerable where it is read: two to four options and what each means day to day, the option
+ * recommended and why, and the `file:line` it rests on. A malformed one is invalid output, so it gets a corrective try.
+ */
+export const Question = z
+  .object({
+    ask: z.string().refine((ask) => ask.includes('?'), 'ask must contain a "?"'),
+    options: z
+      .array(z.object({ option: z.string(), means: z.string() }))
+      .min(2)
+      .max(4),
+    recommend: z.string(),
+    why: z.string(),
+    cites: z.array(z.string().regex(/^\S+:\d+(-\d+)?$/, 'a cite is file:line or file:line-line')).min(1),
+  })
+  .superRefine((question, context) => {
+    if (!question.options.some((each) => each.option === question.recommend)) {
+      context.addIssue({ code: 'custom', path: ['recommend'], message: 'recommend must equal one option' });
+    }
+  });
+
 /** What a planner could not settle from the ticket alone. */
-export const Questions = z.object({ questions: z.array(z.string()) });
+export const Questions = z.object({ questions: z.array(Question) });
 
 /**
  * Whether the ticket earns its place: kept, or canceled as not worth doing, each with how sure the check is; and the
@@ -65,14 +86,19 @@ export const Action = z.discriminatedUnion('kind', [
 export const Decision = z.object({
   summary: z.string(),
   actions: z.array(Action),
-  /** The open questions the judge confirmed, which a person must answer before the ticket is planned. */
-  questions: z.array(z.string()),
+  /**
+   * The open questions the judge confirmed, which a person must answer before the ticket is planned: at most two, the
+   * ones a person most needs to answer. The judge settles the rest as assumptions.
+   */
+  questions: z.array(Question).max(2),
 });
 
-/** The actions the workflow lets through, the ones it only reports, and the label the groomed ticket ends with. */
+/** The actions the workflow lets through, the ones it only reports, the questions it posts, and the label the groomed ticket ends with. */
 export const Plan = z.object({
   apply: z.array(Action),
   reported: z.array(z.string()),
+  /** The open questions the comment posts: none once an action ended the ticket. */
+  questions: z.array(Question),
   outcome: z.enum(['groomed', 'open-questions']),
 });
 

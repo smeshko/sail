@@ -22,6 +22,6 @@
 
 {{labels: the type, platform and source the ticket carries now, and what you changed and why; or that they were right}}
 
-## Open questions
+## Assumptions
 
-{{questions: each open question a planner would need answered, one bullet each; or that there are none}}
+{{assumptions: each open question you settled yourself instead of asking, with the choice you made and why, one bullet each; or that there were none}}

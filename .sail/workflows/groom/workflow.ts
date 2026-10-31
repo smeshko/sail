@@ -186,8 +186,8 @@ function limit(decision: z.infer<typeof Decision>, context: Context): z.infer<ty
       ended = 'the ticket is already marked a duplicate';
     }
   }
-  const outcome = ended === undefined && decision.questions.length > 0 ? 'open-questions' : 'groomed';
-  return { apply, reported, outcome };
+  const questions = ended === undefined ? decision.questions : [];
+  return { apply, reported, questions, outcome: questions.length > 0 ? 'open-questions' : 'groomed' };
 }
 
 export default workflow(

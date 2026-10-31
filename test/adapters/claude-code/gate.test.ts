@@ -251,6 +251,38 @@ test('canUseTool allows the submission and denies everything else under the rule
   ]);
 });
 
+test('canUseTool allows the call the hook just allowed, as Claude Code asks again for its protected paths, and that call alone', async () => {
+  const g = gate();
+  const use = (tool: string, input: Record<string, unknown>, id: string) =>
+    g.canUseTool(tool, input, { signal, toolUseID: id, requestId: 'r1' });
+  const write = { file_path: '.claude/CLAUDE.md', content: 'x' };
+  const answers = [];
+  for (const id of ['u-same', 'u-other-input', 'u-other-tool', 'u-denied']) {
+    answers.push((await ask(g, pre('Write', write, id))).hookSpecificOutput?.permissionDecision);
+  }
+  answers.push(
+    (await ask(g, pre('Bash', { command: 'tail README.md' }, 'u-bash'))).hookSpecificOutput?.permissionDecision,
+  );
+  const message = (tool: string) => `${tool} reached the fallback: the gate decides every tool call before it runs`;
+  const deny = (tool: string) => ({ behavior: 'deny' as const, message: message(tool) });
+  expect(answers).toEqual(['allow', 'allow', 'allow', 'allow', 'deny']);
+  expect(await use('Write', write, 'u-same')).toEqual({ behavior: 'allow', updatedInput: write });
+  // Asked once: the same id again is the fallback's.
+  expect(await use('Write', write, 'u-same')).toEqual(deny('Write'));
+  expect(await use('Write', { ...write, file_path: '../outside.txt' }, 'u-other-input')).toEqual(deny('Write'));
+  expect(await use('Edit', write, 'u-other-tool')).toEqual(deny('Edit'));
+  expect(await use('Write', write, 'u-never-hooked')).toEqual(deny('Write'));
+  expect(await use('Bash', { command: 'tail README.md' }, 'u-bash')).toEqual(deny('Bash'));
+  expect(g.denials.map(([id]) => id)).toEqual([
+    'u-bash',
+    'u-same',
+    'u-other-input',
+    'u-other-tool',
+    'u-never-hooked',
+    'u-bash',
+  ]);
+});
+
 test('a missing $STAGE_OUT denies even a read the step allows: an empty root fails closed', async () => {
   const g = gate(STEP, { ...CTX, stageOut: '' });
   const answer = await ask(g, pre('Read', { file_path: 'README.md' }));

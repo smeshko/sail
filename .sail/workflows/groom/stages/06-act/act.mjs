@@ -1,5 +1,5 @@
-// Applies the actions in $INPUT_ACTIONS to the ticket in $INPUT_TICKETKEY, comments report.md and an `## Actions`
-// section on it, then swaps the label in $INPUT_LABEL for the plan's outcome, `groomed` or `open-questions`. The swap is
+// Applies the actions in $INPUT_ACTIONS to the ticket in $INPUT_TICKETKEY, comments report.md, an `## Open questions`
+// section rendered from the plan's questions and an `## Actions` section on it, then swaps the label in $INPUT_LABEL for the plan's outcome, `groomed` or `open-questions`. The swap is
 // tried three times, a second apart, as open.sh does for its comment, so a short provider failure after the report is
 // posted does not fail the step. The report ends with a line naming the run, and the step reads the ticket first and
 // comments only when no comment holds that line: a later try has a fresh $STAGE_OUT, so the guard lives on the ticket.
@@ -121,9 +121,34 @@ const section = [
 if (section.length === 2) section.push('- none');
 section.push('', `Labelled \`${plan.outcome}\`.`);
 
+/**
+ * The questions as a numbered list: each option with what it means, the recommended one marked, then why and the cites.
+ * Each sub-line is indented by its item's marker width, so it stays in the item, and a blank line keeps Why out of the
+ * last option's bullet.
+ */
+function questioned(questions) {
+  if (questions.length === 0) return ['## Open questions', '', '- none'];
+  const lines = ['## Open questions', ''];
+  questions.forEach((question, index) => {
+    const marker = `${index + 1}. `;
+    const indent = ' '.repeat(marker.length);
+    lines.push(`${marker}${question.ask}`);
+    for (const { option, means } of question.options) {
+      lines.push(
+        option === question.recommend
+          ? `${indent}- **${option} (recommended)**: ${means}`
+          : `${indent}- ${option}: ${means}`,
+      );
+    }
+    lines.push('', `${indent}Why: ${question.why} (${question.cites.map((cite) => `\`${cite}\``).join(', ')})`, '');
+  });
+  lines.pop();
+  return lines;
+}
+
 const marker = `sail run ${process.env.RUN_ID} groomed this ticket.`;
 const body = join(process.env.STAGE_OUT, 'comment.md');
-writeFileSync(body, `${report}\n\n${section.join('\n')}\n\n${marker}\n`);
+writeFileSync(body, `${report}\n\n${questioned(plan.questions).join('\n')}\n\n${section.join('\n')}\n\n${marker}\n`);
 const current = port(['ticket-source', 'get', ticketKey]);
 const posted = current.comments.some((each) => each.body.split('\n').some((line) => line.trim() === marker));
 const comment = posted ? { url: current.url } : port(['ticket-source', 'comment', ticketKey, '--body-file', body]);

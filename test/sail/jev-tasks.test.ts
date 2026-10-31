@@ -121,10 +121,10 @@ test('tasksState keeps the full relevant diff even beyond MAX_DIFF', () => {
 
 test('clearYes needs every id answered at or above the threshold', () => {
   const answer = (noul: number) => ({ type: 'noul', noul });
-  expect(lib.clearYes({ a: answer(0.95), b: answer(1) }, ['a', 'b'])).toBe(true);
-  expect(lib.clearYes({ a: answer(0.949), b: answer(1) }, ['a', 'b'])).toBe(false);
+  expect(lib.clearYes({ a: answer(0.8), b: answer(1) }, ['a', 'b'])).toBe(true);
+  expect(lib.clearYes({ a: answer(0.799), b: answer(1) }, ['a', 'b'])).toBe(false);
   expect(lib.clearYes({ a: answer(1) }, ['a', 'b'])).toBe(false);
-  expect(lib.clearYes({ a: answer(0.8) }, ['a'], 0.8)).toBe(true);
+  expect(lib.clearYes({ a: answer(0.9) }, ['a'], 0.95)).toBe(false);
   expect(lib.clearYes({}, [])).toBe(false);
   expect(lib.clearYes({ a: { type: 'score', score: 3 } }, ['a'])).toBe(false);
 });
@@ -230,7 +230,7 @@ test('the stage, with Jev answering every task a clear yes, outputs the TasksChe
     const { code, stderr, output } = runStage(repo, PLAN);
     expect({ code, stderr }).toEqual({ code: 0, stderr: '' });
     expect(output.asked).toBe(true);
-    expect(output.threshold).toBe(0.95);
+    expect(output.threshold).toBe(0.8);
     expect(output.answers).toEqual(ALL.map((id) => ({ id, yes: 0.99 })));
     expect(output.checked?.tasks.map((task) => [task.id, task.implemented])).toEqual(ALL.map((id) => [id, true]));
     expect(output.checked?.tasks[0]?.evidence).toContain('0.99');

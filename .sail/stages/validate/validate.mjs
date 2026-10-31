@@ -4,23 +4,16 @@
 // gate runs. A validation tests what changed since the branch's last validated commit, when it has one, so the
 // validation after a fix tests only what the fix changed: typecheck and lint still check everything. One gate runs at a
 // time on the machine: its test files already take a worker per core, and two runs' gates side by side slow each other.
+// The lock is lib/gate-lock.mjs's, and the gate and the reruns carry validate's pid in SAIL_GATE_LOCK_HOLDER, so the
+// test launcher knows the lock it finds is validate's own.
 // A gate that outlasts GATE_SECONDS is stopped and fails the validation, so a hung gate never holds the lock for good.
 // A failing test is judged before it goes back to the implementer: one that passes when its file runs again is flaky,
 // and one that also fails on the branch's merge-base is the base's. Failures that are all flaky pass; failures that are
 // all the base's, or flaky, set baseRed, which ends the run instead of another pass: no change of the branch fixes it.
 import { spawn, spawnSync } from 'node:child_process';
-import {
-  appendFileSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs';
+import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 const root = process.cwd();
 const bun = process.env.SAIL_BUN ?? 'bun';
@@ -76,6 +69,7 @@ function gate() {
   return new Promise((resolve) => {
     const child = spawn(bun, ['run', 'gate', ...(since ? ['--base', since] : [])], {
       cwd: root,
+      env: holderEnv,
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: true,
     });
@@ -120,90 +114,9 @@ function gate() {
   });
 }
 
-// The lock is a directory, which only one process can make, holding the holder's pid and workspace. A holder that died
-// without removing it, killed at the stage's timeout, leaves it to the next validation to remove.
-const LOCK = join(tmpdir(), 'sail-validate.lock');
-
-/** The holder of the lock: its pid and workspace, or undefined while it is still writing them. */
-function holder() {
-  try {
-    const [pid, ...dir] = readFileSync(join(LOCK, 'holder'), 'utf8').trim().split(' ');
-    return { pid: Number(pid), dir: dir.join(' ') };
-  } catch {
-    return undefined;
-  }
-}
-
-/** Whether a process with this pid exists: signal 0 checks without sending anything. */
-function isAlive(pid) {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return error.code === 'EPERM';
-  }
-}
-
-/** Whether the lock was left behind: its holder is gone, or never wrote itself down. */
-function isStale() {
-  const held = holder();
-  if (held) return !isAlive(held.pid);
-  try {
-    return Date.now() - statSync(LOCK).mtimeMs > 10_000;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Removes a lock left behind. It is renamed aside first, which only one waiter can do, then checked: a waiter that saw
- * the same stale lock as another may have renamed the fresh lock that one took meanwhile, and puts it back.
- */
-function takeOver() {
-  const seen = holder()?.pid;
-  const aside = `${LOCK}.${process.pid}`;
-  try {
-    renameSync(LOCK, aside);
-  } catch {
-    return;
-  }
-  let moved;
-  try {
-    moved = Number(readFileSync(join(aside, 'holder'), 'utf8').split(' ')[0]);
-  } catch {}
-  if (moved !== undefined && moved !== seen && isAlive(moved)) {
-    try {
-      renameSync(aside, LOCK);
-      return;
-    } catch {}
-  }
-  rmSync(aside, { recursive: true, force: true });
-}
-
-/** Takes the lock, waiting as long as another validation holds it, and frees it when this process exits. */
-async function lock() {
-  for (let waiting = false; ; ) {
-    try {
-      mkdirSync(LOCK);
-      writeFileSync(join(LOCK, 'holder'), `${process.pid} ${root}\n`);
-      process.on('exit', () => rmSync(LOCK, { recursive: true, force: true }));
-      return;
-    } catch (error) {
-      if (error.code !== 'EEXIST') throw error;
-    }
-    if (isStale()) {
-      takeOver();
-      continue;
-    }
-    if (!waiting) {
-      process.stderr.write(`validate: waiting for the validation in ${holder()?.dir ?? 'another workspace'}\n`);
-      waiting = true;
-    }
-    await Bun.sleep(1000);
-  }
-}
-
-await lock();
+const { HOLDER_ENV, lock } = await import(join(dirname(process.env.SAIL_CONFIG), 'lib/gate-lock.mjs'));
+const holderEnv = { ...process.env, [HOLDER_ENV]: String(process.pid) };
+await lock({ label: 'validate', waiting: (dir) => `waiting for the validation in ${dir}` });
 const { code, log } = await gate();
 const failing = code === 1 ? failingTests(log) : [];
 const judged = failing.length > 0 ? await classify(failing) : [];
@@ -251,6 +164,7 @@ function failingTests(text) {
 function rerun(files, cwd) {
   const result = spawnSync(bun, ['run', 'test', ...files], {
     cwd,
+    env: holderEnv,
     encoding: 'utf8',
     timeout: RERUN_SECONDS * 1000,
     killSignal: 'SIGKILL',
