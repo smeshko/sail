@@ -93,10 +93,12 @@ export const Decision = z.object({
   questions: z.array(Question).max(2),
 });
 
-/** The actions the workflow lets through, the ones it only reports, and the label the groomed ticket ends with. */
+/** The actions the workflow lets through, the ones it only reports, the questions it posts, and the label the groomed ticket ends with. */
 export const Plan = z.object({
   apply: z.array(Action),
   reported: z.array(z.string()),
+  /** The open questions the comment posts: none once an action ended the ticket. */
+  questions: z.array(Question),
   outcome: z.enum(['groomed', 'open-questions']),
 });
 

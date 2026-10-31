@@ -45,10 +45,20 @@ test('a groom run on fakes reads FAKE-2 unclaimed, comments the report and swaps
       '## Duplicates',
       '## Staleness',
       '## Labels',
+      '## Assumptions',
       '## Open questions',
     ]) {
       expect(comment).toContain(heading);
     }
+    expect(comment.indexOf('## Open questions')).toBeLessThan(comment.indexOf('## Actions'));
+    expect(comment).toContain('1. Should the total include the calls a seeded run reused from the run it came from?');
+    expect(comment).toContain('2. Should a run that made no agent calls print a total line at all?');
+    expect(comment).toContain("  - include reused: the total is the whole run's cost, as if every call had run here");
+    expect(comment).toContain('  - **exclude reused (recommended)**: the total is what this run spent');
+    expect(comment).toContain('  - **print $0.00 (recommended)**: every run ends the same way');
+    expect(comment.match(/\(recommended\)/g)).toHaveLength(2);
+    expect(comment).toContain('  Why: reused calls cost the seeded run nothing');
+    expect(comment).toContain('(`src/cli/commands/show.ts:40`)');
     expect(comment).toContain('## Actions');
     expect(comment).toContain('Labelled `open-questions`.');
     expect(comment.trimEnd().split('\n').at(-1)).toBe(`sail run ${basename(dir)} groomed this ticket.`);
@@ -449,7 +459,9 @@ test('groom labels a ticket with no open question groomed', async () => {
     expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
 
     expect(fakeTicket(repo.dir, 'FAKE-2').labels).toEqual(['groomed']);
-    expect(lastComment(repo.dir)).toContain('Labelled `groomed`.');
+    const comment = lastComment(repo.dir);
+    expect(comment).toContain('Labelled `groomed`.');
+    expect(comment).toContain('## Open questions\n\n- none\n\n## Actions');
   });
 }, 120_000);
 
@@ -468,7 +480,10 @@ test('groom cancels a ticket the worth check gave cancel at the threshold, and l
     const ticket = fakeTicket(repo.dir, 'FAKE-2');
     expect(ticket.state).toEqual({ type: 'canceled', name: 'Canceled' });
     expect(ticket.labels).toEqual(['groomed']);
-    expect(lastComment(repo.dir)).toContain('- applied: cancel (a tidy-up nobody would notice)');
+    const comment = lastComment(repo.dir);
+    expect(comment).toContain('- applied: cancel (a tidy-up nobody would notice)');
+    expect(comment).toContain('## Open questions\n\n- none\n\n## Actions');
+    expect(comment).not.toContain('(recommended)');
   });
 }, 120_000);
 

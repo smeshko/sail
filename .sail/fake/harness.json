@@ -637,11 +637,27 @@
             "recommend": "exclude reused",
             "why": "reused calls cost the seeded run nothing, so the total should say what it spent",
             "cites": ["src/cli/commands/show.ts:40"]
+          },
+          {
+            "ask": "Should a run that made no agent calls print a total line at all?",
+            "options": [
+              {
+                "option": "print $0.00",
+                "means": "every run ends the same way, so a reader never wonders whether the line is missing"
+              },
+              {
+                "option": "print nothing",
+                "means": "a run with no cost shows no footer, and a script-only run looks as it does today"
+              }
+            ],
+            "recommend": "print $0.00",
+            "why": "a footer that sometimes appears is harder to scan than one that always does",
+            "cites": ["src/cli/commands/show.ts:52-58"]
           }
         ]
       },
       "files": {
-        "report.md": "## Grooming report\n\nFAKE-2 reads as a vaguer FAKE-1: both want a total cost line in `sail show`.\n\n## Worth\n\nKept at 0.70: nothing prints a run's total today, and a reader of `sail show` asks for it.\n\n## Merges\n\n- FAKE-1 at confidence 0.60: the same footer line; likely one ticket, but the check is not sure enough to merge.\n\n## Duplicates\n\n- FAKE-1 at confidence 0.60: the same footer line, but FAKE-2 does not say where the total goes.\n\n## Staleness\n\nNot stale: `show.ts` lists each call's cost and prints no total.\n\n## Labels\n\nFAKE-2 carries no type or platform: it is a `feature` of the `cli`.\n\n## Open questions\n\n- Should the total include the calls a seeded run reused from the run it came from?\n"
+        "report.md": "## Grooming report\n\nFAKE-2 reads as a vaguer FAKE-1: both want a total cost line in `sail show`.\n\n## Worth\n\nKept at 0.70: nothing prints a run's total today, and a reader of `sail show` asks for it.\n\n## Merges\n\n- FAKE-1 at confidence 0.60: the same footer line; likely one ticket, but the check is not sure enough to merge.\n\n## Duplicates\n\n- FAKE-1 at confidence 0.60: the same footer line, but FAKE-2 does not say where the total goes.\n\n## Staleness\n\nNot stale: `show.ts` lists each call's cost and prints no total.\n\n## Labels\n\nFAKE-2 carries no type or platform: it is a `feature` of the `cli`.\n\n## Assumptions\n\n- Rounded the total to two decimals: the footer prints dollars, and sub-cent precision adds nothing.\n"
       },
       "messages": ["Report written: FAKE-2 is probably a duplicate of FAKE-1."],
       "turns": 10,
