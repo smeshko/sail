@@ -1,0 +1,200 @@
+// scripts/workspace-docs.ts: the Markdown under a clone's docs/ lands in a run's workspace, and nothing else does.
+import { expect, spyOn, test } from 'bun:test';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { builder, readonly, withTools } from '../../.sail/lib/permissions';
+import { cloneOf, copyDocs, main } from '../../scripts/workspace-docs';
+import { createGitWorktreeWorkspace } from '../../src/adapters/workspace/git-worktree';
+import { readConfig } from '../../src/engine/config';
+import { decide } from '../../src/engine/permissions/index';
+import { withOrigin } from '../helpers/origin';
+import { withTempRepo } from '../helpers/temp-repo';
+
+const SCRIPT = join(import.meta.dir, '..', '..', 'scripts', 'workspace-docs.ts');
+
+function put(root: string, file: string, content: string): void {
+  mkdirSync(dirname(join(root, file)), { recursive: true });
+  writeFileSync(join(root, file), content);
+}
+
+function tempDir(): string {
+  return realpathSync(mkdtempSync(join(tmpdir(), 'sail-workspace-docs-')));
+}
+
+test('copyDocs copies each Markdown file under docs/ byte for byte and leaves non-Markdown files out', () => {
+  const clone = tempDir();
+  const workspace = tempDir();
+  put(clone, 'docs/adr/0001-a.md', '# ADR 1\nDecision: yes.\n');
+  put(clone, 'docs/artifacts/plans/archive/p/DECISIONS.md', 'D1\n');
+  put(clone, 'docs/artifacts/plans/archive/p/evidence/shot.png', 'png');
+  const copied = copyDocs(clone, workspace);
+  expect({
+    copied,
+    adr: readFileSync(join(workspace, 'docs/adr/0001-a.md'), 'utf8'),
+    decisions: readFileSync(join(workspace, 'docs/artifacts/plans/archive/p/DECISIONS.md'), 'utf8'),
+    png: existsSync(join(workspace, 'docs/artifacts/plans/archive/p/evidence/shot.png')),
+  }).toEqual({
+    copied: ['adr/0001-a.md', 'artifacts/plans/archive/p/DECISIONS.md'],
+    adr: '# ADR 1\nDecision: yes.\n',
+    decisions: 'D1\n',
+    png: false,
+  });
+});
+
+test('copyDocs copies nothing and writes nothing when the clone has no docs/', () => {
+  const clone = tempDir();
+  const workspace = tempDir();
+  expect({ copied: copyDocs(clone, workspace), made: existsSync(join(workspace, 'docs')) }).toEqual({
+    copied: [],
+    made: false,
+  });
+});
+
+test('copyDocs copies nothing when the clone and the workspace are the same directory', () => {
+  const clone = tempDir();
+  put(clone, 'docs/adr/0001-a.md', 'x\n');
+  expect(copyDocs(clone, clone)).toEqual([]);
+});
+
+test('copyDocs leaves a file the workspace already has unchanged', () => {
+  const clone = tempDir();
+  const workspace = tempDir();
+  put(clone, 'docs/adr/0001-a.md', 'clone\n');
+  put(clone, 'docs/adr/0002-b.md', 'two\n');
+  put(workspace, 'docs/adr/0001-a.md', 'tracked\n');
+  const copied = copyDocs(clone, workspace);
+  expect({ copied, kept: readFileSync(join(workspace, 'docs/adr/0001-a.md'), 'utf8') }).toEqual({
+    copied: ['adr/0002-b.md'],
+    kept: 'tracked\n',
+  });
+});
+
+test('as the git-worktree workspace setup, the script puts the clone docs/ in the workspace as regular files that git status does not show', async () => {
+  await withTempRepo(async (repo) => {
+    writeFileSync(join(repo.dir, '.gitignore'), 'docs/\n');
+    repo.git('add', '.gitignore');
+    repo.git('commit', '--quiet', '-m', 'ignore docs');
+    withOrigin(repo);
+    put(repo.dir, 'docs/adr/0001-a.md', '# ADR 1\n');
+    const runDir = join(tempDir(), 'r1');
+    mkdirSync(runDir, { recursive: true });
+    const adapter = createGitWorktreeWorkspace({
+      repo: repo.dir,
+      env: repo.env,
+      leasesDir: tempDir(),
+      setup: `bun ${SCRIPT}`,
+    });
+    const created = await adapter.create({ runId: 'r1', runDir }, { branch: 'sail/FAKE-1-docs' });
+    const path = 'rejected' in created ? '' : created.path;
+    expect({
+      isFile: lstatSync(join(path, 'docs/adr/0001-a.md')).isFile(),
+      content: readFileSync(join(path, 'docs/adr/0001-a.md'), 'utf8'),
+      status: repo.git('-C', path, 'status', '--porcelain'),
+    }).toEqual({ isFile: true, content: '# ADR 1\n', status: '' });
+  });
+});
+
+test('cloneOf run in a worktree returns the clone, and throws outside a git checkout', async () => {
+  await withTempRepo(async (repo) => {
+    const tree = join(tempDir(), 'tree');
+    repo.git('worktree', 'add', '--quiet', '--detach', tree);
+    expect(realpathSync(cloneOf(tree, repo.env))).toBe(realpathSync(repo.dir));
+    expect(() => cloneOf(tempDir(), { ...repo.env, GIT_CEILING_DIRECTORIES: tmpdir() })).toThrow();
+  });
+});
+
+const REPO = join(import.meta.dir, '..', '..');
+
+test("sail's own config loads, and its workspace setup runs the docs copy after the install", () => {
+  const config = readConfig(join(REPO, '.sail'));
+  const setup = 'issues' in config ? '' : String(config.adapters.workspace?.setup);
+  expect({
+    loaded: !('issues' in config),
+    installFirst: setup.indexOf('bun install --frozen-lockfile') >= 0,
+    copyAfter: setup.indexOf('scripts/workspace-docs.ts') > setup.indexOf('bun install --frozen-lockfile'),
+  }).toEqual({ loaded: true, installFirst: true, copyAfter: true });
+});
+
+/** A decide context over a real workspace with its stage directories, as the engine makes them. */
+function workspaceContext() {
+  const worktree = tempDir();
+  for (const dir of ['.in', '.out', 'docs/adr', 'src']) mkdirSync(join(worktree, dir), { recursive: true });
+  writeFileSync(join(worktree, 'docs/adr/0001-x.md'), '# ADR\n');
+  return { worktree, stageOut: join(worktree, '.out'), stageIn: join(worktree, '.in'), env: {} };
+}
+
+test.each([
+  ['readonly', readonly],
+  ['builder', builder],
+])(
+  'under %s, a write and an edit of docs/adr/ in the workspace are denied for matching no write glob',
+  (_name, permissions) => {
+    const ctx = workspaceContext();
+    const path = join(ctx.worktree, 'docs/adr/0001-x.md');
+    const verdicts = (['write', 'edit'] as const).map((kind) => {
+      const decision = decide({ tool: kind, kind, paths: [path] }, permissions, ctx);
+      return decision.allow
+        ? 'allowed'
+        : `${decision.rule}: ${decision.reason.includes("matches none of the step's write globs")}`;
+    });
+    expect(verdicts).toEqual(['write: true', 'write: true']);
+  },
+);
+
+test('under builder, a write of src/ in the workspace is allowed, so the docs/ denial is the glob and not the setup', () => {
+  const ctx = workspaceContext();
+  const call = { tool: 'write', kind: 'write', paths: [join(ctx.worktree, 'src/x.ts')] } as const;
+  expect(decide(call, builder, ctx)).toEqual({ allow: true });
+});
+
+test('under readonly, a read of docs/adr/ in the workspace is allowed', () => {
+  const ctx = workspaceContext();
+  const call = { tool: 'read', kind: 'read', paths: [join(ctx.worktree, 'docs/adr/0001-x.md')] } as const;
+  expect(decide(call, readonly, ctx)).toEqual({ allow: true });
+});
+
+test('under readonly with a tool added, a write of docs/adr/ in the workspace is still denied', () => {
+  const ctx = workspaceContext();
+  const permissions = withTools(readonly, ['WebFetch']);
+  const decision = decide(
+    { tool: 'write', kind: 'write', paths: [join(ctx.worktree, 'docs/adr/0001-x.md')] },
+    permissions,
+    ctx,
+  );
+  expect({ tools: permissions.tools, allow: decision.allow }).toEqual({ tools: ['WebFetch'], allow: false });
+});
+
+test.each(['04-questions', '05-decide'])(
+  'the groom %s prompt points at docs/adr/ and docs/artifacts/plans/',
+  (stage) => {
+    const prompt = readFileSync(join(REPO, '.sail/workflows/groom/stages', stage, 'prompt.md'), 'utf8');
+    expect({ adr: prompt.includes('docs/adr/'), plans: prompt.includes('docs/artifacts/plans/') }).toEqual({
+      adr: true,
+      plans: true,
+    });
+  },
+);
+
+test('main copies a worktree clone docs/ and reports the count, and exits 1 naming the error outside a git checkout', async () => {
+  await withTempRepo(async (repo) => {
+    put(repo.dir, 'docs/adr/0001-a.md', '# ADR 1\n');
+    const tree = join(tempDir(), 'tree');
+    repo.git('worktree', 'add', '--quiet', '--detach', tree);
+    const lines: string[] = [];
+    const log = spyOn(console, 'log').mockImplementation((line: string) => void lines.push(line));
+    const error = spyOn(console, 'error').mockImplementation((line: string) => void lines.push(line));
+    try {
+      const codes = [main(tree, repo.env), main(tempDir(), { ...repo.env, GIT_CEILING_DIRECTORIES: tmpdir() })];
+      expect({
+        codes,
+        copied: lines[0]?.startsWith('workspace-docs: copied 1 files from '),
+        failed: lines[1]?.startsWith('workspace-docs: '),
+        content: readFileSync(join(tree, 'docs/adr/0001-a.md'), 'utf8'),
+      }).toEqual({ codes: [0, 1], copied: true, failed: true, content: '# ADR 1\n' });
+    } finally {
+      log.mockRestore();
+      error.mockRestore();
+    }
+  });
+});
