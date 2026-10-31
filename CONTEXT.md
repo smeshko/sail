@@ -570,7 +570,7 @@ A workflow that declares `watch: { every, label? }` and `maxConcurrentRuns`, whi
 _Avoid_: loop, line, daemon, pipeline
 
 **Watcher**:
-The resident process that automates one repository's watch set: it polls and it dispatches. `sail watch <workflow…>` starts it in the clone where it is run, or adds to the live one; `sail watch` with no names does so for every workflow that declares a watch. There is one per repository. Each run it dispatches fetches before it makes its worktree, and runs start from `origin/<default>` in detached worktrees. A dispatched run, and every resume of it, reads its `.sail/` and conventions from the commit it fetched, never the clone's working tree, and records that commit as `definitionsSha`; a workflow missing or broken there is refused, naming the commit. It is sail's home in v1. Without one running, nothing starts on its own.
+The resident process that automates one repository's watch set: it polls and it dispatches. `sail watch <workflow…>` starts it in the clone where it is run, or adds to the live one; `sail watch` with no names does so for every workflow that declares a watch. There is one per repository. Each run it dispatches fetches before it makes its worktree, and runs start from `origin/<default>` in detached worktrees. A dispatched run, and every resume of it, reads its `.sail/` and conventions from the commit it fetched, never the clone's working tree, and records that commit as `definitionsSha`; a workflow missing or broken there is refused, naming the commit; one whose definitions need a newer sail holds the dispatch rather than failing or parking its item. It is sail's home in v1. Without one running, nothing starts on its own.
 _Avoid_: daemon, monitor, poller, scheduler
 
 **Watch set**:
@@ -610,7 +610,7 @@ The key a queue item is known by, minted from its source: `ticket:<ticket key>`,
 _Avoid_: item id, queue key
 
 **Held dispatch**:
-A watched workflow's dispatch stopped until a time, because one of its runs hit the usage limit or could not reach a provider. It is kept in `queue.json`, and the queue is not changed: nothing starts or resumes until the reset, or a back-off when the provider gave none (or, for an unavailable port, the schedule's next wait), and no item's attempt is counted.
+A watched workflow's dispatch stopped until a time, because one of its runs hit the usage limit or could not reach a provider. It is kept in `queue.json`, and the queue is not changed: nothing starts or resumes until the reset, or a back-off when the provider gave none (or, for an unavailable port, the schedule's next wait), and no item's attempt is counted. A start refused because the `.sail/` committed at the default branch needs a newer sail holds it too, with no time: until the running sail's SDK changes, which the watcher's next tick finds.
 _Avoid_: paused (the poll's word), throttled, frozen
 
 **Parked**:

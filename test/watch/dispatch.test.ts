@@ -62,6 +62,9 @@ async function world(
     source?: (own: TicketSource) => TicketSource;
     workspace?: (own: WorkspacePort) => WorkspacePort;
     paused?: () => boolean;
+    sail?: () => string;
+    pullBlocked?: () => string | undefined;
+    onHeld?: () => void;
   } = {},
 ): Promise<World> {
   writeTickets(writeStub(repo.dir), designated(count));
@@ -103,6 +106,9 @@ async function world(
       onSettled: (each) => settled.push(each),
       onError: (message) => errors.push(message),
       ...(options.paused === undefined ? {} : { paused: options.paused }),
+      ...(options.sail === undefined ? {} : { sail: options.sail }),
+      ...(options.pullBlocked === undefined ? {} : { pullBlocked: options.pullBlocked }),
+      ...(options.onHeld === undefined ? {} : { onHeld: options.onHeld }),
     });
   return { runs, clock, store, ticketSource, adapters, spawner, settled, errors, dispatcher };
 }
@@ -1561,3 +1567,86 @@ test('a fixture run whose push is unavailable once is suspended, resumed by the 
     });
   });
 }, 120_000);
+
+const NEWER = 'sail FAKE-1: definitions at abc1234 need a newer sail: pull /work/clone';
+
+test('a start refused for definitions that need a newer sail defers its item and holds the dispatch untimed; nothing starts, resumes or parks until the running sail changes, then the item dispatches again', async () => {
+  await withTempRepo(async (repo) => {
+    let sail = 'sdk-1';
+    let heard = 0;
+    const w = await world(repo, 2, 2, { claiming: false, sail: () => sail, onHeld: () => heard++ });
+    const dispatcher = w.dispatcher();
+    await dispatcher.tick();
+    expect(spawnedKeys(w.spawner)).toEqual(['FAKE-1', 'FAKE-2']);
+    const refused = w.spawner.run('FAKE-1').runId;
+    await w.spawner.end('FAKE-1', { refused: NEWER, code: 3 });
+    await dispatcher.tick();
+    expect(states(w.store)).toEqual(['FAKE-1 queued 0', 'FAKE-2 dispatched 1']);
+    expect(heard).toBe(1);
+    expect(w.store.snapshot().held).toMatchObject({
+      sail: 'sdk-1',
+      runId: refused,
+      reason: 'definitions at abc1234 need a newer sail: pull /work/clone',
+    });
+    expect(w.store.snapshot().held).not.toHaveProperty('until');
+    expect(eventsOf(w.runs, 'queue:held')).toEqual([
+      { run: refused, reason: 'definitions at abc1234 need a newer sail: pull /work/clone' },
+    ]);
+
+    for (let tick = 0; tick < 3; tick++) {
+      w.clock.advance(FIVE_MINUTES * 12);
+      await dispatcher.tick();
+    }
+    expect(spawnedKeys(w.spawner)).toEqual(['FAKE-1', 'FAKE-2']);
+    expect(states(w.store)).toEqual(['FAKE-1 queued 0', 'FAKE-2 dispatched 1']);
+    expect(w.settled).toEqual([]);
+    expect(eventsOf(w.runs, 'queue:released')).toEqual([]);
+
+    sail = 'sdk-2';
+    await dispatcher.tick();
+    expect(eventsOf(w.runs, 'queue:released')).toHaveLength(1);
+    expect(w.store.snapshot().held).toBeUndefined();
+    expect(spawnedKeys(w.spawner)).toEqual(['FAKE-1', 'FAKE-2', 'FAKE-1']);
+    expect(states(w.store)).toEqual(['FAKE-1 dispatched 1', 'FAKE-2 dispatched 1']);
+  });
+});
+
+test('a fingerprint already changed since the refused spawn releases the hold on the tick after it, and the hold names what stops the watcher pulling', async () => {
+  await withTempRepo(async (repo) => {
+    let sail = 'sdk-1';
+    const w = await world(repo, 1, 1, {
+      claiming: false,
+      sail: () => sail,
+      pullBlocked: () => 'the clone has local changes',
+    });
+    const dispatcher = w.dispatcher();
+    await dispatcher.tick();
+    await w.spawner.end('FAKE-1', { refused: NEWER, code: 3 });
+    sail = 'sdk-2';
+    await dispatcher.tick();
+    expect(w.store.snapshot().held).toMatchObject({
+      sail: 'sdk-1',
+      reason:
+        "definitions at abc1234 need a newer sail: pull /work/clone (the watcher can't: the clone has local changes)",
+    });
+    await dispatcher.tick();
+    expect(w.store.snapshot().held).toBeUndefined();
+    expect(spawnedKeys(w.spawner)).toEqual(['FAKE-1', 'FAKE-1']);
+  });
+});
+
+test('a start refused with N type errors still fails its attempt and parks after maxAttempts, holding nothing', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 1, 1, { claiming: false, sail: () => 'sdk-1' });
+    const dispatcher = w.dispatcher();
+    const typeErrors = 'sail FAKE-1: 2 type errors in .sail/workflows/a/workflow.ts';
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await dispatcher.tick();
+      await w.spawner.end('FAKE-1', { refused: typeErrors, code: 3 });
+      await dispatcher.tick();
+      expect(w.store.snapshot().held).toBeUndefined();
+      w.clock.advance(FIVE_MINUTES);
+    }
+    expect(states(w.store)).toEqual(['FAKE-1 parked 2']);
+  });
+});
