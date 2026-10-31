@@ -213,3 +213,8 @@ test('a workspace git no longer knows is still removed, and nothing beside it in
     ],
   }).toEqual({ released: false, workspace: false, beside: ['keep\n', 'keep\n'] });
 });
+
+test('fastForward answers moved false: the fake repository stands in for the remote', async () => {
+  const workspace = createFakeWorkspace({ repo: repo().dir, env: repo().env, leasesDir: tempDir() });
+  expect(await workspace.fastForward?.()).toEqual({ moved: false });
+});

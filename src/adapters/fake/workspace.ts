@@ -82,6 +82,9 @@ export function createFakeWorkspace(options: FakeWorkspaceOptions): WorkspacePor
       copyTree(repo, sha, paths, into, env);
       return { sha };
     },
+    async fastForward() {
+      return { moved: false };
+    },
     async reopen(run, { branch, baseSha }) {
       return reopenWorktree(join(run.runDir, WORKSPACE_DIR), branch, baseSha, env);
     },

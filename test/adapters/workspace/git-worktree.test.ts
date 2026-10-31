@@ -151,6 +151,80 @@ test('with SAIL_HOME in its env and no leases directory named, a lease lands in 
   });
 });
 
+test('fastForward moves a clean clone on the default branch behind its remote to the remote tip, answering both shas; at the tip it answers moved false, up to date', async () => {
+  await withTempRepo(async (repo) => {
+    const origin = withOrigin(repo);
+    const from = repo.git('rev-parse', 'HEAD');
+    const to = origin.push('later.txt');
+    const adapter = adapterOf(repo, world(repo));
+    expect(await adapter.fastForward?.()).toEqual({ moved: true, from, to });
+    expect(repo.git('rev-parse', 'HEAD')).toBe(to);
+    expect(repo.git('rev-parse', '--abbrev-ref', 'HEAD')).toBe('main');
+    expect(await adapter.fastForward?.()).toEqual({ moved: false });
+  });
+});
+
+describe('fastForward leaves the clone as it was and says why, for', () => {
+  const unmoved = async (repo: TempRepo, expected: string) => {
+    const head = repo.git('rev-parse', 'HEAD');
+    const branch = repo.git('rev-parse', '--abbrev-ref', 'HEAD');
+    const status = repo.git('status', '--porcelain');
+    const answer = await adapterOf(repo, world(repo)).fastForward?.();
+    expect(answer).toMatchObject({ moved: false, blocked: expect.stringContaining(expected) });
+    expect(repo.git('rev-parse', 'HEAD')).toBe(head);
+    expect(repo.git('rev-parse', '--abbrev-ref', 'HEAD')).toBe(branch);
+    expect(repo.git('status', '--porcelain')).toBe(status);
+  };
+
+  test('uncommitted changes to a tracked file', async () => {
+    await withTempRepo(async (repo) => {
+      const origin = withOrigin(repo);
+      origin.push('later.txt');
+      writeFileSync(join(repo.dir, 'README.md'), 'edited by hand\n');
+      await unmoved(repo, 'uncommitted changes');
+    });
+  });
+
+  test('another branch checked out', async () => {
+    await withTempRepo(async (repo) => {
+      const origin = withOrigin(repo);
+      origin.push('later.txt');
+      repo.git('checkout', '--quiet', '-b', 'topic');
+      await unmoved(repo, 'topic');
+    });
+  });
+
+  test('a detached HEAD', async () => {
+    await withTempRepo(async (repo) => {
+      const origin = withOrigin(repo);
+      origin.push('later.txt');
+      repo.git('checkout', '--quiet', '--detach');
+      await unmoved(repo, 'detached');
+    });
+  });
+
+  test('a local commit the remote lacks', async () => {
+    await withTempRepo(async (repo) => {
+      const origin = withOrigin(repo);
+      origin.push('later.txt');
+      writeFileSync(join(repo.dir, 'mine.txt'), 'mine\n');
+      repo.git('add', 'mine.txt');
+      repo.git('commit', '--quiet', '-m', 'mine');
+      await unmoved(repo, 'local commit');
+    });
+  });
+
+  test('a fast-forward git itself refuses', async () => {
+    await withTempRepo(async (repo) => {
+      const origin = withOrigin(repo);
+      origin.push('README.md', 'from the remote\n');
+      writeFileSync(join(repo.dir, 'README.md'), 'same path, untracked elsewhere\n');
+      repo.git('update-index', '--assume-unchanged', 'README.md');
+      await unmoved(repo, 'merge --ff-only');
+    });
+  });
+});
+
 test('create fetches first: a commit pushed to the origin after the clone fetched is the new base, and origin/main moves to it', async () => {
   await withTempRepo(async (repo) => {
     const origin = withOrigin(repo);
