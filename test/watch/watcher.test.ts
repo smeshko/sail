@@ -1514,3 +1514,35 @@ test('a newer-sail hold asks for a fast-forward on the next tick, and the finger
     await watcher.stop();
   });
 });
+
+test('a fast-forward that has not answered holds up no dispatch, and none starts beside it until it answers', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(
+      repo,
+      [{ name: 'a', label: 'sail-a', cap: 1 }],
+      tickets({ 'FAKE-1': 'sail-a', 'FAKE-2': 'sail-a' }),
+    );
+    let answer: ((value: FastForwardAnswer) => void) | undefined;
+    const ff = fastForwarding(w, () => MOVED);
+    const pending = {
+      ...ff.adapters.workspace,
+      fastForward: () => {
+        ff.calls.push(w.spawner.runs.map((run) => run.ticketKey ?? ''));
+        return new Promise<FastForwardAnswer>((resolve) => {
+          answer = resolve;
+        });
+      },
+    };
+    const watcher = await w.start(['a'], { adapters: { ...ff.adapters, workspace: pending }, fastForwardMs: 1000 });
+    await w.timers.advance(1000);
+    await w.timers.advance(1000);
+    await w.timers.advance(1000);
+    expect(w.spawner.runs.map((run) => run.ticketKey)).toEqual(['FAKE-1']);
+    expect(ff.calls).toEqual([[]]);
+    answer?.(MOVED);
+    await w.timers.advance(1000);
+    expect(w.out.some((line) => line.includes('clone fast-forwarded to b1c2d3e'))).toBe(true);
+    expect(ff.calls).toHaveLength(2);
+    await watcher.stop();
+  });
+});
