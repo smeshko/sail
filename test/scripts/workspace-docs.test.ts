@@ -3,7 +3,7 @@ import { expect, spyOn, test } from 'bun:test';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { builder, readonly } from '../../.sail/lib/permissions';
+import { builder, readonly, withTools } from '../../.sail/lib/permissions';
 import { cloneOf, copyDocs, main } from '../../scripts/workspace-docs';
 import { createGitWorktreeWorkspace } from '../../src/adapters/workspace/git-worktree';
 import { readConfig } from '../../src/engine/config';
@@ -152,6 +152,17 @@ test('under readonly, a read of docs/adr/ in the workspace is allowed', () => {
   const ctx = workspaceContext();
   const call = { tool: 'read', kind: 'read', paths: [join(ctx.worktree, 'docs/adr/0001-x.md')] } as const;
   expect(decide(call, readonly, ctx)).toEqual({ allow: true });
+});
+
+test('under readonly with a tool added, a write of docs/adr/ in the workspace is still denied', () => {
+  const ctx = workspaceContext();
+  const permissions = withTools(readonly, ['WebFetch']);
+  const decision = decide(
+    { tool: 'write', kind: 'write', paths: [join(ctx.worktree, 'docs/adr/0001-x.md')] },
+    permissions,
+    ctx,
+  );
+  expect({ tools: permissions.tools, allow: decision.allow }).toEqual({ tools: ['WebFetch'], allow: false });
 });
 
 test.each(['04-questions', '05-decide'])(
