@@ -121,18 +121,26 @@ const section = [
 if (section.length === 2) section.push('- none');
 section.push('', `Labelled \`${plan.outcome}\`.`);
 
-/** The questions as a numbered list: each option with what it means, the recommended one marked, then why and the cites. */
+/**
+ * The questions as a numbered list: each option with what it means, the recommended one marked, then why and the cites.
+ * Each sub-line is indented by its item's marker width, so it stays in the item, and a blank line keeps Why out of the
+ * last option's bullet.
+ */
 function questioned(questions) {
   if (questions.length === 0) return ['## Open questions', '', '- none'];
   const lines = ['## Open questions', ''];
   questions.forEach((question, index) => {
-    lines.push(`${index + 1}. ${question.ask}`);
+    const marker = `${index + 1}. `;
+    const indent = ' '.repeat(marker.length);
+    lines.push(`${marker}${question.ask}`);
     for (const { option, means } of question.options) {
       lines.push(
-        option === question.recommend ? `  - **${option} (recommended)**: ${means}` : `  - ${option}: ${means}`,
+        option === question.recommend
+          ? `${indent}- **${option} (recommended)**: ${means}`
+          : `${indent}- ${option}: ${means}`,
       );
     }
-    lines.push(`  Why: ${question.why} (${question.cites.map((cite) => `\`${cite}\``).join(', ')})`, '');
+    lines.push('', `${indent}Why: ${question.why} (${question.cites.map((cite) => `\`${cite}\``).join(', ')})`, '');
   });
   lines.pop();
   return lines;

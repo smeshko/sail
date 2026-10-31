@@ -59,6 +59,19 @@ test('a groom run on fakes reads FAKE-2 unclaimed, comments the report and swaps
     expect(comment.match(/\(recommended\)/g)).toHaveLength(2);
     expect(comment).toContain('  Why: reused calls cost the seeded run nothing');
     expect(comment).toContain('(`src/cli/commands/show.ts:40`)');
+    // CommonMark continues a `1. ` item only at three spaces in, and a line after a nested list joins its last bullet
+    // unless a blank line parts them: so the options nest under their question and its Why stands apart from them.
+    expect(comment).toContain(
+      [
+        '1. Should the total include the calls a seeded run reused from the run it came from?',
+        "   - include reused: the total is the whole run's cost, as if every call had run here",
+        "   - **exclude reused (recommended)**: the total is what this run spent, and a seeded run's total is smaller",
+        '',
+        '   Why: reused calls cost the seeded run nothing, so the total should say what it spent (`src/cli/commands/show.ts:40`)',
+        '',
+        '2. Should a run that made no agent calls print a total line at all?',
+      ].join('\n'),
+    );
     expect(comment).toContain('## Actions');
     expect(comment).toContain('Labelled `open-questions`.');
     expect(comment.trimEnd().split('\n').at(-1)).toBe(`sail run ${basename(dir)} groomed this ticket.`);
