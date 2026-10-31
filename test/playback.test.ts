@@ -89,9 +89,9 @@ test('recording the scripted run changes nothing it writes: the recorded run is 
   expect(runDirDiff(recordedRun, committedRun)).toBe('');
 });
 
-test('playing the scripted set back writes the committed golden run, all 63 files, byte for byte', () => {
+test('playing the scripted set back writes the committed golden run, all 82 files, byte for byte', () => {
   expect(unmade[SCRIPTED_SET]).toBeUndefined();
-  expect(filesIn(committedRun)).toHaveLength(63);
+  expect(filesIn(committedRun)).toHaveLength(82);
   expect(runDirDiff(scriptedPlayback, committedRun)).toBe('');
 });
 

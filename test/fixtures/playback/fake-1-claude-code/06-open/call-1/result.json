@@ -34,7 +34,7 @@
     "STAGE_OUT": ".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/06-open/call-1/out",
     "WORKSPACE": ".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/workspace",
     "BRANCH": "sail/FAKE-1-add-a-shout-flag-to-the-greet-command",
-    "SAIL_CONFIG": ".sail/project.yaml",
+    "SAIL_CONFIG": ".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/definition/.sail/project.yaml",
     "INPUT_TITLE": ".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/06-open/call-1/in/title.txt",
     "INPUT_BODY": ".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/06-open/call-1/in/pr-body.md",
     "INPUT_TICKETKEY": ".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/06-open/call-1/in/ticketKey.txt",
