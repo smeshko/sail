@@ -77,11 +77,11 @@ function takeOver() {
 
 /**
  * Takes the lock and frees it when this process exits. While another process holds it, prints `waiting(dir)` once to
- * stderr, prefixed `label: `. With `seconds` it gives up and returns false once they have passed; without, it waits as
- * long as the holder does.
+ * stderr, prefixed `label: `. With `seconds` it gives up and returns false once they have passed; without, or with a
+ * value that is no number of seconds, it waits as long as the holder does, pausing at least 50 ms between tries.
  */
 export async function lock({ label, waiting, seconds }) {
-  const until = seconds === undefined ? Number.POSITIVE_INFINITY : Date.now() + seconds * 1000;
+  const until = Number.isFinite(seconds) ? Date.now() + seconds * 1000 : Number.POSITIVE_INFINITY;
   for (let told = false; ; ) {
     const path = lockPath();
     try {

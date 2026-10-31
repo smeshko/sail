@@ -91,6 +91,21 @@ test('a broad run takes the lock when the holder exits mid-wait, runs bun test, 
   });
 });
 
+test('a SAIL_TEST_LOCK_SECONDS that is no number of seconds waits the default 180 s', async () => {
+  await withTempRepo(async (repo) => {
+    const held = await hold(repo);
+    for (const value of ['3m', '', '-5']) {
+      const child = launch(repo, probes(6), { RUN_ID: 'ADW-1-x', SAIL_TEST_LOCK_SECONDS: value });
+      const stderr = child.stderr.getReader();
+      const { value: first } = await stderr.read();
+      child.kill();
+      await child.exited;
+      expect(new TextDecoder().decode(first)).toBe(WAIT(repo).replace('2 s', '180 s'));
+    }
+    await held.release();
+  });
+});
+
 test('a run whose SAIL_GATE_LOCK_HOLDER is the live holder prints no wait line', async () => {
   await withTempRepo(async (repo) => {
     const held = await hold(repo);

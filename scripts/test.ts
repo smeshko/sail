@@ -8,8 +8,8 @@
 //
 // Inside a sail run (RUN_ID set), a broad run (see broadRun) takes the machine's gate lock first, the one validate holds
 // while its gate runs: one broad run goes at a time, so several runs' test files don't overload the machine. It waits up
-// to SAIL_TEST_LOCK_SECONDS (180) and then stops with exit 2. Validate's own gate is let through: it names its pid in
-// SAIL_GATE_LOCK_HOLDER, or is an ancestor of this process.
+// to SAIL_TEST_LOCK_SECONDS (180, also when that is no number of seconds) and then stops with exit 2. Validate's own
+// gate is let through: it names its pid in SAIL_GATE_LOCK_HOLDER, or is an ancestor of this process.
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { availableParallelism, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -48,7 +48,8 @@ if (process.env.RUN_ID && broadRun(args)) {
   const gate = (await import(join(import.meta.dir, '..', '.sail', 'lib', 'gate-lock.mjs'))) as GateLock;
   const held = gate.holder()?.pid;
   const mine = gate.heldBy(Number(process.env[gate.HOLDER_ENV])) || (held !== undefined && isAncestor(held));
-  const seconds = Number(process.env.SAIL_TEST_LOCK_SECONDS ?? 180);
+  const given = Number(process.env.SAIL_TEST_LOCK_SECONDS?.trim() || Number.NaN);
+  const seconds = Number.isFinite(given) && given >= 0 ? given : 180;
   if (!mine) {
     const taken = await gate.lock({
       label: 'scripts/test.ts',

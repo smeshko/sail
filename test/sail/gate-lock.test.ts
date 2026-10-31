@@ -78,6 +78,22 @@ test('lock with a cap prints the waiting line once and resolves false while a li
   });
 });
 
+test('lock with a NaN cap pauses between tries rather than spinning', async () => {
+  await withTempRepo(async (repo) => {
+    const held = await hold(repo);
+    const waiter = run(
+      repo,
+      `const start = process.cpuUsage();
+setTimeout(() => { const used = process.cpuUsage(start); console.log(used.user + used.system); process.exit(0); }, 1000);
+await lock({ label: 'probe', waiting: () => 'waiting', seconds: Number.NaN });`,
+    );
+    const [out] = await Promise.all([new Response(waiter.stdout).text(), waiter.exited]);
+    expect(Number(out.trim())).toBeLessThan(250_000);
+    writeFileSync(held.release, '');
+    await held.child.exited;
+  });
+});
+
 test('lock with a cap takes the lock once the holder exits mid-wait', async () => {
   await withTempRepo(async (repo) => {
     const held = await hold(repo);
