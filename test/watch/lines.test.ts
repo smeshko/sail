@@ -154,6 +154,25 @@ test('queue:held prints when the dispatch resumes and why, and queue:released pr
   for (const event of events) expect(validateDocument('sail.event.v1', event)).toEqual([]);
 });
 
+test("an item's queue:held prints the item, until when and why as an alert, and its queue:released names the item", () => {
+  const held: QueueEvent = {
+    ...envelope,
+    type: 'queue:held',
+    dedupKey: 'ticket:FAKE-1',
+    until: '2026-10-15T08:10:10.000Z',
+    run: RUN,
+    reason: 'publish#1 could not reach a provider: codeHost.push: unreachable',
+  };
+  const released: QueueEvent = { ...envelope, type: 'queue:released', dedupKey: 'ticket:FAKE-1' };
+  expect([queueLine(held), queueLine(released)].map((line) => (line === undefined ? undefined : utc(line)))).toEqual([
+    '08:09:10 a  FAKE-1 held until 2026-10-15T08:10:10.000Z: publish#1 could not reach a provider: codeHost.push: unreachable\n',
+    '08:09:10 a  FAKE-1 released\n',
+  ]);
+  expect(queueLine(held)?.alert).toBe(true);
+  expect(queueLine(released)?.alert).toBeUndefined();
+  for (const event of [held, released]) expect(validateDocument('sail.event.v1', event)).toEqual([]);
+});
+
 test('a poll that found nothing prints no line, unless it follows a failed poll', () => {
   const nothing: QueueEvent = {
     ...envelope,

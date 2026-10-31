@@ -425,6 +425,22 @@ test('sail queue add of a ticket to a pull-request workflow exits 3, naming what
   });
 }, 30_000);
 
+test("sail queue ls a prints a held item's hold, until when and why, on its line", async () => {
+  await withTempRepo(async (repo) => {
+    const { env } = repository(repo, []);
+    const path = writeQueue(join(repo.dir, '.sail-runs'));
+    const queue = JSON.parse(readFileSync(path, 'utf8'));
+    const held = { until: '2026-10-15T09:01:00.000Z', reason: 'publish#1 could not reach a provider', at: START };
+    queue.items[1] = { ...queue.items[1], held };
+    writeFileSync(path, `${JSON.stringify(queue)}\n`);
+    const listed = await runCaptured(['queue', 'ls', 'a'], repo.dir, { env });
+    expect(listed.stdout.split('\n')[2]).toBe(
+      `dispatched ticket:FAKE-2 Add a farewell · run ${RUN}, 1 attempt, held until 2026-10-15T09:01:00.000Z: publish#1 could not reach a provider`,
+    );
+    expect(listed.stdout.split('\n')[0]).not.toContain('dispatch held');
+  });
+});
+
 test('sail queue ls a prints dispatch held until <time> on its first line while the queue is held, and not otherwise', async () => {
   await withTempRepo(async (repo) => {
     const { env } = repository(repo, []);
