@@ -24,9 +24,9 @@
 //   rest of the dispatch; a run that hits the limit again is held again.
 // - **A start whose definitions need a newer sail** (its last log line says so) is neither a failure nor a park: the item
 //   goes back to queued with its attempt given back, and the workflow's dispatch is held (`queue:held`, no `until`) by
-//   the running sail's SDK fingerprint as it was when the start spawned. The tick that finds the fingerprint changed
-//   releases the hold (`queue:released`), so an item whose start spawned before a pull dispatches again on the tick
-//   after the hold. `pullBlocked` adds why the watcher can't pull to the hold's reason.
+//   the running sail's SDK fingerprint as it was when the start spawned, which its queue item records, so a restarted
+//   watcher holds by it too. The tick that finds the fingerprint changed releases the hold (`queue:released`), so an
+//   item whose start spawned before a pull dispatches again on the tick after the hold. `pullBlocked` adds why the watcher can't pull to the hold's reason.
 // - **A due pull request**, in queue order: the lease on its queued branch first, then the re-check of the pull request
 //   through the CodeHost. One that is closed, merged, a draft, unlabelled, a fork or moved to another sha is dropped
 //   with why, and its run starts as `sail '#<n>' --head-sha <sha>`, pinned to the queued sha. It claims nothing.
@@ -155,8 +155,6 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
   const resumedAt = new Map<string, Date>();
   /** When this dispatcher first saw each run on its usage limit or an unavailable port, until it resumes the run. */
   const limitedAt = new Map<string, Date>();
-  /** The running sail's fingerprint when each item's start was spawned, by dedup key. */
-  const sailAtSpawn = new Map<string, string>();
   const sail = options.sail ?? sdkFingerprint;
   /** Until the first settle is over: a live run found then is adopted. */
   let first = true;
@@ -317,7 +315,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
         store.deferred(item.dedupKey);
         const blocked = options.pullBlocked?.();
         store.holdForSail(
-          sailAtSpawn.get(item.dedupKey) ?? sail(),
+          item.sail ?? sail(),
           runId,
           blocked === undefined ? answer.reason : `${answer.reason} (the watcher can't: ${blocked})`,
         );
@@ -446,8 +444,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
   const start = (item: QueueItem, force: boolean) => {
     const { source } = item;
     const runId = newRunId(source.kind === 'pr' ? `pr-${source.number}` : source.ticketKey, now().getTime());
-    const atSpawn = sail();
-    store.dispatched(item.dedupKey, runId);
+    store.dispatched(item.dedupKey, runId, sail());
     let spawned: SpawnedRun;
     try {
       spawned = options.spawn({
@@ -466,7 +463,6 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
       return;
     }
     logFroms.set(item.dedupKey, spawned.logFrom);
-    sailAtSpawn.set(item.dedupKey, atSpawn);
     store.spawned(item.dedupKey, spawned.pid);
     watchExit(item, spawned);
   };

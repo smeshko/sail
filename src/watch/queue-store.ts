@@ -84,6 +84,8 @@ export const QueueItem = z.strictObject({
   runId: z.string().optional(),
   /** The process of that run, once it was spawned. */
   pid: z.number().int().positive().optional(),
+  /** The running sail's SDK fingerprint when that run was dispatched: a newer-sail hold for it lasts until it changes. */
+  sail: z.string().optional(),
   /** Why it last failed. */
   reason: z.string().optional(),
   finishedAt: z.string().optional(),
@@ -201,7 +203,7 @@ export interface QueueStore {
   /** The items a dispatch may start: queued ones, and failed ones past their `retryAt`, in the order `items` holds. */
   due(): QueueItem[];
   /** Records a dispatch of the item, which counts an attempt. */
-  dispatched(key: string, runId: string): void;
+  dispatched(key: string, runId: string, sail?: string): void;
   /** Records the pid of the dispatched item's process, and emits `queue:dispatched`. An item not dispatched throws. */
   spawned(key: string, pid: number): void;
   /** Records the pid the dispatched item's run is alive as, and emits `run:adopted`. An item not dispatched throws. */
@@ -468,7 +470,7 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
       const at = now().getTime();
       return structuredClone(queue.items.filter((item) => isDue(item, at)));
     },
-    dispatched(key, runId) {
+    dispatched(key, runId, sail) {
       change((next) => {
         const item = find(next, key);
         item.state = 'dispatched';
@@ -477,6 +479,8 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
         delete item.moved;
         delete item.retryAt;
         delete item.pid;
+        if (sail === undefined) delete item.sail;
+        else item.sail = sail;
       });
     },
     spawned(key, pid) {
@@ -523,7 +527,7 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
         }
         item.state = 'queued';
         item.attempts = 0;
-        for (const field of ['reason', 'retryAt', 'finishedAt', 'runId', 'pid'] as const) delete item[field];
+        for (const field of ['reason', 'retryAt', 'finishedAt', 'runId', 'pid', 'sail'] as const) delete item[field];
         place(next, item);
       });
       stream.emit({ type: 'queue:requeued', workflow, dedupKey: key, reason });
@@ -574,6 +578,7 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
         item.attempts -= 1;
         delete item.runId;
         delete item.pid;
+        delete item.sail;
         place(next, item);
       });
     },

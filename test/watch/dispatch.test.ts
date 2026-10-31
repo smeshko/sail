@@ -1650,3 +1650,20 @@ test('a start refused with N type errors still fails its attempt and parks after
     expect(states(w.store)).toEqual(['FAKE-1 parked 2']);
   });
 });
+
+test('a dispatcher that settles a refused start an earlier one spawned holds by the sail the start spawned on, so the restarted sail releases it', async () => {
+  await withTempRepo(async (repo) => {
+    let sail = 'sdk-1';
+    const w = await world(repo, 1, 1, { claiming: false, sail: () => sail });
+    await w.dispatcher().tick();
+    expect(spawnedKeys(w.spawner)).toEqual(['FAKE-1']);
+    sail = 'sdk-2';
+    const restarted = w.dispatcher();
+    await w.spawner.end('FAKE-1', { refused: NEWER, code: 3 });
+    await restarted.tick();
+    expect(w.store.snapshot().held).toMatchObject({ sail: 'sdk-1' });
+    await restarted.tick();
+    expect(w.store.snapshot().held).toBeUndefined();
+    expect(spawnedKeys(w.spawner)).toEqual(['FAKE-1', 'FAKE-1']);
+  });
+});
