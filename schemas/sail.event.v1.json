@@ -1815,10 +1815,11 @@
       "unevaluatedProperties": false
     },
     "queueHeld": {
-      "description": "a workflow's dispatch held because a run hit the usage limit or could not reach a provider, until a time, or, with no until, because its definitions need a newer sail, until the running sail changes: nothing starts or resumes meanwhile, and the queue is unchanged",
+      "description": "a workflow's dispatch held because a run hit the usage limit or several runs could not reach a provider, until a time, or, with no until, because its definitions need a newer sail, until the running sail changes: nothing starts or resumes meanwhile. With a dedupKey it is that one item held, because its run could not reach a provider, and the workflow dispatches on. The queue is unchanged",
       "type": "object",
       "$ref": "#/$defs/queueEnvelope",
       "properties": {
+        "dedupKey": { "$ref": "#/$defs/dedupKey" },
         "until": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$" },
         "run": { "type": "string", "minLength": 1 },
         "reason": { "type": "string", "pattern": "\\S" }
@@ -1827,9 +1828,12 @@
       "unevaluatedProperties": false
     },
     "queueReleased": {
-      "description": "a workflow's held dispatch released: its hold has passed",
+      "description": "a workflow's held dispatch, or with a dedupKey one held item, released: its hold has passed",
       "type": "object",
       "$ref": "#/$defs/queueEnvelope",
+      "properties": {
+        "dedupKey": { "$ref": "#/$defs/dedupKey" }
+      },
       "unevaluatedProperties": false
     },
     "queueMoved": {

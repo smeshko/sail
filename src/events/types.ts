@@ -500,12 +500,14 @@ export interface QueuePayloads {
   /** A parked or failed item put back in the queue by hand, with no attempts. */
   'queue:requeued': { workflow: string; dedupKey: string; reason: string };
   /**
-   * A workflow's dispatch held because run `run` hit the usage limit or could not reach a provider, until a time, or with
-   * no `until` because its definitions need a newer sail, until the running sail changes: the queue is unchanged.
+   * A workflow's dispatch held because run `run` hit the usage limit or several runs could not reach a provider, until a
+   * time, or with no `until` because its definitions need a newer sail, until the running sail changes. With a
+   * `dedupKey` it is that one item held, because its run could not reach a provider: the workflow dispatches on. The
+   * queue is unchanged.
    */
-  'queue:held': { workflow: string; until?: string; run: string; reason: string };
-  /** A workflow's held dispatch released, its hold passed. */
-  'queue:released': { workflow: string };
+  'queue:held': { workflow: string; dedupKey?: string; until?: string; run: string; reason: string };
+  /** A workflow's held dispatch, or with a `dedupKey` one held item, released: its hold passed. */
+  'queue:released': { workflow: string; dedupKey?: string };
   /** A queued item put directly `before` or `after` another queued item by hand: exactly one of the two is given. */
   'queue:moved': { workflow: string; dedupKey: string; before?: string; after?: string; reason: string };
 }
