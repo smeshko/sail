@@ -1,10 +1,10 @@
 // scripts/workspace-docs.ts: the Markdown under a clone's docs/ lands in a run's workspace, and nothing else does.
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { builder, readonly } from '../../.sail/lib/permissions';
-import { cloneOf, copyDocs } from '../../scripts/workspace-docs';
+import { cloneOf, copyDocs, main } from '../../scripts/workspace-docs';
 import { createGitWorktreeWorkspace } from '../../src/adapters/workspace/git-worktree';
 import { readConfig } from '../../src/engine/config';
 import { decide } from '../../src/engine/permissions/index';
@@ -164,3 +164,26 @@ test.each(['04-questions', '05-decide'])(
     });
   },
 );
+
+test('main copies a worktree clone docs/ and reports the count, and exits 1 naming the error outside a git checkout', async () => {
+  await withTempRepo(async (repo) => {
+    put(repo.dir, 'docs/adr/0001-a.md', '# ADR 1\n');
+    const tree = join(tempDir(), 'tree');
+    repo.git('worktree', 'add', '--quiet', '--detach', tree);
+    const lines: string[] = [];
+    const log = spyOn(console, 'log').mockImplementation((line: string) => void lines.push(line));
+    const error = spyOn(console, 'error').mockImplementation((line: string) => void lines.push(line));
+    try {
+      const codes = [main(tree, repo.env), main(tempDir(), { ...repo.env, GIT_CEILING_DIRECTORIES: tmpdir() })];
+      expect({
+        codes,
+        copied: lines[0]?.startsWith('workspace-docs: copied 1 files from '),
+        failed: lines[1]?.startsWith('workspace-docs: '),
+        content: readFileSync(join(tree, 'docs/adr/0001-a.md'), 'utf8'),
+      }).toEqual({ codes: [0, 1], copied: true, failed: true, content: '# ADR 1\n' });
+    } finally {
+      log.mockRestore();
+      error.mockRestore();
+    }
+  });
+});

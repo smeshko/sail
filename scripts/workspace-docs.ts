@@ -30,13 +30,17 @@ export function copyDocs(clone: string, workspace: string): string[] {
   return copied;
 }
 
-if (import.meta.main) {
+/** Copies the docs of the clone `workspace` belongs to into it, printing the count. Returns the exit code. */
+export function main(workspace: string, env?: Readonly<Record<string, string>>): number {
   try {
-    const clone = cloneOf(process.cwd());
-    const copied = copyDocs(clone, process.cwd());
+    const clone = cloneOf(workspace, env);
+    const copied = copyDocs(clone, workspace);
     console.log(`workspace-docs: copied ${copied.length} files from ${join(clone, 'docs')}`);
+    return 0;
   } catch (error) {
     console.error(`workspace-docs: ${(error as Error).message}`);
-    process.exit(1);
+    return 1;
   }
 }
+
+if (import.meta.main) process.exit(main(process.cwd()));
