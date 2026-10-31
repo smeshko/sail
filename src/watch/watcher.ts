@@ -26,9 +26,16 @@
 // clears the registry field and resolves `done`. Runs in flight carry on: they are detached, and the watcher's own
 // stop asks nothing of them. Only an `unwatch` command does.
 //
+// Before its dispatchers run, a tick starts a fast-forward of the clone when the workspace can (`workspace.fastForward()`):
+// only when some workflow has an item due or a dispatch held for definitions that need a newer sail, none is in flight,
+// and no oftener than `fastForwardMs`, bar a hold, which asks at once. The tick never waits on it, so a slow or
+// unreachable remote holds up no dispatch, settle or command; a move kicks the next tick. A move prints `clone fast-forwarded to <sha7>`; one the adapter blocks
+// prints `clone not fast-forwarded: <why>` once per distinct reason, and that reason ends a newer-sail hold's, so a
+// person sees what to do. The adapter moves nothing of the user's: any state but a clean default branch is left alone.
+//
 // Once its first workflows are added, a starting watcher sweeps the worktrees of ended runs (`workspace.sweep()`): a
 // completed or failed run whose worktree was left behind, as when its release failed. Runs that are running,
-// suspended or interrupted keep theirs. It is the one slow git step in the watcher's own process, and rare.
+// suspended or interrupted keep theirs. It is the one slow git step the watcher's own process waits on, and rare.
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { isAlive as processIsAlive, releaseLease, takeLease } from '../adapters/leases';
@@ -97,6 +104,9 @@ async function atMost(promise: Promise<unknown>, ms: number): Promise<void> {
   clearTimeout(timer);
 }
 
+/** How often the watcher fast-forwards the clone unless told otherwise. */
+export const FAST_FORWARD_MS = 60_000;
+
 /** How often the watcher ticks unless told otherwise. */
 export const TICK_MS = 1000;
 
@@ -131,6 +141,10 @@ export interface WatcherOptions {
    * Asked at every tick: while it answers a reason, nothing starts or resumes, and the reason is printed once.
    */
   checkConfig?: () => Promise<string | undefined>;
+  /** The least time between two fast-forwards of the clone: `FAST_FORWARD_MS` when left out. */
+  fastForwardMs?: number;
+  /** The running sail's SDK fingerprint, handed to each dispatcher: its own when left out. */
+  sail?: () => string;
 }
 
 export interface Watcher {
@@ -278,6 +292,53 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
     }
     configProblem = problem;
   };
+  /** When the clone was last fast-forwarded or tried, and whether a hold asked for one at once. */
+  let lastFastForward: number | undefined;
+  let fastForwardAsked = false;
+  /** Why the clone was not fast-forwarded as the last try left it, undefined once it moved or was up to date. */
+  let notFastForwarded: string | undefined;
+  /** Whether a watched workflow has an item due or a dispatch held for definitions that need a newer sail. */
+  const wantsPull = () =>
+    watchedTargets().some(
+      (target) => target.store.due().length > 0 || target.store.snapshot().held?.sail !== undefined,
+    );
+  /** The fast-forward in flight, which the tick never waits on: a slow remote holds up no dispatch. */
+  let pulling: Promise<void> | undefined;
+  /** Starts a fast-forward of the clone when the workspace can, none is in flight, something wants it and the interval has passed. */
+  const fastForward = () => {
+    if (pulling !== undefined) return;
+    pulling = pull().finally(() => {
+      pulling = undefined;
+    });
+  };
+  const pull = async () => {
+    if (workspace.fastForward === undefined || !wantsPull()) return;
+    const at = now().getTime();
+    if (
+      !fastForwardAsked &&
+      lastFastForward !== undefined &&
+      at - lastFastForward < (options.fastForwardMs ?? FAST_FORWARD_MS)
+    ) {
+      return;
+    }
+    fastForwardAsked = false;
+    lastFastForward = at;
+    try {
+      const answer = await workspace.fastForward();
+      if (answer.moved) {
+        notFastForwarded = undefined;
+        print({ at: now(), text: `clone fast-forwarded to ${answer.to.slice(0, 7)}` });
+        kick();
+      } else {
+        if (answer.blocked !== undefined && answer.blocked !== notFastForwarded) {
+          print({ at: now(), text: `clone not fast-forwarded: ${answer.blocked}` });
+        }
+        notFastForwarded = answer.blocked;
+      }
+    } catch (error) {
+      print(errorLine(undefined, `the clone was not fast-forwarded: ${messageOf(error)}`, now()));
+    }
+  };
   /** Gives back the queues' lease: set once it is taken. */
   let release: (() => void) | undefined;
   let timer: unknown;
@@ -334,6 +395,12 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
       onError: (message) => print(errorLine(workflow, message, now())),
       onExit: kick,
       paused: () => configProblem !== undefined,
+      pullBlocked: () => notFastForwarded,
+      onHeld: () => {
+        fastForwardAsked = true;
+        kick();
+      },
+      ...(options.sail === undefined ? {} : { sail: options.sail }),
     });
     set.set(workflow, { target, poller, dispatcher });
     await atMost(poller.start(), options.firstPollMs ?? FIRST_POLL_MS);
@@ -506,6 +573,7 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
           return;
         }
         await recheck();
+        fastForward();
         for (const [workflow, watched] of [...set]) {
           if (stopped) break;
           try {

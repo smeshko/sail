@@ -499,8 +499,11 @@ export interface QueuePayloads {
   'run:resumed': { workflow: string; dedupKey: string; run: string; pid: number; from: ResumedFrom };
   /** A parked or failed item put back in the queue by hand, with no attempts. */
   'queue:requeued': { workflow: string; dedupKey: string; reason: string };
-  /** A workflow's dispatch held until a time because run `run` hit the usage limit or could not reach a provider: the queue is unchanged. */
-  'queue:held': { workflow: string; until: string; run: string; reason: string };
+  /**
+   * A workflow's dispatch held because run `run` hit the usage limit or could not reach a provider, until a time, or with
+   * no `until` because its definitions need a newer sail, until the running sail changes: the queue is unchanged.
+   */
+  'queue:held': { workflow: string; until?: string; run: string; reason: string };
   /** A workflow's held dispatch released, its hold passed. */
   'queue:released': { workflow: string };
   /** A queued item put directly `before` or `after` another queued item by hand: exactly one of the two is given. */

@@ -44,7 +44,7 @@ export function queueEventLine(event: QueueEvent): string {
     case 'queue:error':
       return `${text(fields.port)} ${text(fields.adapter)}: ${text(fields.message)}${fields.paused === true ? ' (paused)' : ''}`;
     case 'queue:held':
-      return `until ${text(fields.until)}: ${text(fields.reason)}`;
+      return `${fields.until === undefined ? 'held' : `until ${text(fields.until)}`}: ${text(fields.reason)}`;
     case 'queue:released':
       return 'dispatch released';
     case 'queue:moved': {
@@ -129,7 +129,9 @@ function panelView(panel: QueuePanel, stream: QueueStream | undefined, ui: UiSta
       ? ''
       : html`<span class="dt">label ${polling.label} · polled ${ago(polling.lastPolledAt, now)} · ${polling.failures} failed polls</span>`
   }${paused === undefined ? '' : html`<span class="warnchip">paused: ${paused.port} ${paused.adapter}: ${paused.message}</span>`}${
-    held === undefined ? '' : html`<span class="warnchip">held until ${clock(held.until, ui.tz)}: ${held.reason}</span>`
+    held === undefined
+      ? ''
+      : html`<span class="warnchip">held${held.until === undefined ? '' : html` until ${clock(held.until, ui.tz)}`}: ${held.reason}</span>`
   }${ui.queueNotice === undefined ? '' : html`<span class="warnchip">${ui.queueNotice}</span>`}</div>
 ${panel.problem === undefined ? '' : html`<div class="code bad">${panel.problem}</div>`}
 ${stream?.error === undefined ? '' : html`<div class="code bad">${stream.error}</div>`}

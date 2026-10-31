@@ -113,7 +113,8 @@ export const PORT_OPERATIONS = {
     'capabilities',
   ]),
   harness: operations<Harness>()(['run', 'capabilities']),
-  workspace: operations<WorkspacePort>()([
+  // `fastForward` is optional: an adapter without a clone of its own leaves it out.
+  workspace: operations<Omit<WorkspacePort, 'fastForward'>>()([
     'repository',
     'lease',
     'releaseLease',

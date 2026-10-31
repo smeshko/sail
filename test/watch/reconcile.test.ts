@@ -106,6 +106,19 @@ test("a live pid is in flight and adopted only on a first settle, completed is d
   ]);
 });
 
+test('a refused start whose log ends with the newer-sail line is outdated, naming it; an N type errors line is a failed attempt', async () => {
+  const w = world();
+  logLine(w.runsDir, 1, 'sail FAKE-1: definitions at abc1234 need a newer sail: pull /work/clone');
+  logLine(w.runsDir, 2, 'sail FAKE-2: 2 type errors in .sail/workflows/a/workflow.ts');
+  expect([
+    await reconcileItem(item(1, DEAD), w.context({ exited: 3 })),
+    await reconcileItem(item(2, DEAD), w.context({ exited: 3 })),
+  ]).toEqual([
+    { kind: 'outdated', reason: 'definitions at abc1234 need a newer sail: pull /work/clone' },
+    { kind: 'failed', reason: 'its start was refused: sail FAKE-2: 2 type errors in .sail/workflows/a/workflow.ts' },
+  ]);
+});
+
 test('suspended until and budget_exceeded wait; a dead running, a suspended interrupted and a suspended unwatched run are resumed from where they were, and parked with why once this dispatcher has resumed them', async () => {
   const w = world();
   runDir(w.runsDir, 1, 'suspended', 'until');

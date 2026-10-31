@@ -59,6 +59,15 @@ export interface WorkspacePort {
     from: { readonly paths: readonly string[]; readonly base?: string; readonly signal?: AbortSignal },
   ): Promise<{ sha: string }>;
   /**
+   * Brings the clone's own checkout to the remote's default branch tip, for an adapter that has a clone. It fetches
+   * first, and moves nothing of the user's: only a clean checkout of the default branch with no local commit is moved,
+   * by a fast-forward. `moved: false` with no `blocked` is up to date; with `blocked` it is why the clone was left as it
+   * was. A fetch that fails is `unavailable`. Optional: an adapter with no clone of its own leaves it out. Emits nothing.
+   */
+  fastForward?(options?: {
+    readonly signal?: AbortSignal;
+  }): Promise<{ moved: true; from: string; to: string } | { moved: false; blocked?: string }>;
+  /**
    * The run's existing workspace, once checked to be a checkout whose `HEAD` descends from `baseSha`. One that is gone,
    * or has lost its base, is `invalid`. Emits nothing.
    */

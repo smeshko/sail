@@ -29,6 +29,7 @@ import {
   addDetached,
   copyTree,
   diffWorkingTree,
+  fastForwardClone,
   fetchRemote,
   gitSync,
   releaseWorktree,
@@ -187,6 +188,10 @@ export function createGitWorktreeWorkspace(options: GitWorktreeOptions): Workspa
       if (sha === undefined) throw new PortError('workspace', 'readTree', 'invalid', `${from} names no commit`);
       copyTree(repo, sha, paths, into, env);
       return { sha };
+    },
+    async fastForward({ signal } = {}) {
+      await fetchRemote(repo, remote, env, options.fetchTimeoutMs ?? FETCH_TIMEOUT_MS, signal);
+      return fastForwardClone(repo, remote, defaultBranch(), env);
     },
     async reopen(run, { branch, baseSha }) {
       return reopenWorktree(join(run.runDir, WORKSPACE_DIR), branch, baseSha, env);
