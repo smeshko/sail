@@ -1762,3 +1762,51 @@ test('a resumed run is counted against its cap once it renews its lease, before 
     expect(during).toEqual([run.runId]);
   });
 });
+
+// The definitions are copied with the run directory, before the workspace setup, so a clone edit during it can't reach them.
+
+const SPEC_STAGE = 'workflows/ticket-to-pr/stages/spec/stage.ts';
+
+test("a start keeps the stage its roster was built from in definition/, though the clone's .sail/ changes it while the workspace is made", async () => {
+  await withTempRepo(async (repo) => {
+    const sail = writeStub(repo.dir);
+    const before = readFileSync(join(sail, SPEC_STAGE), 'utf8');
+    const adapters = await fakeAdapters(repo.dir);
+    const { workspace } = adapters.ports;
+    const create = workspace.create.bind(workspace);
+    workspace.create = async (run, options) => {
+      writeFileSync(join(sail, SPEC_STAGE), before.replace("script('spec'", "agent('spec'"));
+      return create(run, options);
+    };
+    const run = await openStub(repo.dir, { ticket: 'FAKE-1' }, adapters);
+    if ('refused' in run) throw new Error(run.refused);
+    expect(readFileSync(join(run.dir, 'definition', '.sail', SPEC_STAGE), 'utf8')).toBe(before);
+    expect(readRunHeader(run.dir).stages.spec?.kind).toBe('script');
+  });
+});
+
+test("a start whose definitions can't be copied leaves no run directory and releases its lease", async () => {
+  await withTempRepo(async (repo) => {
+    const sail = writeStub(repo.dir);
+    writeFileSync(join(sail, 'unreadable.txt'), 'x');
+    chmodSync(join(sail, 'unreadable.txt'), 0);
+    try {
+      const adapters = await fakeAdapters(repo.dir);
+      const { workspace } = adapters.ports;
+      const lease = workspace.lease.bind(workspace);
+      const leased: string[] = [];
+      workspace.lease = async (remote, branch, holder) => {
+        leased.push(branch);
+        return lease(remote, branch, holder);
+      };
+      const thrown = await rejection(openStub(repo.dir, { ticket: 'FAKE-1' }, adapters));
+      expect(String(thrown)).toMatch(/run \S+'s directory was not written: /);
+      expect(runIds(repo.dir)).toEqual([]);
+      const { url } = await workspace.repository();
+      expect(leased).toHaveLength(1);
+      expect(await workspace.holder(url, leased[0] as string)).toBeUndefined();
+    } finally {
+      chmodSync(join(sail, 'unreadable.txt'), 0o644);
+    }
+  });
+});
