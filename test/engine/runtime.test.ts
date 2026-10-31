@@ -451,6 +451,9 @@ function interruptedIn(repoDir: string, options: Partial<RunWorkflowOptions> = {
   return interruptWhenAsleep(repoDir, running, () => controller.abort());
 }
 
+/** The `.sail/` a run keeps in its `definition/`, which is what its resume runs. */
+const copyOf = (repoDir: string, runId: string): string => join(repoDir, '.sail-runs', runId, 'definition', '.sail');
+
 const interruptedRepo = holdTempRepo();
 let interruptedOnce: Promise<string> | undefined;
 /**
@@ -657,7 +660,7 @@ test('a resume runs the interrupted call again as its next try, and nothing jour
 test('a workflow whose keys no longer fit the journal fails the resume with determinism_violation, and nothing runs', async () => {
   await withTempRepo(async (repo) => {
     const runId = await interruptedCopy(repo.dir);
-    swapImplementAndTests(join(repo.dir, '.sail'));
+    swapImplementAndTests(copyOf(repo.dir, runId));
     const end = await resumeWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), runId });
     expect(end).toMatchObject({
       runId,
@@ -706,6 +709,15 @@ test('a refused resume passes through, and neither STATUS nor the journal change
 test('resuming from a .sail/ this process already ran from throws before it writes anything', async () => {
   await withTempRepo(async (repo) => {
     const { end } = await interruptedIn(repo.dir);
+    setSleepAt(repo.dir, 'implement#2');
+    const controller = new AbortController();
+    const resuming = resumeWorkflow({
+      cwd: repo.dir,
+      adapters: await fakeAdapters(repo.dir),
+      runId: end.runId,
+      signal: controller.signal,
+    });
+    await interruptWhenAsleep(repo.dir, resuming, () => controller.abort());
     const status = readFileSync(join(end.dir, 'STATUS'), 'utf8');
     await expect(
       resumeWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), runId: end.runId }),
@@ -2864,7 +2876,7 @@ test.each<[string, (sail: string) => void, string]>([
   async (_, change, message) => {
     await withTempRepo(async (repo) => {
       const stopped = await stoppedTwoStep(repo.dir, afterDescribe);
-      change(join(repo.dir, '.sail'));
+      change(copyOf(repo.dir, stopped.runId));
       const before = readFileSync(join(stopped.dir, 'journal.ndjson'), 'utf8');
       const end = await resumeWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), runId: stopped.runId });
       expect(end).toMatchObject({ status: 'failed', stopReason: 'determinism_violation', message });
@@ -2880,7 +2892,7 @@ test('a resume that asks for a call with other bindings than its journaled steps
   await withTempRepo(async (repo) => {
     const stopped = await stoppedTwoStep(repo.dir, afterDescribe);
     edit(
-      join(repo.dir, '.sail'),
+      copyOf(repo.dir, stopped.runId),
       WORKFLOW_FILE,
       "run.stage(publish, { spec: s.files['spec.md'] })",
       "run.stage(publish, { spec: b.files['brief.md'] })",
@@ -2904,7 +2916,7 @@ test("a resume with publish's first step renamed after publish#1 is journaled wh
       consumers: [abortOnAppend(controller, 'publish#1')],
     }));
     expect(journaled(stopped.dir)).toEqual(STEP_JOURNAL.slice(0, 6));
-    replaceAll(join(repo.dir, '.sail'), PUBLISH_FILE, "'describe'", "'draft'");
+    replaceAll(copyOf(repo.dir, stopped.runId), PUBLISH_FILE, "'describe'", "'draft'");
     const before = readFileSync(join(stopped.dir, 'journal.ndjson'), 'utf8');
     const end = await resumeWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), runId: stopped.runId });
     expect(end).toMatchObject({
@@ -3016,7 +3028,7 @@ test("a two-step stage in a group: its step lines interleave with its sibling's 
     await withTempRepo(async (reordered) => {
       copyRun(repo.dir, reordered.dir);
       edit(
-        join(reordered.dir, '.sail'),
+        copyOf(reordered.dir, stopped.runId),
         WORKFLOW_FILE,
         GROUP_CALLS,
         `    [notify, { url: 'fake://codehost/pull/0' }],\n    [publish, { spec: s.files['spec.md'] }],\n`,
@@ -3328,7 +3340,7 @@ test.each(['sequence', 'group'] as const)(
       expect(first.status).toBe('suspended');
       const runId = await withTempRepo(async (copy) => {
         copyRun(repo.dir, copy.dir);
-        twoImplements(join(copy.dir, '.sail'), mode, [2, 1]);
+        twoImplements(copyOf(copy.dir, first.runId), mode, [2, 1]);
         const end = await resumeWorkflow({ cwd: copy.dir, adapters: await fakeAdapters(copy.dir), runId: first.runId });
         expect(end).toMatchObject({ status: 'failed', stopReason: 'determinism_violation' });
         expect((end as { message?: string }).message).toMatch(

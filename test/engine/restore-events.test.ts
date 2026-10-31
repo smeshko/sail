@@ -88,7 +88,12 @@ function seededIn(reused: number | undefined) {
   const source = join(root, '.sail-runs', 'FAKE-1-SOURCE');
   mkdirSync(source, { recursive: true });
   cpSync(join(GOLDEN, 'events.ndjson'), join(source, 'events.ndjson'));
-  const dir = copyWith(() => []);
+  const dir = join(root, '.sail-runs', 'FAKE-1-SEEDED');
+  cpSync(
+    copyWith(() => []),
+    dir,
+    { recursive: true },
+  );
   const header = { ...readRunHeader(dir), fromRun: 'FAKE-1-SOURCE', ...(reused === undefined ? {} : { reused }) };
   return lostEvents({ dir, header, sailDir: join(root, '.sail') });
 }

@@ -69,7 +69,7 @@ function changedCopy(name: string, change: (dir: string) => void): string {
 test('the committed golden run is what a fresh run of the fixture writes: the same files, each byte for byte', () => {
   expect(unmade).toBe('');
   expect(stale(fresh, committed)).toEqual([]);
-  expect(filesIn(committed)).toHaveLength(63);
+  expect(filesIn(committed)).toHaveLength(82);
 });
 
 test("run.json's sail.runtime is the one field compared apart: a fresh run names the running Bun, and the committed one a Bun", () => {
@@ -151,7 +151,7 @@ test('a view rendered from a changed stream differs from the committed one: a st
 
 test('no file of a fresh run holds the path of the temporary repository it ran in, or of this checkout', () => {
   const files = filesIn(fresh);
-  expect(files).toHaveLength(63);
+  expect(files).toHaveLength(82);
   const machine = [tmpdir(), 'sail-golden-', join(import.meta.dir, '..', '..')];
   const holding = files.filter((file) =>
     machine.some((path) => readFileSync(join(fresh, file), 'utf8').includes(path)),
@@ -161,6 +161,6 @@ test('no file of a fresh run holds the path of the temporary repository it ran i
 
 test('every file of a fresh run is an ordinary, writable file: run.json too, which the run itself leaves read-only', () => {
   const files = filesIn(fresh);
-  expect(files).toHaveLength(63);
+  expect(files).toHaveLength(82);
   expect(files.filter((file) => (statSync(join(fresh, file)).mode & 0o200) === 0)).toEqual([]);
 });
