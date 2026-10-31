@@ -405,7 +405,8 @@ export function stripUserinfo(url: string): string {
  * Brings the clone's checked-out `branch` to `<remote>/<branch>` with `git merge --ff-only`, only when that can lose and
  * move nothing of the user's: `HEAD` must be on `branch` itself, no tracked file may differ from it, and no local commit
  * may be missing from the remote. Anything else, and a merge git refuses, is `blocked` with why, and the clone is left as
- * it was. The remote is fetched by the caller. Untracked files are the user's and never block.
+ * it was. The remote is fetched by the caller. Untracked files are the user's and never block. The merge runs no hook,
+ * as `addDetached` runs none: a hook the merged commits bring never runs in the watcher's process.
  */
 export function fastForwardClone(
   repo: string,
@@ -429,7 +430,7 @@ export function fastForwardClone(
   if (Number(ahead.stdout.trim()) > 0) return blocked(`${branch} has local commits that ${remote} lacks`);
   const from = resolveCommit(repo, 'HEAD', env);
   if (from === undefined || from === tip) return { moved: false };
-  const merged = gitSync(repo, ['merge', '--ff-only', '--quiet', tip], env);
+  const merged = gitSync(repo, ['-c', 'core.hooksPath=/dev/null', 'merge', '--ff-only', '--quiet', tip], env);
   if (merged.code !== 0) {
     return blocked(`git merge --ff-only failed: ${(merged.stderr || merged.stdout).trim().split('\n')[0]}`);
   }

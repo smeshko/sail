@@ -164,6 +164,20 @@ test('fastForward moves a clean clone on the default branch behind its remote to
   });
 });
 
+test("fastForward runs none of the clone's git hooks: a post-merge hook in its hooks path never runs", async () => {
+  await withTempRepo(async (repo) => {
+    const origin = withOrigin(repo);
+    const to = origin.push('later.txt');
+    const hooks = join(repo.dir, '.git', 'test-hooks');
+    const ran = join(repo.dir, '.git', 'post-merge-ran');
+    mkdirSync(hooks, { recursive: true });
+    writeFileSync(join(hooks, 'post-merge'), `#!/bin/sh\ntouch '${ran}'\n`, { mode: 0o755 });
+    repo.git('config', 'core.hooksPath', hooks);
+    expect(await adapterOf(repo, world(repo)).fastForward?.()).toMatchObject({ moved: true, to });
+    expect(existsSync(ran)).toBe(false);
+  });
+});
+
 describe('fastForward leaves the clone as it was and says why, for', () => {
   const unmoved = async (repo: TempRepo, expected: string) => {
     const head = repo.git('rev-parse', 'HEAD');
