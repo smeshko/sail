@@ -1396,3 +1396,121 @@ test('an add command for a pull-request workflow is rejected, naming what it pol
     await watcher.stop();
   });
 });
+
+type FastForwardAnswer = Awaited<ReturnType<NonNullable<WatcherOptions['adapters']['workspace']['fastForward']>>>;
+
+/** `w`'s workspace with a `fastForward()` that answers `answer()` and records the ticket keys spawned at each call. */
+function fastForwarding(w: Awaited<ReturnType<typeof watched>>, answer: () => FastForwardAnswer) {
+  const calls: string[][] = [];
+  const workspace = {
+    ...w.adapters.ports.workspace,
+    fastForward: async () => {
+      calls.push(w.spawner.runs.map((run) => run.ticketKey ?? ''));
+      return answer();
+    },
+  };
+  return { calls, adapters: { ...w.adapters.ports, workspace } };
+}
+
+const MOVED = { moved: true, from: 'a'.repeat(40), to: 'b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0' } as const;
+const NEWER = 'sail FAKE-1: definitions at abc1234 need a newer sail: pull /work/clone';
+
+test('with a due item the watcher fast-forwards the clone before it spawns and says so, never with nothing due, and once within the interval', async () => {
+  await withTempRepo(async (repo) => {
+    const idle = await watched(repo, [{ name: 'a', label: 'sail-a', cap: 1 }], []);
+    const none = fastForwarding(idle, () => MOVED);
+    const quiet = await idle.start(['a'], { adapters: none.adapters });
+    await idle.timers.advance(3000);
+    expect(none.calls).toEqual([]);
+    await quiet.stop();
+
+    const w = await watched(
+      repo,
+      [{ name: 'a', label: 'sail-a', cap: 1 }],
+      tickets({ 'FAKE-1': 'sail-a', 'FAKE-2': 'sail-a' }),
+    );
+    const ff = fastForwarding(w, () => MOVED);
+    const watcher = await w.start(['a'], { adapters: ff.adapters, fastForwardMs: 60_000 });
+    await w.timers.advance(1000);
+    await w.timers.advance(1000);
+    await w.timers.advance(1000);
+    expect(ff.calls).toEqual([[]]);
+    expect(w.order('a')).toEqual(['FAKE-1']);
+    expect(
+      w.out.filter((line) => line.includes('clone fast-forwarded')).map((line) => line.replace(/^\S+\s+/, '').trim()),
+    ).toEqual(['clone fast-forwarded to b1c2d3e']);
+    await w.timers.advance(60_000);
+    expect(ff.calls).toHaveLength(2);
+    await watcher.stop();
+  });
+});
+
+test('a blocked fast-forward is said once per distinct reason, and a newer-sail hold set afterwards ends its reason with what the watcher cannot do', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(
+      repo,
+      [{ name: 'a', label: 'sail-a', cap: 1 }],
+      tickets({ 'FAKE-1': 'sail-a', 'FAKE-2': 'sail-a' }),
+    );
+    let blocked = 'the clone has uncommitted changes';
+    const ff = fastForwarding(w, () => ({ moved: false, blocked }));
+    const watcher = await w.start(['a'], { adapters: ff.adapters, fastForwardMs: 1000, sail: () => 'sdk-1' });
+    const said = () =>
+      w.out
+        .filter((line) => line.includes('clone not fast-forwarded'))
+        .map((line) => line.replace(/^\S+\s+/, '').trim());
+    await w.timers.advance(1000);
+    await w.timers.advance(1000);
+    await w.timers.advance(1000);
+    expect(said()).toEqual(['clone not fast-forwarded: the clone has uncommitted changes']);
+    blocked = 'main has local commits that origin lacks';
+    await w.timers.advance(1000);
+    expect(said()).toHaveLength(2);
+    expect(said()[1]).toContain('main has local commits');
+
+    await w.spawner.end('FAKE-1', { refused: NEWER, code: 3 });
+    await w.timers.advance(1000);
+    const held = JSON.parse(readFileSync(join(queueDir(w.runs, 'a'), 'queue.json'), 'utf8')).held;
+    expect(held.reason).toBe(
+      "definitions at abc1234 need a newer sail: pull /work/clone (the watcher can't: main has local commits that origin lacks)",
+    );
+    await watcher.stop();
+  });
+});
+
+test('a newer-sail hold asks for a fast-forward on the next tick, and the fingerprint changing after it releases the hold and spawns the item', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(repo, [{ name: 'a', label: 'sail-a', cap: 1 }], tickets({ 'FAKE-1': 'sail-a' }));
+    let sail = 'sdk-1';
+    let pulled = false;
+    // A refused start claimed nothing, unlike the watcher fixture's spawner.
+    const plain = fakeSpawner(w.runs);
+    const ff = fastForwarding(w, () => {
+      if (!pulled) return { moved: false, blocked: 'not yet' };
+      sail = 'sdk-2';
+      return MOVED;
+    });
+    const watcher = await w.start(['a'], {
+      adapters: ff.adapters,
+      fastForwardMs: 600_000,
+      sail: () => sail,
+      spawn: plain.spawn,
+      resume: plain.resume,
+      isAlive: plain.isAlive,
+    });
+    await w.timers.advance(1000);
+    expect(ff.calls).toHaveLength(1);
+    await plain.end('FAKE-1', { refused: NEWER, code: 3 });
+    pulled = true;
+    await w.timers.advance(1000);
+    expect(ff.calls).toHaveLength(2);
+    expect(plain.runs.map((run) => run.ticketKey)).toEqual(['FAKE-1', 'FAKE-1']);
+    expect(
+      w
+        .events('a')
+        .map((event) => event.type)
+        .filter((type) => type === 'queue:held' || type === 'queue:released'),
+    ).toEqual(['queue:held', 'queue:released']);
+    await watcher.stop();
+  });
+});
