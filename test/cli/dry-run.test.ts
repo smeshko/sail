@@ -5,9 +5,9 @@
 import { expect, test } from 'bun:test';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { EXIT_OK, EXIT_REFUSED } from '../../src/cli/exit-codes';
+import { EXIT_OK, EXIT_REFUSED, EXIT_WAITING } from '../../src/cli/exit-codes';
 import { fakeAdapters } from '../helpers/adapters';
-import { copyFixture, edit } from '../helpers/fixture';
+import { copyFixture, edit, patchTicket } from '../helpers/fixture';
 import { type Captured, runCaptured } from '../helpers/run-captured';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
 
@@ -256,4 +256,29 @@ test('--dry-run prints a harness field under the model of a stage whose alias na
       'workspace fake (builtin), harnesses.second fake (builtin)\n',
     ),
   );
+}, 60_000);
+
+const waitOnFake2 = (repo: TempRepo) => patchTicket(join(repo.dir, '.sail'), 'FAKE-1', { prerequisites: ['FAKE-2'] });
+
+test('--dry-run on a ticket with an open prerequisite exits 5 naming it, and writes nothing', async () => {
+  const { code, stdout, stderr, before, after } = await dryIn(['FAKE-1', '--dry-run'], waitOnFake2);
+  expect({ code, stdout, stderr }).toEqual({
+    code: EXIT_WAITING,
+    stdout: '',
+    stderr:
+      'sail FAKE-1: the ticket waits on FAKE-2, a prerequisite that is not Done or Canceled. --ignore-prerequisites runs it anyway\n',
+  });
+  expect(after).toEqual(before);
+}, 60_000);
+
+test('--dry-run --ignore-prerequisites on a ticket with an open prerequisite exits 0 and prints the roster', async () => {
+  const { code, stdout, stderr } = await dryIn(['FAKE-1', '--dry-run', '--ignore-prerequisites'], waitOnFake2);
+  expect({ code, stdout, stderr }).toEqual({ code: EXIT_OK, stdout: ROSTER, stderr: '' });
+}, 60_000);
+
+test('--dry-run on a ticket whose prerequisite is Canceled exits 0', async () => {
+  const { code, stderr } = await dryIn(['FAKE-1', '--dry-run'], (repo) =>
+    patchTicket(join(repo.dir, '.sail'), 'FAKE-1', { prerequisites: ['FAKE-4'] }),
+  );
+  expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
 }, 60_000);

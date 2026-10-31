@@ -279,11 +279,11 @@ The named reason a run ended without completing, such as `workflow_failed`, `sta
 _Avoid_: error message, cause, exit reason
 
 **Refusal**:
-A command's end before a run starts, with exit code 3: an invalid config, missing credentials, type errors, no workflow, a source the intake doesn't accept, a source that isn't designated or is already claimed, a leased branch, or a workspace that can't be made. A refusal leaves no run directory.
+A command's end before a run starts, with exit code 3: an invalid config, missing credentials, type errors, no workflow, a source the intake doesn't accept, a source that isn't designated or is already claimed, a leased branch, or a workspace that can't be made. A refusal leaves no run directory. A ticket that waits on an open prerequisite is refused with exit code 5 instead, a distinct code so a script can tell waiting from a refusal; `--ignore-prerequisites` starts it, and `--force` doesn't.
 _Avoid_: rejection, abort, error (an outcome)
 
 **Dry run**:
-`sail <ticket> --dry-run`: the start's whole preflight (the config, credentials, the type check, the ticket and its designation, the branch lease) and the roster the run would freeze, printed. It writes nothing: no run directory, workspace, lease or comment, and no claim. It exits 0, or 3 with the start's own refusal.
+`sail <ticket> --dry-run`: the start's whole preflight (the config, credentials, the type check, the ticket and its designation, the branch lease) and the roster the run would freeze, printed. It writes nothing: no run directory, workspace, lease or comment, and no claim. It exits 0, or 3 (5 for a ticket that waits on an open prerequisite) with the start's own refusal.
 _Avoid_: preview, simulation, plan
 
 **Keep-awake**:

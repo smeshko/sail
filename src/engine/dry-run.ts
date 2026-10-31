@@ -4,7 +4,7 @@
 // directory, workspace, lease, claim or comment. Like a start, it claims the `.sail/` for the process.
 import { PortError } from '../ports/errors';
 import type { PullRequestDetails, Ticket } from '../ports/types';
-import { leasedBy, type OpenRunOptions, preflightRun } from './open-run';
+import { leasedBy, type OpenRunOptions, preflightRun, type Refusal } from './open-run';
 import type { RunHeader } from './run-header';
 
 /**
@@ -19,9 +19,7 @@ export interface DryRun {
 }
 
 /** The start's preflight and a read of the branch's lease, or the start's refusal. Nothing is written. */
-export async function dryRun(
-  options: Omit<OpenRunOptions, 'dispatch' | 'signal'>,
-): Promise<DryRun | { refused: string }> {
+export async function dryRun(options: Omit<OpenRunOptions, 'dispatch' | 'signal'>): Promise<DryRun | Refusal> {
   const preflight = await preflightRun(options);
   if ('refused' in preflight) return preflight;
   const { header, branch, resolved, pullRequest } = preflight;

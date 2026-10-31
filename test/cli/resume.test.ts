@@ -28,7 +28,7 @@ import {
   submits,
   writeAgentFixture,
 } from '../helpers/agent-fixture';
-import { edit, FIXTURE_SAIL, write } from '../helpers/fixture';
+import { edit, FIXTURE_SAIL, patchTicket, write } from '../helpers/fixture';
 import { writeLiveRun } from '../helpers/live-run';
 import { fakeInterrupts, normaliseDurations, runCaptured } from '../helpers/run-captured';
 import { killOne, sailProcess, until } from '../helpers/sail-process';
@@ -320,6 +320,19 @@ test("a hand-started run resumes from its own copy of .sail/, whatever the check
     });
     expect(readEvents(dir).filter((event) => event.type === 'error:crash')).toEqual([]);
     expect(stubExecutions(repo.dir)).toContain('implement#1');
+  });
+}, 60_000);
+
+test('a suspended run of a ticket that has since gained an open prerequisite resumes to its end: a resume checks no prerequisites', async () => {
+  await withTempRepo(async (repo) => {
+    const runId = await suspendedAfterSpecInto(repo.dir);
+    patchTicket(join(repo.dir, '.sail'), 'FAKE-1', { prerequisites: ['FAKE-4'] });
+    const { code, stderr } = await runCaptured(['resume', runId], repo.dir);
+    expect({ code, stderr, status: readStatus(join(repo.dir, '.sail-runs', runId)) }).toEqual({
+      code: EXIT_OK,
+      stderr: '',
+      status: { status: 'completed' },
+    });
   });
 }, 60_000);
 

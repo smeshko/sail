@@ -87,7 +87,8 @@ test('a command that throws exits 4 and names the error', async () => {
 
 // `sail <ticket>` (D1): the first argument that names no command is the ticket a run starts from.
 
-const TICKET_USAGE = 'sail <ticket> [--workflow <name>] [--force] [--until <stage>] [-q|-v|-vv]';
+const TICKET_USAGE =
+  'sail <ticket> [--workflow <name>] [--force] [--ignore-prerequisites] [--until <stage>] [-q|-v|-vv]';
 
 test('the usage lists sail <ticket> first among the commands, and says what --force and --until do, each on a line of its own', async () => {
   const { stdout } = await runCaptured(['--help']);
@@ -95,6 +96,7 @@ test('the usage lists sail <ticket> first among the commands, and says what --fo
   expect(commands[0]).toBe(`  ${TICKET_USAGE}`);
   expect(stdout).toMatch(/^ {2}--force {2,}\S.*designated.*pick-up state/m);
   expect(stdout).toMatch(/^ {2}--until <stage> {2,}\S.*first call.*sail resume/m);
+  expect(stdout).toMatch(/^ {2}--ignore-prerequisites {2,}\S.*not Done or Canceled.*exits 5/m);
 });
 
 test('an argument after the ticket that sail <ticket> does not take is refused by name with exit 3, before anything is looked for', async () => {

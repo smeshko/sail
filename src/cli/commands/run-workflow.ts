@@ -1,4 +1,4 @@
-// `sail <ticket> [--workflow <name>] [--force] [--until <stage>] [-q|-v|-vv]`: starts a run from a ticket in the
+// `sail <ticket> [--workflow <name>] [--force] [--ignore-prerequisites] [--until <stage>] [-q|-v|-vv]`: starts a run from a ticket in the
 // repository sail is run from, and runs its workflow to its end, or to the stage `--until` names. The workflow is
 // type-checked first, so a wrongly wired stage never runs. Every refusal is one `sail <ticket as typed>: <message>` line
 // with exit code 3, and comes before the run directory exists: the config and its adapters, the workflow, its types,
@@ -44,7 +44,7 @@ import { type TerminalConsumer, terminalConsumer, type Verbosity } from '../../e
 import type { ProviderEmit, SailEvent } from '../../events/types';
 import type { Harness } from '../../ports/harness';
 import type { WorkspacePort } from '../../ports/workspace';
-import { EXIT_INTERNAL, EXIT_REFUSED, type ExitCode, exitCodeFor } from '../exit-codes';
+import { EXIT_INTERNAL, EXIT_REFUSED, EXIT_WAITING, type ExitCode, exitCodeFor } from '../exit-codes';
 import { count, formatDiagnostic } from '../format';
 import type { Io, Parsed } from '../index';
 import { registerRepository } from '../registration';
@@ -344,8 +344,10 @@ async function startRun(
   interrupted?: AbortSignal,
 ): Promise<ExitCode> {
   const [ticket = ''] = args.positionals;
-  const refuse = (message: string) =>
-    refuseAs(io, command)(committed === undefined ? message : `${message} ${committed.where}`);
+  const refuse = (message: string, waiting = false) => {
+    const code = refuseAs(io, command)(committed === undefined ? message : `${message} ${committed.where}`);
+    return waiting ? EXIT_WAITING : code;
+  };
   const project = committed?.project ?? clone;
   const named = args.values.workflow;
   const workflow = typeof named === 'string' ? named : project.config.defaultWorkflow;
@@ -370,6 +372,7 @@ async function startRun(
       workflow,
       ticket,
       force,
+      ignorePrerequisites: args.values['ignore-prerequisites'] === true,
       ...(typeof until === 'string' ? { until } : {}),
     });
   }
@@ -385,6 +388,7 @@ async function startRun(
       workflow,
       ticket,
       force: args.values.force === true,
+      ignorePrerequisites: args.values['ignore-prerequisites'] === true,
       ...(typeof until === 'string' ? { until } : {}),
       ...(typeof dispatch === 'string' ? { dispatch: { runId: dispatch } } : {}),
       ...(typeof headSha === 'string' ? { headSha } : {}),
@@ -395,7 +399,7 @@ async function startRun(
       consumers: [terminal],
     }).finally(() => terminal.close()),
   );
-  if ('refused' in end) return refuse(end.refused);
+  if ('refused' in end) return refuse(end.refused, end.waitingOn !== undefined);
   recording?.finish(end.dir);
   return printEnd(end, io);
 }

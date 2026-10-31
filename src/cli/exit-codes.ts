@@ -19,12 +19,19 @@ export const EXIT_REFUSED = 3;
 /** 4: internal: a bug in sail, not in the run. */
 export const EXIT_INTERNAL = 4;
 
+/**
+ * 5: a ticket waits on a prerequisite that is not Done or Canceled, so its start was refused before a run began.
+ * `--ignore-prerequisites` starts it anyway. Apart from 3 so a script can tell waiting from a refusal.
+ */
+export const EXIT_WAITING = 5;
+
 export type ExitCode =
   | typeof EXIT_OK
   | typeof EXIT_FAILED
   | typeof EXIT_SUSPENDED
   | typeof EXIT_REFUSED
-  | typeof EXIT_INTERNAL;
+  | typeof EXIT_INTERNAL
+  | typeof EXIT_WAITING;
 
 /** The exit code of a run that ended with `status`. */
 export function exitCodeFor(status: Exclude<Status, 'running'>): ExitCode {
