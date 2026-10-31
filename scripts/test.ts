@@ -6,6 +6,10 @@
 // The whole suite runs only on CI, where it is the verify check of every pull request: it takes about ten minutes
 // there, and longer on a laptop. Locally a run names its files or folders, and SAIL_FULL_SUITE=1 overrides.
 //
+// On CI, or with SAIL_TEST_SILENCE_SECONDS, the child's output goes through this process, and a run that prints nothing
+// for 600 s (that variable's value; 0 is off) is stopped: a worker blocked in a synchronous call never reaches its own
+// timeout. The child's process tree goes to stderr, then is killed, and the exit code is 1. Locally the child inherits stdio.
+//
 // Inside a sail run (RUN_ID set), a broad run (see broadRun) takes the machine's gate lock first, the one validate holds
 // while its gate runs: one broad run goes at a time, so several runs' test files don't overload the machine. It waits up
 // to SAIL_TEST_LOCK_SECONDS (180, also when that is no number of seconds) and then stops with exit 2. Validate's own
@@ -14,6 +18,7 @@ import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { availableParallelism, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { broadRun, fullSuiteAllowed, wholeSuite } from './full-suite';
+import { descendants, silenceSeconds } from './test-watchdog';
 
 const args = process.argv.slice(2);
 if (wholeSuite(args) && !fullSuiteAllowed(process.env)) {
@@ -111,10 +116,61 @@ function timings(): string[] {
   return [`--timings=${join(common.stdout.toString().trim(), 'sail-test-timings.json')}`, '--update-timings'];
 }
 
-const child = Bun.spawn([process.execPath, 'test', ...timeout, ...parallel, ...args], {
-  env,
-  stdio: ['inherit', 'inherit', 'inherit'],
+const command = [process.execPath, 'test', ...timeout, ...parallel, ...args];
+const silence = silenceSeconds(process.env);
+
+if (silence === undefined) {
+  const child = Bun.spawn(command, { env, stdio: ['inherit', 'inherit', 'inherit'] });
+  const code = await child.exited;
+  rmSync(home, { recursive: true, force: true });
+  process.exit(code);
+}
+
+const child = Bun.spawn(command, { env, stdio: ['inherit', 'pipe', 'pipe'] });
+let timer: ReturnType<typeof setTimeout> | undefined;
+let arm = () => {};
+const stopped = new Promise<void>((resolve) => {
+  arm = () => {
+    clearTimeout(timer);
+    timer = setTimeout(resolve, silence * 1000);
+  };
+  arm();
 });
-const code = await child.exited;
+const forward = async (stream: ReadableStream<Uint8Array>, sink: NodeJS.WriteStream) => {
+  for await (const chunk of stream) {
+    sink.write(chunk);
+    arm();
+  }
+};
+const forwarded = Promise.all([forward(child.stdout, process.stdout), forward(child.stderr, process.stderr)]);
+
+const exited = child.exited.then(async (code) => {
+  await forwarded;
+  return { code };
+});
+const outcome = await Promise.race([exited, stopped.then(() => undefined)]);
+clearTimeout(timer);
+if (outcome) {
+  rmSync(home, { recursive: true, force: true });
+  process.exit(outcome.code);
+}
+
+console.error(
+  `scripts/test.ts: bun test printed nothing for ${silence} s, so it is stopped. Its processes, with how long each has run:`,
+);
+const listing = Bun.spawnSync(['ps', '-A', '-o', 'pid=,ppid=,etime=,stat=,command=']);
+const tree = listing.exitCode === 0 ? descendants(listing.stdout.toString(), child.pid) : [];
+if (listing.exitCode === 0) console.error(tree.join('\n'));
+else console.error('(ps could not list the processes)');
+for (const line of tree.reverse()) {
+  const pid = Number(line.trim().split(/\s+/)[0]);
+  try {
+    process.kill(pid, 'SIGKILL');
+  } catch {
+    // already gone
+  }
+}
+child.kill('SIGKILL');
+await child.exited;
 rmSync(home, { recursive: true, force: true });
-process.exit(code);
+process.exit(1);
