@@ -25,7 +25,9 @@
 // - Clicks arrive as delegated `data-action`s, and keys as keys. Renders are coalesced: a region marked dirty is drawn
 //   by one flush at most every 100 ms.
 //
-// It controls three things. In the queue view, `move-item`, `poll-queue`, `add-ticket`, `requeue-item` and `drop-item` ask
+// It controls four things. In the rail, `watch-set` asks the dashboard's server to watch or unwatch one workflow of a
+// repository or all of them (an unwatch on a second click), and the answer, in `sail`'s own words, shows under the
+// repository's header. In the queue view, `move-item`, `poll-queue`, `add-ticket`, `requeue-item` and `drop-item` ask
 // the dashboard's server to have the watcher move, poll, add, requeue or drop (a drop on a second click, from the menu
 // `item-menu` opens), and the answer,
 // a refusal or that the watcher has not taken the command yet, is shown beside the queue's header. `resume-run` and
@@ -997,6 +999,32 @@ export function boot(host: PageHost): Page {
       delete ui.armedDrop;
       queueOp(data.repo, data.workflow, 'drop', { dedupKey: data.item });
     },
+    'watch-set': (data) => {
+      const { repo, op, workflow } = data;
+      if (repo === undefined || (op !== 'watch' && op !== 'unwatch')) return;
+      const id = workflow === undefined ? repo : `${repo}/${workflow}`;
+      if (op === 'unwatch' && ui.armedWatch !== id) {
+        ui.armedWatch = id;
+        mark('rail');
+        return;
+      }
+      delete ui.armedWatch;
+      ui.watchNotice = { repo, text: op === 'watch' ? 'watching…' : 'unwatching…' };
+      mark('rail');
+      void host
+        .post(`/api/repos/${enc(repo)}/${op}`, { workflows: workflow === undefined ? [] : [workflow] })
+        .then(({ status, body }) => {
+          if (stopped) return;
+          const said =
+            status === 200 || status === 202
+              ? (answerField(body, 'message') ?? answerField(body, 'waiting'))
+              : undefined;
+          if (said !== undefined) ui.watchNotice = { repo, text: said };
+          else if (status === 200 || status === 202) delete ui.watchNotice;
+          else ui.watchNotice = { repo, text: refusal(status, body, op) };
+          mark('rail');
+        });
+    },
     'resume-run': () => startRun('resume'),
     'restart-run': () => startRun('restart'),
     'stop-run': () => endRun('stop'),
@@ -1076,6 +1104,10 @@ export function boot(host: PageHost): Page {
       (ui.armed !== undefined && !runAction) || (ui.armedDrop !== undefined && action !== 'drop-item') || shuts;
     if (ui.armed !== undefined && !runAction) delete ui.armed;
     if (ui.armedDrop !== undefined && action !== 'drop-item') delete ui.armedDrop;
+    if (ui.armedWatch !== undefined && action !== 'watch-set') {
+      delete ui.armedWatch;
+      mark('rail');
+    }
     if (shuts) delete ui.itemMenu;
     if (disarms) mark('main');
     actions[action]?.(data);

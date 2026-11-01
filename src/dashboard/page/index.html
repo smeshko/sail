@@ -490,6 +490,30 @@
       .wf-h .counts .f {
         color: var(--err);
       }
+      .lgrp-acts {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        padding: 0 12px 4px 34px;
+      }
+      .wf-act {
+        flex: 0 0 auto;
+        padding: 0 5px;
+        font-family: var(--mono);
+        font-size: 10px;
+        border-radius: 4px;
+        border: 1px solid var(--line);
+        background: var(--panel-2);
+        color: var(--fg-3);
+      }
+      .wf-act:hover {
+        border-color: var(--line-2);
+        color: var(--fg);
+      }
+      .wf-act.armed {
+        border-color: var(--warn);
+        color: var(--fg);
+      }
       .qbadge {
         flex: 0 0 auto;
         padding: 0 5px;
