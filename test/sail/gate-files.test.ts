@@ -1,7 +1,7 @@
 // The review's gate-files script reports only the head's gate changes against the current base, on fake ports.
 import { expect, test } from 'bun:test';
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join, relative } from 'node:path';
 import { EVERYTHING } from '../../scripts/affected-tests';
 import { writeOwnSail } from '../helpers/own-sail';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
@@ -11,6 +11,7 @@ const lib = (await import(join(ROOT, '.sail/lib/gate-files.mjs'))) as {
   GATE_FILES: string[];
   GUARD_FILES: string[];
   GUARD_DIRS: string[];
+  GUARD_CODE_DIRS: string[];
   isGateFile(path: string): boolean;
 };
 
@@ -200,29 +201,135 @@ test('a deleted gate-files stage is named', async () => {
   });
 });
 
-test('renaming the merge stage away still names its old paths', async () => {
+test('renaming the merge stage away names its old paths and its new ones', async () => {
   await withTempRepo((repo) => {
     const base = setup(repo);
-    repo.git('mv', MERGE, '.sail/workflows/review/stages/30-merge');
+    const moved = '.sail/workflows/review/stages/30-merge';
+    repo.git('mv', MERGE, moved);
     repo.git('commit', '-qm', 'rename');
+    const files = ['merge.mjs', 'run.sh', 'stage.ts'];
     expect(stage(repo, base)).toEqual({
       code: 0,
-      output: { base, touched: [`${MERGE}/merge.mjs`, `${MERGE}/run.sh`, `${MERGE}/stage.ts`] },
+      output: { base, touched: [...files.map((f) => `${MERGE}/${f}`), ...files.map((f) => `${moved}/${f}`)] },
     });
   });
 });
 
-test('review files outside the guard and merge path merge on their own', () => {
+test("the review's modules, scripts and shared stages are gate files", () => {
   const paths = [
     '.sail/workflows/review/reviewer.ts',
     '.sail/workflows/review/schemas.ts',
-    '.sail/workflows/review/stages/06-review-architecture/prompt.md',
     '.sail/workflows/review/stages/19-sync-base/stage.ts',
+    '.sail/workflows/review/stages/19-sync-base/sync.mjs',
+    '.sail/workflows/review/stages/14-push/run.sh',
+    '.sail/stages/validate/stage.ts',
+    '.sail/stages/file-follow-ups/file.mjs',
+    '.sail/lib/permissions.ts',
+    '.sail/lib/jev-check.mjs',
     '.sail/workflows/review/workflow.ts.bak',
+    '.sail/workflows/review/stages/23-new/stage.ts',
+  ];
+  expect(paths.filter((path) => !lib.isGateFile(path))).toEqual([]);
+});
+
+test('review prompts and files outside the graph merge on their own', () => {
+  const paths = [
+    '.sail/workflows/review/stages/06-review-architecture/prompt.md',
     '.sail/workflows/review/stages/18-merge-notes/x.md',
     '.sail/project.yaml',
+    '.sail/lib/demo.mjs',
+    '.sail/lib/demo.sh',
+    '.sail/workflows/factory/workflow.ts',
+    '.sail/workflows/groom/workflow.ts',
   ];
   expect(paths.filter((path) => lib.isGateFile(path))).toEqual([]);
+});
+
+const SOURCE_FILE = /\.(?:ts|mjs|js)$/;
+
+function resolveImport(from: string, spec: string): string {
+  const base = join(dirname(from), spec);
+  const found = ['', '.ts', '.mjs', '.js', '/index.ts']
+    .map((ext) => base + ext)
+    .find((path) => SOURCE_FILE.test(path) && existsSync(path));
+  if (!found) throw new Error(`${relative(ROOT, from)} references ${spec}, which resolves to no file`);
+  return found;
+}
+
+function references(file: string): string[] {
+  const text = readFileSync(file, 'utf8');
+  const refs: string[] = [];
+  const add = (path: string) => {
+    if (!existsSync(path)) {
+      throw new Error(`${relative(ROOT, file)} references ${relative(ROOT, path)}, which does not exist`);
+    }
+    refs.push(path);
+  };
+  if (SOURCE_FILE.test(file)) {
+    for (const m of text.matchAll(/(?:\bfrom\s*|\bimport\s*\(\s*|^import\s+)['"](\.[^'"]*)['"]/gm)) {
+      refs.push(resolveImport(file, m[1] as string));
+    }
+    for (const m of text.matchAll(/\brun:\s*'(\.\/[^']+)'/g)) add(join(dirname(file), m[1] as string));
+    for (const m of text.matchAll(/join\(dirname\(process\.env\.SAIL_CONFIG\),\s*'lib',\s*'([\w.-]+)'\)/g)) {
+      add(join(ROOT, '.sail/lib', m[1] as string));
+    }
+    for (const m of text.matchAll(/join\(dirname\(process\.env\.SAIL_CONFIG\),\s*'lib\/([\w.-]+)'\)/g)) {
+      add(join(ROOT, '.sail/lib', m[1] as string));
+    }
+  }
+  if (file.endsWith('.sh')) {
+    for (const m of text.matchAll(/\$\(dirname "\$0"\)\/([\w.-]+)/g)) add(join(dirname(file), m[1] as string));
+    for (const m of text.matchAll(/(?:SAIL_CONFIG[^\n]*\)|\$sail_dir)\/lib\/([\w.-]+)/g)) {
+      add(join(ROOT, '.sail/lib', m[1] as string));
+    }
+  }
+  return refs;
+}
+
+function reach(entries: string[]): string[] {
+  const seen = new Set<string>();
+  const queue = entries.map((entry) => join(ROOT, entry));
+  for (let file = queue.pop(); file !== undefined; file = queue.pop()) {
+    if (seen.has(file)) continue;
+    seen.add(file);
+    queue.push(...references(file));
+  }
+  return [...seen].map((file) => relative(ROOT, file)).sort();
+}
+
+test('every module the review workflow and the guard reach is a gate file', () => {
+  const reached = reach(['.sail/workflows/review/workflow.ts', '.sail/lib/gate-files.mjs']);
+  expect(reached).toEqual(
+    expect.arrayContaining([
+      '.sail/workflows/review/schemas.ts',
+      '.sail/workflows/review/reviewer.ts',
+      '.sail/lib/permissions.ts',
+      '.sail/lib/jev-check.mjs',
+      '.sail/lib/play.sh',
+      '.sail/lib/play.mjs',
+      '.sail/stages/file-follow-ups/stage.ts',
+      '.sail/stages/validate/validate.mjs',
+      '.sail/workflows/review/stages/19-sync-base/sync.mjs',
+    ]),
+  );
+  expect(reached.filter((path) => !lib.isGateFile(path))).toEqual([]);
+  const missesSchemas = (path: string) => lib.isGateFile(path) && path !== '.sail/workflows/review/schemas.ts';
+  expect(reached.filter((path) => !missesSchemas(path))).toEqual(['.sail/workflows/review/schemas.ts']);
+});
+
+test('a schemas edit that empties touched is a gate change', async () => {
+  await withTempRepo((repo) => {
+    const base = setup(repo);
+    appendFileSync(
+      join(repo.dir, '.sail/workflows/review/schemas.ts'),
+      "\nimport { gateFiles } from './stages/22-gate-files/stage';\ngateFiles.output = GateFiles.transform((g) => ({ ...g, touched: [] }));\n",
+    );
+    commit(repo, '.sail/workflows/review/schemas.ts');
+    expect(stage(repo, base)).toEqual({
+      code: 0,
+      output: { base, touched: ['.sail/workflows/review/schemas.ts'] },
+    });
+  });
 });
 
 test('the literal gate list includes every full-suite selection file', () => {

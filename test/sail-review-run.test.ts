@@ -435,6 +435,22 @@ test('a pull request that changes the gate-file guard is handed to a human befor
   });
 }, 120_000);
 
+test("a pull request that changes the review's schemas is handed to a human before any merge", async () => {
+  await withTempRepo(async (repo) => {
+    const schemas = '.sail/workflows/review/schemas.ts';
+    const answers = seed() as { answers: Record<string, unknown> };
+    answers.answers['leak-3'] = { type: 'noul', noul: 0 };
+    setUp(repo, answers, undefined, schemas);
+    const { code, keys } = await review(repo);
+    expect(code).toBe(1);
+    expect(keys.filter((key) => key.startsWith('merge#'))).toEqual([]);
+    expect(keys.slice(-2)).toEqual(['gate-files#1', 'hand-over#1']);
+    const pr = await pullRequest(repo);
+    expect(pr.labels.includes('needs-human')).toBe(true);
+    expect(pr.comments.at(-1)).toContain(schemas);
+  });
+}, 120_000);
+
 test('a check still red after its rerun goes to fix as a finding, then validate, push and merge again', async () => {
   await withTempRepo(async (repo) => {
     setUp(repo, seed());
