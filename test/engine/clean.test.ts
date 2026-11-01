@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createGitWorktreeWorkspace } from '../../src/adapters/workspace/git-worktree';
 import { type Cleaned, cleanRun } from '../../src/engine/clean';
-import { writeStatus } from '../../src/engine/run-dir';
+import { writeOpening, writeStatus } from '../../src/engine/run-dir';
 import { readRunHeader } from '../../src/engine/run-header';
 import { type RunEnd, runWorkflow } from '../../src/engine/runtime';
 import { stopRun } from '../../src/engine/stop';
@@ -155,6 +155,64 @@ test('a branch another run leases refuses the clean, naming that run', async () 
     expect(refused).toContain('OTHER-1');
     expect(existsSync(end.dir)).toBe(true);
     expect(existsSync(join(end.dir, 'workspace'))).toBe(true);
+  });
+});
+
+test('a live seeded run of it, which leases a branch of its own, refuses the clean, naming that run', async () => {
+  await withTempRepo(async (repo) => {
+    const { end, branch } = await failedRun(repo);
+    const adapters = await fakeAdapters(repo.dir);
+    const { url } = await adapters.ports.workspace.repository();
+    const seededDir = join(repo.dir, '.sail-runs', 'SEED-1');
+    mkdirSync(seededDir, { recursive: true });
+    const seededBranch = `${branch}-seeded-abcd1234`;
+    const header = readRunHeader(end.dir);
+    writeFileSync(
+      join(seededDir, 'run.json'),
+      JSON.stringify({ ...header, runId: 'SEED-1', fromRun: end.runId, reused: 1, branch: seededBranch }),
+    );
+    writeStatus(seededDir, 'suspended', 'until');
+    await adapters.ports.workspace.lease(url, seededBranch, { runId: 'SEED-1', runDir: seededDir, pid: process.pid });
+    const refused = refusal(await clean(repo, end.runId));
+    expect(refused).toContain('SEED-1');
+    expect(existsSync(end.dir)).toBe(true);
+  });
+});
+
+test('a seeded run of it still being opened, with only its OPENING, refuses the clean, naming that run', async () => {
+  await withTempRepo(async (repo) => {
+    const { end, branch } = await failedRun(repo);
+    const adapters = await fakeAdapters(repo.dir);
+    const { url } = await adapters.ports.workspace.repository();
+    const seededDir = join(repo.dir, '.sail-runs', 'SEED-2');
+    mkdirSync(seededDir, { recursive: true });
+    const seededBranch = `${branch}-seeded-abcd1234`;
+    writeOpening(seededDir, { workflow: 'ticket-to-pr', branch: seededBranch, remote: url });
+    await adapters.ports.workspace.lease(url, seededBranch, { runId: 'SEED-2', runDir: seededDir, pid: process.pid });
+    const refused = refusal(await clean(repo, end.runId));
+    expect(refused).toContain('SEED-2');
+    expect(existsSync(end.dir)).toBe(true);
+  });
+});
+
+test('a seeded run of it that has ended does not refuse the clean', async () => {
+  await withTempRepo(async (repo) => {
+    const { end, branch } = await failedRun(repo);
+    const seededDir = join(repo.dir, '.sail-runs', 'SEED-3');
+    mkdirSync(seededDir, { recursive: true });
+    const header = readRunHeader(end.dir);
+    writeFileSync(
+      join(seededDir, 'run.json'),
+      JSON.stringify({
+        ...header,
+        runId: 'SEED-3',
+        fromRun: end.runId,
+        reused: 1,
+        branch: `${branch}-seeded-abcd1234`,
+      }),
+    );
+    writeStatus(seededDir, 'failed', 'workflow_failed');
+    expect('cleaned' in (await clean(repo, end.runId))).toBe(true);
   });
 });
 

@@ -1,6 +1,7 @@
 // `cleanRun()`: the engine side of `sail clean <run>`, which the dashboard can call in-process. It leaves nothing of a
 // failed run behind but a copy of its run directory in sail's machine directory. In order:
-// - **Checks, all before any removal:** the id names a run, whose STATUS is `failed`; no other run leases its branch;
+// - **Checks, all before any removal:** the id names a run, whose STATUS is `failed`; no other run leases its branch,
+//   nor does a run seeded from it lease its own;
 //   no queue item names it, in any state; its branch has no open pull request, asked of the code host only when the
 //   remote has the branch; and the archive destination is free. A check that can't be answered refuses the run.
 // - **Removals, in order:** its worktree, local branch, remote branch and run ref. One already gone is skipped. One that
@@ -20,7 +21,7 @@ import { QUEUE_DIR, type QueueItem, readQueue } from '../watch/queue-store';
 import { isPlainName } from './call-dir';
 import { type Clock, systemClock } from './clock';
 import { machineDir } from './machine-dir';
-import { readStatus, runsDir } from './run-dir';
+import { readOpening, readStatus, runsDir } from './run-dir';
 import { RUN_HEADER_FILE, readRunHeader } from './run-header';
 
 export interface CleanRunOptions {
@@ -61,6 +62,31 @@ export function queueItemsNaming(runs: string, runId: string): { workflow: strin
     for (const item of queue.items) if (item.runId === runId) found.push({ workflow, item });
   }
   return found;
+}
+
+/**
+ * The runs under `runs` seeded from run `runId`, whose branch is `<branch>-seeded-…`: by their header's `fromRun`, or,
+ * for one still being opened, by the branch its `OPENING` names. Each comes with the branch and remote its lease is on.
+ */
+function seededFrom(runs: string, runId: string, branch: string): { runId: string; branch: string; remote: string }[] {
+  const found: { runId: string; branch: string; remote: string }[] = [];
+  for (const entry of readdirSync(runs, { withFileTypes: true })) {
+    if (!entry.isDirectory() || entry.name === runId || !isPlainName(entry.name)) continue;
+    const dir = join(runs, entry.name);
+    if (!existsSync(join(dir, RUN_HEADER_FILE))) {
+      const opening = readOpening(dir);
+      if (opening?.branch.startsWith(`${branch}-seeded-`)) found.push({ runId: entry.name, ...opening });
+      continue;
+    }
+    try {
+      const header = readRunHeader(dir);
+      if (header.fromRun !== runId || header.branch === undefined || header.repository === undefined) continue;
+      found.push({ runId: entry.name, branch: header.branch, remote: header.repository.url });
+    } catch {
+      // A header that can't be read names no run it was seeded from.
+    }
+  }
+  return found.sort((a, b) => a.runId.localeCompare(b.runId));
 }
 
 /** Moves `from` to `to`, copying and removing across devices. */
@@ -113,6 +139,12 @@ export async function cleanRun(options: CleanRunOptions): Promise<Cleaned> {
       const holder = await workspace.holder(repository.url, branch);
       if (holder !== undefined)
         return { refused: `run ${runId}: its branch ${branch} is leased by run ${holder.runId}` };
+      for (const seeded of seededFrom(runs, runId, branch)) {
+        const lease = await workspace.holder(seeded.remote, seeded.branch);
+        if (lease?.runId === seeded.runId) {
+          return { refused: `run ${runId}: run ${seeded.runId}, seeded from it, leases ${seeded.branch}` };
+        }
+      }
     } catch (error) {
       if (!(error instanceof PortError)) throw error;
       return { refused: `run ${runId}: the lease on ${branch} could not be read: ${error.message}` };
