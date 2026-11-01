@@ -3,7 +3,7 @@
 // - **Checks, all before any removal:** the id names a run, whose STATUS is `failed`; no other run leases its branch,
 //   nor does a run seeded from it lease its own;
 //   no queue item names it, in any state; its branch has no open pull request, asked of the code host only when the
-//   remote has the branch; and the archive destination is free. A check that can't be answered refuses the run.
+//   remote has the branch, and never for a pull-request run, whose branches it keeps; and the archive destination is free. A check that can't be answered refuses the run.
 // - **Removals, in order:** its worktree, local branch, remote branch and run ref. One already gone is skipped. One that
 //   fails is reported and the rest still run. A run started from a pull request keeps both branches: they are the pull
 //   request's head, which sail never made.
@@ -165,8 +165,9 @@ async function check(options: CleanRunOptions): Promise<{ refused: string } | Ch
     };
   }
 
+  // A pull request's run keeps its branches, so where they are and what pull request is open from them don't matter.
   let present = { local: false, remote: false };
-  if (branch !== undefined && repository !== undefined) {
+  if (branch !== undefined && repository !== undefined && header.source.kind !== 'pr') {
     try {
       present = await workspace.branches(branch);
       if (present.remote) {
