@@ -30,7 +30,7 @@ import { type ProjectConfig, type RunPort, readConfig } from '../../engine/confi
 import { runsDir as runsDirOf } from '../../engine/run-dir';
 import { formatIssue } from '../../engine/schemas';
 import { sameLabel } from '../../ports/labels';
-import { commandTaken, dropCommand } from '../../watch/inbox';
+import { commandTaken, dropCommand, NOT_TAKEN } from '../../watch/inbox';
 import { readWatch, readWatches, systemTimers, type Timers, type WatchDeclaration } from '../../watch/poll';
 import {
   findHolder,
@@ -213,7 +213,7 @@ export function watchCommand(deps: WatchDeps = {}): Command {
       }
       const file = dropCommand(runsDirOf(sailDir), { op: 'watch', workflows: names });
       if (!(await taken(file, deps))) {
-        io.stdout(`${command}: ${watcher} has not taken the command yet: it waits in ${at(io, file)}\n`);
+        io.stdout(`${command}: ${watcher} ${NOT_TAKEN}: it waits in ${at(io, file)}\n`);
         return EXIT_OK;
       }
       const now = liveSet(sailDir, pid).map((each) => each.workflow);
@@ -275,7 +275,7 @@ export function unwatchCommand(deps: WatchDeps = {}): Command {
     if (workflows.length === 0) return refuseAs(io, command)(`${watcher} watches nothing: nothing to unwatch`);
     const file = dropCommand(runsDirOf(project.sailDir), { op: 'unwatch', workflows });
     if (!(await taken(file, deps))) {
-      io.stdout(`${command}: ${watcher} has not taken the command yet: it waits in ${at(io, file)}\n`);
+      io.stdout(`${command}: ${watcher} ${NOT_TAKEN}: it waits in ${at(io, file)}\n`);
       return EXIT_OK;
     }
     const now = liveSet(project.sailDir, pid).map((each) => each.workflow);
