@@ -53,6 +53,9 @@ export interface PageHost {
 export interface ElementLike {
   innerHTML: string;
   value?: string;
+  /** For a checkbox. */
+  checked?: boolean;
+  type?: string;
   scrollTop?: number;
   scrollHeight?: number;
   dataset: Record<string, string | undefined>;
@@ -201,7 +204,9 @@ export function browserHost(win: BrowserWindow): PageHost {
       }
     },
     value(name) {
-      return doc.getElementById('main')?.querySelector?.(`[name="${name}"]`)?.value ?? undefined;
+      const field = doc.getElementById('main')?.querySelector?.(`[name="${name}"]`);
+      if (field?.type === 'checkbox') return field.checked === true ? 'on' : '';
+      return field?.value ?? undefined;
     },
     connect(query, handlers) {
       const socket = new win.WebSocket(`ws://${win.location.host}/ws?${query}`);

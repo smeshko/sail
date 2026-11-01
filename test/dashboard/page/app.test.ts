@@ -1489,3 +1489,111 @@ test("a stage chosen and a raise typed on one run don't carry over to the next o
     '<option value="implement" title="implement#1 and everything after it, in loop fix from iteration 1" selected>',
   );
 });
+
+/** The beta queue open in the centre with its stream replayed, and the posts and renders cleared. */
+function openBetaQueue() {
+  page = boot(host);
+  host.push(host.open('index')[0], indexMessage());
+  const [socket] = host.open('queue=');
+  for (const event of readEvents(queueDirOf(m))) host.push(socket, { kind: 'queue-event', event });
+  host.click({ action: 'select-queue', queue: `beta/${QUEUE_WORKFLOW}` });
+  host.advance(100);
+  return socket;
+}
+const BETA = { repo: 'beta', workflow: QUEUE_WORKFLOW };
+const QUEUE_PATH = `/api/repos/beta/queues/${QUEUE_WORKFLOW}`;
+
+test('a poll click posts an empty body to the queue poll route; a 200 shows its message beside the header, a 202 says waiting, a 409 its error, and no answer says so (ADW-460)', async () => {
+  openBetaQueue();
+  const notices: (string | undefined)[] = [];
+  for (const answer of [
+    { status: 200, body: JSON.stringify({ message: 'sail queue: polled ticket-to-pr' }) },
+    { status: 202, body: JSON.stringify({ waiting: 'the watcher has not taken the command yet' }) },
+    { status: 409, body: JSON.stringify({ error: "no watcher is running for 'beta'" }) },
+    { status: 0, body: '' },
+  ]) {
+    host.postAnswer = answer;
+    host.click({ action: 'poll-queue', ...BETA });
+    await settle();
+    host.advance(100);
+    notices.push(page?.ui.queueNotice);
+  }
+  expect(host.posts).toEqual(Array(4).fill({ path: `${QUEUE_PATH}/poll`, body: {} }));
+  expect(notices).toEqual([
+    'sail queue: polled ticket-to-pr',
+    'the watcher has not taken the command yet',
+    "no watcher is running for 'beta'",
+    'the poll could not be sent: the dashboard did not answer',
+  ]);
+  expect(host.regions.main).toContain('<span class="warnchip">the poll could not be sent');
+});
+
+test('the add form shows once the queue stream has polled tickets; add posts the typed key and force, an empty key posts nothing, and the key is kept across a draw (ADW-460)', async () => {
+  page = boot(host);
+  host.push(host.open('index')[0], indexMessage());
+  const [socket] = host.open('queue=');
+  host.click({ action: 'select-queue', queue: `beta/${QUEUE_WORKFLOW}` });
+  host.advance(100);
+  expect(host.regions.main).not.toContain('name="add-ticket"');
+  for (const event of readEvents(queueDirOf(m))) host.push(socket, { kind: 'queue-event', event });
+  host.advance(100);
+  expect(host.regions.main).toContain('name="add-ticket"');
+  host.click({ action: 'add-ticket', ...BETA });
+  await settle();
+  expect(host.posts).toEqual([]);
+  host.fields['add-ticket'] = '  FAKE-9 ';
+  host.fields['add-force'] = 'on';
+  host.postAnswer = { status: 200, body: JSON.stringify({ message: 'sail queue: queued ticket:FAKE-9 Nine' }) };
+  host.click({ action: 'add-ticket', ...BETA });
+  await settle();
+  host.advance(100);
+  expect(host.posts).toEqual([{ path: `${QUEUE_PATH}/add`, body: { ticketKey: 'FAKE-9', force: true } }]);
+  expect(page?.ui.queueNotice).toBe('sail queue: queued ticket:FAKE-9 Nine');
+  expect(host.regions.main).toContain('value=""');
+  host.fields['add-force'] = '';
+  host.click({ action: 'add-ticket', ...BETA });
+  await settle();
+  expect(host.posts[1]).toEqual({ path: `${QUEUE_PATH}/add`, body: { ticketKey: 'FAKE-9' } });
+});
+
+test('the first click on drop arms it and posts nothing, the second posts the dedup key, and any other click disarms it (ADW-460)', async () => {
+  openBetaQueue();
+  const row = { ...BETA, item: 'ticket:FAKE-6' };
+  host.click({ action: 'drop-item', ...row });
+  host.advance(100);
+  expect([host.posts, page?.ui.armedDrop, host.regions.main?.includes('confirm drop')]).toEqual([
+    [],
+    'ticket:FAKE-6',
+    true,
+  ]);
+  host.click({ action: 'toggle-queue-events' });
+  host.advance(100);
+  expect([host.posts, page?.ui.armedDrop, host.regions.main?.includes('confirm drop')]).toEqual([[], undefined, false]);
+  host.click({ action: 'drop-item', ...row });
+  host.click({ action: 'drop-item', ...BETA, item: 'ticket:FAKE-5' });
+  expect([host.posts, page?.ui.armedDrop]).toEqual([[], 'ticket:FAKE-5']);
+  host.postAnswer = { status: 200, body: JSON.stringify({ message: 'sail queue: ticket:FAKE-5 dropped' }) };
+  host.click({ action: 'drop-item', ...BETA, item: 'ticket:FAKE-5' });
+  await settle();
+  host.advance(100);
+  expect([host.posts, page?.ui.armedDrop, page?.ui.queueNotice]).toEqual([
+    [{ path: `${QUEUE_PATH}/drop`, body: { dedupKey: 'ticket:FAKE-5' } }],
+    undefined,
+    'sail queue: ticket:FAKE-5 dropped',
+  ]);
+});
+
+test('a requeue click posts at once with the dedup key, and a 409 shows the CLI line as the notice (ADW-460)', async () => {
+  openBetaQueue();
+  host.postAnswer = {
+    status: 409,
+    body: JSON.stringify({ error: 'ticket:FAKE-6 is queued: only a parked or failed item is requeued' }),
+  };
+  host.click({ action: 'requeue-item', ...BETA, item: 'ticket:FAKE-6' });
+  await settle();
+  host.advance(100);
+  expect([host.posts, page?.ui.queueNotice]).toEqual([
+    [{ path: `${QUEUE_PATH}/requeue`, body: { dedupKey: 'ticket:FAKE-6' } }],
+    'ticket:FAKE-6 is queued: only a parked or failed item is requeued',
+  ]);
+});

@@ -25,10 +25,12 @@
 // - Clicks arrive as delegated `data-action`s, and keys as keys. Renders are coalesced: a region marked dirty is drawn
 //   by one flush at most every 100 ms.
 //
-// It controls three things. `move-item` asks the dashboard's server to have the watcher move a waiting queue item, and a
-// refusal is shown in the queue view. `resume-run` and `restart-run` ask it to start a suspended run again or a failed
-// run as a seeded one, each on a second click: what the open run offers is read from its actions route when it opens and
-// when the index changes its status or its queue item, and the page draws it. A refusal is shown beside the buttons; a
+// It controls two things. In the queue view, `move-item`, `poll-queue`, `add-ticket`, `requeue-item` and `drop-item` ask
+// the dashboard's server to have the watcher move, poll, add, requeue or drop (a drop on a second click), and the answer,
+// a refusal or that the watcher has not taken the command yet, is shown beside the queue's header. `resume-run` and
+// `restart-run` ask it to start a suspended run again or a failed
+// run as a seeded one, each on a second click: what the open run offers is read from its actions route when it opens
+// and when the index changes its status or its queue item, and the page draws it. A refusal is shown beside the buttons; a
 // started restart opens the new run, and a started resume reads the run again. The other actions change what is shown,
 // and `copy` puts a CLI command on the clipboard.
 import type { QueueEvent, SailEvent } from '../../events/types';
@@ -113,6 +115,16 @@ function refusal(status: number, body: string, what: string): string {
   return `the ${what} was refused (${status})`;
 }
 
+/** The string field `field` of a JSON answer, undefined when it has none. */
+function answerField(body: string, field: string): string | undefined {
+  try {
+    const value = (JSON.parse(body) as Record<string, unknown>)[field];
+    return typeof value === 'string' && value !== '' ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function parse(text: string): Message | undefined {
   try {
     const value = JSON.parse(text) as unknown;
@@ -182,6 +194,8 @@ export function boot(host: PageHost): Page {
   let indexRetry: number | undefined;
   let stopped = false;
 
+  let addFieldsOwn = true;
+
   const dirty = new Set<Region>();
   let flushTimer: number | undefined;
 
@@ -206,6 +220,13 @@ export function boot(host: PageHost): Page {
     main: () => {
       const panel = openQueue();
       if (panel !== undefined) {
+        // What was typed in the add field survives the draw, but not an add that took.
+        if (addFieldsOwn) {
+          ui.addTicket = host.value('add-ticket') ?? ui.addTicket;
+          const forced = host.value('add-force');
+          if (forced !== undefined) ui.addForce = forced !== '';
+        }
+        addFieldsOwn = true;
         return renderQueue(panel, queues.get(ui.queue ?? '')?.stream, ui, host.now()).value;
       }
       if (run === undefined) return html`<div class="qempty">no run selected</div>`.value;
@@ -603,7 +624,9 @@ export function boot(host: PageHost): Page {
     const recent = [...open.stream.recent, event].slice(-RECENT_EVENTS);
     const watch =
       event.type === 'watch:added' ? 'watched' : event.type === 'watch:removed' ? 'not watched' : open.stream.watch;
-    open.stream = { recent, watch };
+    const polls =
+      event.type === 'queue:polled' ? (event as Extract<QueueEvent, { type: 'queue:polled' }>).kind : open.stream.polls;
+    open.stream = { recent, watch, ...(polls === undefined ? {} : { polls }) };
     if (ui.queue === id) mark('main');
   };
 
@@ -697,6 +720,24 @@ export function boot(host: PageHost): Page {
   };
 
   /** Gives the centre back to the run, from the queue it showed. */
+  /**
+   * Asks the server to have the watcher `what` the queue of `workflow`, and shows the answer beside the queue's header: a
+   * 200's message, what a 202 says the watcher has yet to do, or why it was refused. `took` runs when the change was applied.
+   */
+  const queueOp = (repo: string, workflow: string, what: string, body: unknown, took?: () => void) => {
+    const path = `/api/repos/${enc(repo)}/queues/${enc(workflow)}/${what}`;
+    void host.post(path, body).then(({ status, body: answer }) => {
+      if (stopped) return;
+      if (status === 200 || status === 202) {
+        const notice = answerField(answer, status === 200 ? 'message' : 'waiting');
+        if (notice === undefined) delete ui.queueNotice;
+        else ui.queueNotice = notice;
+        if (status === 200) took?.();
+      } else ui.queueNotice = refusal(status, answer, what);
+      mark('main');
+    });
+  };
+
   const leaveQueue = () => {
     if (ui.queue === undefined) return;
     delete ui.queue;
@@ -857,14 +898,39 @@ export function boot(host: PageHost): Page {
     'move-item': (data) => {
       const { dir, repo, workflow, key, target } = data;
       if (repo === undefined || workflow === undefined || key === undefined || target === undefined) return;
-      const path = `/api/repos/${enc(repo)}/queues/${enc(workflow)}/move`;
       const body = dir === 'up' ? { dedupKey: key, before: target } : { dedupKey: key, after: target };
-      void host.post(path, body).then(({ status, body: answer }) => {
-        if (stopped) return;
-        if (status >= 200 && status < 300) delete ui.queueNotice;
-        else ui.queueNotice = refusal(status, answer, 'move');
-        mark('main');
+      queueOp(repo, workflow, 'move', body);
+    },
+    'poll-queue': (data) => {
+      if (data.repo === undefined || data.workflow === undefined) return;
+      queueOp(data.repo, data.workflow, 'poll', {});
+    },
+    'add-ticket': (data) => {
+      const { repo, workflow } = data;
+      if (repo === undefined || workflow === undefined) return;
+      ui.addTicket = host.value('add-ticket') ?? ui.addTicket;
+      const forced = host.value('add-force');
+      if (forced !== undefined) ui.addForce = forced !== '';
+      const ticketKey = (ui.addTicket ?? '').trim();
+      if (ticketKey === '') return;
+      queueOp(repo, workflow, 'add', ui.addForce === true ? { ticketKey, force: true } : { ticketKey }, () => {
+        delete ui.addTicket;
+        addFieldsOwn = false;
       });
+    },
+    'requeue-item': (data) => {
+      if (data.repo === undefined || data.workflow === undefined || data.item === undefined) return;
+      queueOp(data.repo, data.workflow, 'requeue', { dedupKey: data.item });
+    },
+    'drop-item': (data) => {
+      if (data.repo === undefined || data.workflow === undefined || data.item === undefined) return;
+      if (ui.armedDrop !== data.item) {
+        ui.armedDrop = data.item;
+        mark('main');
+        return;
+      }
+      delete ui.armedDrop;
+      queueOp(data.repo, data.workflow, 'drop', { dedupKey: data.item });
     },
     'resume-run': () => startRun('resume'),
     'restart-run': () => startRun('restart'),
@@ -925,11 +991,13 @@ export function boot(host: PageHost): Page {
   };
 
   host.onAction((action, data) => {
-    // A click on anything but a start disarms it.
-    if (ui.armed !== undefined && action !== 'resume-run' && action !== 'restart-run') {
-      delete ui.armed;
-      mark('main');
-    }
+    // A click on anything but a start disarms it, and on anything but a drop disarms that.
+    const disarms =
+      (ui.armed !== undefined && action !== 'resume-run' && action !== 'restart-run') ||
+      (ui.armedDrop !== undefined && action !== 'drop-item');
+    if (ui.armed !== undefined && action !== 'resume-run' && action !== 'restart-run') delete ui.armed;
+    if (ui.armedDrop !== undefined && action !== 'drop-item') delete ui.armedDrop;
+    if (disarms) mark('main');
     actions[action]?.(data);
   });
   host.onKey((key, inInput) => {

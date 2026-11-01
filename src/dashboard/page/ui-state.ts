@@ -43,8 +43,13 @@ export interface UiState {
   folded: string[];
   /** Whether the queue view shows its recent events. */
   queueEvents: boolean;
-  /** Why the last move was refused, shown in the queue view until the next move succeeds. */
+  /** The answer to the last queue change that wasn't a plain success, shown in the queue view until the next. */
   queueNotice?: string;
+  /** The item whose drop a first click has armed, by dedup key, which a second click drops. */
+  armedDrop?: string;
+  /** What was typed in the queue view's add field, and whether Force is ticked, kept across a draw. */
+  addTicket?: string | undefined;
+  addForce?: boolean;
   /** The run action a first click has armed, which a second click starts. */
   armed?: 'resume' | 'restart';
   /** Why the last Resume or Restart was refused, or that it is starting, shown beside the buttons. */
