@@ -11,6 +11,7 @@ import { type RunEnd, runWorkflow } from '../../src/engine/runtime';
 import { stopRun } from '../../src/engine/stop';
 import type { CodeHost } from '../../src/ports/code-host';
 import type { WorkspacePort } from '../../src/ports/workspace';
+import { queueItemsNaming } from '../../src/watch/queue-store';
 import { fakeAdapters } from '../helpers/adapters';
 import { withOrigin } from '../helpers/origin';
 import { writeStub } from '../helpers/stub-workflow';
@@ -64,6 +65,7 @@ async function clean(
     sailDir: sailDir(repo),
     runId,
     workspace: more.workspace ?? adapters.ports.workspace,
+    queueItems: (id) => queueItemsNaming(join(repo.dir, '.sail-runs'), id),
     codeHost: more.codeHost ?? (async () => adapters.ports.codeHost),
     env: { SAIL_HOME: sailHome(repo) },
     clock: NOW,

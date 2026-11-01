@@ -9,9 +9,11 @@ import { homedir } from 'node:os';
 import { BUILTINS } from '../../adapters/index';
 import { resolveAdapters } from '../../engine/adapters';
 import { cleanRun } from '../../engine/clean';
+import { runsDir } from '../../engine/run-dir';
 import { listRuns } from '../../engine/runs';
 import { formatIssue } from '../../engine/schemas';
 import type { CodeHost } from '../../ports/code-host';
+import { queueItemsNaming } from '../../watch/queue-store';
 import { EXIT_FAILED, EXIT_OK, EXIT_REFUSED, type ExitCode } from '../exit-codes';
 import type { Io, Parsed } from '../index';
 import { findProject, refuseAs } from './run-workflow';
@@ -60,6 +62,7 @@ export async function clean(args: Parsed, io: Io): Promise<ExitCode> {
       sailDir: project.sailDir,
       runId,
       workspace: project.adapters.ports.workspace,
+      queueItems: (id) => queueItemsNaming(runsDir(project.sailDir), id),
       codeHost,
       env,
     });

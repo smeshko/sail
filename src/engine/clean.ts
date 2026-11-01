@@ -11,14 +11,13 @@
 //   `<sail home>/failed-runs/<YYYY-MM-DD>/<run id>/`. A failed removal keeps it where it is, so a second clean reads its
 //   header and finishes the job.
 //
-// It needs only the Workspace port, and the code host through a getter, so a run with no remote branch never needs the
-// code host's credentials. It loads no workflow and writes into no run's event stream.
+// It needs only the Workspace port, the queues through a lookup the caller hands in, so the engine reads no queue file
+// itself, and the code host through a getter, so a run with no remote branch never needs the code host's credentials. It loads no workflow and writes into no run's event stream.
 import { cpSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import type { CodeHost } from '../ports/code-host';
 import { PortError } from '../ports/errors';
 import type { WorkspacePort } from '../ports/workspace';
-import { QUEUE_DIR, type QueueItem, readQueue } from '../watch/queue-store';
 import { isPlainName } from './call-dir';
 import { type Clock, systemClock } from './clock';
 import { machineDir } from './machine-dir';
@@ -30,12 +29,20 @@ export interface CleanRunOptions {
   sailDir: string;
   runId: string;
   workspace: WorkspacePort;
+  /** The queue items of the repository that name run `runId`, or why the queues can't be read. */
+  queueItems: (runId: string) => QueueNaming[] | { refused: string };
   /** The code host, asked for only when the run's branch is on the remote. */
   codeHost: () => Promise<CodeHost | { refused: string }>;
   /** Where `SAIL_HOME` is read from. This process's by default. */
   env?: Readonly<Record<string, string | undefined>>;
   /** What the archive's date is read from. The system's by default. */
   clock?: Clock;
+}
+
+/** A queue item that names a run, as the queue of `workflow` holds it. */
+export interface QueueNaming {
+  workflow: string;
+  item: { dedupKey: string; state: string };
 }
 
 /** How a clean went: the run was cleaned and archived, a removal failed and the run directory stays, or it was refused. */
@@ -50,23 +57,6 @@ const pad = (value: number): string => String(value).padStart(2, '0');
 export function archiveDir(env: Readonly<Record<string, string | undefined>>, date: Date, runId: string): string {
   const day = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
   return join(machineDir(env), 'failed-runs', day, runId);
-}
-
-/** The items of every queue under `runs` that name run `runId`, in any state. A queue that can't be read refuses. */
-export function queueItemsNaming(
-  runs: string,
-  runId: string,
-): { workflow: string; item: QueueItem }[] | { refused: string } {
-  const root = join(runs, QUEUE_DIR);
-  if (!existsSync(root)) return [];
-  const found: { workflow: string; item: QueueItem }[] = [];
-  for (const workflow of readdirSync(root).sort()) {
-    const queue = readQueue(runs, workflow);
-    if (queue === undefined) continue;
-    if ('refused' in queue) return queue;
-    for (const item of queue.items) if (item.runId === runId) found.push({ workflow, item });
-  }
-  return found;
 }
 
 /**
@@ -156,7 +146,7 @@ export async function cleanRun(options: CleanRunOptions): Promise<Cleaned> {
     }
   }
 
-  const naming = queueItemsNaming(runs, runId);
+  const naming = options.queueItems(runId);
   if ('refused' in naming) return { refused: `run ${runId}: the queues could not be checked: ${naming.refused}` };
   const named = naming[0];
   if (named !== undefined) {
