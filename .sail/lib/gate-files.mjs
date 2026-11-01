@@ -16,8 +16,21 @@ export const GATE_FILES = [
 export const GATE_DIRS = ['.github/'];
 
 // The review judges a pull request by the guard its run loaded, so one changing the guard or the merge path would be
-// judged by the guard it replaces. A stage added to the merge path must be added here.
-export const GUARD_FILES = ['.sail/lib/gate-files.mjs', '.sail/workflows/review/workflow.ts'];
+// judged by the guard it replaces. So every module the guard and the merge path import, and every script their stages
+// run, must be covered too. A module or stage added to that graph must be covered here; test/sail/gate-files.test.ts
+// derives the graph and fails when one isn't.
+export const GUARD_FILES = [
+  '.sail/lib/gate-files.mjs',
+  '.sail/lib/permissions.ts',
+  '.sail/lib/jev-check.mjs',
+  '.sail/lib/duplicates.mjs',
+  '.sail/lib/gate-lock.mjs',
+  '.sail/lib/play.sh',
+  '.sail/lib/play.mjs',
+  '.sail/workflows/review/workflow.ts',
+];
+// Every file in these folders but a `.md` prompt or template.
+export const GUARD_CODE_DIRS = ['.sail/workflows/review/', '.sail/stages/file-follow-ups/', '.sail/stages/validate/'];
 export const GUARD_DIRS = [
   '.sail/workflows/review/stages/18-merge/',
   '.sail/workflows/review/stages/21-hand-over/',
@@ -30,6 +43,7 @@ export function isGateFile(path) {
     GATE_DIRS.some((dir) => path.startsWith(dir)) ||
     GUARD_FILES.includes(path) ||
     GUARD_DIRS.some((dir) => path.startsWith(dir)) ||
+    (GUARD_CODE_DIRS.some((dir) => path.startsWith(dir)) && !path.endsWith('.md')) ||
     ['.gitignore', 'biome.json', 'biome.jsonc'].includes(path.split('/').at(-1))
   );
 }
