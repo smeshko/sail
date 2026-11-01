@@ -208,7 +208,7 @@ async function cleanOf(entry: RegistryEntry, runId: string, options: ActionsOpti
   }
 }
 
-/** What run `runId` of the repository offers: Resume or Restart, enabled or why not. */
+/** What run `runId` of the repository offers: Resume, Restart, Stop and Clean, each enabled or why not. */
 export async function runActions(
   entry: RegistryEntry,
   runId: string,
