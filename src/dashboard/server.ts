@@ -15,7 +15,11 @@
 //    run offers (src/dashboard/actions.ts), then starts `sail resume <run>` or `sail run --from-run <run> --stage …`
 //    itself, detached in the clone, its output in `.sail-runs/dashboard/<run id>.log`, as a typed command would: it
 //    needs no watcher and skips the watcher's cap. It answers 202 once the run has started, or 409 with the line the
-//    start was refused with.
+//    start was refused with. The last two are `…/runs/<run>/stop` (body `{ now }`) and `…/clean` (`{}`): each calls the
+//    engine function `sail stop` or `sail clean` calls (src/engine/stop.ts, src/engine/clean.ts) in this process,
+//    with the clone's Workspace port, and is refused in the same words, 409. A stop answers 202 `{ message }`, since a
+//    running run ends later, and a clean 200 `{ message, removed, archived }`; a clean whose removal failed is 409
+//    with the failures, and its run directory stays.
 // 3. A WebSocket upgrade needs a same-origin `Origin`, or no `Origin` and the client header: browsers can't set headers
 //    on an upgrade, but always send `Origin`.
 // 4. A GET of exactly `/` is the page, which a navigation fetches with no header of its own. It holds no data: all it
@@ -24,23 +28,28 @@
 //
 // No answer carries a CORS header. Errors are JSON, `{ "error": "…" }`.
 import { existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import type { Server, ServerWebSocket } from 'bun';
 import { z } from 'zod';
 import { BUILTINS } from '../adapters/index';
 import { resolveAdapters } from '../engine/adapters';
+import { cleanedMessage, cleanRun } from '../engine/clean';
 import { readConfig } from '../engine/config';
+import { credentialValues } from '../engine/redact';
 import { readStatus, runsDir } from '../engine/run-dir';
 import { RUN_HEADER_FILE, readRunHeader } from '../engine/run-header';
 import { newRunId } from '../engine/run-id';
 import { formatIssue } from '../engine/schemas';
+import { stoppedMessage, stopRun } from '../engine/stop';
 import type { TicketSource } from '../ports/ticket-source';
 import { commandTaken, dropCommand } from '../watch/inbox';
 import { commandFor, itemLine, outcomeOf, streamMark } from '../watch/queue-commands';
+import { queueItemsNaming, startingRun } from '../watch/queue-store';
 import { liveSet, liveWatcher, type RegistryEntry } from '../watch/registry';
 import { lastLine, type SpawnedRun, spawnDetached } from '../watch/spawn';
 import { runActions } from './actions';
-import type { ResolveClonePorts } from './clone-ports';
+import { clonePorts, type ResolveClonePorts } from './clone-ports';
 import { callFile, containedFile, findRepo, findRunDir, repos, runItems } from './files';
 import { renderMarkdown } from './markdown';
 import { createPage } from './page';
@@ -100,6 +109,13 @@ const ItemBody = z.strictObject({ dedupKey: z.string().min(1) });
 /** The paths a run is started at: `/api/repos/<repo>/runs/<run>/resume` and `…/restart`. */
 const RESUME_PATH = /^\/api\/repos\/[^/]+\/runs\/[^/]+\/resume$/;
 const RESTART_PATH = /^\/api\/repos\/[^/]+\/runs\/[^/]+\/restart$/;
+
+/** The paths a run is stopped and cleaned at: `/api/repos/<repo>/runs/<run>/stop` and `…/clean`. */
+const STOP_PATH = /^\/api\/repos\/[^/]+\/runs\/[^/]+\/stop$/;
+const CLEAN_PATH = /^\/api\/repos\/[^/]+\/runs\/[^/]+\/clean$/;
+
+const StopBody = z.strictObject({ now: z.boolean() });
+const CleanBody = z.strictObject({});
 
 const ResumeBody = z.strictObject({
   raise: z
@@ -421,6 +437,86 @@ async function restartRoute(starts: Starts, segments: string[], request: Request
   }
 }
 
+/** The repository and the clone's ports a stop or a clean works with, or the answer that refuses the request. */
+async function clonesOf(options: DashboardOptions, segments: string[]) {
+  const [, , name = ''] = segments;
+  const entry = findRepo(options.registryDir, name);
+  if (entry === undefined) return error(404, `no repository '${name}'`);
+  const env = options.env ?? process.env;
+  const ports = await (options.ports ?? ((each) => clonePorts(each, env)))(entry);
+  if ('refused' in ports) return error(409, ports.refused);
+  return { entry, ports, env };
+}
+
+/**
+ * Stops a run as `sail stop` does: the engine's `stopRun()` in this process. A run still starting, which has no
+ * run.json yet, is stopped through its hand-off file. Answers 202 `{ message }`, or 409 with the engine's refusal.
+ */
+async function stopRoute(starts: Starts, segments: string[], request: Request): Promise<Response> {
+  const { options, underway } = starts;
+  const [, , , , runId = ''] = segments;
+  const parsed = await bodyOf(request, StopBody, 'a stop');
+  if (parsed instanceof Response) return parsed;
+  const found = await clonesOf(options, segments);
+  if (found instanceof Response) return found;
+  const { entry, ports, env } = found;
+  const key = `stop ${runId}`;
+  if (underway.has(key)) return error(409, `a stop of ${runId} is already under way`);
+  underway.add(key);
+  try {
+    const runs = runsDir(entry.sailDir);
+    const stopped = await stopRun({
+      sailDir: entry.sailDir,
+      runId,
+      adapters: ports.adapters,
+      now: parsed.body.now,
+      secrets: credentialValues(env),
+      starting: (id) => startingRun(runs, id),
+    });
+    if ('refused' in stopped) return error(409, stopped.refused);
+    return Response.json({ message: stoppedMessage(runId, stopped) }, { status: 202 });
+  } finally {
+    underway.delete(key);
+  }
+}
+
+/**
+ * Cleans a failed run as `sail clean` does: the engine's `cleanRun()` in this process, which makes all its checks
+ * before any removal. Answers 200 with the line `sail clean` prints, or 409 with the refusal or the failed removals.
+ */
+async function cleanRoute(starts: Starts, segments: string[], request: Request): Promise<Response> {
+  const { options, underway } = starts;
+  const [, , , , runId = ''] = segments;
+  const parsed = await bodyOf(request, CleanBody, 'a clean');
+  if (parsed instanceof Response) return parsed;
+  const found = await clonesOf(options, segments);
+  if (found instanceof Response) return found;
+  const { entry, ports, env } = found;
+  const key = `clean ${runId}`;
+  if (underway.has(key)) return error(409, `a clean of ${runId} is already under way`);
+  underway.add(key);
+  try {
+    const cleaned = await cleanRun({
+      sailDir: entry.sailDir,
+      runId,
+      workspace: ports.adapters.ports.workspace,
+      queueItems: (id) => queueItemsNaming(runsDir(entry.sailDir), id),
+      codeHost: ports.codeHost,
+      env,
+    });
+    if ('refused' in cleaned) return error(409, cleaned.refused);
+    if ('failed' in cleaned) {
+      const { failures } = cleaned.failed;
+      return error(409, `${failures.join('; ')}; its run directory stays at .sail-runs/${runId}; clean it again`);
+    }
+    const { removed, archived } = cleaned.cleaned;
+    const home = env.HOME ?? homedir();
+    return Response.json({ message: cleanedMessage(runId, cleaned.cleaned, home), removed, archived });
+  } finally {
+    underway.delete(key);
+  }
+}
+
 /** The environment a run the server starts gets: the server's own, with no variable left unset. */
 function environmentOf(options: DashboardOptions): Record<string, string> {
   const env = options.env ?? process.env;
@@ -437,11 +533,15 @@ export function guard(request: Request, port: number): Response | undefined {
     const path = new URL(request.url).pathname;
     if (
       request.method !== 'POST' ||
-      ![MOVE_PATH, QUEUE_OP_PATH, RESUME_PATH, RESTART_PATH].some((each) => each.test(path))
+      ![MOVE_PATH, QUEUE_OP_PATH, RESUME_PATH, RESTART_PATH, STOP_PATH, CLEAN_PATH].some((each) => each.test(path))
     ) {
-      return error(405, 'the dashboard answers only GET, and POST to a queue change, a resume or a restart', {
-        Allow: 'GET',
-      });
+      return error(
+        405,
+        'the dashboard answers only GET, and POST to a queue change, a resume, a restart, a stop or a clean',
+        {
+          Allow: 'GET',
+        },
+      );
     }
     if (!client) return error(403, `send ${CLIENT_HEADER}: 1`);
     if (!(request.headers.get('content-type') ?? '').toLowerCase().startsWith('application/json')) {
@@ -582,7 +682,15 @@ export function startDashboard(options: DashboardOptions): Dashboard | { refused
         if (request.method === 'POST') {
           const path = url.pathname;
           // A start is waited for up to `startWaitMs`, past Bun's 10 s idle timeout, which would close the request.
-          const start = RESUME_PATH.test(path) ? resumeRoute : RESTART_PATH.test(path) ? restartRoute : undefined;
+          const start = RESUME_PATH.test(path)
+            ? resumeRoute
+            : RESTART_PATH.test(path)
+              ? restartRoute
+              : STOP_PATH.test(path)
+                ? stopRoute
+                : CLEAN_PATH.test(path)
+                  ? cleanRoute
+                  : undefined;
           if (start !== undefined) {
             self.timeout(request, 0);
             return start(starts, segments, request);
