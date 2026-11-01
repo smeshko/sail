@@ -111,10 +111,11 @@ export async function cleanRun(options: CleanRunOptions): Promise<Cleaned> {
   if (branch !== undefined && repository !== undefined) {
     try {
       const holder = await workspace.holder(repository.url, branch);
-      if (holder !== undefined) return { refused: `the branch ${branch} is leased by run ${holder.runId}` };
+      if (holder !== undefined)
+        return { refused: `run ${runId}: its branch ${branch} is leased by run ${holder.runId}` };
     } catch (error) {
       if (!(error instanceof PortError)) throw error;
-      return { refused: `the lease on ${branch} could not be read: ${error.message}` };
+      return { refused: `run ${runId}: the lease on ${branch} could not be read: ${error.message}` };
     }
   }
 
@@ -137,7 +138,7 @@ export async function cleanRun(options: CleanRunOptions): Promise<Cleaned> {
         const open = await host.pullRequestFrom(branch);
         if (open !== undefined) {
           return {
-            refused: `branch ${branch} has an open pull request, #${open.number} (${open.url}): close it first`,
+            refused: `run ${runId}: its branch ${branch} has an open pull request, #${open.number} (${open.url}): close it first`,
           };
         }
       }
@@ -149,7 +150,7 @@ export async function cleanRun(options: CleanRunOptions): Promise<Cleaned> {
 
   const date = (options.clock ?? systemClock)();
   const archived = archiveDir(env, date, runId);
-  if (existsSync(archived)) return { refused: `the archive ${archived} already exists` };
+  if (existsSync(archived)) return { refused: `run ${runId}: the archive ${archived} already exists` };
 
   const removed: string[] = [];
   const failures: string[] = [];

@@ -3,6 +3,7 @@ import pkg from '../../package.json' with { type: 'json' };
 import type { KeepAwake } from '../engine/keep-awake';
 import type { Tty } from '../events/consumers/screen';
 import { check } from './commands/check';
+import { clean } from './commands/clean';
 import { dashboard } from './commands/dashboard';
 import { fromRun } from './commands/from-run';
 import { init } from './commands/init';
@@ -48,6 +49,8 @@ Usage:
   sail login codex [--device]                                Log in to a ChatGPT subscription for pi's openai-codex models
   sail resume <run> [-q|-v|-vv]                              Resume a suspended or crashed run
   sail stop <run> [--now]                                    Stop at the next call boundary, or end the running call now
+  sail clean <run>... | --failed                             Remove a failed run's worktree, branches and run ref, and archive its run
+                                                             directory
   sail run --from-run <run> --stage <stage> [--continue] [--run-id <id>]
                                                              Rerun one stage on another run's earlier calls: a seeded run
   sail runs                                                  List the runs in .sail-runs/
@@ -274,6 +277,7 @@ const commands = new Map<string, CommandSpec>([
       command: queue,
     },
   ],
+  ['clean', { options: { failed: { type: 'boolean' } }, positionals: Number.POSITIVE_INFINITY, command: clean }],
   ['stop', { options: { now: { type: 'boolean' } }, positionals: 1, command: stop }],
   ['--help', bare(help)],
   ['-h', bare(help)],
