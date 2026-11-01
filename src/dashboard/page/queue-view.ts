@@ -2,9 +2,9 @@
 // run, with its polling, a box of items for each state that has any, running first, each folding from its heading, and
 // its recent events from the queue's own stream, folded until the person opens them, and the error that stream sent.
 // The controls ask the watcher and change nothing themselves: the header's poll button, a field to add a ticket (for a
-// workflow that polls tickets), a requeue button on a parked item or a failed one whose run has ended, a drop button on
-// any item but a running one that needs a second click, and, on a waiting item, ▲ and ▼ buttons to move it before or
-// after its waiting neighbour. The answer to any of them, a refusal or that the watcher has not taken it yet, shows
+// workflow that polls tickets), and, at a row's right, ▲ and ▼ on a waiting item to move it before or after its waiting
+// neighbour, and a ⋯ on any item but a running one, which opens its menu: requeue, on a parked item or a failed one
+// whose run has ended, and drop, which needs a second click. One menu is open at a time. The answer to any of them, a refusal or that the watcher has not taken it yet, shows
 // beside the header. An item whose run the rail lists opens it. A waiting item shows its priority. A held item shows
 // when its hold ends and why, and its hold's events name it. An item that waits on its ticket's prerequisites names them.
 import type { QueueEvent } from '../../events/types';
@@ -68,15 +68,21 @@ function itemButton(panel: QueuePanel, item: PanelItem, action: string, label: s
   return html`<button class="btn${armed ? ' armed' : ''}" data-action="${action}" data-repo="${panel.repo}" data-workflow="${panel.workflow}" data-item="${item.dedupKey}" title="${label.replace('confirm ', '')} ${item.dedupKey}">${label}</button>`;
 }
 
-/** Requeue on a parked item, or a failed one whose run has ended; drop on any item that isn't running. */
-function itemControls(panel: QueuePanel, item: PanelItem, ui: UiState): SafeHtml | '' {
+/**
+ * A row's ⋯ and, once opened, its menu: requeue on a parked item, or a failed one whose run has ended; drop on any item
+ * that isn't running. A running item has neither, so it has no ⋯.
+ */
+function itemMenu(panel: QueuePanel, item: PanelItem, ui: UiState): SafeHtml | '' {
   if (item.state === 'dispatched') return '';
+  const open = ui.itemMenu === item.dedupKey;
+  const toggle = html`<button class="btn mv more${open ? ' open' : ''}" data-action="item-menu" data-item="${item.dedupKey}" title="actions for ${item.dedupKey}">⋯</button>`;
+  if (!open) return html`<span class="qmore">${toggle}</span>`;
   const requeue =
     item.state === 'parked' || (item.state === 'failed' && item.runEnded)
       ? itemButton(panel, item, 'requeue-item', 'requeue')
       : '';
   const armed = ui.armedDrop === item.dedupKey;
-  return html`<span class="qacts">${requeue}${itemButton(panel, item, 'drop-item', armed ? 'confirm drop' : 'drop', armed)}</span>`;
+  return html`<span class="qmore">${toggle}<span class="qmenu">${requeue}${itemButton(panel, item, 'drop-item', armed ? 'confirm drop' : 'drop', armed)}</span></span>`;
 }
 
 /** The field to add a ticket by its key, with Force, as typed so far. */
@@ -95,7 +101,9 @@ function moveButtons(panel: QueuePanel, item: PanelItem): SafeHtml | '' {
   const at = waiting.indexOf(item);
   const above = waiting[at - 1];
   const below = waiting[at + 1];
-  return html`<span class="mvs">${above === undefined ? '' : moveButton(panel, item, 'up', above)}${below === undefined ? '' : moveButton(panel, item, 'down', below)}</span>`;
+  // A missing ▲ or ▼ keeps its place, so the arrows line up down the box.
+  const gap = html`<span class="mv-gap"></span>`;
+  return html`${above === undefined ? gap : moveButton(panel, item, 'up', above)}${below === undefined ? gap : moveButton(panel, item, 'down', below)}`;
 }
 
 function itemRow(panel: QueuePanel, item: PanelItem, ui: UiState): SafeHtml {
@@ -118,7 +126,7 @@ function itemRow(panel: QueuePanel, item: PanelItem, ui: UiState): SafeHtml {
     item.held === undefined
       ? ''
       : html` · held until ${clock(item.held.until, ui.tz)} · <span class="why">${item.held.reason}</span>`
-  }${item.waitingOn === undefined ? '' : html` · waiting on ${item.waitingOn.join(', ')}`}${item.reason === undefined ? '' : html` · <span class="why">${item.reason}</span>`}</span>${moveButtons(panel, item)}${itemControls(panel, item, ui)}${run}</div>`;
+  }${item.waitingOn === undefined ? '' : html` · waiting on ${item.waitingOn.join(', ')}`}${item.reason === undefined ? '' : html` · <span class="why">${item.reason}</span>`}</span></span><span class="c-side">${run}${moveButtons(panel, item)}${itemMenu(panel, item, ui)}</span></div>`;
 }
 
 /** What each state is called in the view: what it means to the person, rather than the queue file's word. */
