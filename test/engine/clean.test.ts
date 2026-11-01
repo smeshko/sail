@@ -347,7 +347,7 @@ test('worktree, local branch, remote branch and run ref are each removed and lis
   });
 });
 
-test("a run started from a pull request keeps the pull request's head branch, locally and on the remote, since sail did not make it", async () => {
+test("a run started from a pull request keeps the pull request's head branch, locally and on the remote, since sail did not make it, and never asks the code host about it (ADW-465)", async () => {
   await withTempRepo(async (repo) => {
     withOrigin(repo);
     const { end, branch } = await failedRun(repo);
@@ -366,7 +366,13 @@ test("a run started from a pull request keeps the pull request's head branch, lo
       env: repo.env,
       leasesDir: join(repo.dir, '.sail-runs', 'fake', 'leases'),
     });
-    const cleaned = await clean(repo, end.runId, { workspace });
+    let asked = 0;
+    const codeHost = async () => {
+      asked += 1;
+      return { refused: '/adapters/codeHost needs one of SAIL_GITHUB_TOKEN, GITHUB_TOKEN, none of which is set' };
+    };
+    const cleaned = await clean(repo, end.runId, { workspace, codeHost });
+    expect(asked).toBe(0);
     expect(cleaned).toEqual({
       cleaned: {
         runId: end.runId,
