@@ -17,6 +17,7 @@ import {
 } from 'node:fs';
 import { networkInterfaces } from 'node:os';
 import { join } from 'node:path';
+import { takeLease } from '../../src/adapters/leases';
 import { type Dashboard, guard, startDashboard } from '../../src/dashboard/server';
 import { isRunIdOf } from '../../src/engine/run-id';
 import {
@@ -24,6 +25,8 @@ import {
   entryOf,
   FAKE_2_ID,
   FAKE_3_ID,
+  fake2Dir,
+  fakeClonePorts,
   GOLDEN_RUN,
   GOLDEN_RUN_ID,
   type Machine,
@@ -187,11 +190,19 @@ test("a run's actions route answers what the run offers as JSON, 404 for an unkn
   try {
     const leasesDir = join(seeded.root, 'leases');
     mkdirSync(leasesDir);
-    const started = startDashboard({ registryDir: seeded.registryDir, port: 0, leasesDir });
+    const started = startDashboard({
+      registryDir: seeded.registryDir,
+      port: 0,
+      leasesDir,
+      ports: fakeClonePorts(leasesDir),
+      env: { ...process.env, SAIL_HOME: seeded.sailHome },
+    });
     if ('refused' in started) throw new Error(started.refused);
     servers.push(started);
     const before = treeHash(seeded.root);
     const failed = await get(started, `/api/repos/alpha/runs/${FAKE_2_ID}/actions`);
+    const suspended = await get(started, `/api/repos/beta/runs/${FAKE_3_ID}/actions`);
+    expect(JSON.parse(suspended.body).stop).toEqual({ enabled: true });
     const unknown = await get(started, '/api/repos/alpha/runs/FAKE-0-NOPE/actions');
     expect([failed.status, failed.type, JSON.parse(failed.body)]).toEqual([
       200,
@@ -205,6 +216,11 @@ test("a run's actions route answers what the run offers as JSON, 404 for an unkn
           ],
           stage: 'implement',
           budget: { maxUsd: 25, maxMinutes: 90 },
+        },
+        clean: {
+          enabled: true,
+          removes: ['run ref'],
+          archive: expect.stringMatching(new RegExp(`/failed-runs/\\d{4}-\\d{2}-\\d{2}/${FAKE_2_ID}$`)),
         },
       },
     ]);
@@ -733,4 +749,200 @@ test.each([
   const options = await fetch(`http://127.0.0.1:${server.port}${RESUME}`, { method: 'OPTIONS', headers: HEADER });
   expect([options.status, options.headers.get('allow')]).toEqual([405, 'GET']);
   expect(stub.argv()).toEqual([]);
+});
+
+const STOP = `/api/repos/beta/runs/${FAKE_3_ID}/stop`;
+const CLEAN = `/api/repos/alpha/runs/${FAKE_2_ID}/clean`;
+const FAKE_3_BRANCH = 'sail/FAKE-3-escape-b-this-b-that';
+const FAKE_2_BRANCH = 'sail/FAKE-2-print-the-version-with-version';
+
+/** A dashboard whose clones' ports are the fake workspace on a leases directory of the test's machine. */
+function startPorts(more: Parameters<typeof fakeClonePorts>[1] = {}): Dashboard {
+  const leasesDir = join(m.root, 'leases');
+  mkdirSync(leasesDir, { recursive: true });
+  const started = startDashboard({
+    registryDir: m.registryDir,
+    port: 0,
+    leasesDir,
+    ports: fakeClonePorts(leasesDir, more),
+    env: { ...process.env, SAIL_HOME: m.sailHome },
+  });
+  if ('refused' in started) throw new Error(started.refused);
+  servers.push(started);
+  return started;
+}
+
+const control = () => readFileSync(join(betaRun(), 'CONTROL'), 'utf8').trim();
+const statusOf = (dir: string) => readFileSync(join(dir, 'STATUS'), 'utf8').trim();
+
+test('a POST to stop a run another process runs asks it to stop at its next call boundary, or at once with now, and answers 202 with the CLI words', async () => {
+  m = seedFixtures();
+  settleQueue();
+  writeFileSync(join(betaRun(), 'STATUS'), 'running\n');
+  const leasesDir = join(m.root, 'leases');
+  mkdirSync(leasesDir, { recursive: true });
+  const held = takeLease(leasesDir, 'fake://origin', FAKE_3_BRANCH, {
+    runId: FAKE_3_ID,
+    runDir: betaRun(),
+    pid: process.ppid,
+  });
+  expect(held.leased).toBe(true);
+  const server = startPorts();
+  const later = await post(server, STOP, startedBy('{"now":false}'));
+  expect([later.status, await later.json()]).toEqual([
+    202,
+    { message: `run ${FAKE_3_ID} stops at its next call boundary (pid ${process.ppid})` },
+  ]);
+  expect(control()).toBe('stopped');
+  const now = await post(server, STOP, startedBy('{"now":true}'));
+  expect([now.status, await now.json()]).toEqual([
+    202,
+    { message: `run ${FAKE_3_ID} ends its running call now (pid ${process.ppid})` },
+  ]);
+  expect(control()).toBe('stopped now');
+  expect(statusOf(betaRun())).toBe('running');
+});
+
+test('a POST to stop a suspended run ends it failed, stopped, with run:end in its events', async () => {
+  m = seedFixtures();
+  settleQueue();
+  const server = startPorts();
+  const stopped = await post(server, STOP, startedBy('{"now":false}'));
+  expect([stopped.status, await stopped.json()]).toEqual([202, { message: `run ${FAKE_3_ID} stopped` }]);
+  expect(statusOf(betaRun())).toBe('failed stopped');
+  expect(readFileSync(join(betaRun(), 'events.ndjson'), 'utf8')).toContain('"type":"run:end"');
+});
+
+test('a POST to stop a run that has ended is 409 with the engine words', async () => {
+  m = seedFixtures();
+  const server = startPorts();
+  const ended = await post(server, `/api/repos/alpha/runs/${FAKE_2_ID}/stop`, startedBy('{"now":false}'));
+  expect([ended.status, await ended.json()]).toEqual([
+    409,
+    { error: `run ${FAKE_2_ID} has ended (failed stage_error): there is nothing to stop` },
+  ]);
+});
+
+test('the actions route offers Stop for a dispatched run still starting, with no run directory yet (review R2)', async () => {
+  m = seedFixtures();
+  const startingId = 'FAKE-5-01M3BWNZM08Q4T6V2XRJ5KWD9Z';
+  const file = join(queueDirOf(m), 'queue.json');
+  writeFileSync(file, readFileSync(file, 'utf8').replace(`"runId": "${FAKE_3_ID}"`, `"runId": "${startingId}"`));
+  const server = startPorts();
+  const offers = await get(server, `/api/repos/beta/runs/${startingId}/actions`);
+  expect([offers.status, JSON.parse(offers.body)]).toEqual([200, { stop: { enabled: true } }]);
+  expect((await get(server, '/api/repos/beta/runs/FAKE-0-NOPE/actions')).status).toBe(404);
+});
+
+test('a POST to stop a run the repository lacks is 409 with the engine words, and a repository it lacks 404', async () => {
+  m = seedFixtures();
+  const server = startPorts();
+  const lacking = await post(server, '/api/repos/alpha/runs/FAKE-0-NOPE/stop', startedBy('{"now":false}'));
+  expect([lacking.status, await lacking.json()]).toEqual([409, { error: "no run 'FAKE-0-NOPE' in .sail-runs" }]);
+  expect((await post(server, '/api/repos/gamma/runs/FAKE-0-NOPE/stop', startedBy('{"now":false}'))).status).toBe(404);
+});
+
+test('a POST to clean a failed run removes what the engine plans, archives its run directory, and answers 200 with the CLI line', async () => {
+  m = seedFixtures();
+  const calls: string[] = [];
+  const server = startPorts({ calls, branches: { local: true, remote: false } });
+  const cleaned = await post(server, CLEAN, startedBy('{}'));
+  const answer = (await cleaned.json()) as { message: string; removed: string[]; archived: string };
+  expect(cleaned.status).toBe(200);
+  expect(answer.removed).toEqual([`branch ${FAKE_2_BRANCH}`, 'run ref']);
+  expect(answer.archived).toMatch(new RegExp(`/failed-runs/\\d{4}-\\d{2}-\\d{2}/${FAKE_2_ID}$`));
+  expect(answer.message).toBe(
+    `cleaned ${FAKE_2_ID}: branch ${FAKE_2_BRANCH}, run ref; run directory -> ${answer.archived}`,
+  );
+  expect(calls).toEqual([
+    `removeBranch ${FAKE_2_BRANCH} local`,
+    `removeBranch ${FAKE_2_BRANCH} remote`,
+    `removeRunRef ${FAKE_2_ID}`,
+  ]);
+  expect(existsSync(fake2Dir(m))).toBe(false);
+  expect(existsSync(answer.archived)).toBe(true);
+});
+
+test('a POST to clean that the engine refuses is 409 with its words, and removes nothing: a leased branch and a run not failed', async () => {
+  m = seedFixtures();
+  const calls: string[] = [];
+  const leasesDir = join(m.root, 'leases');
+  mkdirSync(leasesDir, { recursive: true });
+  const server = startPorts({ calls });
+  const notFailed = await post(server, `/api/repos/beta/runs/${FAKE_3_ID}/clean`, startedBy('{}'));
+  expect(notFailed.status).toBe(409);
+  expect(((await notFailed.json()) as { error: string }).error).toContain(FAKE_3_ID);
+
+  takeLease(leasesDir, 'fake://origin', FAKE_2_BRANCH, {
+    runId: 'FAKE-9-01HZX3Y4Z5A6B7C8D9E0F1G2H3',
+    runDir: m.root,
+    pid: process.pid,
+  });
+  const leased = await post(server, CLEAN, startedBy('{}'));
+  expect(leased.status).toBe(409);
+  expect(((await leased.json()) as { error: string }).error).toContain('FAKE-9-01HZX3Y4Z5A6B7C8D9E0F1G2H3');
+
+  expect(calls).toEqual([]);
+  expect(existsSync(fake2Dir(m))).toBe(true);
+});
+
+test('a POST to clean a failed run whose branch has an open pull request is 409, and removes nothing', async () => {
+  m = seedFixtures();
+  const calls: string[] = [];
+  const server = startPorts({
+    calls,
+    branches: { local: false, remote: true },
+    codeHost: { pullRequestFrom: async () => ({ number: 7, url: 'fake://pr/7' }) } as never,
+  });
+  const pr = await post(server, CLEAN, startedBy('{}'));
+  expect(pr.status).toBe(409);
+  expect(((await pr.json()) as { error: string }).error).toContain('pull request');
+  expect(calls).toEqual([]);
+  expect(existsSync(fake2Dir(m))).toBe(true);
+});
+
+test('a POST to clean a failed run a queue item names is 409 with the engine words, and changes neither', async () => {
+  m = seedFixtures();
+  writeFileSync(join(betaRun(), 'STATUS'), 'failed workflow_failed\n');
+  const queue = join(queueDirOf(m), 'queue.json');
+  const text = readFileSync(queue, 'utf8');
+  const server = startPorts();
+  const refused = await post(server, `/api/repos/beta/runs/${FAKE_3_ID}/clean`, startedBy('{}'));
+  expect([refused.status, await refused.json()]).toEqual([
+    409,
+    {
+      error: `queue item ticket:FAKE-3 of ticket-to-pr (dispatched) names run ${FAKE_3_ID}: requeue it or drop it: \`sail queue requeue|drop\``,
+    },
+  ]);
+  expect([readFileSync(queue, 'utf8'), existsSync(betaRun())]).toEqual([text, true]);
+});
+
+test.each([
+  ['a stop with no now', STOP, '{}'],
+  ['a stop with a now that is no boolean', STOP, '{"now":"yes"}'],
+  ['a stop that is not JSON', STOP, 'nope'],
+  ['a clean with a field it does not take', CLEAN, '{"x":1}'],
+  ['a clean that is not JSON', CLEAN, 'nope'],
+])('%s is 400 as JSON, and changes no run', async (_, path, body) => {
+  m = seedFixtures();
+  const server = startPorts();
+  const before = treeHash(m.root);
+  const response = await post(server, path, startedBy(body));
+  expect([response.status, await response.json()]).toEqual([400, { error: expect.any(String) }]);
+  expect(treeHash(m.root)).toBe(before);
+});
+
+test.each([
+  ['no client header', { 'Content-Type': 'application/json' }, 403],
+  ['a form content type', { ...HEADER, 'Content-Type': 'text/plain' }, 415],
+  ['a foreign Origin', { ...JSON_HEADERS, Origin: 'http://evil.example' }, 403],
+])('a stop or a clean with %s is refused with %i, and changes no run', async (_, headers, status) => {
+  m = seedFixtures();
+  const server = startPorts();
+  const before = treeHash(m.root);
+  for (const path of [STOP, CLEAN]) {
+    const response = await post(server, path, { headers, body: '{"now":false}' });
+    expect(response.status).toBe(status);
+  }
+  expect(treeHash(m.root)).toBe(before);
 });

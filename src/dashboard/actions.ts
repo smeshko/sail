@@ -1,7 +1,14 @@
-// What a run offers its viewer, as the server reads it: Resume or Restart, enabled or why not. It is the one check behind
-// both the actions route and each POST that starts a run, so a request is judged again as it arrives. Read-only.
+// What a run offers its viewer, as the server reads it: Resume, Restart, Stop and Clean, enabled or why not. It is the
+// one check behind both the actions route and each POST that acts on a run, so a request is judged again as it arrives.
+// Read-only: Clean's offer asks the engine's `checkClean()`, which removes nothing.
 //
-// - A `completed` run offers neither, and says why. A `running` run offers both, disabled.
+// - A `completed` run offers nothing, and says why. A `running` run offers Resume and Restart, disabled.
+// - Stop is offered for a `running` or `suspended` run, and for a dispatched run that has no run directory yet. It is
+//   never disabled: `sail stop` stops a run the watcher dispatched, and its refusals come with the POST. A `completed`
+//   or `failed` run has ended, so it offers none.
+// - Clean is offered for a `failed` run, beside Restart: enabled with what it removes and where the run directory goes,
+//   or disabled with `sail clean`'s refusal, or with why the clone's ports can't be resolved. It is not held back by
+//   the watcher check below, since the engine's checks refuse a leased branch and a queue item that names the run.
 // - Resume is offered for a `suspended` run. For stop reason `budget_exceeded` it needs a raise: the budget the run
 //   suspended on (its `run:suspended`), else `usd` when the cost has reached the budget's dollars, else `minutes`.
 // - Restart is offered for a `failed` run, a stopped one included. It is a seeded run, so it is disabled for the runs
@@ -14,6 +21,8 @@
 //   run and is dispatched, or failed and waiting to retry: the watcher has it.
 import { join } from 'node:path';
 import { defaultLeasesDir, heldLease } from '../adapters/leases';
+import { isPlainName } from '../engine/call-dir';
+import { checkClean } from '../engine/clean';
 import { INTAKE_KEY } from '../engine/intake';
 import { type JournalEntry, readJournal } from '../engine/journal';
 import { readStatus, runsDir } from '../engine/run-dir';
@@ -22,7 +31,9 @@ import { noIntakeRun, notTicketRun, noWorkspaceRun, seedEnd } from '../engine/se
 import { readEvents } from '../events/consumers/ndjson';
 import { summarize } from '../events/summary';
 import type { SailEvent } from '../events/types';
+import { queueItemsNaming, startingRun } from '../watch/queue-store';
 import type { RegistryEntry } from '../watch/registry';
+import { clonePorts, type ResolveClonePorts } from './clone-ports';
 import { findRunDir } from './files';
 import { queueViews } from './queues';
 
@@ -54,10 +65,21 @@ export interface RestartOffer extends Offer {
   budget: Budget;
 }
 
+export interface StopOffer extends Offer {}
+
+export interface CleanOffer extends Offer {
+  /** What a clean would remove, in order. */
+  removes: string[];
+  /** Where the run directory would go. */
+  archive?: string;
+}
+
 export interface RunActions {
   resume?: ResumeOffer;
   restart?: RestartOffer;
-  /** Why the run offers neither. */
+  stop?: StopOffer;
+  clean?: CleanOffer;
+  /** Why the run offers nothing. */
   why?: string;
 }
 
@@ -65,6 +87,8 @@ export interface ActionsOptions {
   /** Where branch leases are looked up. By default the fake workspace's, or the machine's. */
   leasesDir?: string | undefined;
   env?: Readonly<Record<string, string | undefined>> | undefined;
+  /** The clone's ports, for a clean's checks. By default resolved from its `project.yaml`. */
+  ports?: ResolveClonePorts | undefined;
 }
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
@@ -162,10 +186,39 @@ function restartOf(runId: string, header: RunHeader, entries: readonly JournalEn
   return { enabled: true, stages, ...(stage === undefined ? {} : { stage }), budget } satisfies RestartOffer;
 }
 
-/** What run `runId` of the repository offers: Resume or Restart, enabled or why not. */
-export function runActions(entry: RegistryEntry, runId: string, options: ActionsOptions = {}): RunActions {
+/** Clean's offer for a failed run: `checkClean()`'s plan, or its refusal. */
+async function cleanOf(entry: RegistryEntry, runId: string, options: ActionsOptions): Promise<CleanOffer> {
+  const refuse = (why: string): CleanOffer => ({ enabled: false, removes: [], why });
+  try {
+    const env = options.env ?? process.env;
+    const ports = await (options.ports ?? ((each) => clonePorts(each, env)))(entry);
+    if ('refused' in ports) return refuse(ports.refused);
+    const checked = await checkClean({
+      sailDir: entry.sailDir,
+      runId,
+      workspace: ports.adapters.ports.workspace,
+      queueItems: (id) => queueItemsNaming(runsDir(entry.sailDir), id),
+      codeHost: ports.codeHost,
+      env,
+    });
+    if ('refused' in checked) return refuse(checked.refused);
+    return { enabled: true, removes: checked.plan.removes, archive: checked.plan.archive };
+  } catch (error) {
+    return refuse(`run ${runId} can't be checked for a clean: ${messageOf(error)}`);
+  }
+}
+
+/** What run `runId` of the repository offers: Resume, Restart, Stop and Clean, each enabled or why not. */
+export async function runActions(
+  entry: RegistryEntry,
+  runId: string,
+  options: ActionsOptions = {},
+): Promise<RunActions> {
   const dir = findRunDir(entry, runId);
-  if (typeof dir !== 'string') return { why: dir.missing };
+  if (typeof dir !== 'string') {
+    if (isPlainName(runId) && startingRun(runsDir(entry.sailDir), runId)) return { stop: { enabled: true } };
+    return { why: dir.missing };
+  }
   try {
     const { status, stopReason } = readStatus(dir);
     const header = readRunHeader(dir);
@@ -178,6 +231,7 @@ export function runActions(entry: RegistryEntry, runId: string, options: Actions
       return {
         resume: { enabled: false, why, spentUsd, budget },
         restart: { enabled: false, why, stages: [], budget: { ...header.budget } },
+        stop: { enabled: true },
       };
     }
     const busy = heldBy(entry, runId, header, options);
@@ -186,7 +240,7 @@ export function runActions(entry: RegistryEntry, runId: string, options: Actions
     if (status === 'failed') {
       const { entries } = readJournal(dir);
       const restart = restartOf(runId, header, entries, events);
-      return { restart: restart.enabled ? disable(restart) : restart };
+      return { restart: restart.enabled ? disable(restart) : restart, clean: await cleanOf(entry, runId, options) };
     }
     const suspended = events.findLast((event) => event.type === 'run:suspended');
     const raise = stopReason === 'budget_exceeded' ? raiseOf(events, spentUsd, budget) : undefined;
@@ -201,7 +255,7 @@ export function runActions(entry: RegistryEntry, runId: string, options: Actions
       budget,
       ...(raise === undefined ? {} : { raise }),
     };
-    return { resume: disable(resume) };
+    return { resume: disable(resume), stop: { enabled: true } };
   } catch (error) {
     return { why: `run ${runId} can't be read: ${messageOf(error)}` };
   }

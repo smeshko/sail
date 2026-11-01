@@ -6,7 +6,7 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, write
 import { join } from 'node:path';
 import { type RunEnd, resumeWorkflow, runWorkflow } from '../../src/engine/runtime';
 import { validateRunDir } from '../../src/engine/schemas';
-import { stopRun } from '../../src/engine/stop';
+import { stoppedMessage, stopRun } from '../../src/engine/stop';
 import { PortError } from '../../src/ports/errors';
 import { fakeAdapters } from '../helpers/adapters';
 import { writeStub } from '../helpers/stub-workflow';
@@ -169,6 +169,23 @@ test('a run left running by a process that is gone is stopped the same way, its 
   });
 });
 
+test('a stop of a suspended run refused after it leased the branch leaves the lease marked suspended again (review R7)', async () => {
+  await withTempRepo(async (repo) => {
+    const end = await suspendedRun(repo);
+    const [file] = leaseFiles(repo);
+    const leaseOf = () => JSON.parse(readFileSync(join(leasesDir(repo), file ?? ''), 'utf8'));
+    expect(leaseOf().suspended).toBe(true);
+    appendFileSync(join(end.dir, 'events.ndjson'), 'not json\n');
+    const stopped = await stop(repo, end.runId);
+    expect(stopped).toEqual({ refused: expect.stringContaining("can't be read, so the events can't continue") });
+    expect([readFileSync(join(end.dir, 'STATUS'), 'utf8'), leaseFiles(repo), leaseOf()]).toEqual([
+      'suspended until\n',
+      [file],
+      expect.objectContaining({ runId: end.runId, suspended: true }),
+    ]);
+  });
+});
+
 test('a run whose lease another run took over is stopped with no lease to release, and the other run keeps its lease', async () => {
   await withTempRepo(async (repo) => {
     const end = await suspendedRun(repo);
@@ -276,4 +293,19 @@ test.each<[string, Partial<Parameters<typeof stopRun>[0]>]>([
     });
     expect([stopped, readdirSync(runs)]).toEqual([{ refused: `no run '${STARTING}' in .sail-runs` }, []]);
   });
+});
+
+test('stoppedMessage gives the line for each outcome sail stop prints', () => {
+  const ended = { runId: 'R-1', dir: '/x', status: 'failed', stopReason: 'stopped', message: '' } as const;
+  expect([
+    stoppedMessage('R-1', { starting: true }),
+    stoppedMessage('R-1', { requested: { pid: 42 } }),
+    stoppedMessage('R-1', { requested: { pid: 42, now: true } }),
+    stoppedMessage('R-1', { ended }),
+  ]).toEqual([
+    'run R-1 is still starting: it stops before its intake',
+    'run R-1 stops at its next call boundary (pid 42)',
+    'run R-1 ends its running call now (pid 42)',
+    'run R-1 stopped',
+  ]);
 });

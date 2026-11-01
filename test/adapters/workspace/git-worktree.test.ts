@@ -858,6 +858,29 @@ describe('the clean removals', () => {
     });
   });
 
+  test('branches() asks the remote without blocking this process: a remote this process serves answers it (review R5)', async () => {
+    await withTempRepo(async (repo) => {
+      withOrigin(repo);
+      const w = world(repo);
+      const outcome = await withServer(
+        () => new Response('no such repository', { status: 404 }),
+        async (url) => {
+          repo.git('remote', 'set-url', 'origin', url);
+          try {
+            await adapterOf(repo, w, { fetchTimeoutMs: 3_000 }).branches('sail/any');
+            return 'answered';
+          } catch (error) {
+            return { failure: portFailure(error), timedOut: messageOf(error).includes('timed out') };
+          }
+        },
+      );
+      expect(outcome).toEqual({
+        failure: { port: 'workspace', op: 'branches', code: 'unavailable' },
+        timedOut: false,
+      });
+    });
+  });
+
   test("removeBranch removes a local branch, and answers removed false when it's gone", async () => {
     await withTempRepo(async (repo) => {
       withOrigin(repo);

@@ -13,11 +13,10 @@
 //
 // It resolves only the Workspace port, so no ticket source is asked for its credentials, and loads no workflow.
 
-import { isAlive } from '../../adapters/leases';
 import { credentialValues } from '../../engine/redact';
 import { runsDir } from '../../engine/run-dir';
-import { stopRun } from '../../engine/stop';
-import { dispatchedItem } from '../../watch/queue-store';
+import { stoppedMessage, stopRun } from '../../engine/stop';
+import { startingRun } from '../../watch/queue-store';
 import { EXIT_OK, type ExitCode } from '../exit-codes';
 import type { Io, Parsed } from '../index';
 import { findProject, refuseAs } from './run-workflow';
@@ -36,20 +35,9 @@ export async function stop(args: Parsed, io: Io): Promise<ExitCode> {
     adapters: project.adapters,
     now: args.values.now === true,
     secrets: credentialValues(io.env ?? process.env),
-    starting: (id) => {
-      const item = dispatchedItem(runsDir(project.sailDir), id);
-      return item !== undefined && (item.pid === undefined || isAlive(item.pid));
-    },
+    starting: (id) => startingRun(runsDir(project.sailDir), id),
   });
   if ('refused' in stopped) return refuse(stopped.refused);
-  if ('starting' in stopped) {
-    io.stdout(`${COMMAND}: run ${runId} is still starting: it stops before its intake\n`);
-  } else if ('requested' in stopped) {
-    io.stdout(
-      `${COMMAND}: run ${runId} ${stopped.requested.now ? 'ends its running call now' : 'stops at its next call boundary'} (pid ${stopped.requested.pid})\n`,
-    );
-  } else {
-    io.stdout(`${COMMAND}: run ${runId} stopped\n`);
-  }
+  io.stdout(`${COMMAND}: ${stoppedMessage(runId, stopped)}\n`);
   return EXIT_OK;
 }

@@ -13,6 +13,7 @@ import {
   FAKE_2_ID,
   FAKE_3_ID,
   fake2Dir,
+  fakeClonePorts,
   GOLDEN_RUN_ID,
   type Machine,
   QUEUE_WORKFLOW,
@@ -79,7 +80,7 @@ class FakeHost implements PageHost {
   get(path: string) {
     if (path.endsWith('/actions')) {
       this.actionReads.push(path);
-      return Promise.resolve(this.answer(path));
+      return this.actionsAnswer(path);
     }
     return new Promise<{ status: number; body: string }>((done) => {
       const read = { path, resolve: () => done(this.answer(path)) };
@@ -99,6 +100,17 @@ class FakeHost implements PageHost {
     this.posts.push({ path, body });
     return this.postAnswer;
   }
+  /** What the dashboard would answer for a run's actions. */
+  private async actionsAnswer(path: string): Promise<{ status: number; body: string }> {
+    const [, , , repo = '', , runId = ''] = new URL(path, 'http://dashboard').pathname
+      .split('/')
+      .map(decodeURIComponent);
+    const entry = findRepo(this.machine.registryDir, repo);
+    if (entry === undefined) return { status: 404, body: '' };
+    const leasesDir = join(this.machine.root, 'leases');
+    const offers = await runActions(entry, runId, { leasesDir, ports: fakeClonePorts(leasesDir) });
+    return { status: 200, body: JSON.stringify(offers) };
+  }
   /** What the dashboard would answer for a call's result or log: the file, or 404. */
   private answer(path: string): { status: number; body: string } {
     const given = this.bodies.get(path);
@@ -106,10 +118,6 @@ class FakeHost implements PageHost {
     const url = new URL(path, 'http://dashboard');
     const [, , , repo = '', , runId = '', , key = '', what] = url.pathname.split('/').map(decodeURIComponent);
     const entry = findRepo(this.machine.registryDir, repo);
-    if (url.pathname.endsWith('/actions') && entry !== undefined) {
-      const leasesDir = join(this.machine.root, 'leases');
-      return { status: 200, body: JSON.stringify(runActions(entry, runId, { leasesDir })) };
-    }
     const dir = entry === undefined ? { missing: '' } : findRunDir(entry, runId);
     if (typeof dir !== 'string') return { status: 404, body: '' };
     const name = what === 'result' ? 'result.json' : (STREAMS[url.searchParams.get('stream') ?? ''] ?? '');
@@ -1332,6 +1340,7 @@ test("a failed run's view offers Restart with its stages and the failed one chos
   expect(host.actionReads).toEqual([`${GOLDEN_PATH}/actions`, `${FAKE_2_PATH}/actions`]);
   expect(buttons(host.regions.main).filter(([, action]) => action?.endsWith('-run'))).toEqual([
     ['restart', 'restart-run', '', ''],
+    ['clean', 'clean-run', '', ''],
   ]);
   expect(host.regions.main).toContain(
     '<option value="implement" title="implement#1 and everything after it, in loop fix from iteration 1" selected>',
@@ -1419,6 +1428,7 @@ test('a suspended run over its dollars offers Resume with a raise field and no R
   expect(host.regions.main).toContain('name="raise"');
   expect(buttons(host.regions.main).filter(([, action]) => action?.endsWith('-run'))).toEqual([
     ['resume', 'resume-run', '', ''],
+    ['stop', 'stop-run', '', ''],
   ]);
   host.click({ action: 'resume-run' });
   host.advance(100);
@@ -1678,4 +1688,103 @@ test('a requeue click posts at once with the dedup key, and a 409 shows the CLI 
     [{ path: `${QUEUE_PATH}/requeue`, body: { dedupKey: 'ticket:FAKE-6' } }],
     'ticket:FAKE-6 is queued: only a parked or failed item is requeued',
   ]);
+});
+
+test('Stop arms on a first click and posts { now: false } on the second, shows the answer beside the buttons, and reads the run again', async () => {
+  settleQueue();
+  await openOffering('beta', FAKE_3_ID, m.beta.runDir);
+  host.click({ action: 'stop-run' });
+  host.advance(100);
+  expect(host.posts).toEqual([]);
+  expect(buttons(host.regions.main).find(([, action]) => action === 'stop-run')).toEqual([
+    'confirm stop · at its next call boundary',
+    'stop-run',
+    'armed',
+    '',
+  ]);
+  host.postAnswer = {
+    status: 202,
+    body: JSON.stringify({ message: `run ${FAKE_3_ID} stops at its next call boundary (pid 7)` }),
+  };
+  host.click({ action: 'stop-run' });
+  await settle();
+  host.advance(100);
+  expect(host.posts).toEqual([{ path: `${FAKE_3_PATH}/stop`, body: { now: false } }]);
+  expect(host.regions.main).toContain(
+    `<span class="warnchip">run ${FAKE_3_ID} stops at its next call boundary (pid 7)</span>`,
+  );
+  expect(host.actionReads.filter((path) => path === `${FAKE_3_PATH}/actions`).length).toBeGreaterThan(1);
+});
+
+test('with Stop now ticked, the confirmation says so and the post is { now: true }', async () => {
+  settleQueue();
+  await openOffering('beta', FAKE_3_ID, m.beta.runDir);
+  host.fields.now = 'on';
+  host.click({ action: 'stop-run' });
+  host.advance(100);
+  expect(buttons(host.regions.main).find(([, action]) => action === 'stop-run')?.[0]).toBe(
+    'confirm stop now · ends its running call',
+  );
+  host.postAnswer = { status: 202, body: JSON.stringify({ message: 'run X ends its running call now (pid 7)' }) };
+  host.click({ action: 'stop-run' });
+  await settle();
+  expect(host.posts).toEqual([{ path: `${FAKE_3_PATH}/stop`, body: { now: true } }]);
+});
+
+test('ticking Stop now once Stop is armed keeps it armed and makes it say so (review D1)', async () => {
+  settleQueue();
+  await openOffering('beta', FAKE_3_ID, m.beta.runDir);
+  host.click({ action: 'stop-run' });
+  host.advance(100);
+  host.fields.now = 'on';
+  host.click({ action: 'stop-now' });
+  host.advance(100);
+  expect(
+    buttons(host.regions.main)
+      .find(([, action]) => action === 'stop-run')
+      ?.slice(0, 3),
+  ).toEqual(['confirm stop now · ends its running call', 'stop-run', 'armed']);
+  expect(host.regions.main).toContain('data-action="stop-now" checked');
+  expect(host.posts).toEqual([]);
+});
+
+test('Clean arms with what it removes, posts {} on the second click, and leaves the run for the index with the cleaned line until a run is selected', async () => {
+  await openOffering('alpha', FAKE_2_ID, fake2Dir(m));
+  host.click({ action: 'clean-run' });
+  host.advance(100);
+  expect(host.posts).toEqual([]);
+  expect(buttons(host.regions.main).find(([, action]) => action === 'clean-run')?.[0]).toStartWith(
+    'confirm clean · removes run ref · run directory -&gt; ',
+  );
+  const cleaned = `cleaned ${FAKE_2_ID}: run ref; run directory -> ~/.sail/failed-runs/2026-11-01/${FAKE_2_ID}`;
+  host.postAnswer = { status: 200, body: JSON.stringify({ message: cleaned, removed: ['run ref'], archived: '/x' }) };
+  const before = host.open('run=')[0];
+  host.click({ action: 'clean-run' });
+  await settle();
+  host.advance(100);
+  expect(host.posts).toEqual([{ path: `${FAKE_2_PATH}/clean`, body: {} }]);
+  expect([before?.closed, page?.ui.indexNotice]).toEqual([true, cleaned]);
+  expect(host.regions.rail).toContain(`<span class="warnchip">${cleaned.replace('->', '-&gt;')}</span>`);
+  host.click({ action: 'select-run', repo: 'alpha', run: GOLDEN_RUN_ID });
+  host.advance(100);
+  expect(host.regions.rail).not.toContain('cleaned ');
+});
+
+test('a refused Stop or Clean shows its error beside the buttons and disarms, and any other click disarms an armed one', async () => {
+  await openOffering('alpha', FAKE_2_ID, fake2Dir(m));
+  host.click({ action: 'clean-run' });
+  host.postAnswer = { status: 409, body: JSON.stringify({ error: 'run X: a queue item names it' }) };
+  host.click({ action: 'clean-run' });
+  await settle();
+  host.advance(100);
+  expect(host.regions.main).toContain('<span class="warnchip">run X: a queue item names it</span>');
+  expect(buttons(host.regions.main).find(([, action]) => action === 'clean-run')?.[0]).toBe('clean');
+  expect(page?.ui.runId).toBe(FAKE_2_ID);
+  host.click({ action: 'clean-run' });
+  host.click({ action: 'toggle-theme' });
+  host.advance(100);
+  expect(buttons(host.regions.main).find(([, action]) => action === 'clean-run')?.[0]).toBe('clean');
+  host.click({ action: 'clean-run' });
+  await settle();
+  expect(host.posts).toHaveLength(1);
 });

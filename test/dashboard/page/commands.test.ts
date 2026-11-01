@@ -4,10 +4,10 @@ import { runCommands } from '../../../src/dashboard/page/commands';
 
 const RUN = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N';
 
-test('runCommands gives sail show always, --follow while the run runs, and sail resume once it is suspended', () => {
+test('runCommands gives sail show always and --follow while the run runs, and no resume row, since Resume is a button', () => {
   const commands = (status: string) => runCommands(RUN, status).map(({ label, command }) => `${label}: ${command}`);
   expect(commands('running')).toEqual([`show: sail show ${RUN}`, `follow: sail show ${RUN} --follow`]);
-  expect(commands('suspended')).toEqual([`show: sail show ${RUN}`, `resume: sail resume ${RUN}`]);
+  expect(commands('suspended')).toEqual([`show: sail show ${RUN}`]);
   expect(commands('completed')).toEqual([`show: sail show ${RUN}`]);
   expect(commands('failed')).toEqual([`show: sail show ${RUN}`]);
 });

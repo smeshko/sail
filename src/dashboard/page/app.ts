@@ -25,15 +25,17 @@
 // - Clicks arrive as delegated `data-action`s, and keys as keys. Renders are coalesced: a region marked dirty is drawn
 //   by one flush at most every 100 ms.
 //
-// It controls two things. In the queue view, `move-item`, `poll-queue`, `add-ticket`, `requeue-item` and `drop-item` ask
+// It controls three things. In the queue view, `move-item`, `poll-queue`, `add-ticket`, `requeue-item` and `drop-item` ask
 // the dashboard's server to have the watcher move, poll, add, requeue or drop (a drop on a second click, from the menu
 // `item-menu` opens), and the answer,
 // a refusal or that the watcher has not taken the command yet, is shown beside the queue's header. `resume-run` and
 // `restart-run` ask it to start a suspended run again or a failed
 // run as a seeded one, each on a second click: what the open run offers is read from its actions route when it opens
 // and when the index changes its status or its queue item, and the page draws it. A refusal is shown beside the buttons; a
-// started restart opens the new run, and a started resume reads the run again. The other actions change what is shown,
-// and `copy` puts a CLI command on the clipboard.
+// started restart opens the new run, and a started resume reads the run again. `stop-run` and `clean-run` ask it to stop
+// a running or suspended run (with Stop now ticked, at once) or to clean a failed one, each on a second click: a stop
+// shows its answer beside the buttons and reads the run again, and a clean leaves the run and shows its answer in the
+// rail until a run is selected. The other actions change what is shown, and `copy` puts a CLI command on the clipboard.
 import type { QueueEvent, SailEvent } from '../../events/types';
 import type { RunActions } from '../actions';
 import type { IndexRepo } from '../files';
@@ -241,6 +243,8 @@ export function boot(host: PageHost): Page {
       if (fieldsOwn) {
         ui.raise = host.value('raise') ?? ui.raise;
         ui.restartStage = host.value('stage') ?? ui.restartStage;
+        const now = host.value('now');
+        if (now !== undefined) ui.stopNow = now !== '';
       }
       fieldsOwn = true;
       const card = opened();
@@ -612,6 +616,7 @@ export function boot(host: PageHost): Page {
     delete ui.runNotice;
     delete ui.raise;
     delete ui.restartStage;
+    delete ui.stopNow;
     fieldsOwn = false;
     openRunSocket(run);
     readOffers();
@@ -817,9 +822,58 @@ export function boot(host: PageHost): Page {
       });
   };
 
+  /**
+   * A first click arms Stop or Clean, which then names what it will do; a second click posts it. Stop posts `{ now }`
+   * and reads the run again. Clean posts `{}` and, once the run is gone, leaves it and shows the answer in the rail.
+   */
+  const endRun = (kind: 'stop' | 'clean') => {
+    const open = run;
+    const offer = kind === 'stop' ? offers?.stop : offers?.clean;
+    if (open === undefined || offer === undefined || !offer.enabled || starting) return;
+    if (kind === 'stop') ui.stopNow = (host.value('now') ?? (ui.stopNow === true ? 'on' : '')) !== '';
+    if (ui.armed !== kind) {
+      ui.armed = kind;
+      delete ui.runNotice;
+      mark('main');
+      return;
+    }
+    delete ui.armed;
+    starting = true;
+    ui.runNotice = `${kind === 'stop' ? 'stopping' : 'cleaning'} ${open.runId}…`;
+    mark('main');
+    void host
+      .post(
+        `/api/repos/${enc(open.repo)}/runs/${enc(open.runId)}/${kind}`,
+        kind === 'stop' ? { now: ui.stopNow === true } : {},
+      )
+      .then(({ status, body: answer }) => {
+        starting = false;
+        if (stopped) return;
+        if (status < 200 || status >= 300) {
+          ui.runNotice = refusal(status, answer, kind);
+          mark('main');
+          return;
+        }
+        delete ui.runNotice;
+        if (run !== open) return;
+        const message = answerField(answer, 'message');
+        if (kind === 'clean') {
+          closeRun();
+          if (message === undefined) delete ui.indexNotice;
+          else ui.indexNotice = message;
+          mark('rail', 'main', 'inspector', 'status');
+          return;
+        }
+        closeRun();
+        selectRun(open.repo, open.runId);
+        if (message !== undefined) ui.runNotice = message;
+      });
+  };
+
   const actions: Record<string, (data: Record<string, string>) => void> = {
     'select-run': (data) => {
       if (data.repo === undefined || data.run === undefined) return;
+      delete ui.indexNotice;
       leaveQueue();
       selectRun(data.repo, data.run);
     },
@@ -945,6 +999,13 @@ export function boot(host: PageHost): Page {
     },
     'resume-run': () => startRun('resume'),
     'restart-run': () => startRun('restart'),
+    'stop-run': () => endRun('stop'),
+    'clean-run': () => endRun('clean'),
+    // Ticking Stop now redraws an armed Stop's confirmation, which names what it will do.
+    'stop-now': () => {
+      ui.stopNow = host.value('now') === 'on';
+      mark('main');
+    },
     'toggle-queue-events': () => {
       ui.queueEvents = !ui.queueEvents;
       mark('main');
@@ -1006,15 +1067,14 @@ export function boot(host: PageHost): Page {
   };
 
   host.onAction((action, data) => {
-    // A click on anything but a start disarms it, and on anything but a drop disarms that. An item's menu shuts on any
-    // click but its ⋯, which toggles it, and the drop that arms.
+    // A click on anything but a run action disarms it, and on anything but a drop disarms that. An item's menu shuts on
+    // any click but its ⋯, which toggles it, and the drop that arms.
+    const runAction = ['resume-run', 'restart-run', 'stop-run', 'stop-now', 'clean-run'].includes(action);
     const shuts =
       ui.itemMenu !== undefined && action !== 'item-menu' && !(action === 'drop-item' && ui.armedDrop !== data.item);
     const disarms =
-      (ui.armed !== undefined && action !== 'resume-run' && action !== 'restart-run') ||
-      (ui.armedDrop !== undefined && action !== 'drop-item') ||
-      shuts;
-    if (ui.armed !== undefined && action !== 'resume-run' && action !== 'restart-run') delete ui.armed;
+      (ui.armed !== undefined && !runAction) || (ui.armedDrop !== undefined && action !== 'drop-item') || shuts;
+    if (ui.armed !== undefined && !runAction) delete ui.armed;
     if (ui.armedDrop !== undefined && action !== 'drop-item') delete ui.armedDrop;
     if (shuts) delete ui.itemMenu;
     if (disarms) mark('main');

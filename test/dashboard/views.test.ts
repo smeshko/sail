@@ -27,9 +27,9 @@ function stale(rendered: string, stored: string): string[] {
   ];
 }
 
-test('the committed dashboard views are what the fixtures render now', () => {
+test('the committed dashboard views are what the fixtures render now', async () => {
   const fresh = join(temp, 'fresh');
-  expect(renderDashboardViews(fresh)).toEqual([
+  expect(await renderDashboardViews(fresh)).toEqual([
     'rail.html',
     'attention.html',
     'queue.html',
@@ -48,9 +48,9 @@ test('the committed dashboard views are what the fixtures render now', () => {
   expect(stale(fresh, COMMITTED)).toEqual([]);
 });
 
-test('a view changed by one byte is named as stale, and so is one missing', () => {
+test('a view changed by one byte is named as stale, and so is one missing', async () => {
   const fresh = join(temp, 'again');
-  renderDashboardViews(fresh);
+  await renderDashboardViews(fresh);
   const changed = join(temp, 'changed');
   cpSync(COMMITTED, changed, { recursive: true });
   const rail = readFileSync(join(changed, 'rail.html'), 'utf8');

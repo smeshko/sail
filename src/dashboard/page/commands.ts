@@ -12,11 +12,10 @@ export function shellWord(word: string): string {
   return /^[A-Za-z0-9._:@#%+=/-]+$/.test(word) ? word : `'${word.replaceAll("'", `'\\''`)}'`;
 }
 
-/** `sail show` always, `--follow` while the run runs, and `sail resume` once it is suspended. */
+/** `sail show` always, and `--follow` while the run runs: Resume and Stop are buttons, not commands. */
 export function runCommands(runId: string, status: string | undefined): Command[] {
   const run = shellWord(runId);
   const commands: Command[] = [{ label: 'show', command: `sail show ${run}` }];
   if (status === 'running') commands.push({ label: 'follow', command: `sail show ${run} --follow` });
-  if (status === 'suspended') commands.push({ label: 'resume', command: `sail resume ${run}` });
   return commands;
 }

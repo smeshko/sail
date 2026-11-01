@@ -33,6 +33,7 @@ import {
   diffWorkingTree,
   fastForwardClone,
   fetchRemote,
+  gitAsync,
   gitSync,
   hasLocalBranch,
   releaseWorktree,
@@ -134,7 +135,12 @@ export function createGitWorktreeWorkspace(options: GitWorktreeOptions): Workspa
 
   /** Whether the remote has `branch` now, asked of the remote itself rather than read from a tracking ref. */
   const onRemote = async (branch: string): Promise<boolean> => {
-    const listed = gitSync(repo, ['ls-remote', '--heads', remote, `refs/heads/${branch}`], env, FETCH_TIMEOUT_MS);
+    const listed = await gitAsync(
+      repo,
+      ['ls-remote', '--heads', remote, `refs/heads/${branch}`],
+      env,
+      options.fetchTimeoutMs ?? FETCH_TIMEOUT_MS,
+    );
     if (listed.code !== 0) throw new PortError('workspace', 'branches', 'unavailable', listed.stderr);
     return listed.stdout.trim() !== '';
   };

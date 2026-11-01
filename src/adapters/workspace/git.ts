@@ -1,7 +1,8 @@
 // The git plumbing the built-in Workspace adapters share: `git-worktree`, and the fake, which runs on it with no fetch.
 // Every git call gets `nonInteractive()`'s environment, so none can ask for credentials (D7). A local call is a
-// synchronous spawn with stdin ignored and a timeout. Only a fetch, the one call that reaches the network, runs as a
-// process group under `runProcess()`, with its own timeout and the start's signal.
+// synchronous spawn with stdin ignored and a timeout. A fetch reaches the network, so it runs as a process group under
+// `runProcess()`, with its own timeout and the start's signal; an `ls-remote` does too, so it runs under `gitAsync()`,
+// which leaves the process free to answer others meanwhile, such as the dashboard's requests.
 //
 // A workspace is `<runDir>/workspace`: a detached worktree of the repository. git is handed every path resolved, since
 // it runs in the repository and a caller's paths are relative to where the caller runs.
@@ -97,6 +98,49 @@ export function gitSync(
       return { code: -1, stdout: '', stderr: said };
     }
     return { code: result.exitCode ?? -1, stdout: result.stdout.toString(), stderr };
+  } catch (error) {
+    // No such directory to run in.
+    return { code: -1, stdout: '', stderr: (error as Error).message };
+  }
+}
+
+/**
+ * `gitSync()`'s call without blocking this process while git runs: for a call that reaches the network. A call that
+ * times out is killed, and is a failed result.
+ */
+export async function gitAsync(
+  cwd: string,
+  args: readonly string[],
+  env?: Readonly<Record<string, string>>,
+  timeoutMs: number = LOCAL_TIMEOUT_MS,
+): Promise<GitResult> {
+  try {
+    const child = Bun.spawn(['git', ...args], {
+      cwd,
+      env: nonInteractive(env ?? inherited()),
+      stdin: 'ignore',
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGKILL');
+    }, timeoutMs);
+    try {
+      const [stdout, stderr, code] = await Promise.all([
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+        child.exited,
+      ]);
+      if (timedOut) {
+        const said = `git ${subcommand(args)} timed out after ${timeoutMs} ms ${stderr.trim()}`.trim();
+        return { code: -1, stdout: '', stderr: said };
+      }
+      return { code, stdout, stderr: stderr.trim() };
+    } finally {
+      clearTimeout(timer);
+    }
   } catch (error) {
     // No such directory to run in.
     return { code: -1, stdout: '', stderr: (error as Error).message };
