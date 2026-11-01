@@ -1,7 +1,8 @@
 // The run view: the run's header, its totals against its budget, one stage card per call grouped by loop iteration, a
 // group's cards side by side under a header of their own, the roster stages not called yet, the pull request it opened,
-// the Resume, Restart, Stop or Clean a run offers, and the CLI commands to copy. The cards come from the run model, fed by the run's events. The totals come from the
-// summary in the index when there is one, and from the cards otherwise.
+// and the CLI commands to copy. The cards come from the run model, fed by the run's events. The totals come from the
+// summary in the index when there is one, and from the cards otherwise. The Resume, Restart, Stop or Clean a run offers
+// are drawn here too, by `runControls`, but shown in the rail's ⋯ menu for the open run.
 import type { Summary } from '../../events/summary';
 import type { CleanOffer, RestartOffer, ResumeOffer, RunActions, StopOffer } from '../actions';
 import { runCommands } from './commands';
@@ -179,8 +180,11 @@ function cleanControl(offer: CleanOffer, ui: UiState): SafeHtml {
   return html`<span class="act"><button class="btn${armed ? ' armed' : ''}" data-action="clean-run">${label}</button></span>`;
 }
 
-/** What the run offers (Resume, Restart, Stop, Clean), whichever it does, with the notice of the last one. */
-function actionBar(actions: RunActions | undefined, ui: UiState): SafeHtml {
+/**
+ * What the run offers (Resume, Restart, Stop, Clean), whichever it does, with the notice of the last one: the body of
+ * the rail's ⋯ menu for the open run. Undefined when it offers none of them.
+ */
+export function runControls(actions: RunActions | undefined, ui: UiState): SafeHtml | undefined {
   if (
     actions === undefined ||
     (actions.resume === undefined &&
@@ -188,26 +192,17 @@ function actionBar(actions: RunActions | undefined, ui: UiState): SafeHtml {
       actions.stop === undefined &&
       actions.clean === undefined)
   ) {
-    return html``;
+    return undefined;
   }
-  return html`<div class="grp"><div class="grp-t">control</div><div class="acts">${
-    actions.resume === undefined ? '' : resumeControl(actions.resume, ui)
-  }${actions.restart === undefined ? '' : restartControl(actions.restart, ui)}${
-    actions.stop === undefined ? '' : stopControl(actions.stop, ui)
-  }${actions.clean === undefined ? '' : cleanControl(actions.clean, ui)}${
-    ui.runNotice === undefined ? '' : html`<span class="warnchip">${ui.runNotice}</span>`
-  }</div></div>
-`;
+  return html`<div class="acts">${actions.resume === undefined ? '' : resumeControl(actions.resume, ui)}${
+    actions.restart === undefined ? '' : restartControl(actions.restart, ui)
+  }${actions.stop === undefined ? '' : stopControl(actions.stop, ui)}${
+    actions.clean === undefined ? '' : cleanControl(actions.clean, ui)
+  }${ui.runNotice === undefined ? '' : html`<span class="warnchip">${ui.runNotice}</span>`}</div>`;
 }
 
 /** The run view. `now` is ms since the epoch, for the running cards' durations. */
-export function renderRun(
-  model: RunModel,
-  summary: Summary | null | undefined,
-  ui: UiState,
-  now: number,
-  actions?: RunActions,
-): SafeHtml {
+export function renderRun(model: RunModel, summary: Summary | null | undefined, ui: UiState, now: number): SafeHtml {
   const runId = model.runId ?? summary?.runId ?? ui.runId ?? '';
   const status = model.end?.status ?? (model.runId === undefined ? summary?.status : 'running');
   const stopReason = model.end?.stopReason ?? summary?.stopReason;
@@ -235,7 +230,7 @@ ${
     ? ''
     : html`<div class="grp"><div class="grp-t">pull request</div>${link(typeof pr.url === 'string' ? pr.url : undefined, `#${text(pr.number)}`)}</div>`
 }
-${actionBar(actions, ui)}${runId === '' ? '' : html`<div class="grp"><div class="grp-t">commands</div>${commandList(runCommands(runId, status))}</div>`}
+${runId === '' ? '' : html`<div class="grp"><div class="grp-t">commands</div>${commandList(runCommands(runId, status))}</div>`}
 ${
   model.unreadable === 0
     ? ''

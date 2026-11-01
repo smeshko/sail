@@ -6,7 +6,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { CleanOffer, RestartOffer, ResumeOffer, StopOffer } from '../../../src/dashboard/actions';
 import { foldRun } from '../../../src/dashboard/page/run-model';
-import { renderRun, renderStatus } from '../../../src/dashboard/page/run-view';
+import { renderRun, renderStatus, runControls } from '../../../src/dashboard/page/run-view';
 import { initialUi } from '../../../src/dashboard/page/ui-state';
 import { readEvents } from '../../../src/events/consumers/ndjson';
 import { type Summary, summarize } from '../../../src/events/summary';
@@ -201,13 +201,12 @@ test("a seeded run's header names the run it was seeded from, and an unseeded ru
 });
 
 test('Resume shows its raise field with what was typed, arms into the confirmation with what was spent, and shows a disabled one with its reason', () => {
-  const model = foldRun(readEvents(FAKE_3));
   const resume = RESUME_OFFER;
-  const view = (ui: Partial<ReturnType<typeof initialUi>>, offers: Parameters<typeof renderRun>[4]) =>
-    renderRun(model, summaryOf(FAKE_3), { ...initialUi(0), ...ui }, NOW, offers).value;
+  const view = (ui: Partial<ReturnType<typeof initialUi>>, offers: Parameters<typeof runControls>[0]) =>
+    runControls(offers, { ...initialUi(0), ...ui })?.value ?? '';
   const idle = view({ raise: '5' }, { resume });
-  expect(idle).toContain(
-    '<div class="grp"><div class="grp-t">control</div><div class="acts"><span class="act"><label class="lbl">raise $ <input class="num" type="number" name="raise" min="0.01" step="any" value="5"></label><button class="btn" data-action="resume-run">resume</button></span></div></div>',
+  expect(idle).toBe(
+    '<div class="acts"><span class="act"><label class="lbl">raise $ <input class="num" type="number" name="raise" min="0.01" step="any" value="5"></label><button class="btn" data-action="resume-run">resume</button></span></div>',
   );
   expect(idle).not.toContain('restart');
   expect(view({ armed: 'resume' }, { resume })).toContain(
@@ -221,12 +220,11 @@ test('Resume shows its raise field with what was typed, arms into the confirmati
   ).toContain(
     '<span class="act"><button class="btn" disabled>resume</button><span class="act-why">run is running</span></span><span class="warnchip">refused &lt;b&gt;</span>',
   );
-  expect(view({}, undefined)).not.toContain('control</div>');
-  expect(view({}, {})).not.toContain('control</div>');
+  expect(runControls(undefined, initialUi(0))).toBeUndefined();
+  expect(runControls({ why: 'run completed' }, initialUi(0))).toBeUndefined();
 });
 
 test('Restart lists the stages with what runs again as titles, the failed one selected unless another was chosen, and arms into the confirmation with the stage and budget', () => {
-  const model = foldRun(readEvents(FAKE_2));
   const restart: RestartOffer = {
     enabled: true,
     stages: [
@@ -237,7 +235,7 @@ test('Restart lists the stages with what runs again as titles, the failed one se
     budget: { maxUsd: 25, maxMinutes: 90 },
   };
   const view = (ui: Partial<ReturnType<typeof initialUi>>, offer = restart) =>
-    renderRun(model, summaryOf(FAKE_2), { ...initialUi(0), ...ui }, NOW, { restart: offer }).value;
+    runControls({ restart: offer }, { ...initialUi(0), ...ui })?.value;
   expect(view({})).toContain(
     '<select name="stage"><option value="spec" title="spec#1 and everything after it">spec</option><option value="implement" title="implement#1 and everything after it, in loop fix from iteration 1" selected>implement</option></select>',
   );
@@ -259,9 +257,8 @@ test('Restart lists the stages with what runs again as titles, the failed one se
 });
 
 test('Stop shows a Stop now box that is ticked as chosen, arms into the confirmation each way names, and a disabled one gives its reason', () => {
-  const model = foldRun(readEvents(FAKE_3));
   const view = (ui: Partial<ReturnType<typeof initialUi>>, stop: StopOffer = { enabled: true }) =>
-    renderRun(model, summaryOf(FAKE_3), { ...initialUi(0), ...ui }, NOW, { stop }).value;
+    runControls({ stop }, { ...initialUi(0), ...ui })?.value;
   expect(view({})).toContain(
     '<span class="act"><label class="lbl"><input type="checkbox" name="now" data-action="stop-now"> stop now</label><button class="btn" data-action="stop-run">stop</button></span>',
   );
@@ -280,7 +277,6 @@ test('Stop shows a Stop now box that is ticked as chosen, arms into the confirma
 });
 
 test('Clean sits beside Restart, arms into a confirmation that lists what it removes and where the run directory goes, and a disabled one gives its reason', () => {
-  const model = foldRun(readEvents(FAKE_2));
   const clean: CleanOffer = {
     enabled: true,
     removes: ['worktree', 'branch sail/x', 'run ref'],
@@ -288,7 +284,7 @@ test('Clean sits beside Restart, arms into a confirmation that lists what it rem
   };
   const restart: RestartOffer = { enabled: true, stages: [], stage: 'implement', budget: { maxUsd: 25 } };
   const view = (ui: Partial<ReturnType<typeof initialUi>>, offer: CleanOffer = clean) =>
-    renderRun(model, summaryOf(FAKE_2), { ...initialUi(0), ...ui }, NOW, { restart, clean: offer }).value;
+    runControls({ restart, clean: offer }, { ...initialUi(0), ...ui })?.value;
   const idle = view({});
   expect(idle).toContain(
     'data-action="restart-run">restart</button></span><span class="act"><button class="btn" data-action="clean-run">clean</button></span>',

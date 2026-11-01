@@ -6,11 +6,14 @@
 // and the open queue's workflow stay in sight under it, so the selection is never hidden. A workflow's header also
 // carries its Watch or Unwatch, and an opened repository a row with Watch all and, while its watch set isn't empty,
 // Unwatch all; an Unwatch armed by a first click reads `click again`. The answer to the last change shows under the
-// repository's header.
+// repository's header. A run's row, but a completed one's, has a ⋯ that opens the run and, under its row, a menu of
+// what it offers: Resume, Restart, Stop and Clean.
+import type { RunActions } from '../actions';
 import { ago, cost, duration } from './format';
 import { html, type SafeHtml } from './html';
 import { newestFirst, type RailRepo, type RailRun, type RailWorkflow, workflowOf } from './index-model';
 import { queueId } from './queue-view';
+import { runControls } from './run-view';
 import { pillOf, type UiState } from './ui-state';
 
 /** Whether `run` of `repo` is the open run: not while a queue holds the centre. */
@@ -27,7 +30,25 @@ const runLabel = (run: RailRun) => (run.pr === undefined ? (run.ticketKey ?? run
 const tooltipOf = (run: RailRun): string | undefined =>
   run.pr === undefined ? run.title : run.title === undefined ? run.runId : `${run.runId} · ${run.title}`;
 
-function liveRow(repo: string, run: RailRun, ui: UiState): SafeHtml {
+/** Whether `run`'s menu is open: only the open run's can be. */
+const isMenuOpen = (repo: string, run: RailRun, ui: UiState) => isOpen(repo, run, ui) && ui.runMenu === run.runId;
+
+/** A row's ⋯: on any run but a completed one, which offers nothing. */
+function more(repo: string, run: RailRun, ui: UiState): SafeHtml | '' {
+  if (run.status === 'completed') return '';
+  return html`<span class="r-more${isMenuOpen(repo, run, ui) ? ' open' : ''}" data-action="run-menu" data-repo="${repo}" data-run="${run.runId}" title="actions for ${run.runId}">⋯</span>`;
+}
+
+/** The open menu under `run`'s row: what the run offers, once its actions are read. */
+function runMenu(repo: string, run: RailRun, ui: UiState, offers: RunActions | undefined): SafeHtml | '' {
+  if (!isMenuOpen(repo, run, ui)) return '';
+  const controls = runControls(offers, ui);
+  if (controls !== undefined) return html`<div class="r-menu">${controls}</div>`;
+  const why = offers === undefined ? 'reading what the run offers…' : (offers.why ?? 'the run offers nothing');
+  return html`<div class="r-menu"><span class="act-why">${why}</span></div>`;
+}
+
+function liveRow(repo: string, run: RailRun, ui: UiState, offers: RunActions | undefined): SafeHtml {
   const tip = tooltipOf(run);
   const facts = [duration(run.durationMs), cost(run.costUsd)].join(' · ');
   return html`<button class="run live-run${isOpen(repo, run, ui) ? ' sel' : ''}"${
@@ -35,22 +56,22 @@ function liveRow(repo: string, run: RailRun, ui: UiState): SafeHtml {
   } data-action="select-run" data-repo="${repo}" data-run="${run.runId}">
 <span class="r-main"><span class="r-line"><span class="st ${pillOf(run.status)}"></span><span class="r-id">${runLabel(run)}</span>${
     run.title === undefined ? '' : html` <span class="r-title">${run.title}</span>`
-  }</span><span class="r-sub">${repo} › ${workflowOf(run)}${
+  }${more(repo, run, ui)}</span><span class="r-sub">${repo} › ${workflowOf(run)}${
     run.status === 'running' && run.stalled !== undefined
       ? html` · <span class="stalled">stalled ${run.stalled}</span>`
       : ''
   } · ${facts}${
     run.stopReason === undefined ? '' : html` · <span class="why">${run.stopReason}</span>`
-  }</span>${run.problem === undefined ? '' : html`<span class="r-problem">${run.problem}</span>`}</span></button>`;
+  }</span>${run.problem === undefined ? '' : html`<span class="r-problem">${run.problem}</span>`}</span></button>${runMenu(repo, run, ui, offers)}`;
 }
 
-function runningBlock(repos: readonly RailRepo[], ui: UiState): SafeHtml {
+function runningBlock(repos: readonly RailRepo[], ui: UiState, offers: RunActions | undefined): SafeHtml {
   const live = newestFirst(
     repos.flatMap((repo) => repo.runs.filter(isLive).map((run) => ({ ...run, repo: repo.name }))),
   );
   if (live.length === 0) return html``;
   return html`<div class="rail-h"><span>running</span><span class="c">${live.length}</span></div>
-${live.map(({ repo, ...run }) => liveRow(repo, run, ui))}`;
+${live.map(({ repo, ...run }) => liveRow(repo, run, ui, offers))}`;
 }
 
 function queuedBlock(repos: readonly RailRepo[], ui: UiState, now: number): SafeHtml {
@@ -80,15 +101,21 @@ const SECTIONS = [
 
 const finished = (run: RailRun) => SECTIONS.some((each) => each.holds(run));
 
-function historyRow(repo: string, run: RailRun, ui: UiState): SafeHtml {
+function historyRow(repo: string, run: RailRun, ui: UiState, offers: RunActions | undefined): SafeHtml {
   const tip = cost(run.costUsd);
   return html`<button class="run hist-run${isOpen(repo, run, ui) ? ' sel' : ''}" title="${tip}" data-action="select-run" data-repo="${repo}" data-run="${run.runId}">
 <span class="st ${pillOf(run.status)}"></span><span class="r-id">${runLabel(run)}</span>${
     run.title === undefined ? '' : html` <span class="r-title">${run.title}</span>`
-  }<span class="r-el">${duration(run.durationMs)}</span></button>`;
+  }${more(repo, run, ui)}<span class="r-el">${duration(run.durationMs)}</span></button>${runMenu(repo, run, ui, offers)}`;
 }
 
-function historyLine(repo: string, group: string, runs: RailRun[], ui: UiState): SafeHtml {
+function historyLine(
+  repo: string,
+  group: string,
+  runs: RailRun[],
+  ui: UiState,
+  offers: RunActions | undefined,
+): SafeHtml {
   const parts = SECTIONS.map((which) => ({ which, held: runs.filter(which.holds) })).filter(
     ({ held }) => held.length > 0,
   );
@@ -99,7 +126,7 @@ function historyLine(repo: string, group: string, runs: RailRun[], ui: UiState):
   });
   const rows = parts.flatMap(({ which, held }) =>
     (ui.open.includes(`${group}:${which.name}`) ? held : held.filter((run) => isOpen(repo, run, ui))).map((run) =>
-      historyRow(repo, run, ui),
+      historyRow(repo, run, ui, offers),
     ),
   );
   return html`<div class="hist">${toggles}</div>
@@ -107,8 +134,8 @@ ${rows}`;
 }
 
 /** What a folded workflow still shows: the open finished run's row. A live open run is in the running block. */
-function openRun(repo: string, workflow: RailWorkflow, ui: UiState): SafeHtml {
-  return html`${workflow.runs.filter((run) => finished(run) && isOpen(repo, run, ui)).map((run) => historyRow(repo, run, ui))}`;
+function openRun(repo: string, workflow: RailWorkflow, ui: UiState, offers: RunActions | undefined): SafeHtml {
+  return html`${workflow.runs.filter((run) => finished(run) && isOpen(repo, run, ui)).map((run) => historyRow(repo, run, ui, offers))}`;
 }
 
 function counts(runs: readonly RailRun[]): SafeHtml {
@@ -150,23 +177,29 @@ function workflowHeader(
   }${workflow.toggle === undefined ? '' : watchButton(repo, workflow.toggle, ui, workflow.name)}${counts(workflow.runs)}</div>`;
 }
 
-function workflowGroup(repo: string, workflow: RailWorkflow, ui: UiState, now: number): SafeHtml {
+function workflowGroup(
+  repo: string,
+  workflow: RailWorkflow,
+  ui: UiState,
+  now: number,
+  offers: RunActions | undefined,
+): SafeHtml {
   const group = queueId(repo, workflow.name);
   const open = ui.expanded.includes(group);
   return html`<div class="wf">${workflowHeader(repo, workflow, group, open, ui, now)}
-${open ? historyLine(repo, group, workflow.runs, ui) : openRun(repo, workflow, ui)}</div>`;
+${open ? historyLine(repo, group, workflow.runs, ui, offers) : openRun(repo, workflow, ui, offers)}</div>`;
 }
 
 /** What a folded repository still shows: the open queue's workflow, folding as it would, and the open finished run's row. */
-function repoSelection(repo: RailRepo, ui: UiState, now: number): SafeHtml {
+function repoSelection(repo: RailRepo, ui: UiState, now: number, offers: RunActions | undefined): SafeHtml {
   return html`${repo.workflows.map((workflow) =>
     workflow.queue !== undefined && ui.queue === queueId(repo.name, workflow.name)
-      ? workflowGroup(repo.name, workflow, ui, now)
-      : openRun(repo.name, workflow, ui),
+      ? workflowGroup(repo.name, workflow, ui, now, offers)
+      : openRun(repo.name, workflow, ui, offers),
   )}`;
 }
 
-function repoGroup(repo: RailRepo, ui: UiState, now: number): SafeHtml {
+function repoGroup(repo: RailRepo, ui: UiState, now: number, offers: RunActions | undefined): SafeHtml {
   const open = ui.expanded.includes(repo.name);
   return html`<div class="lgrp">
 <button class="lgrp-h${open ? ' open' : ''}"${
@@ -181,14 +214,22 @@ ${repo.problem === undefined ? '' : html`<div class="lgrp-p">${repo.problem}</di
       }</div>`
     : ''
 }
-${open ? repo.workflows.map((workflow) => workflowGroup(repo.name, workflow, ui, now)) : repoSelection(repo, ui, now)}</div>`;
+${open ? repo.workflows.map((workflow) => workflowGroup(repo.name, workflow, ui, now, offers)) : repoSelection(repo, ui, now, offers)}</div>`;
 }
 
-/** The rail from the index model. `now` is ms since the epoch, for how long ago a queue was polled. */
-export function renderRail(repos: readonly RailRepo[], ui: UiState, now: number): SafeHtml {
+/**
+ * The rail from the index model. `now` is ms since the epoch, for how long ago a queue was polled. `offers` is what the
+ * open run offers, for its ⋯ menu: undefined until its actions are read.
+ */
+export function renderRail(
+  repos: readonly RailRepo[],
+  ui: UiState,
+  now: number,
+  offers?: RunActions | undefined,
+): SafeHtml {
   const runs = repos.reduce((sum, repo) => sum + repo.runs.length, 0);
   const notice =
     ui.indexNotice === undefined ? '' : html`<div class="act"><span class="warnchip">${ui.indexNotice}</span></div>`;
-  return html`${notice}${runningBlock(repos, ui)}${queuedBlock(repos, ui, now)}<div class="rail-h"><span>repositories</span><span class="c">${runs} runs</span></div>
-${repos.length === 0 ? html`<div class="qempty">no repository is registered yet: run sail watch in one</div>` : ''}${repos.map((repo) => repoGroup(repo, ui, now))}`;
+  return html`${notice}${runningBlock(repos, ui, offers)}${queuedBlock(repos, ui, now)}<div class="rail-h"><span>repositories</span><span class="c">${runs} runs</span></div>
+${repos.length === 0 ? html`<div class="qempty">no repository is registered yet: run sail watch in one</div>` : ''}${repos.map((repo) => repoGroup(repo, ui, now, offers))}`;
 }

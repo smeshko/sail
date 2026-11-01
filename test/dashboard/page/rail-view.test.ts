@@ -309,3 +309,32 @@ test("the watch notice shows under its own repository's header, open or folded, 
   expect(folded).not.toContain('lgrp-acts');
   expect(rail({ watchNotice: notice })).not.toContain(notice.text);
 });
+
+test("every run but a completed one has a ⋯ in its row, and only the open run's menu opens under its row, with what it offers (ADW-466)", () => {
+  const sections = { open: ['alpha/ticket-to-pr:failed', 'alpha/ticket-to-pr:completed'] };
+  const mores = (markup: string) =>
+    [
+      ...markup.matchAll(/<span class="r-more( open)?" data-action="run-menu" data-repo="\w+" data-run="([\w-]+)"/g),
+    ].map(([, open, run]) => `${run}${open ? ' open' : ''}`);
+  expect(mores(rail(sections)).sort()).toEqual([FAKE_2_ID, FAKE_3_ID].sort());
+  expect(rail(sections)).not.toContain('class="r-menu"');
+  const offers = { restart: { enabled: true, stages: [], stage: 'implement', budget: {} } };
+  const open = { ...initialUi(0), expanded: ALL, ...sections, repo: 'alpha', runId: FAKE_2_ID, runMenu: FAKE_2_ID };
+  const markup = renderRail(railRepos(index(m.registryDir), NOW), open, NOW, offers).value;
+  expect(mores(markup)).toContain(`${FAKE_2_ID} open`);
+  expect(markup).toContain(
+    `<span class="r-el">4.9s</span></button><div class="r-menu"><div class="acts"><span class="act"><label class="lbl">from <select name="stage"></select></label><button class="btn" data-action="restart-run">restart</button></span></div></div>`,
+  );
+  // The menu is the open run's: a run that isn't open draws none, though the menu names it.
+  const elsewhere = { ...open, runId: GOLDEN_RUN_ID };
+  expect(renderRail(railRepos(index(m.registryDir), NOW), elsewhere, NOW, offers).value).not.toContain('r-menu');
+  expect(renderRail(railRepos(index(m.registryDir), NOW), { ...open }, NOW, undefined).value).toContain(
+    '<div class="r-menu"><span class="act-why">reading what the run offers…</span></div>',
+  );
+  expect(renderRail(railRepos(index(m.registryDir), NOW), { ...open }, NOW, { why: 'nothing here' }).value).toContain(
+    '<div class="r-menu"><span class="act-why">nothing here</span></div>',
+  );
+  expect(renderRail(railRepos(index(m.registryDir), NOW), { ...open }, NOW, {}).value).toContain(
+    '<div class="r-menu"><span class="act-why">the run offers nothing</span></div>',
+  );
+});
