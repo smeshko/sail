@@ -255,7 +255,7 @@ test('boot renders the rail with alpha and beta from the first index, opens the 
     'publish#1',
   ]);
   expect(host.regions.status).toContain('<span>ended completed</span>');
-  expect(host.regions.attention).toContain('⚑ needs attention<span class="badge">6</span></button>');
+  expect(host.regions.attention).toContain('⚑ needs attention<span class="badge">4</span></button>');
   expect(host.regions.attention).not.toContain('att-pane');
 });
 

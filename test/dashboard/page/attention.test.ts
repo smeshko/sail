@@ -1,5 +1,5 @@
-// Needs attention, from the index alone (D9): failed and suspended runs, calls that ended in error or were denied,
-// parked queue items and problems, across every repository in one list, each saying what it opens.
+// Needs attention, from the index alone (D9): failed runs, calls that ended in error, parked queue items and
+// problems, across every repository in one list, each saying what it opens.
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -20,7 +20,7 @@ beforeEach(() => {
 });
 afterEach(() => m.remove());
 
-test('each stalled key of a running run opens its call, but stale completed stalls are hidden', () => {
+test("a running run's stalled steps add no item", () => {
   const repos = index(m.registryDir);
   const run = repos[0]?.runs.find((run) => run.runId === GOLDEN_RUN_ID);
   if (!run?.summary) throw new Error('missing fixture summary');
@@ -28,34 +28,14 @@ test('each stalled key of a running run opens its call, but stale completed stal
     { key: 'spec#1', since: '2026-10-01T12:00:00.000Z' },
     { key: 'publish#1/describe', since: '2026-10-01T12:01:00.000Z' },
   ];
-  expect(attention(repos).filter((item) => item.title === 'stalled')).toEqual([]);
   run.status = { status: 'running' };
-  expect(attention(repos).filter((item) => item.title === 'stalled')).toEqual([
-    {
-      repo: 'alpha',
-      runId: GOLDEN_RUN_ID,
-      key: 'spec#1',
-      kind: 'stalled',
-      title: 'stalled',
-      detail: 'spec#1 · no event since 2026-10-01T12:00:00.000Z',
-      opens: { repo: 'alpha', runId: GOLDEN_RUN_ID, key: 'spec#1', tab: 'overview' },
-    },
-    {
-      repo: 'alpha',
-      runId: GOLDEN_RUN_ID,
-      key: 'publish#1/describe',
-      kind: 'stalled',
-      title: 'stalled',
-      detail: 'publish#1/describe · no event since 2026-10-01T12:01:00.000Z',
-      opens: { repo: 'alpha', runId: GOLDEN_RUN_ID, key: 'publish#1', tab: 'overview' },
-    },
-  ]);
+  expect(attention(repos).filter((item) => item.runId === GOLDEN_RUN_ID)).toEqual([]);
 });
 
 const FAKE_2_MESSAGE = 'implement#1 ended in error: harness: the session ended before it submitted a result';
 const PARKED = 'stage_error: implement#1 ended in error: harness: the session ended before it submitted a result';
 
-test("attention lists, across both repositories, FAKE-2's failure, error and denial, FAKE-3's suspension and error, and FAKE-6 parked, and nothing of the golden run", () => {
+test("attention lists, across both repositories, FAKE-2's failure and error, FAKE-3's error, and FAKE-6 parked, and nothing of the golden run", () => {
   const items = attention(index(m.registryDir));
   expect(items).toEqual([
     {
@@ -74,22 +54,6 @@ test("attention lists, across both repositories, FAKE-2's failure, error and den
       title: 'implement#1 ended in error',
       detail: '',
       opens: { repo: 'alpha', runId: FAKE_2_ID, key: 'implement#1' },
-    },
-    {
-      repo: 'alpha',
-      runId: FAKE_2_ID,
-      kind: 'denial',
-      title: '1 denial',
-      detail: 'implement#1: 1',
-      opens: { repo: 'alpha', runId: FAKE_2_ID, key: 'implement#1', tab: 'permissions' },
-    },
-    {
-      repo: 'beta',
-      runId: FAKE_3_ID,
-      kind: 'suspended',
-      title: 'suspended: budget_exceeded',
-      detail: `stopped during implement#1: the run spent $1.06 of its $1.00 budget · sail resume ${FAKE_3_ID}`,
-      opens: { repo: 'beta', runId: FAKE_3_ID },
     },
     {
       repo: 'beta',
@@ -111,7 +75,7 @@ test("attention lists, across both repositories, FAKE-2's failure, error and den
   expect(items.some((item) => item.runId === GOLDEN_RUN_ID)).toBe(false);
 });
 
-test("a run's denials across several calls are one item: their total, each call's count in order, opening the first", () => {
+test('a run with denials adds no item', () => {
   const repos = index(m.registryDir);
   const run = repos.find((repo) => repo.name === 'alpha')?.runs.find((each) => each.runId === FAKE_2_ID);
   const calls = run?.summary?.calls ?? [];
@@ -121,42 +85,25 @@ test("a run's denials across several calls are one item: their total, each call'
     ['implement#1', 1],
   ]);
   for (const call of calls) if (call.key === 'spec#1') call.denials = 4;
-  expect(attention(repos).filter((item) => item.kind === 'denial')).toEqual([
-    {
-      repo: 'alpha',
-      runId: FAKE_2_ID,
-      kind: 'denial',
-      title: '5 denials',
-      detail: 'spec#1: 4 · implement#1: 1',
-      opens: { repo: 'alpha', runId: FAKE_2_ID, key: 'spec#1', tab: 'permissions' },
-    },
-  ]);
+  expect(attention(repos).map((item) => item.title)).not.toContain('5 denials');
+  expect(attention(repos).map((item) => item.title)).not.toContain('1 denial');
 });
 
-test('a failed run without a message keeps the ticket as its detail, and a suspended one with a message puts it before the resume command', () => {
+test('a failed run without a message keeps the ticket as its detail', () => {
   const repos = index(m.registryDir);
-  const runOf = (repo: string, id: string) => repos.find((r) => r.name === repo)?.runs.find((r) => r.runId === id);
-  const failed = runOf('alpha', FAKE_2_ID)?.summary;
-  const suspended = runOf('beta', FAKE_3_ID)?.summary;
+  const failed = repos.find((r) => r.name === 'alpha')?.runs.find((r) => r.runId === FAKE_2_ID)?.summary;
   if (failed) Reflect.deleteProperty(failed, 'message');
-  if (suspended) suspended.message = 'the run budget is spent';
   const details = attention(repos)
-    .filter((item) => item.kind === 'failed' || item.kind === 'suspended')
+    .filter((item) => item.kind === 'failed')
     .map((item) => item.detail);
-  expect(details).toEqual([
-    'FAKE-2 Print the version with --version',
-    `the run budget is spent · sail resume ${FAKE_3_ID}`,
-  ]);
+  expect(details).toEqual(['FAKE-2 Print the version with --version']);
 });
 
-test('a suspended run without a message has the resume command alone as its detail', () => {
+test('a suspended run adds no item', () => {
   const repos = index(m.registryDir);
-  const suspended = repos.find((r) => r.name === 'beta')?.runs.find((r) => r.runId === FAKE_3_ID)?.summary;
-  if (suspended) Reflect.deleteProperty(suspended, 'message');
-  const details = attention(repos)
-    .filter((item) => item.kind === 'suspended')
-    .map((item) => item.detail);
-  expect(details).toEqual([`sail resume ${FAKE_3_ID}`]);
+  const suspended = repos.find((r) => r.name === 'beta')?.runs.find((r) => r.runId === FAKE_3_ID);
+  expect(suspended?.status?.status).toBe('suspended');
+  expect(attention(repos).filter((item) => item.runId === FAKE_3_ID && item.key === undefined)).toEqual([]);
 });
 
 test('a failed run without a ticket has its message alone as its detail', () => {
@@ -174,8 +121,6 @@ test("without beta's queue/ the parked item is gone, and the rest stays", () => 
   expect(attention(index(m.registryDir)).map((item) => `${item.repo} ${item.kind}`)).toEqual([
     'alpha failed',
     'alpha error',
-    'alpha denial',
-    'beta suspended',
     'beta error',
   ]);
 });
