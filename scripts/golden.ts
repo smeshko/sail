@@ -258,6 +258,11 @@ export async function renderDashboardViews(outDir: string): Promise<string[]> {
     const views: Record<string, SafeHtml> = {};
     const selected = ui({ repo: 'alpha', runId: GOLDEN_RUN_ID });
     views['rail.html'] = renderRail(railRepos(repos, VIEWS_NOW), selected, VIEWS_NOW);
+    views['rail-repos.html'] = renderRail(
+      railRepos(repos, VIEWS_NOW),
+      { ...selected, expanded: ['alpha', 'beta'] },
+      VIEWS_NOW,
+    );
     views['attention.html'] = renderAttention(attention(repos), true);
     const queueEvents = readEvents(queueDirOf(machine)) as unknown as QueueEvent[];
     const stream = { recent: queueEvents.slice(-20), watch: watchState(queueEvents), polls: pollKind(queueEvents) };
