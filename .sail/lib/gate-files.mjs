@@ -11,6 +11,7 @@ export const GATE_FILES = [
   'biome.json',
   'scripts/full-suite.ts',
   'scripts/bun-version.ts',
+  'scripts/test-watchdog.ts',
 ];
 export const GATE_DIRS = ['.github/'];
 
