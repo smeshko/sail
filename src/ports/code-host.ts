@@ -42,6 +42,11 @@ export interface CodeHost {
   openPullRequest(request: OpenPullRequest): Promise<PullRequest>;
   /** The open, non-draft pull requests that carry `label`, whatever its case, with their head in this repository: never a fork. */
   listDesignated(label: string): Promise<PullRequest[]>;
+  /**
+   * The open pull request whose head is `branch` in this repository, a draft included, or undefined when there is none.
+   * A fork's is never returned. A read: it emits nothing.
+   */
+  pullRequestFrom(branch: string): Promise<PullRequest | undefined>;
   /** The pull request with its details: its body, author, base sha, whether it is a fork, and its comments. */
   getPullRequest(number: number): Promise<PullRequestDetails>;
   /** The checks on the pull request's head sha. Emits `codehost:checks`. */

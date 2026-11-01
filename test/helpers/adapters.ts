@@ -85,6 +85,7 @@ export const OPERATIONS: Record<Port, string[]> = {
     'merge',
     'openPullRequest',
     'parseRef',
+    'pullRequestFrom',
     'push',
     'removeLabel',
     'rerunChecks',

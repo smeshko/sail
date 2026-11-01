@@ -102,6 +102,7 @@ export const PORT_OPERATIONS = {
     'push',
     'openPullRequest',
     'listDesignated',
+    'pullRequestFrom',
     'getPullRequest',
     'checks',
     'rerunChecks',
