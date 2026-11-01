@@ -1,4 +1,4 @@
-// The dashboard's server: the registry's run files and queues, read-only but for three requests, on 127.0.0.1. Every
+// The dashboard's server: the registry's run files and queues, read-only but for a few requests, on 127.0.0.1. Every
 // request passes the guard first:
 //
 // 1. `Host` must be this server's (`127.0.0.1:<port>` or `localhost:<port>`), so a DNS-rebinding page gets 403.
@@ -6,7 +6,12 @@
 //    `/api/repos/<repo>/queues/<workflow>/move`, and two more, `/api/repos/<repo>/runs/<run>/resume` and `…/restart`.
 //    Each needs the client header (403), `Content-Type: application/json` (415) and an `Origin` that is absent or this
 //    server's own (403). A move never writes a queue: it drops a move command in the watcher's inbox, as `sail queue
-//    move` does, and answers 409 when no watcher of that clone watches it. A resume or a restart checks again what the
+//    move` does, and answers 409 when no watcher of that clone watches it. So do four more, at
+//    `/api/repos/<repo>/queues/<workflow>/poll` (body `{}`), `…/add` (`{ ticketKey, force? }`), `…/requeue` and
+//    `…/drop` (`{ dedupKey }`): each makes the checks `sail queue` makes (src/watch/queue-commands.ts), 409 with its
+//    message when one fails, drops the command, and waits up to 15 s for the watcher to take it. Once applied it
+//    answers 200 `{ message }` with the line `sail queue` prints; a command not taken in time is 202 `{ waiting }`, and one
+//    taken but not applied 409. A resume or a restart checks again what the
 //    run offers (src/dashboard/actions.ts), then starts `sail resume <run>` or `sail run --from-run <run> --stage …`
 //    itself, detached in the clone, its output in `.sail-runs/dashboard/<run id>.log`, as a typed command would: it
 //    needs no watcher and skips the watcher's cap. It answers 202 once the run has started, or 409 with the line the
@@ -19,14 +24,20 @@
 //
 // No answer carries a CORS header. Errors are JSON, `{ "error": "…" }`.
 import { existsSync, readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import type { Server, ServerWebSocket } from 'bun';
 import { z } from 'zod';
+import { BUILTINS } from '../adapters/index';
+import { resolveAdapters } from '../engine/adapters';
+import { readConfig } from '../engine/config';
 import { readStatus, runsDir } from '../engine/run-dir';
 import { RUN_HEADER_FILE, readRunHeader } from '../engine/run-header';
 import { newRunId } from '../engine/run-id';
-import { dropCommand } from '../watch/inbox';
-import { liveSet, liveWatcher } from '../watch/registry';
+import { formatIssue } from '../engine/schemas';
+import type { TicketSource } from '../ports/ticket-source';
+import { commandTaken, dropCommand } from '../watch/inbox';
+import { commandFor, itemLine, outcomeOf, streamMark } from '../watch/queue-commands';
+import { liveSet, liveWatcher, type RegistryEntry } from '../watch/registry';
 import { lastLine, type SpawnedRun, spawnDetached } from '../watch/spawn';
 import { runActions } from './actions';
 import { callFile, containedFile, findRepo, findRunDir, repos, runItems } from './files';
@@ -51,6 +62,10 @@ export interface DashboardOptions {
   cli?: readonly string[];
   /** How long a start is waited for before it is answered as under way. 120 000 ms by default. */
   startWaitMs?: number;
+  /** How long a queue change waits for the watcher to take its command before it is answered as waiting. 15 000 ms by default. */
+  applyTimeoutMs?: number;
+  /** How often it looks. 100 ms by default. */
+  applyPollMs?: number;
 }
 
 export interface Dashboard {
@@ -71,6 +86,13 @@ const origins = (port: number) => [`127.0.0.1:${port}`, `localhost:${port}`];
 
 /** The one path a POST is served at: `/api/repos/<repo>/queues/<workflow>/move`. */
 const MOVE_PATH = /^\/api\/repos\/[^/]+\/queues\/[^/]+\/move$/;
+
+/** The paths a queue change is made at: `/api/repos/<repo>/queues/<workflow>/poll`, `…/add`, `…/requeue` and `…/drop`. */
+const QUEUE_OP_PATH = /^\/api\/repos\/[^/]+\/queues\/[^/]+\/(poll|add|requeue|drop)$/;
+
+const PollBody = z.strictObject({});
+const AddBody = z.strictObject({ ticketKey: z.string().min(1), force: z.boolean().optional() });
+const ItemBody = z.strictObject({ dedupKey: z.string().min(1) });
 
 /** The paths a run is started at: `/api/repos/<repo>/runs/<run>/resume` and `…/restart`. */
 const RESUME_PATH = /^\/api\/repos\/[^/]+\/runs\/[^/]+\/resume$/;
@@ -96,6 +118,22 @@ const MoveBody = z
   .refine((move) => (move.before === undefined) !== (move.after === undefined), {
     message: 'give exactly one of before and after',
   });
+
+/**
+ * The repository's live watcher when it runs in this clone and watches `workflow`, with how to name it and the label it
+ * polls the workflow on, or the 409 that says why not.
+ */
+function watchedBy(entry: RegistryEntry, workflow: string): { named: string; label: string } | Response {
+  const watcher = liveWatcher(entry);
+  if (watcher === undefined) {
+    return error(409, `no watcher is running for '${entry.name}': sail watch ${workflow} first`);
+  }
+  const named = `the watcher of '${entry.name}' (pid ${watcher.pid})`;
+  if (watcher.sailDir !== entry.sailDir) return error(409, `${named} runs in another clone: ${watcher.sailDir}`);
+  const set = liveSet(entry.sailDir, watcher.pid).find((each) => each.workflow === workflow);
+  if (set === undefined) return error(409, `${named} does not watch '${workflow}': sail watch ${workflow} first`);
+  return { named, label: set.label };
+}
 
 /**
  * Asks the repository's live watcher to move a queued item, by dropping a move command in its inbox: the watcher alone
@@ -130,15 +168,8 @@ async function moveRoute(registryDir: string, segments: string[], request: Reque
     if (item === undefined) return error(409, `${workflow}'s queue has no item ${key}`);
     if (item.state !== 'queued') return error(409, `${key} is ${item.state}: only a queued item is moved`);
   }
-  const watcher = liveWatcher(entry);
-  if (watcher === undefined) {
-    return error(409, `no watcher is running for '${entry.name}': sail watch ${workflow} first`);
-  }
-  const named = `the watcher of '${entry.name}' (pid ${watcher.pid})`;
-  if (watcher.sailDir !== entry.sailDir) return error(409, `${named} runs in another clone: ${watcher.sailDir}`);
-  if (!liveSet(entry.sailDir, watcher.pid).some((each) => each.workflow === workflow)) {
-    return error(409, `${named} does not watch '${workflow}': sail watch ${workflow} first`);
-  }
+  const watched = watchedBy(entry, workflow);
+  if (watched instanceof Response) return watched;
   const file = dropCommand(runsDir(entry.sailDir), {
     op: 'move',
     workflow,
@@ -146,6 +177,92 @@ async function moveRoute(registryDir: string, segments: string[], request: Reque
     ...(before === undefined ? { after: target } : { before: target }),
   });
   return Response.json({ file }, { status: 202 });
+}
+
+/**
+ * A poll, an add, a requeue or a drop in a watched workflow's queue: the checks `sail queue` makes, then the command in
+ * the live watcher's inbox, and the wait for the watcher to take it and the reading of what it did. The watcher alone
+ * writes the queue.
+ */
+async function queueOpRoute(options: DashboardOptions, segments: string[], request: Request): Promise<Response> {
+  const [, , name = '', , workflow = '', op = ''] = segments;
+  const entry = findRepo(options.registryDir, name);
+  if (entry === undefined) return error(404, `no repository '${name}'`);
+  const dir = findQueueDir(entry, workflow);
+  if (typeof dir !== 'string') return error(404, dir.missing);
+  let ref: string | undefined;
+  let force = false;
+  if (op === 'poll') {
+    const parsed = await bodyOf(request, PollBody, 'a poll');
+    if (parsed instanceof Response) return parsed;
+  } else if (op === 'add') {
+    const parsed = await bodyOf(request, AddBody, 'an add');
+    if (parsed instanceof Response) return parsed;
+    ref = parsed.body.ticketKey;
+    force = parsed.body.force === true;
+  } else if (op === 'requeue' || op === 'drop') {
+    const parsed = await bodyOf(request, ItemBody, op === 'drop' ? 'a drop' : 'a requeue');
+    if (parsed instanceof Response) return parsed;
+    ref = parsed.body.dedupKey;
+  } else {
+    return error(404, `no queue operation '${op}'`);
+  }
+  const watched = watchedBy(entry, workflow);
+  if (watched instanceof Response) return watched;
+
+  const { sailDir } = entry;
+  const runs = runsDir(sailDir);
+  const config = readConfig(sailDir);
+  if ('issues' in config) return error(409, config.issues.map(formatIssue).join('; '));
+  let ticketSource: TicketSource | undefined;
+  if (op === 'add') {
+    const resolved = await resolveAdapters({
+      sailDir,
+      config,
+      builtins: BUILTINS,
+      env: environmentOf(options),
+      ports: ['ticketSource'],
+    });
+    if ('issues' in resolved) return error(409, resolved.issues.map(formatIssue).join('; '));
+    ticketSource = resolved.ports.ticketSource;
+  }
+  let checked: Awaited<ReturnType<typeof commandFor>>;
+  try {
+    checked = await commandFor(op, {
+      runs,
+      sailDir,
+      config,
+      workflow,
+      label: watched.label,
+      ...(ref === undefined ? {} : { ref }),
+      force,
+      ...(ticketSource === undefined ? {} : { ticketSource }),
+    });
+  } catch (thrown) {
+    return error(409, messageOf(thrown));
+  }
+  if ('refused' in checked) return error(409, checked.refused);
+  const { command, key } = checked;
+
+  const mark = streamMark(runs, workflow);
+  const file = dropCommand(runs, command);
+  const taken = await commandTaken(file, {
+    ...(options.applyTimeoutMs === undefined ? {} : { timeoutMs: options.applyTimeoutMs }),
+    ...(options.applyPollMs === undefined ? {} : { pollMs: options.applyPollMs }),
+  });
+  if (!taken) {
+    const waiting = `${watched.named} has not taken the command yet: it waits in ${relative(entry.clone, file)}`;
+    return Response.json({ waiting }, { status: 202 });
+  }
+  if (op === 'poll') return Response.json({ message: `${watched.named} polls ${workflow} now` });
+  let outcome: ReturnType<typeof outcomeOf>;
+  try {
+    outcome = outcomeOf(runs, workflow, op, key ?? '', mark);
+  } catch (thrown) {
+    return error(409, messageOf(thrown));
+  }
+  if ('refused' in outcome) return error(409, outcome.refused);
+  return Response.json({ message: outcome.applied === undefined ? `${key} dropped` : itemLine(outcome.applied) });
 }
 
 /** The run ids with a start under way: a second request for one is refused. */
@@ -307,8 +424,11 @@ export function guard(request: Request, port: number): Response | undefined {
   const client = request.headers.get(CLIENT_HEADER) === '1';
   if (request.method !== 'GET') {
     const path = new URL(request.url).pathname;
-    if (request.method !== 'POST' || ![MOVE_PATH, RESUME_PATH, RESTART_PATH].some((each) => each.test(path))) {
-      return error(405, 'the dashboard answers only GET, and POST to a queue move, a resume or a restart', {
+    if (
+      request.method !== 'POST' ||
+      ![MOVE_PATH, QUEUE_OP_PATH, RESUME_PATH, RESTART_PATH].some((each) => each.test(path))
+    ) {
+      return error(405, 'the dashboard answers only GET, and POST to a queue change, a resume or a restart', {
         Allow: 'GET',
       });
     }
@@ -453,6 +573,10 @@ export function startDashboard(options: DashboardOptions): Dashboard | { refused
           if (start !== undefined) {
             self.timeout(request, 0);
             return start(starts, segments, request);
+          }
+          if (QUEUE_OP_PATH.test(path)) {
+            self.timeout(request, 0);
+            return queueOpRoute(options, segments, request);
           }
           return moveRoute(registryDir, segments, request);
         }
