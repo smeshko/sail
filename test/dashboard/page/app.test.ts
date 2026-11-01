@@ -1,12 +1,13 @@
 // The page's shell, driven through a fake host (D3, D10): sockets the test pushes messages into, timers it runs by
 // hand, and REST reads answered from the seeded fixtures' own files through the dashboard's file module. Every
 // assertion is on what the shell rendered into a region, or on the sockets and reads it asked the host for.
-import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { runActions } from '../../../src/dashboard/actions';
 import { callFile, findRepo, findRunDir, index } from '../../../src/dashboard/files';
-import { boot, FILTER_KEY, type Page, RAIL_KEY, THEME_KEY } from '../../../src/dashboard/page/app';
+import { boot, CLEARED_KEY, FILTER_KEY, type Page, RAIL_KEY, THEME_KEY } from '../../../src/dashboard/page/app';
+import { attention, identity } from '../../../src/dashboard/page/attention';
 import type { ConnectHandlers, PageHost, Region } from '../../../src/dashboard/page/host';
 import { readEvents } from '../../../src/events/consumers/ndjson';
 import {
@@ -255,7 +256,7 @@ test('boot renders the rail with alpha and beta from the first index, opens the 
     'publish#1',
   ]);
   expect(host.regions.status).toContain('<span>ended completed</span>');
-  expect(host.regions.attention).toContain('⚑ needs attention<span class="badge">6</span></button>');
+  expect(host.regions.attention).toContain('⚑ needs attention<span class="badge">4</span></button>');
   expect(host.regions.attention).not.toContain('att-pane');
 });
 
@@ -1910,4 +1911,131 @@ test('a 202 shows its waiting line, a 409 the CLI refusal, and no answer says so
     'sail watch: no workflow declares a watch',
     'the watch could not be sent: the dashboard did not answer',
   ]);
+});
+
+describe('all clear', () => {
+  const badge = () => host.regions.attention?.match(/<span class="badge">(\d+)<\/span>/)?.[1];
+  const pushIndex = (change?: (repos: ReturnType<typeof index>) => void) => {
+    const repos = index(m.registryDir);
+    change?.(repos);
+    host.push(host.open('index')[0], { kind: 'index', repos });
+    host.advance(100);
+  };
+  const bootOpen = (change?: (repos: ReturnType<typeof index>) => void) => {
+    page = boot(host);
+    pushIndex(change);
+    host.click({ action: 'toggle-attention' });
+    host.advance(100);
+  };
+
+  test('one click empties the list and the count, shows nothing needs attention, posts nothing and leaves the failed run in the rail', () => {
+    bootOpen();
+    host.click({ action: 'toggle-group', group: 'alpha' });
+    host.click({ action: 'toggle-group', group: 'alpha/ticket-to-pr' });
+    host.click({ action: 'toggle-section', section: 'alpha/ticket-to-pr:failed' });
+    host.advance(100);
+    expect(host.regions.rail).toContain(`data-run="${FAKE_2_ID}"`);
+    expect(badge()).toBe('4');
+    expect(host.regions.attention).toContain('data-action="clear-attention">all clear</button>');
+    host.click({ action: 'clear-attention' });
+    host.advance(100);
+    expect(badge()).toBeUndefined();
+    expect(host.regions.attention).toContain('nothing needs attention');
+    expect(host.regions.attention).not.toContain('all clear');
+    expect(host.posts).toEqual([]);
+    expect(host.regions.rail).toContain(`data-run="${FAKE_2_ID}"`);
+  });
+
+  test('the clear survives a reboot over the same storage', () => {
+    bootOpen();
+    host.click({ action: 'clear-attention' });
+    page?.stop();
+    bootOpen();
+    expect(badge()).toBeUndefined();
+    expect(host.regions.attention).toContain('nothing needs attention');
+  });
+
+  test('a new failure, and a cleared parked item whose attempts changed, are listed after a clear', () => {
+    bootOpen();
+    host.click({ action: 'clear-attention' });
+    pushIndex((repos) => {
+      const run = repos.find((repo) => repo.name === 'beta')?.runs.find((each) => each.runId === FAKE_3_ID);
+      if (run) run.status = { status: 'failed', stopReason: 'stage_error' };
+    });
+    expect(badge()).toBe('1');
+    expect(host.regions.attention).toContain('failed: stage_error');
+    pushIndex((repos) => {
+      for (const view of repos.find((repo) => repo.name === 'beta')?.queues ?? [])
+        for (const item of view.queue?.items ?? []) if (item.state === 'parked') item.attempts = 3;
+    });
+    expect(badge()).toBe('1');
+    expect(host.regions.attention).toContain('ticket:FAKE-6 parked after 3 attempts');
+  });
+
+  test('a failure that arrives before the pane is drawn again is not cleared with the rows on screen', () => {
+    bootOpen();
+    host.push(host.open('index')[0], {
+      kind: 'index',
+      repos: (() => {
+        const repos = index(m.registryDir);
+        const run = repos.find((repo) => repo.name === 'beta')?.runs.find((each) => each.runId === FAKE_3_ID);
+        if (run) run.status = { status: 'failed', stopReason: 'stage_error' };
+        return repos;
+      })(),
+    });
+    host.click({ action: 'clear-attention' });
+    host.advance(100);
+    expect(badge()).toBe('1');
+    expect(host.regions.attention).toContain('failed: stage_error');
+  });
+
+  test('a prune keeps what another tab cleared in storage since this one loaded it', () => {
+    const fails = (repos: ReturnType<typeof index>) => {
+      const run = repos.find((repo) => repo.name === 'beta')?.runs.find((each) => each.runId === FAKE_3_ID);
+      if (run) run.status = { status: 'failed', stopReason: 'stage_error' };
+    };
+    const changed = (repos: ReturnType<typeof index>) => {
+      fails(repos);
+      for (const view of repos.find((repo) => repo.name === 'beta')?.queues ?? [])
+        for (const item of view.queue?.items ?? []) if (item.state === 'parked') item.attempts = 3;
+    };
+    bootOpen();
+    host.click({ action: 'clear-attention' });
+    // Another tab clears the new failure: its identity joins the four this tab cleared.
+    const failure = (() => {
+      const repos = index(m.registryDir);
+      fails(repos);
+      return attention(repos).find((item) => item.kind === 'failed' && item.runId === FAKE_3_ID);
+    })();
+    if (failure === undefined) throw new Error('no failure of FAKE-3');
+    const stored: string[] = JSON.parse(host.storage.get(CLEARED_KEY) ?? '[]');
+    host.storage.set(CLEARED_KEY, JSON.stringify([...stored, identity(failure)]));
+    // This tab's next index no longer lists the parked item it cleared, so it prunes and saves.
+    pushIndex(changed);
+    page?.stop();
+    bootOpen(changed);
+    expect(badge()).toBe('1');
+    expect(host.regions.attention).toContain('ticket:FAKE-6 parked after 3 attempts');
+    expect(host.regions.attention).not.toContain('failed: stage_error');
+  });
+
+  test('identities the newest index no longer lists are dropped from storage, and the listed ones stay', () => {
+    host.storage.set(CLEARED_KEY, JSON.stringify(['gone']));
+    bootOpen();
+    expect(host.storage.get(CLEARED_KEY)).toBe('[]');
+    host.click({ action: 'clear-attention' });
+    const kept = host.storage.get(CLEARED_KEY);
+    expect(JSON.parse(kept ?? '[]')).toHaveLength(4);
+    pushIndex();
+    expect(host.storage.get(CLEARED_KEY)).toBe(kept);
+  });
+
+  test('a stored value that is not a list of strings clears nothing', () => {
+    for (const bad of ['nope', '{"a":1}', '[1,"a"]']) {
+      host.storage.set(CLEARED_KEY, bad);
+      bootOpen();
+      expect(badge()).toBe('4');
+      page?.stop();
+    }
+  });
 });

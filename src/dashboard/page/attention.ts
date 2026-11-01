@@ -1,20 +1,18 @@
 // Needs attention: one list, across every repository, of what a person should look at. It comes from the index alone,
 // whose runs carry their summaries and whose repositories carry their queues, so no run is opened to build it. Each
-// item says what to open: its run, its call, and the inspector's tab, where the run's own files explain it. A run's
-// denials are one item, however many of its calls had them.
+// item says what to open: its run and its call, where the run's own files explain it. Only failures are listed: a
+// failed run, a call in error, a parked item and a problem.
 
 import type { IndexRepo } from '../files';
-import { shellWord } from './commands';
 import { newestFirst, statusOf, stopReasonOf } from './index-model';
 
-export type AttentionKind = 'failed' | 'suspended' | 'error' | 'denial' | 'parked' | 'problem' | 'stalled';
+export type AttentionKind = 'failed' | 'error' | 'parked' | 'problem';
 
 /** What an item opens in the shell. */
 export interface Opens {
   repo: string;
   runId: string;
   key?: string;
-  tab?: string;
 }
 
 export interface AttentionItem {
@@ -48,25 +46,6 @@ function repoItems(repo: IndexRepo): AttentionItem[] {
       const detail = [about, message].filter((part) => part !== undefined && part !== '').join(' · ');
       items.push({ repo: name, runId, kind: 'failed', title: `failed: ${stopReason}`, detail, opens });
     }
-    if (status === 'suspended') {
-      const resume = `sail resume ${shellWord(runId)}`;
-      const detail = message === undefined ? resume : `${message} · ${resume}`;
-      items.push({ repo: name, runId, kind: 'suspended', title: `suspended: ${stopReason}`, detail, opens });
-    }
-    if (status === 'running') {
-      for (const { key, since } of run.summary?.stalled ?? []) {
-        items.push({
-          repo: name,
-          runId,
-          key,
-          kind: 'stalled',
-          title: 'stalled',
-          detail: `${key} · no event since ${since}`,
-          opens: { ...opens, key: key.split('/')[0] ?? key, tab: 'overview' },
-        });
-      }
-    }
-    const denying: { key: string; denials: number }[] = [];
     for (const call of run.summary?.calls ?? []) {
       const { key } = call;
       if (call.outcome === 'error') {
@@ -81,20 +60,6 @@ function repoItems(repo: IndexRepo): AttentionItem[] {
           opens: { ...opens, key },
         });
       }
-      if ((call.denials ?? 0) > 0) denying.push({ key, denials: call.denials ?? 0 });
-    }
-    // A run's denials are one item, naming each call that had them, which opens the first one's permissions.
-    const first = denying[0];
-    if (first !== undefined) {
-      const total = denying.reduce((sum, each) => sum + each.denials, 0);
-      items.push({
-        repo: name,
-        runId,
-        kind: 'denial',
-        title: plural(total, 'denial'),
-        detail: denying.map((each) => `${each.key}: ${each.denials}`).join(' · '),
-        opens: { ...opens, key: first.key, tab: 'permissions' },
-      });
     }
     if (run.problem !== undefined)
       problems.push({ repo: name, runId, kind: 'problem', title: 'run', detail: run.problem, opens });
@@ -126,4 +91,10 @@ function repoItems(repo: IndexRepo): AttentionItem[] {
 /** Every item that needs attention: by repository name, then newest run first, then call order; parked and problems last. */
 export function attention(index: readonly IndexRepo[]): AttentionItem[] {
   return [...index].sort((a, b) => (a.name < b.name ? -1 : Number(a.name > b.name))).flatMap(repoItems);
+}
+
+/** What an item is known by once a person has cleared it: every field that says what it is. */
+export function identity(item: AttentionItem): string {
+  const { repo, kind, runId, key, workflow, title, detail } = item;
+  return JSON.stringify([repo, kind, runId ?? null, key ?? null, workflow ?? null, title, detail]);
 }
