@@ -1,13 +1,14 @@
 // The queue view: one watched workflow's queue, opened from its row in the rail and drawn in the centre in place of the
 // run, with its polling, a box of items for each state that has any, running first, each folding from its heading, and
-// its recent events from the queue's own stream, folded until the person opens them, and the error that stream sent. A failed or parked item shows the
-// commands that requeue or drop it, to copy, and an item whose run the rail lists opens it. A waiting item shows its
-// priority and has ▲ and ▼ buttons to move it before or after its waiting neighbour: the dashboard's first control,
-// which asks the watcher and changes nothing itself. A refused move shows its reason beside the header. A held item
-// shows when its hold ends and why, and its hold's events name it. An item that waits on its ticket's prerequisites names them.
+// its recent events from the queue's own stream, folded until the person opens them, and the error that stream sent.
+// The controls ask the watcher and change nothing themselves: the header's poll button, a field to add a ticket (for a
+// workflow that polls tickets), a requeue button on a parked item or a failed one whose run has ended, a drop button on
+// any item but a running one that needs a second click, and, on a waiting item, ▲ and ▼ buttons to move it before or
+// after its waiting neighbour. The answer to any of them, a refusal or that the watcher has not taken it yet, shows
+// beside the header. An item whose run the rail lists opens it. A waiting item shows its priority. A held item shows
+// when its hold ends and why, and its hold's events name it. An item that waits on its ticket's prerequisites names them.
 import type { QueueEvent } from '../../events/types';
 import type { QueueItemState } from '../../watch/queue-store';
-import { parkedCommands } from './commands';
 import { ago, clock } from './format';
 import { html, type SafeHtml, safeHref } from './html';
 import { type PanelItem, QUEUE_STATES, type QueuePanel, type WatchState } from './index-model';
@@ -19,6 +20,8 @@ export interface QueueStream {
   watch: WatchState;
   /** The error its stream sent, which stops its reconnects. */
   error?: string;
+  /** What the workflow polls, from its last `queue:polled` event. */
+  polls?: 'ticket' | 'pr' | undefined;
 }
 
 /** The key a queue's stream is kept under: `<repo>/<workflow>`. */
@@ -61,11 +64,24 @@ export function queueEventLine(event: QueueEvent): string {
   }
 }
 
-function commands(panel: QueuePanel, item: PanelItem): SafeHtml {
-  return html`<span class="cmds">${parkedCommands(panel.workflow, item.dedupKey).map(
-    ({ label, command }) =>
-      html`<span class="cmd"><code>${command}</code><button class="btn" data-action="copy" data-text="${command}" title="${label}">copy</button></span>`,
-  )}</span>`;
+function itemButton(panel: QueuePanel, item: PanelItem, action: string, label: string, armed = false): SafeHtml {
+  return html`<button class="btn${armed ? ' armed' : ''}" data-action="${action}" data-repo="${panel.repo}" data-workflow="${panel.workflow}" data-item="${item.dedupKey}" title="${label.replace('confirm ', '')} ${item.dedupKey}">${label}</button>`;
+}
+
+/** Requeue on a parked item, or a failed one whose run has ended; drop on any item that isn't running. */
+function itemControls(panel: QueuePanel, item: PanelItem, ui: UiState): SafeHtml | '' {
+  if (item.state === 'dispatched') return '';
+  const requeue =
+    item.state === 'parked' || (item.state === 'failed' && item.runEnded)
+      ? itemButton(panel, item, 'requeue-item', 'requeue')
+      : '';
+  const armed = ui.armedDrop === item.dedupKey;
+  return html`<span class="qacts">${requeue}${itemButton(panel, item, 'drop-item', armed ? 'confirm drop' : 'drop', armed)}</span>`;
+}
+
+/** The field to add a ticket by its key, with Force, as typed so far. */
+function addForm(panel: QueuePanel, ui: UiState): SafeHtml {
+  return html`<div class="qadd"><input class="txt" type="text" name="add-ticket" placeholder="ticket key" value="${ui.addTicket ?? ''}"><label class="lbl"><input type="checkbox" name="add-force"${ui.addForce === true ? ' checked' : ''}> force</label><button class="btn" data-action="add-ticket" data-repo="${panel.repo}" data-workflow="${panel.workflow}" title="add the ticket to the queue">add</button></div>`;
 }
 
 /** A waiting row's ▲ or ▼: `target` is the waiting neighbour the item moves before or after. */
@@ -102,9 +118,7 @@ function itemRow(panel: QueuePanel, item: PanelItem, ui: UiState): SafeHtml {
     item.held === undefined
       ? ''
       : html` · held until ${clock(item.held.until, ui.tz)} · <span class="why">${item.held.reason}</span>`
-  }${item.waitingOn === undefined ? '' : html` · waiting on ${item.waitingOn.join(', ')}`}${item.reason === undefined ? '' : html` · <span class="why">${item.reason}</span>`}</span>${
-    item.state === 'parked' || item.state === 'failed' ? commands(panel, item) : ''
-  }</span>${moveButtons(panel, item)}${run}</div>`;
+  }${item.waitingOn === undefined ? '' : html` · waiting on ${item.waitingOn.join(', ')}`}${item.reason === undefined ? '' : html` · <span class="why">${item.reason}</span>`}</span>${moveButtons(panel, item)}${itemControls(panel, item, ui)}${run}</div>`;
 }
 
 /** What each state is called in the view: what it means to the person, rather than the queue file's word. */
@@ -141,7 +155,8 @@ function panelView(panel: QueuePanel, stream: QueueStream | undefined, ui: UiSta
     held === undefined
       ? ''
       : html`<span class="warnchip">held${held.until === undefined ? '' : html` until ${clock(held.until, ui.tz)}`}: ${held.reason}</span>`
-  }${ui.queueNotice === undefined ? '' : html`<span class="warnchip">${ui.queueNotice}</span>`}</div>
+  }${ui.queueNotice === undefined ? '' : html`<span class="warnchip">${ui.queueNotice}</span>`}<button class="btn" data-action="poll-queue" data-repo="${panel.repo}" data-workflow="${panel.workflow}" title="poll now">poll</button></div>
+${stream?.polls === 'ticket' ? addForm(panel, ui) : ''}
 ${panel.problem === undefined ? '' : html`<div class="code bad">${panel.problem}</div>`}
 ${stream?.error === undefined ? '' : html`<div class="code bad">${stream.error}</div>`}
 <div class="statebar">${QUEUE_STATES.map((state) => html`<span class="sf"><i class="d ${state}"></i>${LABELS[state]} <span class="n">${panel.counts[state]}</span></span>`)}</div>

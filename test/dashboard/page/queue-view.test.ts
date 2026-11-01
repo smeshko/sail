@@ -1,5 +1,5 @@
 // The queue panel, drawn: each watched workflow's items by state, its polling, its watch state from the queue's own
-// stream, and a parked item's commands to copy. With no queue anywhere it draws nothing, which hides the panel.
+// stream, and a parked item's requeue and drop buttons. With no queue anywhere it draws nothing, which hides the panel.
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -61,10 +61,8 @@ test("beta's queue view lists running first, shows its header, its four items ea
   expect(markup).toContain(
     'parked · 2 attempts · <span class="why">stage_error: implement#1 ended in error: harness: the session ended before it submitted a result</span>',
   );
-  expect(markup).toContain(
-    '<code>sail queue requeue ticket-to-pr ticket:FAKE-6</code><button class="btn" data-action="copy" data-text="sail queue requeue ticket-to-pr ticket:FAKE-6" title="requeue">copy</button>',
-  );
-  expect(markup).toContain('<code>sail queue drop ticket-to-pr ticket:FAKE-6</code>');
+  expect(markup).not.toContain('sail queue');
+  expect(markup).not.toContain('data-action="copy"');
   expect(markup).toContain(
     `<button class="run-link" data-action="select-run" data-repo="beta" data-run="${FAKE_3_ID}" title="open ${FAKE_3_ID}">${FAKE_3_ID} ›</button>`,
   );
@@ -95,13 +93,15 @@ test('a folded section draws only its heading and count, without its items, whil
   expect(markup.match(/<button class="qsec grp-t open"/g)).toHaveLength(3);
 });
 
-test('a failed item shows its requeue and drop commands, and a queue with no items says it is empty', () => {
+test('a failed item whose run ended shows its requeue and drop buttons, and a queue with no items says it is empty', () => {
   const [panel] = queuePanels(index(m.registryDir));
   if (panel === undefined) throw new Error('beta has no queue');
-  const failed = panel.items.map((item) => (item.state === 'parked' ? { ...item, state: 'failed' as const } : item));
+  const failed = panel.items.map((item) =>
+    item.state === 'parked' ? { ...item, state: 'failed' as const, runEnded: true } : item,
+  );
   const markup = renderQueue({ ...panel, items: failed }, undefined, initialUi(0), NOW).value;
   expect(markup).toContain('<span class="caret">›</span>failed · 1</button><div class="qbox">');
-  expect(markup).toContain('<code>sail queue requeue ticket-to-pr ticket:FAKE-6</code>');
+  expect(markup).toContain('data-action="requeue-item"');
   expect(renderQueue({ ...panel, items: [] }, undefined, initialUi(0), NOW).value).toContain(
     '<div class="qempty">the queue is empty</div>',
   );
@@ -314,4 +314,83 @@ test('a waiting item with open prerequisites shows waiting on their keys in its 
   expect(
     queueEventLine({ ...at, type: 'queue:waiting', dedupKey: 'ticket:FAKE-5', on: ['FAKE-1'] } as QueueEvent),
   ).toBe('ticket:FAKE-5 waiting on FAKE-1');
+});
+
+/** The queue-changing buttons of each row, as `<key>: <action>[ <label>]`, in row order. */
+function controls(markup: string): string[] {
+  return [...markup.matchAll(/<div class="qrow2[^"]*">(.*?)<\/div>/gs)].map(([, row]) => {
+    const key = /class="c-ref">([^<]+)</.exec(row ?? '')?.[1];
+    const buttons = [
+      ...(row ?? '').matchAll(/<button class="btn[^"]*" data-action="(requeue-item|drop-item)"[^>]*>([^<]*)</g),
+    ];
+    return `${key}: ${buttons.map(([, action, label]) => `${action} ${label}`).join(', ')}`;
+  });
+}
+
+test('each state shows the buttons it is given: queued, parked and done drop; failed requeues only when its run ended; a dispatched item has none', () => {
+  const [panel] = queuePanels(index(m.registryDir));
+  if (panel === undefined) throw new Error('beta has no queue');
+  const item = (state: 'failed', runEnded: boolean, key: string) => ({
+    ...panel.items[0],
+    ...{ state, dedupKey: key, runEnded },
+  });
+  const items = [
+    ...panel.items,
+    item('failed', false, 'ticket:FAKE-8'),
+    item('failed', true, 'ticket:FAKE-9'),
+  ] as typeof panel.items;
+  const markup = renderQueue({ ...panel, items }, undefined, initialUi(0), NOW).value;
+  expect(controls(markup).sort()).toEqual([
+    'ticket:FAKE-3: ',
+    'ticket:FAKE-4: drop-item drop',
+    'ticket:FAKE-5: drop-item drop',
+    'ticket:FAKE-6: requeue-item requeue, drop-item drop',
+    'ticket:FAKE-8: drop-item drop',
+    'ticket:FAKE-9: requeue-item requeue, drop-item drop',
+  ]);
+  expect(markup).toContain(
+    '<button class="btn" data-action="drop-item" data-repo="beta" data-workflow="ticket-to-pr" data-item="ticket:FAKE-6" title="drop ticket:FAKE-6">drop</button>',
+  );
+  expect(markup).toContain(
+    '<button class="btn" data-action="requeue-item" data-repo="beta" data-workflow="ticket-to-pr" data-item="ticket:FAKE-6" title="requeue ticket:FAKE-6">requeue</button>',
+  );
+});
+
+test('the drop an armed click named reads confirm drop and is armed; the others stay drop', () => {
+  const [panel] = queuePanels(index(m.registryDir));
+  if (panel === undefined) throw new Error('beta has no queue');
+  const markup = renderQueue(panel, undefined, { ...initialUi(0), armedDrop: 'ticket:FAKE-6' }, NOW).value;
+  expect(controls(markup).filter((row) => row.includes('confirm'))).toEqual([
+    'ticket:FAKE-6: requeue-item requeue, drop-item confirm drop',
+  ]);
+  expect(markup).toContain('<button class="btn armed" data-action="drop-item"');
+  expect(markup.match(/btn armed/g)).toHaveLength(1);
+});
+
+test('the header has a poll button for the workflow, and the add form shows only for a workflow that polls tickets (ADW-460)', () => {
+  const [panel] = queuePanels(index(m.registryDir));
+  if (panel === undefined) throw new Error('beta has no queue');
+  const draw = (polls?: 'ticket' | 'pr') =>
+    renderQueue(panel, { recent: [], watch: 'watched', ...(polls === undefined ? {} : { polls }) }, initialUi(0), NOW)
+      .value;
+  const poll =
+    '<button class="btn" data-action="poll-queue" data-repo="beta" data-workflow="ticket-to-pr" title="poll now">poll</button>';
+  for (const markup of [draw('ticket'), draw('pr'), draw()]) expect(markup).toContain(poll);
+  const form = draw('ticket');
+  expect(form).toContain('<input class="txt" type="text" name="add-ticket" placeholder="ticket key"');
+  expect(form).toContain('<label class="lbl"><input type="checkbox" name="add-force"> force</label>');
+  expect(form).toContain('<button class="btn" data-action="add-ticket" data-repo="beta" data-workflow="ticket-to-pr"');
+  for (const markup of [draw('pr'), draw()]) {
+    expect(markup).not.toContain('add-ticket');
+    expect(markup).not.toContain('add-force');
+  }
+});
+
+test('what was typed in the add field and whether force is ticked survive a draw', () => {
+  const [panel] = queuePanels(index(m.registryDir));
+  if (panel === undefined) throw new Error('beta has no queue');
+  const ui = { ...initialUi(0), addTicket: 'FAKE-"9"', addForce: true };
+  const markup = renderQueue(panel, { recent: [], watch: 'watched', polls: 'ticket' }, ui, NOW).value;
+  expect(markup).toContain('name="add-ticket" placeholder="ticket key" value="FAKE-&quot;9&quot;"');
+  expect(markup).toContain('<input type="checkbox" name="add-force" checked> force');
 });
