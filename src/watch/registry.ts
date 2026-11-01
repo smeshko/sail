@@ -10,7 +10,18 @@
 // run refreshing its repository's entry never erases the watcher that started it.
 //
 // The machine directory is `SAIL_HOME`, or `~/.sail`; branch leases and exclusive slots live there too.
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  readSync,
+  renameSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { isAlive as processIsAlive } from '../adapters/leases';
 import { runsDir } from '../engine/run-dir';
@@ -141,6 +152,50 @@ export interface Watched {
   ts: string;
 }
 
+/** What `liveSet` has read of one queue event stream: how far, and each pid's last `watch:added` or `watch:removed`. */
+interface StreamRead {
+  ino: number;
+  offset: number;
+  last: Map<number, Record<string, unknown>>;
+}
+
+// The streams are append-only and grow on every poll, and the dashboard asks for the set every second, so each one is
+// read on from where the last read stopped. One that shrank or was replaced is read whole again.
+const streamReads = new Map<string, StreamRead>();
+
+/** `file`'s last watch event of each pid, reading only the whole lines it gained since the last call. */
+function watchEvents(file: string): Map<number, Record<string, unknown>> {
+  const { ino, size } = statSync(file);
+  let read = streamReads.get(file);
+  if (read === undefined || read.ino !== ino || size < read.offset) {
+    read = { ino, offset: 0, last: new Map() };
+    streamReads.set(file, read);
+  }
+  if (size === read.offset) return read.last;
+  const bytes = Buffer.alloc(size - read.offset);
+  const fd = openSync(file, 'r');
+  try {
+    readSync(fd, bytes, 0, bytes.length, read.offset);
+  } finally {
+    closeSync(fd);
+  }
+  // A line still being written is left for the next read.
+  const end = bytes.lastIndexOf(0x0a) + 1;
+  read.offset += end;
+  for (const line of bytes.subarray(0, end).toString('utf8').split('\n')) {
+    let event: Record<string, unknown>;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if ((event.type === 'watch:added' || event.type === 'watch:removed') && typeof event.pid === 'number') {
+      read.last.set(event.pid, event);
+    }
+  }
+  return read.last;
+}
+
 /** The live watcher's set, read from the queue event streams beside `sailDir`, in the order it was formed. */
 export function liveSet(sailDir: string, pid: number): Watched[] {
   const dir = join(runsDir(sailDir), QUEUE_DIR);
@@ -149,17 +204,8 @@ export function liveSet(sailDir: string, pid: number): Watched[] {
   for (const workflow of readdirSync(dir)) {
     const file = join(dir, workflow, 'events.ndjson');
     if (!existsSync(file)) continue;
-    let last: Record<string, unknown> | undefined;
-    for (const line of readFileSync(file, 'utf8').split('\n')) {
-      let event: Record<string, unknown>;
-      try {
-        event = JSON.parse(line);
-      } catch {
-        continue;
-      }
-      // The live watcher's own events: one that lost the registry to it may have written after them (keepWatcher).
-      if ((event.type === 'watch:added' || event.type === 'watch:removed') && event.pid === pid) last = event;
-    }
+    // The live watcher's own events: one that lost the registry to it may have written after them (keepWatcher).
+    const last = watchEvents(file).get(pid);
     if (last?.type === 'watch:added') {
       set.push({ workflow, label: String(last.label), seq: Number(last.seq), ts: String(last.ts) });
     }

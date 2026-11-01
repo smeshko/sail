@@ -1,7 +1,16 @@
 // The watcher registry's repository entries: `<machine dir>/watchers/<name>.json`, one `sail.registry.v1` entry per
 // repository name, written atomically and read without ever throwing for a bad file.
 import { afterEach, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { machineDir as engineMachineDir } from '../../src/engine/machine-dir';
@@ -12,6 +21,7 @@ import {
   cloneRemote,
   findHolder,
   keepWatcher,
+  liveSet,
   machineDir,
   type RegistryEntry,
   readEntry,
@@ -340,4 +350,29 @@ test("a repository that claims one of a watcher's labels while keepWatcher repai
     },
     fixture: stale,
   });
+});
+
+test('liveSet reads only what a queue stream gained since its last read, and a whole stream again once replaced', () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'sail-live-set-')));
+  dirs.push(root);
+  const sailDir = join(root, '.sail');
+  const file = join(root, '.sail-runs', 'queue', 'triage', 'events.ndjson');
+  mkdirSync(join(root, '.sail-runs', 'queue', 'triage'), { recursive: true });
+  const added = `${JSON.stringify({ type: 'watch:added', pid: 7, label: 'sail', seq: 1, ts: '2026-10-14T09:00:00.000Z' })}\n`;
+  writeFileSync(file, added);
+  expect(liveSet(sailDir, 7).map((each) => each.workflow)).toEqual(['triage']);
+
+  // The bytes already read are not read again: an in-place change to them goes unseen, what was appended is read.
+  const polled = `${JSON.stringify({ type: 'queue:polled', seq: 2 })}\n`;
+  writeFileSync(file, `${' '.repeat(added.length - 1)}\n${polled}`);
+  expect(liveSet(sailDir, 7).map((each) => each.workflow)).toEqual(['triage']);
+  appendFileSync(
+    file,
+    `${JSON.stringify({ type: 'watch:removed', pid: 7, seq: 3, ts: '2026-10-14T09:05:00.000Z' })}\n`,
+  );
+  expect(liveSet(sailDir, 7)).toEqual([]);
+
+  // A stream shorter than what was read is read whole again.
+  writeFileSync(file, added);
+  expect(liveSet(sailDir, 7).map((each) => each.workflow)).toEqual(['triage']);
 });
