@@ -19,7 +19,7 @@
 // The checks, the command to drop and the reading of what the watcher did are `src/watch/queue-commands.ts`'s, which
 // the dashboard's queue view shares.
 //
-// An item is named by its dedup key (`ticket:FAKE-1`, as the dashboard's commands print it) or its ticket key. Every
+// An item is named by its dedup key (`ticket:FAKE-1`, as `sail queue ls` prints it) or its ticket key. Every
 // refusal is exit code 3.
 import { isAlive as processIsAlive } from '../../adapters/leases';
 import { runsDir as runsDirOf } from '../../engine/run-dir';
