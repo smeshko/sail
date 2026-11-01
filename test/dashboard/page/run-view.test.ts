@@ -4,7 +4,7 @@
 import { expect, test } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { RestartOffer, ResumeOffer } from '../../../src/dashboard/actions';
+import type { CleanOffer, RestartOffer, ResumeOffer, StopOffer } from '../../../src/dashboard/actions';
 import { foldRun } from '../../../src/dashboard/page/run-model';
 import { renderRun, renderStatus } from '../../../src/dashboard/page/run-view';
 import { initialUi } from '../../../src/dashboard/page/ui-state';
@@ -60,7 +60,7 @@ test('the golden run view shows $1.35 of its $25.00 budget, its PR and sail show
   expect(markup).not.toContain('sail resume');
 });
 
-test("FAKE-3's view has a lint#1 card and a not called yet group of describe, open, self-review and tests, its resume command, and no page module names lint", () => {
+test("FAKE-3's view has a lint#1 card and a not called yet group of describe, open, self-review and tests, no resume command, and no page module names lint", () => {
   const markup = renderRun(foldRun(readEvents(FAKE_3)), summaryOf(FAKE_3), initialUi(0), NOW).value;
   expect(groups(markup)).toEqual([
     '-: intake#1 spec#1 lint#1',
@@ -72,7 +72,8 @@ test("FAKE-3's view has a lint#1 card and a not called yet group of describe, op
   );
   expect(markup).toContain('<span class="warnchip">budget_exceeded</span>');
   expect(markup).toContain('<div class="stat"><b>$1.06</b><span>of $1.00 (106.3%)</span></div>');
-  expect(markup).toContain(`<code>sail resume ${FAKE_3_ID}</code>`);
+  expect(markup).toContain(`<code>sail show ${FAKE_3_ID}</code>`);
+  expect(markup).not.toContain('sail resume');
   const naming = readdirSync(PAGE).filter((file) => /\blint\b(?!\/)/.test(readFileSync(join(PAGE, file), 'utf8')));
   expect(naming).toEqual([]);
 });
@@ -206,7 +207,7 @@ test('Resume shows its raise field with what was typed, arms into the confirmati
     renderRun(model, summaryOf(FAKE_3), { ...initialUi(0), ...ui }, NOW, offers).value;
   const idle = view({ raise: '5' }, { resume });
   expect(idle).toContain(
-    '<div class="grp"><div class="grp-t">start again</div><div class="acts"><span class="act"><label class="lbl">raise $ <input class="num" type="number" name="raise" min="0.01" step="any" value="5"></label><button class="btn" data-action="resume-run">resume</button></span></div></div>',
+    '<div class="grp"><div class="grp-t">control</div><div class="acts"><span class="act"><label class="lbl">raise $ <input class="num" type="number" name="raise" min="0.01" step="any" value="5"></label><button class="btn" data-action="resume-run">resume</button></span></div></div>',
   );
   expect(idle).not.toContain('restart');
   expect(view({ armed: 'resume' }, { resume })).toContain(
@@ -220,8 +221,8 @@ test('Resume shows its raise field with what was typed, arms into the confirmati
   ).toContain(
     '<span class="act"><button class="btn" disabled>resume</button><span class="act-why">run is running</span></span><span class="warnchip">refused &lt;b&gt;</span>',
   );
-  expect(view({}, undefined)).not.toContain('start again');
-  expect(view({}, {})).not.toContain('start again');
+  expect(view({}, undefined)).not.toContain('control</div>');
+  expect(view({}, {})).not.toContain('control</div>');
 });
 
 test('Restart lists the stages with what runs again as titles, the failed one selected unless another was chosen, and arms into the confirmation with the stage and budget', () => {
@@ -254,5 +255,46 @@ test('Restart lists the stages with what runs again as titles, the failed one se
   expect(view({ armed: 'restart' }, { ...restart, budget: {} })).toContain('· no budget</button>');
   expect(view({}, { enabled: false, why: 'branch sail/x is leased by run FAKE-9', stages: [], budget: {} })).toContain(
     '<button class="btn" disabled>restart</button><span class="act-why">branch sail/x is leased by run FAKE-9</span>',
+  );
+});
+
+test('Stop shows a Stop now box that is ticked as chosen, arms into the confirmation each way names, and a disabled one gives its reason', () => {
+  const model = foldRun(readEvents(FAKE_3));
+  const view = (ui: Partial<ReturnType<typeof initialUi>>, stop: StopOffer = { enabled: true }) =>
+    renderRun(model, summaryOf(FAKE_3), { ...initialUi(0), ...ui }, NOW, { stop }).value;
+  expect(view({})).toContain(
+    '<span class="act"><label class="lbl"><input type="checkbox" name="now"> stop now</label><button class="btn" data-action="stop-run">stop</button></span>',
+  );
+  expect(view({ stopNow: true })).toContain('<input type="checkbox" name="now" checked> stop now');
+  expect(view({ armed: 'stop' })).toContain(
+    '<button class="btn armed" data-action="stop-run">confirm stop · at its next call boundary</button>',
+  );
+  expect(view({ armed: 'stop', stopNow: true })).toContain(
+    '<button class="btn armed" data-action="stop-run">confirm stop now · ends its running call</button>',
+  );
+  expect(view({}, { enabled: false, why: 'run is not running' })).toContain(
+    '<button class="btn" disabled>stop</button><span class="act-why">run is not running</span>',
+  );
+});
+
+test('Clean sits beside Restart, arms into a confirmation that lists what it removes and where the run directory goes, and a disabled one gives its reason', () => {
+  const model = foldRun(readEvents(FAKE_2));
+  const clean: CleanOffer = {
+    enabled: true,
+    removes: ['worktree', 'branch sail/x', 'run ref'],
+    archive: '~/.sail/failed-runs/2026-11-01/FAKE-2',
+  };
+  const restart: RestartOffer = { enabled: true, stages: [], stage: 'implement', budget: { maxUsd: 25 } };
+  const view = (ui: Partial<ReturnType<typeof initialUi>>, offer: CleanOffer = clean) =>
+    renderRun(model, summaryOf(FAKE_2), { ...initialUi(0), ...ui }, NOW, { restart, clean: offer }).value;
+  const idle = view({});
+  expect(idle).toContain(
+    'data-action="restart-run">restart</button></span><span class="act"><button class="btn" data-action="clean-run">clean</button></span>',
+  );
+  expect(view({ armed: 'clean' })).toContain(
+    '<button class="btn armed" data-action="clean-run">confirm clean · removes worktree, branch sail/x, run ref · run directory -&gt; ~/.sail/failed-runs/2026-11-01/FAKE-2</button>',
+  );
+  expect(view({}, { enabled: false, removes: [], why: 'a queue item names it' })).toContain(
+    '<button class="btn" disabled>clean</button><span class="act-why">a queue item names it</span>',
   );
 });

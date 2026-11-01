@@ -50,10 +50,14 @@ export interface UiState {
   /** What was typed in the queue view's add field, and whether Force is ticked, kept across a draw. */
   addTicket?: string | undefined;
   addForce?: boolean;
-  /** The run action a first click has armed, which a second click starts. */
-  armed?: 'resume' | 'restart';
-  /** Why the last Resume or Restart was refused, or that it is starting, shown beside the buttons. */
+  /** The run action a first click has armed, which a second click makes. */
+  armed?: 'resume' | 'restart' | 'stop' | 'clean';
+  /** Why the last run action was refused, or what it did or that it is under way, shown beside the buttons. */
   runNotice?: string;
+  /** Whether Stop now is ticked, kept across a draw. */
+  stopNow?: boolean;
+  /** What the last Clean removed, shown in the rail until a run is selected. */
+  indexNotice?: string;
   /** What was typed in the raise field and chosen in the stage list, kept across a draw. */
   raise?: string | undefined;
   restartStage?: string | undefined;

@@ -1,9 +1,9 @@
 // The run view: the run's header, its totals against its budget, one stage card per call grouped by loop iteration, a
 // group's cards side by side under a header of their own, the roster stages not called yet, the pull request it opened,
-// the Resume or Restart a run offers, and the CLI commands to copy. The cards come from the run model, fed by the run's events. The totals come from the
+// the Resume, Restart, Stop or Clean a run offers, and the CLI commands to copy. The cards come from the run model, fed by the run's events. The totals come from the
 // summary in the index when there is one, and from the cards otherwise.
 import type { Summary } from '../../events/summary';
-import type { RestartOffer, ResumeOffer, RunActions } from '../actions';
+import type { CleanOffer, RestartOffer, ResumeOffer, RunActions, StopOffer } from '../actions';
 import { runCommands } from './commands';
 import { cost, duration, percent, tokens } from './format';
 import { html, type SafeHtml, safeHref, text } from './html';
@@ -156,12 +156,45 @@ function restartControl(offer: RestartOffer, ui: UiState): SafeHtml {
   )}</select></label><button class="btn${ui.armed === 'restart' ? ' armed' : ''}" data-action="restart-run">${label}</button></span>`;
 }
 
-/** Resume or Restart, whichever the run offers, with the notice of the last start. */
+function stopControl(offer: StopOffer, ui: UiState): SafeHtml {
+  if (!offer.enabled) {
+    return html`<span class="act"><button class="btn" disabled>stop</button><span class="act-why">${offer.why}</span></span>`;
+  }
+  const armed = ui.armed === 'stop';
+  const label = !armed
+    ? 'stop'
+    : ui.stopNow === true
+      ? 'confirm stop now · ends its running call'
+      : 'confirm stop · at its next call boundary';
+  return html`<span class="act"><label class="lbl"><input type="checkbox" name="now"${ui.stopNow === true ? ' checked' : ''}> stop now</label><button class="btn${armed ? ' armed' : ''}" data-action="stop-run">${label}</button></span>`;
+}
+
+function cleanControl(offer: CleanOffer, ui: UiState): SafeHtml {
+  if (!offer.enabled) {
+    return html`<span class="act"><button class="btn" disabled>clean</button><span class="act-why">${offer.why}</span></span>`;
+  }
+  const armed = ui.armed === 'clean';
+  const where = offer.archive === undefined ? '' : ` · run directory -> ${offer.archive}`;
+  const label = armed ? `confirm clean · removes ${offer.removes.join(', ') || 'nothing'}${where}` : 'clean';
+  return html`<span class="act"><button class="btn${armed ? ' armed' : ''}" data-action="clean-run">${label}</button></span>`;
+}
+
+/** What the run offers (Resume, Restart, Stop, Clean), whichever it does, with the notice of the last one. */
 function actionBar(actions: RunActions | undefined, ui: UiState): SafeHtml {
-  if (actions === undefined || (actions.resume === undefined && actions.restart === undefined)) return html``;
-  return html`<div class="grp"><div class="grp-t">start again</div><div class="acts">${
+  if (
+    actions === undefined ||
+    (actions.resume === undefined &&
+      actions.restart === undefined &&
+      actions.stop === undefined &&
+      actions.clean === undefined)
+  ) {
+    return html``;
+  }
+  return html`<div class="grp"><div class="grp-t">control</div><div class="acts">${
     actions.resume === undefined ? '' : resumeControl(actions.resume, ui)
   }${actions.restart === undefined ? '' : restartControl(actions.restart, ui)}${
+    actions.stop === undefined ? '' : stopControl(actions.stop, ui)
+  }${actions.clean === undefined ? '' : cleanControl(actions.clean, ui)}${
     ui.runNotice === undefined ? '' : html`<span class="warnchip">${ui.runNotice}</span>`
   }</div></div>
 `;

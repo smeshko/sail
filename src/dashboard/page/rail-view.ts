@@ -159,6 +159,8 @@ ${open ? repo.workflows.map((workflow) => workflowGroup(repo.name, workflow, ui,
 /** The rail from the index model. `now` is ms since the epoch, for how long ago a queue was polled. */
 export function renderRail(repos: readonly RailRepo[], ui: UiState, now: number): SafeHtml {
   const runs = repos.reduce((sum, repo) => sum + repo.runs.length, 0);
-  return html`${runningBlock(repos, ui)}${queuedBlock(repos, ui, now)}<div class="rail-h"><span>repositories</span><span class="c">${runs} runs</span></div>
+  const notice =
+    ui.indexNotice === undefined ? '' : html`<div class="act"><span class="warnchip">${ui.indexNotice}</span></div>`;
+  return html`${notice}${runningBlock(repos, ui)}${queuedBlock(repos, ui, now)}<div class="rail-h"><span>repositories</span><span class="c">${runs} runs</span></div>
 ${repos.length === 0 ? html`<div class="qempty">no repository is registered yet: run sail watch in one</div>` : ''}${repos.map((repo) => repoGroup(repo, ui, now))}`;
 }
