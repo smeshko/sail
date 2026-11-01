@@ -116,9 +116,31 @@ export async function stopRun(options: StopRunOptions): Promise<Stopped> {
       }
     }
 
-    const firstSeq = nextSeq(dir);
+    // A stop that leased the branch and leaves without ending the run gives the lease back as it found it: marked again
+    // for a suspended run, which holds it whatever its pid, else released, since its pid was dead. Else a long-lived
+    // process, such as the dashboard, would hold it live for as long as it runs.
+    let ending = false;
+    const restore = async () => {
+      if (lease === undefined || ending) return;
+      try {
+        if (statusOf(dir)?.status === 'suspended') {
+          await port.lease(lease.remote, lease.branch, { runId, runDir: dir, pid: process.pid, suspended: true });
+        } else await port.releaseLease(lease.remote, lease.branch, runId);
+      } catch {
+        // The lease is left as this stop took it; the refusal or error it leaves with says why.
+      }
+    };
+    let firstSeq: ReturnType<typeof nextSeq>;
+    try {
+      firstSeq = nextSeq(dir);
+      if (typeof firstSeq === 'number') {
+        writeStatus(dir, 'failed', 'stopped');
+        ending = true;
+      }
+    } finally {
+      await restore();
+    }
     if (typeof firstSeq !== 'number') return firstSeq;
-    writeStatus(dir, 'failed', 'stopped');
     const said: string[] = [MESSAGE];
     if (repository !== undefined) {
       try {

@@ -169,6 +169,23 @@ test('a run left running by a process that is gone is stopped the same way, its 
   });
 });
 
+test('a stop of a suspended run refused after it leased the branch leaves the lease marked suspended again (review R7)', async () => {
+  await withTempRepo(async (repo) => {
+    const end = await suspendedRun(repo);
+    const [file] = leaseFiles(repo);
+    const leaseOf = () => JSON.parse(readFileSync(join(leasesDir(repo), file ?? ''), 'utf8'));
+    expect(leaseOf().suspended).toBe(true);
+    appendFileSync(join(end.dir, 'events.ndjson'), 'not json\n');
+    const stopped = await stop(repo, end.runId);
+    expect(stopped).toEqual({ refused: expect.stringContaining("can't be read, so the events can't continue") });
+    expect([readFileSync(join(end.dir, 'STATUS'), 'utf8'), leaseFiles(repo), leaseOf()]).toEqual([
+      'suspended until\n',
+      [file],
+      expect.objectContaining({ runId: end.runId, suspended: true }),
+    ]);
+  });
+});
+
 test('a run whose lease another run took over is stopped with no lease to release, and the other run keeps its lease', async () => {
   await withTempRepo(async (repo) => {
     const end = await suspendedRun(repo);
