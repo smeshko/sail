@@ -46,7 +46,15 @@ import { formatIssue } from '../src/engine/schemas';
 import { readEvents } from '../src/events/consumers/ndjson';
 import { terminalConsumer, type Verbosity } from '../src/events/consumers/terminal';
 import type { QueueEvent, SailEvent } from '../src/events/types';
-import { FAKE_2_ID, FAKE_3_ID, fake2Dir, QUEUE_WORKFLOW, queueDirOf, seedFixtures } from '../test/helpers/dashboard';
+import {
+  FAKE_2_ID,
+  FAKE_3_ID,
+  fake2Dir,
+  fakeClonePorts,
+  QUEUE_WORKFLOW,
+  queueDirOf,
+  seedFixtures,
+} from '../test/helpers/dashboard';
 import { FAKE_4_ID } from '../test/helpers/review-fixture';
 
 const root = join(import.meta.dir, '..');
@@ -233,7 +241,7 @@ const VIEWS_TZ = 0;
  * Renders every view of the dashboard's recorded fixtures into `outDir`, as fragments, and gives the files written. The
  * machine is seeded afresh, and nothing absolute of it is ever rendered, so the views are the same on every machine.
  */
-export function renderDashboardViews(outDir: string): string[] {
+export async function renderDashboardViews(outDir: string): Promise<string[]> {
   const machine = seedFixtures();
   try {
     const repos = index(machine.registryDir);
@@ -261,9 +269,13 @@ export function renderDashboardViews(outDir: string): string[] {
       const runId = runIdOf[name as keyof typeof runIdOf];
       const model = foldRun(readEvents(dir));
       const entry = findRepo(machine.registryDir, repo);
-      // An empty leases directory of its own, so no lease of this machine disables a run's actions.
+      // An empty leases directory of its own, so no lease of this machine disables a run's actions, and ports that find
+      // neither branch of a run, since the fixture clones are no git repositories.
+      const leasesDir = join(machine.root, 'leases');
       const offers =
-        entry === undefined ? undefined : runActions(entry, runId, { leasesDir: join(machine.root, 'leases') });
+        entry === undefined
+          ? undefined
+          : await runActions(entry, runId, { leasesDir, ports: fakeClonePorts(leasesDir) });
       views[`run-${name}.html`] = renderRun(model, summaryOf(repo, runId), ui({ repo, runId }), VIEWS_NOW, offers);
     }
     const inspectors: [name: string, run: keyof typeof runDirs, key: string, tab: InspectorTab][] = [
@@ -345,5 +357,6 @@ if (import.meta.main) {
   }
   // Last, since a timeline is drawn from a played-back run.
   rmSync(DASHBOARD_VIEWS, { recursive: true, force: true });
-  for (const file of renderDashboardViews(DASHBOARD_VIEWS)) console.log(relative(root, join(DASHBOARD_VIEWS, file)));
+  for (const file of await renderDashboardViews(DASHBOARD_VIEWS))
+    console.log(relative(root, join(DASHBOARD_VIEWS, file)));
 }

@@ -13,6 +13,7 @@ import {
   FAKE_2_ID,
   FAKE_3_ID,
   fake2Dir,
+  fakeClonePorts,
   GOLDEN_RUN_ID,
   type Machine,
   QUEUE_WORKFLOW,
@@ -79,7 +80,7 @@ class FakeHost implements PageHost {
   get(path: string) {
     if (path.endsWith('/actions')) {
       this.actionReads.push(path);
-      return Promise.resolve(this.answer(path));
+      return this.actionsAnswer(path);
     }
     return new Promise<{ status: number; body: string }>((done) => {
       const read = { path, resolve: () => done(this.answer(path)) };
@@ -99,6 +100,17 @@ class FakeHost implements PageHost {
     this.posts.push({ path, body });
     return this.postAnswer;
   }
+  /** What the dashboard would answer for a run's actions. */
+  private async actionsAnswer(path: string): Promise<{ status: number; body: string }> {
+    const [, , , repo = '', , runId = ''] = new URL(path, 'http://dashboard').pathname
+      .split('/')
+      .map(decodeURIComponent);
+    const entry = findRepo(this.machine.registryDir, repo);
+    if (entry === undefined) return { status: 404, body: '' };
+    const leasesDir = join(this.machine.root, 'leases');
+    const offers = await runActions(entry, runId, { leasesDir, ports: fakeClonePorts(leasesDir) });
+    return { status: 200, body: JSON.stringify(offers) };
+  }
   /** What the dashboard would answer for a call's result or log: the file, or 404. */
   private answer(path: string): { status: number; body: string } {
     const given = this.bodies.get(path);
@@ -106,10 +118,6 @@ class FakeHost implements PageHost {
     const url = new URL(path, 'http://dashboard');
     const [, , , repo = '', , runId = '', , key = '', what] = url.pathname.split('/').map(decodeURIComponent);
     const entry = findRepo(this.machine.registryDir, repo);
-    if (url.pathname.endsWith('/actions') && entry !== undefined) {
-      const leasesDir = join(this.machine.root, 'leases');
-      return { status: 200, body: JSON.stringify(runActions(entry, runId, { leasesDir })) };
-    }
     const dir = entry === undefined ? { missing: '' } : findRunDir(entry, runId);
     if (typeof dir !== 'string') return { status: 404, body: '' };
     const name = what === 'result' ? 'result.json' : (STREAMS[url.searchParams.get('stream') ?? ''] ?? '');

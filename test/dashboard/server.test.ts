@@ -24,6 +24,7 @@ import {
   entryOf,
   FAKE_2_ID,
   FAKE_3_ID,
+  fakeClonePorts,
   GOLDEN_RUN,
   GOLDEN_RUN_ID,
   type Machine,
@@ -187,11 +188,19 @@ test("a run's actions route answers what the run offers as JSON, 404 for an unkn
   try {
     const leasesDir = join(seeded.root, 'leases');
     mkdirSync(leasesDir);
-    const started = startDashboard({ registryDir: seeded.registryDir, port: 0, leasesDir });
+    const started = startDashboard({
+      registryDir: seeded.registryDir,
+      port: 0,
+      leasesDir,
+      ports: fakeClonePorts(leasesDir),
+      env: { ...process.env, SAIL_HOME: seeded.sailHome },
+    });
     if ('refused' in started) throw new Error(started.refused);
     servers.push(started);
     const before = treeHash(seeded.root);
     const failed = await get(started, `/api/repos/alpha/runs/${FAKE_2_ID}/actions`);
+    const suspended = await get(started, `/api/repos/beta/runs/${FAKE_3_ID}/actions`);
+    expect(JSON.parse(suspended.body).stop).toEqual({ enabled: true });
     const unknown = await get(started, '/api/repos/alpha/runs/FAKE-0-NOPE/actions');
     expect([failed.status, failed.type, JSON.parse(failed.body)]).toEqual([
       200,
@@ -205,6 +214,11 @@ test("a run's actions route answers what the run offers as JSON, 404 for an unkn
           ],
           stage: 'implement',
           budget: { maxUsd: 25, maxMinutes: 90 },
+        },
+        clean: {
+          enabled: true,
+          removes: ['run ref'],
+          archive: expect.stringMatching(new RegExp(`/failed-runs/\\d{4}-\\d{2}-\\d{2}/${FAKE_2_ID}$`)),
         },
       },
     ]);

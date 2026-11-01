@@ -40,6 +40,7 @@ import { commandFor, itemLine, outcomeOf, streamMark } from '../watch/queue-comm
 import { liveSet, liveWatcher, type RegistryEntry } from '../watch/registry';
 import { lastLine, type SpawnedRun, spawnDetached } from '../watch/spawn';
 import { runActions } from './actions';
+import type { ResolveClonePorts } from './clone-ports';
 import { callFile, containedFile, findRepo, findRunDir, repos, runItems } from './files';
 import { renderMarkdown } from './markdown';
 import { createPage } from './page';
@@ -58,6 +59,8 @@ export interface DashboardOptions {
   env?: Readonly<Record<string, string | undefined>>;
   /** Where branch leases are looked up, instead of the fake workspace's or the machine's. */
   leasesDir?: string;
+  /** The clone's ports, for a clean's checks and a stop or a clean itself. Resolved from its `project.yaml` when left out. */
+  ports?: ResolveClonePorts;
   /** The `sail` a resume or a restart starts: this checkout's when left out. */
   cli?: readonly string[];
   /** How long a start is waited for before it is answered as under way. 120 000 ms by default. */
@@ -334,7 +337,11 @@ async function resumeRoute(starts: Starts, segments: string[], request: Request)
   const { entry, runId, dir } = found;
   const parsed = await bodyOf(request, ResumeBody, 'a resume');
   if (parsed instanceof Response) return parsed;
-  const actions = runActions(entry, runId, { leasesDir: options.leasesDir, env: options.env });
+  const actions = await runActions(entry, runId, {
+    leasesDir: options.leasesDir,
+    env: options.env,
+    ports: options.ports,
+  });
   const { resume } = actions;
   if (resume === undefined || !resume.enabled) {
     return error(409, resume?.why ?? actions.why ?? `run ${runId} offers no resume`);
@@ -383,7 +390,11 @@ async function restartRoute(starts: Starts, segments: string[], request: Request
   const { entry, runId, dir } = found;
   const parsed = await bodyOf(request, RestartBody, 'a restart');
   if (parsed instanceof Response) return parsed;
-  const actions = runActions(entry, runId, { leasesDir: options.leasesDir, env: options.env });
+  const actions = await runActions(entry, runId, {
+    leasesDir: options.leasesDir,
+    env: options.env,
+    ports: options.ports,
+  });
   const { restart } = actions;
   if (restart === undefined || !restart.enabled) {
     return error(409, restart?.why ?? actions.why ?? `run ${runId} offers no restart`);
@@ -466,7 +477,7 @@ function file(runDir: string, path: string, type: string): Response {
 }
 
 /** The answer to a GET of `/api/…`, from the path's decoded segments. */
-function route(options: DashboardOptions, segments: string[], url: URL): Response {
+async function route(options: DashboardOptions, segments: string[], url: URL): Promise<Response> {
   const { registryDir } = options;
   const [api, reposWord, name, kind, runId, part, key, what, ...rest] = segments;
   if (api !== 'api' || reposWord !== 'repos') return error(404, 'no such route');
@@ -479,7 +490,9 @@ function route(options: DashboardOptions, segments: string[], url: URL): Respons
   const runDir = findRunDir(entry, runId);
   if (typeof runDir !== 'string') return error(404, runDir.missing);
   if (part === 'actions' && key === undefined) {
-    return Response.json(runActions(entry, runId, { leasesDir: options.leasesDir, env: options.env }));
+    return Response.json(
+      await runActions(entry, runId, { leasesDir: options.leasesDir, env: options.env, ports: options.ports }),
+    );
   }
   if (part === 'summary' && key === undefined) return file(runDir, join(runDir, 'summary.json'), 'application/json');
   if (part === 'events' && key === undefined) {

@@ -23,6 +23,10 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createFakeWorkspace } from '../../src/adapters/fake/workspace';
+import type { ResolveClonePorts } from '../../src/dashboard/clone-ports';
+import { providerRelay, type ResolvedAdapters } from '../../src/engine/adapters';
+import type { CodeHost } from '../../src/ports/code-host';
 import { copyGoldenRun, GOLDEN_RUN, GOLDEN_RUN_ID } from './golden-run';
 
 export { GOLDEN_RUN, GOLDEN_RUN_ID };
@@ -215,4 +219,24 @@ export function appendStageEnd(runDir: string, key: string, resultPath: string):
     durationMs: 10,
     resultPath,
   });
+}
+
+/**
+ * The ports of a clone for a stop or a clean: the fake workspace on `leasesDir`, whose `branches()` says what `more`
+ * does (neither branch by default, since the fixture clones are no git repositories), and a code host that answers
+ * `pullRequestFrom` as `more.codeHost` does (no open pull request by default).
+ */
+export function fakeClonePorts(
+  leasesDir: string,
+  more: { branches?: { local: boolean; remote: boolean }; codeHost?: Pick<CodeHost, 'pullRequestFrom'> } = {},
+): ResolveClonePorts {
+  return async () => {
+    const workspace = {
+      ...createFakeWorkspace({ repo: join(leasesDir, 'no-repo'), leasesDir }),
+      branches: async () => more.branches ?? { local: false, remote: false },
+    };
+    const adapters = { ports: { workspace }, relay: providerRelay() } as unknown as ResolvedAdapters<'workspace'>;
+    const codeHost = (more.codeHost ?? { pullRequestFrom: async () => undefined }) as CodeHost;
+    return { adapters, codeHost: async () => codeHost };
+  };
 }
