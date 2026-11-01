@@ -45,6 +45,8 @@ export interface UiState {
   queueEvents: boolean;
   /** The answer to the last queue change that wasn't a plain success, shown in the queue view until the next. */
   queueNotice?: string;
+  /** The item whose ⋯ menu is open, by dedup key. */
+  itemMenu?: string;
   /** The item whose drop a first click has armed, by dedup key, which a second click drops. */
   armedDrop?: string;
   /** What was typed in the queue view's add field, and whether Force is ticked, kept across a draw. */

@@ -1569,6 +1569,7 @@ test('the add form shows once the queue stream has polled tickets; add posts the
 test('the first click on drop arms it and posts nothing, the second posts the dedup key, and any other click disarms it (ADW-460)', async () => {
   openBetaQueue();
   const row = { ...BETA, item: 'ticket:FAKE-6' };
+  host.click({ action: 'item-menu', item: row.item });
   host.click({ action: 'drop-item', ...row });
   host.advance(100);
   expect([host.posts, page?.ui.armedDrop, host.regions.main?.includes('confirm drop')]).toEqual([
@@ -1579,18 +1580,66 @@ test('the first click on drop arms it and posts nothing, the second posts the de
   host.click({ action: 'toggle-queue-events' });
   host.advance(100);
   expect([host.posts, page?.ui.armedDrop, host.regions.main?.includes('confirm drop')]).toEqual([[], undefined, false]);
+  host.click({ action: 'item-menu', item: row.item });
   host.click({ action: 'drop-item', ...row });
+  host.click({ action: 'item-menu', item: 'ticket:FAKE-5' });
   host.click({ action: 'drop-item', ...BETA, item: 'ticket:FAKE-5' });
-  expect([host.posts, page?.ui.armedDrop]).toEqual([[], 'ticket:FAKE-5']);
+  expect([host.posts, page?.ui.armedDrop, page?.ui.itemMenu]).toEqual([[], 'ticket:FAKE-5', 'ticket:FAKE-5']);
   host.postAnswer = { status: 200, body: JSON.stringify({ message: 'sail queue: ticket:FAKE-5 dropped' }) };
   host.click({ action: 'drop-item', ...BETA, item: 'ticket:FAKE-5' });
   await settle();
   host.advance(100);
-  expect([host.posts, page?.ui.armedDrop, page?.ui.queueNotice]).toEqual([
+  expect([host.posts, page?.ui.armedDrop, page?.ui.itemMenu, page?.ui.queueNotice]).toEqual([
     [{ path: `${QUEUE_PATH}/drop`, body: { dedupKey: 'ticket:FAKE-5' } }],
+    undefined,
     undefined,
     'sail queue: ticket:FAKE-5 dropped',
   ]);
+});
+
+test("an item's ⋯ opens its menu, one at a time; its ⋯ again, Escape, another control, or its item drawn running shuts it (ADW-464)", () => {
+  openBetaQueue();
+  const menus = () => [page?.ui.itemMenu, host.regions.main?.match(/class="qmenu"/g)?.length ?? 0];
+  expect(menus()).toEqual([undefined, 0]);
+  host.click({ action: 'item-menu', item: 'ticket:FAKE-6' });
+  host.advance(100);
+  expect(menus()).toEqual(['ticket:FAKE-6', 1]);
+  expect(host.regions.main).toContain('data-action="requeue-item"');
+  host.click({ action: 'item-menu', item: 'ticket:FAKE-5' });
+  host.advance(100);
+  expect(menus()).toEqual(['ticket:FAKE-5', 1]);
+  host.click({ action: 'item-menu', item: 'ticket:FAKE-5' });
+  host.advance(100);
+  expect(menus()).toEqual([undefined, 0]);
+  host.click({ action: 'item-menu', item: 'ticket:FAKE-6' });
+  host.click({ action: 'drop-item', ...BETA, item: 'ticket:FAKE-6' });
+  host.press('Escape');
+  host.advance(100);
+  expect([...menus(), page?.ui.armedDrop, page?.ui.queue]).toEqual([undefined, 0, undefined, 'beta/ticket-to-pr']);
+  host.click({ action: 'item-menu', item: 'ticket:FAKE-6' });
+  host.click({ action: 'toggle-queue-events' });
+  host.advance(100);
+  expect(menus()).toEqual([undefined, 0]);
+  host.click({ action: 'item-menu', item: 'ticket:FAKE-6' });
+  const repos = indexMessage().repos.map((repo) => ({
+    ...repo,
+    queues: repo.queues.map((view) =>
+      view.queue === undefined
+        ? view
+        : {
+            ...view,
+            queue: {
+              ...view.queue,
+              items: view.queue.items.map((item) =>
+                item.dedupKey === 'ticket:FAKE-6' ? { ...item, state: 'dispatched' as const } : item,
+              ),
+            },
+          },
+    ),
+  }));
+  host.push(host.open('index')[0], { kind: 'index', repos });
+  host.advance(100);
+  expect(menus()).toEqual([undefined, 0]);
 });
 
 test('an armed drop is disarmed when its item is drawn dispatched, so it asks again once the item can be dropped (review R6)', () => {
