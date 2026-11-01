@@ -1319,12 +1319,13 @@ const buttons = (region: string | undefined) =>
     disabled === undefined ? '' : 'disabled',
   ]);
 
-/** Boots the page on `run` of `repo`, its events replayed and its actions read, and settled. */
+/** Boots the page on `run` of `repo`, its events replayed, its actions read and its ⋯ menu open, and settled. */
 async function openOffering(repo: string, runId: string, dir: string) {
   page = boot(host);
   host.push(host.open('index')[0], indexMessage());
   host.click({ action: 'open', repo, run: runId });
   replay(host.open('run=')[0], dir);
+  host.click({ action: 'run-menu', repo, run: runId });
   await settle();
   host.advance(100);
 }
@@ -1338,17 +1339,17 @@ const settleQueue = () => {
 test("a failed run's view offers Restart with its stages and the failed one chosen, and no Resume; the first click arms it and posts nothing, the second posts the stage and opens the new run", async () => {
   await openOffering('alpha', FAKE_2_ID, fake2Dir(m));
   expect(host.actionReads).toEqual([`${GOLDEN_PATH}/actions`, `${FAKE_2_PATH}/actions`]);
-  expect(buttons(host.regions.main).filter(([, action]) => action?.endsWith('-run'))).toEqual([
+  expect(buttons(host.regions.rail).filter(([, action]) => action?.endsWith('-run'))).toEqual([
     ['restart', 'restart-run', '', ''],
     ['clean', 'clean-run', '', ''],
   ]);
-  expect(host.regions.main).toContain(
+  expect(host.regions.rail).toContain(
     '<option value="implement" title="implement#1 and everything after it, in loop fix from iteration 1" selected>',
   );
   host.click({ action: 'restart-run' });
   host.advance(100);
   expect(host.posts).toEqual([]);
-  expect(buttons(host.regions.main).find(([, action]) => action === 'restart-run')).toEqual([
+  expect(buttons(host.regions.rail).find(([, action]) => action === 'restart-run')).toEqual([
     'confirm restart from implement · budget $25.00',
     'restart-run',
     'armed',
@@ -1371,14 +1372,14 @@ test('a stage chosen in the list is the one a restart is armed and posted with, 
   host.fields.stage = 'spec';
   host.click({ action: 'restart-run' });
   host.advance(100);
-  expect(buttons(host.regions.main).find(([, action]) => action === 'restart-run')?.[0]).toBe(
+  expect(buttons(host.regions.rail).find(([, action]) => action === 'restart-run')?.[0]).toBe(
     'confirm restart from spec · budget $25.00',
   );
   host.fields.stage = 'implement';
   host.click({ action: 'restart-run' });
   host.advance(100);
   expect(host.posts).toEqual([]);
-  expect(buttons(host.regions.main).find(([, action]) => action === 'restart-run')?.[0]).toBe(
+  expect(buttons(host.regions.rail).find(([, action]) => action === 'restart-run')?.[0]).toBe(
     'confirm restart from implement · budget $25.00',
   );
   host.click({ action: 'restart-run' });
@@ -1396,16 +1397,16 @@ test("a refusal is shown beside the buttons in the dashboard's words and disarms
   host.click({ action: 'restart-run' });
   await settle();
   host.advance(100);
-  expect(host.regions.main).toContain(
+  expect(host.regions.rail).toContain(
     '<span class="warnchip">sail run: branch sail/x is leased by run FAKE-9-Y</span>',
   );
-  expect(buttons(host.regions.main).find(([, action]) => action === 'restart-run')?.[0]).toBe('restart');
+  expect(buttons(host.regions.rail).find(([, action]) => action === 'restart-run')?.[0]).toBe('restart');
   host.postAnswer = { status: 0, body: '' };
   host.click({ action: 'restart-run' });
   host.click({ action: 'restart-run' });
   await settle();
   host.advance(100);
-  expect(host.regions.main).toContain(
+  expect(host.regions.rail).toContain(
     '<span class="warnchip">the restart could not be sent: the dashboard did not answer</span>',
   );
   expect(page?.ui.runId).toBe(FAKE_2_ID);
@@ -1416,28 +1417,71 @@ test('any other click disarms an armed button', async () => {
   host.click({ action: 'restart-run' });
   host.click({ action: 'toggle-theme' });
   host.advance(100);
-  expect(buttons(host.regions.main).find(([, action]) => action === 'restart-run')?.[0]).toBe('restart');
+  expect([page?.ui.runMenu, host.regions.rail?.includes('class="r-menu"')]).toEqual([undefined, false]);
+  host.click({ action: 'run-menu', repo: 'alpha', run: FAKE_2_ID });
+  host.advance(100);
+  expect(buttons(host.regions.rail).find(([, action]) => action === 'restart-run')?.[0]).toBe('restart');
   host.click({ action: 'restart-run' });
   await settle();
   expect(host.posts).toEqual([]);
 });
 
+test("a run's ⋯ opens the run and its menu under its row, reading what it offers; its ⋯ again or Escape shuts it, and another run's ⋯ moves it there (ADW-466)", async () => {
+  page = boot(host);
+  host.push(host.open('index')[0], indexMessage());
+  await settle();
+  host.advance(100);
+  expect(host.regions.rail).not.toContain('class="r-menu"');
+  host.click({ action: 'run-menu', repo: 'alpha', run: FAKE_2_ID });
+  host.advance(100);
+  expect([page?.ui.runId, page?.ui.runMenu]).toEqual([FAKE_2_ID, FAKE_2_ID]);
+  expect(host.regions.rail).toContain(
+    '<div class="r-menu"><span class="act-why">reading what the run offers…</span></div>',
+  );
+  await settle();
+  host.advance(100);
+  expect(buttons(host.regions.rail).map(([label]) => label)).toEqual(['restart', 'clean']);
+  expect(host.regions.main).not.toContain('data-action="restart-run"');
+  host.click({ action: 'run-menu', repo: 'alpha', run: FAKE_2_ID });
+  host.advance(100);
+  expect([page?.ui.runId, page?.ui.runMenu, host.regions.rail?.includes('class="r-menu"')]).toEqual([
+    FAKE_2_ID,
+    undefined,
+    false,
+  ]);
+  host.click({ action: 'run-menu', repo: 'alpha', run: FAKE_2_ID });
+  host.click({ action: 'restart-run' });
+  host.press('Escape');
+  host.advance(100);
+  expect([page?.ui.runId, page?.ui.runMenu, page?.ui.armed]).toEqual([FAKE_2_ID, undefined, undefined]);
+  host.click({ action: 'run-menu', repo: 'alpha', run: FAKE_2_ID });
+  host.click({ action: 'run-menu', repo: 'alpha', run: GOLDEN_RUN_ID });
+  await settle();
+  host.advance(100);
+  expect([page?.ui.runId, page?.ui.runMenu, host.regions.rail?.match(/class="r-menu"/g)?.length]).toEqual([
+    GOLDEN_RUN_ID,
+    GOLDEN_RUN_ID,
+    1,
+  ]);
+  expect(host.regions.rail).toContain(`<div class="r-menu"><span class="act-why">run ${GOLDEN_RUN_ID} completed`);
+});
+
 test('a suspended run over its dollars offers Resume with a raise field and no Restart; with no raise typed a click gives a notice, and with one the second click posts it and reads the run again', async () => {
   settleQueue();
   await openOffering('beta', FAKE_3_ID, m.beta.runDir);
-  expect(host.regions.main).toContain('name="raise"');
-  expect(buttons(host.regions.main).filter(([, action]) => action?.endsWith('-run'))).toEqual([
+  expect(host.regions.rail).toContain('name="raise"');
+  expect(buttons(host.regions.rail).filter(([, action]) => action?.endsWith('-run'))).toEqual([
     ['resume', 'resume-run', '', ''],
     ['stop', 'stop-run', '', ''],
   ]);
   host.click({ action: 'resume-run' });
   host.advance(100);
   expect([host.posts, page?.ui.armed]).toEqual([[], undefined]);
-  expect(host.regions.main).toContain('give the dollars to raise the budget by: at least 0.01');
+  expect(host.regions.rail).toContain('give the dollars to raise the budget by: at least 0.01');
   host.fields.raise = '5';
   host.click({ action: 'resume-run' });
   host.advance(100);
-  expect(buttons(host.regions.main).find(([, action]) => action === 'resume-run')?.[0]).toBe(
+  expect(buttons(host.regions.rail).find(([, action]) => action === 'resume-run')?.[0]).toBe(
     'confirm resume · spent $1.06 of $1.00',
   );
   const before = host.open('run=')[0];
@@ -1453,12 +1497,12 @@ test('a suspended run over its dollars offers Resume with a raise field and no R
 test('a run the watcher has is offered Resume disabled with the reason, and a click posts nothing', async () => {
   await openOffering('beta', FAKE_3_ID, m.beta.runDir);
   expect(
-    buttons(host.regions.main).filter(
+    buttons(host.regions.rail).filter(
       ([, action]) => action === undefined && ['resume', 'restart'].includes(action ?? ''),
     ),
   ).toEqual([]);
-  expect(host.regions.main).toContain('<button class="btn" disabled>resume</button>');
-  expect(host.regions.main).toContain('ticket-to-pr&#39;s watcher has this run: ticket:FAKE-3 is dispatched');
+  expect(host.regions.rail).toContain('<button class="btn" disabled>resume</button>');
+  expect(host.regions.rail).toContain('ticket-to-pr&#39;s watcher has this run: ticket:FAKE-3 is dispatched');
   host.click({ action: 'resume-run' });
   host.click({ action: 'resume-run' });
   await settle();
@@ -1474,7 +1518,7 @@ test("the open run's actions are read again when the index shows its status chan
   host.advance(100);
   expect(host.actionReads).toEqual([`${GOLDEN_PATH}/actions`, `${FAKE_2_PATH}/actions`, `${FAKE_2_PATH}/actions`]);
   expect(page?.ui.armed).toBeUndefined();
-  expect(host.regions.main).toContain(`run ${FAKE_2_ID} is running`);
+  expect(host.regions.rail).toContain(`run ${FAKE_2_ID} is running`);
   host.push(host.open('index')[0], indexMessage());
   await settle();
   expect(host.actionReads).toHaveLength(3);
@@ -1491,11 +1535,11 @@ test("a stage chosen and a raise typed on one run don't carry over to the next o
   host.advance(100);
   expect([page?.ui.restartStage, page?.ui.raise]).toEqual([undefined, undefined]);
   host.fields = {};
-  host.click({ action: 'select-run', repo: 'alpha', run: FAKE_2_ID });
+  host.click({ action: 'run-menu', repo: 'alpha', run: FAKE_2_ID });
   replay(host.open('run=')[0], fake2Dir(m));
   await settle();
   host.advance(100);
-  expect(host.regions.main).toContain(
+  expect(host.regions.rail).toContain(
     '<option value="implement" title="implement#1 and everything after it, in loop fix from iteration 1" selected>',
   );
 });
@@ -1696,7 +1740,7 @@ test('Stop arms on a first click and posts { now: false } on the second, shows t
   host.click({ action: 'stop-run' });
   host.advance(100);
   expect(host.posts).toEqual([]);
-  expect(buttons(host.regions.main).find(([, action]) => action === 'stop-run')).toEqual([
+  expect(buttons(host.regions.rail).find(([, action]) => action === 'stop-run')).toEqual([
     'confirm stop · at its next call boundary',
     'stop-run',
     'armed',
@@ -1710,7 +1754,7 @@ test('Stop arms on a first click and posts { now: false } on the second, shows t
   await settle();
   host.advance(100);
   expect(host.posts).toEqual([{ path: `${FAKE_3_PATH}/stop`, body: { now: false } }]);
-  expect(host.regions.main).toContain(
+  expect(host.regions.rail).toContain(
     `<span class="warnchip">run ${FAKE_3_ID} stops at its next call boundary (pid 7)</span>`,
   );
   expect(host.actionReads.filter((path) => path === `${FAKE_3_PATH}/actions`).length).toBeGreaterThan(1);
@@ -1722,7 +1766,7 @@ test('with Stop now ticked, the confirmation says so and the post is { now: true
   host.fields.now = 'on';
   host.click({ action: 'stop-run' });
   host.advance(100);
-  expect(buttons(host.regions.main).find(([, action]) => action === 'stop-run')?.[0]).toBe(
+  expect(buttons(host.regions.rail).find(([, action]) => action === 'stop-run')?.[0]).toBe(
     'confirm stop now · ends its running call',
   );
   host.postAnswer = { status: 202, body: JSON.stringify({ message: 'run X ends its running call now (pid 7)' }) };
@@ -1740,11 +1784,11 @@ test('ticking Stop now once Stop is armed keeps it armed and makes it say so (re
   host.click({ action: 'stop-now' });
   host.advance(100);
   expect(
-    buttons(host.regions.main)
+    buttons(host.regions.rail)
       .find(([, action]) => action === 'stop-run')
       ?.slice(0, 3),
   ).toEqual(['confirm stop now · ends its running call', 'stop-run', 'armed']);
-  expect(host.regions.main).toContain('data-action="stop-now" checked');
+  expect(host.regions.rail).toContain('data-action="stop-now" checked');
   expect(host.posts).toEqual([]);
 });
 
@@ -1753,7 +1797,7 @@ test('Clean arms with what it removes, posts {} on the second click, and leaves 
   host.click({ action: 'clean-run' });
   host.advance(100);
   expect(host.posts).toEqual([]);
-  expect(buttons(host.regions.main).find(([, action]) => action === 'clean-run')?.[0]).toStartWith(
+  expect(buttons(host.regions.rail).find(([, action]) => action === 'clean-run')?.[0]).toStartWith(
     'confirm clean · removes run ref · run directory -&gt; ',
   );
   const cleaned = `cleaned ${FAKE_2_ID}: run ref; run directory -> ~/.sail/failed-runs/2026-11-01/${FAKE_2_ID}`;
@@ -1777,13 +1821,14 @@ test('a refused Stop or Clean shows its error beside the buttons and disarms, an
   host.click({ action: 'clean-run' });
   await settle();
   host.advance(100);
-  expect(host.regions.main).toContain('<span class="warnchip">run X: a queue item names it</span>');
-  expect(buttons(host.regions.main).find(([, action]) => action === 'clean-run')?.[0]).toBe('clean');
+  expect(host.regions.rail).toContain('<span class="warnchip">run X: a queue item names it</span>');
+  expect(buttons(host.regions.rail).find(([, action]) => action === 'clean-run')?.[0]).toBe('clean');
   expect(page?.ui.runId).toBe(FAKE_2_ID);
   host.click({ action: 'clean-run' });
   host.click({ action: 'toggle-theme' });
+  host.click({ action: 'run-menu', repo: 'alpha', run: FAKE_2_ID });
   host.advance(100);
-  expect(buttons(host.regions.main).find(([, action]) => action === 'clean-run')?.[0]).toBe('clean');
+  expect(buttons(host.regions.rail).find(([, action]) => action === 'clean-run')?.[0]).toBe('clean');
   host.click({ action: 'clean-run' });
   await settle();
   expect(host.posts).toHaveLength(1);

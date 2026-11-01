@@ -56,6 +56,8 @@ export interface UiState {
   /** What was typed in the queue view's add field, and whether Force is ticked, kept across a draw. */
   addTicket?: string | undefined;
   addForce?: boolean;
+  /** The open run whose ⋯ menu is open in the rail, by run id. */
+  runMenu?: string;
   /** The run action a first click has armed, which a second click makes. */
   armed?: 'resume' | 'restart' | 'stop' | 'clean';
   /** Why the last run action was refused, or what it did or that it is under way, shown beside the buttons. */

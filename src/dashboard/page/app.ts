@@ -33,7 +33,8 @@
 // a refusal or that the watcher has not taken the command yet, is shown beside the queue's header. `resume-run` and
 // `restart-run` ask it to start a suspended run again or a failed
 // run as a seeded one, each on a second click: what the open run offers is read from its actions route when it opens
-// and when the index changes its status or its queue item, and the page draws it. A refusal is shown beside the buttons; a
+// and when the index changes its status or its queue item, and the rail draws it in the menu a run's ⋯ (`run-menu`)
+// opens under its row, opening the run. A refusal is shown beside the buttons; a
 // started restart opens the new run, and a started resume reads the run again. `stop-run` and `clean-run` ask it to stop
 // a running or suspended run (with Stop now ticked, at once) or to clean a failed one, each on a second click: a stop
 // shows its answer beside the buttons and reads the run again, and a clean leaves the run and shows its answer in the
@@ -217,10 +218,18 @@ export function boot(host: PageHost): Page {
   const opened = () => (ui.timeline ? selected() : undefined);
 
   const draw: Record<Region, () => string> = {
-    rail: () =>
-      index === undefined
-        ? html`<div class="qempty">connecting…</div>`.value
-        : renderRail(railRepos(index, host.now()), ui, host.now()).value,
+    rail: () => {
+      if (index === undefined) return html`<div class="qempty">connecting…</div>`.value;
+      // A raise typed and a stage chosen in the open run's menu survive the draw, but not a switch of run.
+      if (fieldsOwn) {
+        ui.raise = host.value('raise') ?? ui.raise;
+        ui.restartStage = host.value('stage') ?? ui.restartStage;
+        const now = host.value('now');
+        if (now !== undefined) ui.stopNow = now !== '';
+      }
+      fieldsOwn = true;
+      return renderRail(railRepos(index, host.now()), ui, host.now(), offers).value;
+    },
     attention: () => renderAttention(index === undefined ? [] : attention(index), ui.attention).value,
     main: () => {
       const panel = openQueue();
@@ -241,18 +250,10 @@ export function boot(host: PageHost): Page {
       }
       if (run === undefined) return html`<div class="qempty">no run selected</div>`.value;
       const error = run.error === undefined ? '' : html`<div class="code bad">${run.error}</div>`;
-      // A raise typed and a stage chosen survive the draw, but not a switch of run.
-      if (fieldsOwn) {
-        ui.raise = host.value('raise') ?? ui.raise;
-        ui.restartStage = host.value('stage') ?? ui.restartStage;
-        const now = host.value('now');
-        if (now !== undefined) ui.stopNow = now !== '';
-      }
-      fieldsOwn = true;
       const card = opened();
       const view =
         card === undefined
-          ? renderRun(run.model, summaryOf(run), ui, host.now(), offers)
+          ? renderRun(run.model, summaryOf(run), ui, host.now())
           : renderTimeline(card, ui, host.now(), outputs);
       return html`${error}${view}`.value;
     },
@@ -597,7 +598,7 @@ export function boot(host: PageHost): Page {
           // An answer that isn't JSON offers nothing.
         }
       }
-      mark('main');
+      mark('rail');
     });
   };
 
@@ -614,6 +615,7 @@ export function boot(host: PageHost): Page {
     ui.cursor = 0;
     run = { repo, runId, model: emptyRun(), ended: false };
     offers = undefined;
+    delete ui.runMenu;
     delete ui.armed;
     delete ui.runNotice;
     delete ui.raise;
@@ -781,7 +783,7 @@ export function boot(host: PageHost): Page {
       if (ui.raise === undefined || ui.raise.trim() === '' || !Number.isFinite(amount) || amount < 0.01) {
         delete ui.armed;
         ui.runNotice = `give the ${raising === 'usd' ? 'dollars' : 'minutes'} to raise the budget by: at least 0.01`;
-        mark('main');
+        mark('rail');
         return;
       }
       body = { raise: { [raising]: amount } };
@@ -790,13 +792,13 @@ export function boot(host: PageHost): Page {
       ui.armed = kind;
       armedStage = stage;
       delete ui.runNotice;
-      mark('main');
+      mark('rail');
       return;
     }
     delete ui.armed;
     starting = true;
     ui.runNotice = `${kind === 'resume' ? 'resuming' : 'restarting'} ${open.runId}…`;
-    mark('main');
+    mark('rail');
     void host
       .post(`/api/repos/${enc(open.repo)}/runs/${enc(open.runId)}/${kind}`, body)
       .then(({ status, body: answer }) => {
@@ -804,7 +806,7 @@ export function boot(host: PageHost): Page {
         if (stopped) return;
         if (status < 200 || status >= 300) {
           ui.runNotice = refusal(status, answer, kind);
-          mark('main');
+          mark('rail');
           return;
         }
         delete ui.runNotice;
@@ -820,7 +822,7 @@ export function boot(host: PageHost): Page {
         } catch {
           // An answer with no run id leaves the run open.
         }
-        mark('main');
+        mark('rail');
       });
   };
 
@@ -836,13 +838,13 @@ export function boot(host: PageHost): Page {
     if (ui.armed !== kind) {
       ui.armed = kind;
       delete ui.runNotice;
-      mark('main');
+      mark('rail');
       return;
     }
     delete ui.armed;
     starting = true;
     ui.runNotice = `${kind === 'stop' ? 'stopping' : 'cleaning'} ${open.runId}…`;
-    mark('main');
+    mark('rail');
     void host
       .post(
         `/api/repos/${enc(open.repo)}/runs/${enc(open.runId)}/${kind}`,
@@ -853,7 +855,7 @@ export function boot(host: PageHost): Page {
         if (stopped) return;
         if (status < 200 || status >= 300) {
           ui.runNotice = refusal(status, answer, kind);
-          mark('main');
+          mark('rail');
           return;
         }
         delete ui.runNotice;
@@ -866,8 +868,11 @@ export function boot(host: PageHost): Page {
           mark('rail', 'main', 'inspector', 'status');
           return;
         }
+        const menu = ui.runMenu;
         closeRun();
         selectRun(open.repo, open.runId);
+        // The menu the stop was made from stays open on the run read again, with the answer.
+        if (menu !== undefined) ui.runMenu = menu;
         if (message !== undefined) ui.runNotice = message;
       });
   };
@@ -1032,7 +1037,21 @@ export function boot(host: PageHost): Page {
     // Ticking Stop now redraws an armed Stop's confirmation, which names what it will do.
     'stop-now': () => {
       ui.stopNow = host.value('now') === 'on';
-      mark('main');
+      mark('rail');
+    },
+    // A run's ⋯ opens it and its menu under its row; on the open menu's run, it shuts the menu.
+    'run-menu': (data) => {
+      const { repo, run: runId } = data;
+      if (repo === undefined || runId === undefined) return;
+      if (ui.runMenu === runId && ui.queue === undefined && run?.repo === repo && run.runId === runId) {
+        delete ui.runMenu;
+        delete ui.armed;
+        mark('rail');
+        return;
+      }
+      actions['select-run']?.(data);
+      ui.runMenu = runId;
+      mark('rail');
     },
     'toggle-queue-events': () => {
       ui.queueEvents = !ui.queueEvents;
@@ -1079,7 +1098,11 @@ export function boot(host: PageHost): Page {
     // Needs attention and the drawer shut first; then back to the cards from a timeline, keeping the selection; from
     // the cards, no selection.
     Escape: () => {
-      if (ui.itemMenu !== undefined) {
+      if (ui.runMenu !== undefined) {
+        delete ui.runMenu;
+        delete ui.armed;
+        mark('rail');
+      } else if (ui.itemMenu !== undefined) {
         delete ui.itemMenu;
         delete ui.armedDrop;
         mark('main');
@@ -1096,12 +1119,17 @@ export function boot(host: PageHost): Page {
 
   host.onAction((action, data) => {
     // A click on anything but a run action disarms it, and on anything but a drop disarms that. An item's menu shuts on
-    // any click but its ⋯, which toggles it, and the drop that arms.
+    // any click but its ⋯, which toggles it, and the drop that arms. A run's menu shuts on any click but a run action
+    // and a run's ⋯, which handles its own.
     const runAction = ['resume-run', 'restart-run', 'stop-run', 'stop-now', 'clean-run'].includes(action);
     const shuts =
       ui.itemMenu !== undefined && action !== 'item-menu' && !(action === 'drop-item' && ui.armedDrop !== data.item);
+    const shutsRun = ui.runMenu !== undefined && !runAction && action !== 'run-menu';
     const disarms =
-      (ui.armed !== undefined && !runAction) || (ui.armedDrop !== undefined && action !== 'drop-item') || shuts;
+      (ui.armed !== undefined && !runAction) ||
+      (ui.armedDrop !== undefined && action !== 'drop-item') ||
+      shuts ||
+      shutsRun;
     if (ui.armed !== undefined && !runAction) delete ui.armed;
     if (ui.armedDrop !== undefined && action !== 'drop-item') delete ui.armedDrop;
     if (ui.armedWatch !== undefined && action !== 'watch-set') {
@@ -1109,7 +1137,8 @@ export function boot(host: PageHost): Page {
       mark('rail');
     }
     if (shuts) delete ui.itemMenu;
-    if (disarms) mark('main');
+    if (shutsRun) delete ui.runMenu;
+    if (disarms) mark('main', 'rail');
     actions[action]?.(data);
   });
   host.onKey((key, inInput) => {

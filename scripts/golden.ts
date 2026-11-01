@@ -35,7 +35,7 @@ import { renderInspector } from '../src/dashboard/page/inspector-view';
 import { queueId, renderQueue } from '../src/dashboard/page/queue-view';
 import { renderRail } from '../src/dashboard/page/rail-view';
 import { foldRun } from '../src/dashboard/page/run-model';
-import { renderRun } from '../src/dashboard/page/run-view';
+import { renderRun, runControls } from '../src/dashboard/page/run-view';
 import { renderTimeline } from '../src/dashboard/page/timeline-view';
 import { type InspectorTab, initialUi, type UiState } from '../src/dashboard/page/ui-state';
 import { resolveAdapters } from '../src/engine/adapters';
@@ -281,7 +281,12 @@ export async function renderDashboardViews(outDir: string): Promise<string[]> {
         entry === undefined
           ? undefined
           : await runActions(entry, runId, { leasesDir, ports: fakeClonePorts(leasesDir) });
-      views[`run-${name}.html`] = renderRun(model, summaryOf(repo, runId), ui({ repo, runId }), VIEWS_NOW, offers);
+      views[`run-${name}.html`] = renderRun(model, summaryOf(repo, runId), ui({ repo, runId }), VIEWS_NOW);
+      // What a run offers shows in the rail, under its row, once its ⋯ is opened.
+      if (offers !== undefined && runControls(offers, ui()) !== undefined) {
+        const open = ui({ repo, runId, runMenu: runId });
+        views[`rail-menu-${name}.html`] = renderRail(railRepos(repos, VIEWS_NOW), open, VIEWS_NOW, offers);
+      }
     }
     const inspectors: [name: string, run: keyof typeof runDirs, key: string, tab: InspectorTab][] = [
       ['inspector-fake-2-implement-1-permissions.html', 'fake-2', 'implement#1', 'permissions'],
