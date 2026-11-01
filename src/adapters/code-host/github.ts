@@ -229,6 +229,18 @@ export function createGitHubCodeHost(options: GitHubCodeHostOptions): CodeHost {
           .sort((a, b) => a.number - b.number)
           .map(toPullRequest);
       }),
+    pullRequestFrom: (branch) =>
+      guarded(async () => {
+        const open = await paged<GitHubPull>('pullRequestFrom', client.repoPath('pulls'), {
+          state: 'open',
+          head: `${owner}:${branch}`,
+        });
+        // Checked again here: a fork's pull request is never the branch's.
+        const found = open.find(
+          (node) => node.state === 'open' && node.head.ref === branch && !isFork(node, `${owner}/${repo}`),
+        );
+        return found === undefined ? undefined : toPullRequest(found);
+      }),
     getPullRequest: (number) =>
       guarded(async () => {
         const node = await client.request<GitHubPull>('getPullRequest', 'GET', client.repoPath('pulls', number));

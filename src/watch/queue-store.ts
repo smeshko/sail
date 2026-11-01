@@ -318,6 +318,23 @@ export function readQueue(runsDir: string, workflow: string): QueueFile | undefi
   return existsSync(path) ? readQueueFile(path) : undefined;
 }
 
+/** The items of every queue under `runsDir` that name run `runId`, in any state. A queue that can't be read refuses. */
+export function queueItemsNaming(
+  runsDir: string,
+  runId: string,
+): { workflow: string; item: QueueItem }[] | { refused: string } {
+  const root = join(runsDir, QUEUE_DIR);
+  if (!existsSync(root)) return [];
+  const found: { workflow: string; item: QueueItem }[] = [];
+  for (const workflow of readdirSync(root).sort()) {
+    const queue = readQueue(runsDir, workflow);
+    if (queue === undefined) continue;
+    if ('refused' in queue) return queue;
+    for (const item of queue.items) if (item.runId === runId) found.push({ workflow, item });
+  }
+  return found;
+}
+
 /** Opens `workflow`'s queue, an empty one when it has no `queue.json` yet. One that can't be read refuses. */
 export function openQueue(options: OpenQueueOptions): QueueStore | { refused: string } {
   const { workflow, label, now } = options;

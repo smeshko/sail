@@ -261,6 +261,11 @@ export function createFakeCodeHost(options: FakeCodeHostOptions): CodeHost {
         .sort((a, b) => a.number - b.number)
         .map((pr) => toPullRequest(world, pr));
     },
+    async pullRequestFrom(branch) {
+      const world = store.read();
+      const open = world.pullRequests.find((pr) => pr.state === 'open' && pr.head === branch && pr.fork !== true);
+      return open === undefined ? undefined : toPullRequest(world, open);
+    },
     async getPullRequest(number) {
       const world = store.read();
       return details(world, find(world, 'getPullRequest', number));

@@ -355,6 +355,7 @@ export default {
     parseRef: () => undefined,
     push: async () => ({ branch: 7, headSha: 'abc', raw: null }),
     openPullRequest: nothing,
+    pullRequestFrom: nothing,
     listDesignated: nothing,
     getPullRequest: nothing,
     checks: nothing,

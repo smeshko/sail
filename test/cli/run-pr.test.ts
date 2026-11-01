@@ -191,6 +191,7 @@ export default {
     parseRef: () => 12,
     push: nothing,
     openPullRequest: nothing,
+    pullRequestFrom: nothing,
     listDesignated: nothing,
     getPullRequest: nothing,
     checks: nothing,

@@ -492,3 +492,32 @@ test('a seed with unavailable.push 2 fails the first two pushes as unavailable a
     expect(r.git('rev-parse', 'refs/heads/sail/FAKE-30')).toBe(head);
   });
 });
+
+test('pullRequestFrom returns the open pull request from a branch, a draft included', async () => {
+  const host = createFakeCodeHost(
+    files((seed) => {
+      seed.pullRequests.push(
+        seeded(5, { head: 'sail/FAKE-5-open' }),
+        seeded(6, { head: 'sail/FAKE-6-draft', draft: true }),
+      );
+    }),
+  );
+  expect((await host.pullRequestFrom('sail/FAKE-5-open'))?.number).toBe(5);
+  expect((await host.pullRequestFrom('sail/FAKE-6-draft'))?.number).toBe(6);
+});
+
+test('pullRequestFrom gives undefined for a closed pull request, a fork, a branch with none, and a different branch', async () => {
+  const host = createFakeCodeHost(
+    files((seed) => {
+      seed.pullRequests.push(
+        seeded(5, { head: 'sail/FAKE-5-closed', state: 'closed' }),
+        seeded(6, { head: 'sail/FAKE-6-fork', fork: true }),
+        seeded(7, { head: 'sail/FAKE-7-open' }),
+      );
+    }),
+  );
+  expect(await host.pullRequestFrom('sail/FAKE-5-closed')).toBeUndefined();
+  expect(await host.pullRequestFrom('sail/FAKE-6-fork')).toBeUndefined();
+  expect(await host.pullRequestFrom('sail/FAKE-7')).toBeUndefined();
+  expect(await host.pullRequestFrom('sail/none')).toBeUndefined();
+});

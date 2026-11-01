@@ -1723,3 +1723,25 @@ test("with the pulls list and a pull request's comments answered 401 echoing the
     redacted: true,
   });
 });
+
+test('pullRequestFrom asks for the open pull requests from owner:branch and returns the one it finds', async () => {
+  const on = world();
+  const found = await host(on).pullRequestFrom('sail/designated');
+  expect({ number: found?.number, head: found?.head, routes: on.routes() }).toEqual({
+    number: 7,
+    head: 'sail/designated',
+    routes: ['GET /repos/o/r/pulls?state=open&head=o%3Asail%2Fdesignated&per_page=100&page=1'],
+  });
+});
+
+test('pullRequestFrom gives undefined when the branch has no open pull request', async () => {
+  const on = world();
+  expect(await host(on).pullRequestFrom('sail/nothing-here')).toBeUndefined();
+});
+
+test("pullRequestFrom never returns a fork's pull request", async () => {
+  const on = world({
+    pullRequests: [{ number: 13, head: 'sail/forked', labels: ['sail'], fork: true, headSha: 'a'.repeat(40) }],
+  });
+  expect(await host(on).pullRequestFrom('sail/forked')).toBeUndefined();
+});
