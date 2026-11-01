@@ -588,12 +588,14 @@ async function route(options: DashboardOptions, segments: string[], url: URL): P
   if (kind !== 'runs') return error(404, 'no such route');
   if (runId === undefined) return Response.json(runItems(entry));
   const runDir = findRunDir(entry, runId);
-  if (typeof runDir !== 'string') return error(404, runDir.missing);
+  // A dispatched run still starting has no run directory yet, but its actions offer Stop.
   if (part === 'actions' && key === undefined) {
+    if (typeof runDir !== 'string' && !startingRun(runsDir(entry.sailDir), runId)) return error(404, runDir.missing);
     return Response.json(
       await runActions(entry, runId, { leasesDir: options.leasesDir, env: options.env, ports: options.ports }),
     );
   }
+  if (typeof runDir !== 'string') return error(404, runDir.missing);
   if (part === 'summary' && key === undefined) return file(runDir, join(runDir, 'summary.json'), 'application/json');
   if (part === 'events' && key === undefined) {
     return file(runDir, join(runDir, 'events.ndjson'), 'application/x-ndjson');

@@ -823,6 +823,17 @@ test('a POST to stop a run that has ended is 409 with the engine words', async (
   ]);
 });
 
+test('the actions route offers Stop for a dispatched run still starting, with no run directory yet (review R2)', async () => {
+  m = seedFixtures();
+  const startingId = 'FAKE-5-01M3BWNZM08Q4T6V2XRJ5KWD9Z';
+  const file = join(queueDirOf(m), 'queue.json');
+  writeFileSync(file, readFileSync(file, 'utf8').replace(`"runId": "${FAKE_3_ID}"`, `"runId": "${startingId}"`));
+  const server = startPorts();
+  const offers = await get(server, `/api/repos/beta/runs/${startingId}/actions`);
+  expect([offers.status, JSON.parse(offers.body)]).toEqual([200, { stop: { enabled: true } }]);
+  expect((await get(server, '/api/repos/beta/runs/FAKE-0-NOPE/actions')).status).toBe(404);
+});
+
 test('a POST to stop a run the repository lacks is 409 with the engine words, and a repository it lacks 404', async () => {
   m = seedFixtures();
   const server = startPorts();
