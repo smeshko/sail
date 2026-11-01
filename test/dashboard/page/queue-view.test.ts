@@ -93,13 +93,14 @@ test('a folded section draws only its heading and count, without its items, whil
   expect(markup.match(/<button class="qsec grp-t open"/g)).toHaveLength(3);
 });
 
-test('a failed item whose run ended shows its requeue and drop buttons, and a queue with no items says it is empty', () => {
+test('a failed item whose run ended shows its requeue and drop buttons in its open menu, and a queue with no items says it is empty', () => {
   const [panel] = queuePanels(index(m.registryDir));
   if (panel === undefined) throw new Error('beta has no queue');
   const failed = panel.items.map((item) =>
     item.state === 'parked' ? { ...item, state: 'failed' as const, runEnded: true } : item,
   );
-  const markup = renderQueue({ ...panel, items: failed }, undefined, initialUi(0), NOW).value;
+  const ui = { ...initialUi(0), itemMenu: 'ticket:FAKE-6' };
+  const markup = renderQueue({ ...panel, items: failed }, undefined, ui, NOW).value;
   expect(markup).toContain('<span class="caret">›</span>failed · 1</button><div class="qbox">');
   expect(markup).toContain('data-action="requeue-item"');
   expect(renderQueue({ ...panel, items: [] }, undefined, initialUi(0), NOW).value).toContain(
@@ -327,7 +328,7 @@ function controls(markup: string): string[] {
   });
 }
 
-test('each state shows the buttons it is given: queued, parked and done drop; failed requeues only when its run ended; a dispatched item has none', () => {
+test('each state shows the buttons its open menu is given: queued, parked and done drop; failed requeues only when its run ended; a dispatched item has no ⋯', () => {
   const [panel] = queuePanels(index(m.registryDir));
   if (panel === undefined) throw new Error('beta has no queue');
   const item = (state: 'failed', runEnded: boolean, key: string) => ({
@@ -339,8 +340,11 @@ test('each state shows the buttons it is given: queued, parked and done drop; fa
     item('failed', false, 'ticket:FAKE-8'),
     item('failed', true, 'ticket:FAKE-9'),
   ] as typeof panel.items;
-  const markup = renderQueue({ ...panel, items }, undefined, initialUi(0), NOW).value;
-  expect(controls(markup).sort()).toEqual([
+  const opened = (key: string) =>
+    controls(renderQueue({ ...panel, items }, undefined, { ...initialUi(0), itemMenu: key }, NOW).value).find((row) =>
+      row.startsWith(`${key}:`),
+    );
+  expect(items.map((each) => opened(each.dedupKey)).sort()).toEqual([
     'ticket:FAKE-3: ',
     'ticket:FAKE-4: drop-item drop',
     'ticket:FAKE-5: drop-item drop',
@@ -348,6 +352,19 @@ test('each state shows the buttons it is given: queued, parked and done drop; fa
     'ticket:FAKE-8: drop-item drop',
     'ticket:FAKE-9: requeue-item requeue, drop-item drop',
   ]);
+  const closed = renderQueue({ ...panel, items }, undefined, initialUi(0), NOW).value;
+  expect(controls(closed).filter((row) => !row.endsWith(': '))).toEqual([]);
+  expect([...closed.matchAll(/data-action="item-menu" data-item="([^"]+)"/g)].map(([, key]) => key).sort()).toEqual([
+    'ticket:FAKE-4',
+    'ticket:FAKE-5',
+    'ticket:FAKE-6',
+    'ticket:FAKE-8',
+    'ticket:FAKE-9',
+  ]);
+  const markup = renderQueue({ ...panel, items }, undefined, { ...initialUi(0), itemMenu: 'ticket:FAKE-6' }, NOW).value;
+  expect(markup).toContain(
+    '<span class="qmore"><button class="btn mv more open" data-action="item-menu" data-item="ticket:FAKE-6" title="actions for ticket:FAKE-6">⋯</button><span class="qmenu">',
+  );
   expect(markup).toContain(
     '<button class="btn" data-action="drop-item" data-repo="beta" data-workflow="ticket-to-pr" data-item="ticket:FAKE-6" title="drop ticket:FAKE-6">drop</button>',
   );
@@ -356,10 +373,21 @@ test('each state shows the buttons it is given: queued, parked and done drop; fa
   );
 });
 
+test("a row's controls sit after its title column, at its right: the run link, then ▲ ▼, then ⋯ (ADW-464)", () => {
+  const [panel] = queuePanels(index(m.registryDir));
+  if (panel === undefined) throw new Error('beta has no queue');
+  const markup = renderQueue(panel, undefined, initialUi(0), NOW).value;
+  const sides = [...markup.matchAll(/<\/span><\/span><span class="c-side">(.*?)<\/span><\/div>/gs)].map(([, side]) =>
+    [...(side ?? '').matchAll(/data-action="([^"]+)"/g)].map(([, action]) => action),
+  );
+  expect(sides).toEqual([['select-run'], ['item-menu'], ['item-menu'], ['item-menu']]);
+});
+
 test('the drop an armed click named reads confirm drop and is armed; the others stay drop', () => {
   const [panel] = queuePanels(index(m.registryDir));
   if (panel === undefined) throw new Error('beta has no queue');
-  const markup = renderQueue(panel, undefined, { ...initialUi(0), armedDrop: 'ticket:FAKE-6' }, NOW).value;
+  const ui = { ...initialUi(0), armedDrop: 'ticket:FAKE-6', itemMenu: 'ticket:FAKE-6' };
+  const markup = renderQueue(panel, undefined, ui, NOW).value;
   expect(controls(markup).filter((row) => row.includes('confirm'))).toEqual([
     'ticket:FAKE-6: requeue-item requeue, drop-item confirm drop',
   ]);

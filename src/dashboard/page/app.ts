@@ -26,7 +26,8 @@
 //   by one flush at most every 100 ms.
 //
 // It controls two things. In the queue view, `move-item`, `poll-queue`, `add-ticket`, `requeue-item` and `drop-item` ask
-// the dashboard's server to have the watcher move, poll, add, requeue or drop (a drop on a second click), and the answer,
+// the dashboard's server to have the watcher move, poll, add, requeue or drop (a drop on a second click, from the menu
+// `item-menu` opens), and the answer,
 // a refusal or that the watcher has not taken the command yet, is shown beside the queue's header. `resume-run` and
 // `restart-run` ask it to start a suspended run again or a failed
 // run as a seeded one, each on a second click: what the open run offers is read from its actions route when it opens
@@ -227,9 +228,11 @@ export function boot(host: PageHost): Page {
           if (forced !== undefined) ui.addForce = forced !== '';
         }
         addFieldsOwn = true;
-        // An armed drop whose item is running or gone asks again once the item can be dropped.
+        // An armed drop whose item is running or gone asks again once the item can be dropped, and its menu shuts.
         const armedItem = panel.items.find((item) => item.dedupKey === ui.armedDrop);
         if (armedItem === undefined || armedItem.state === 'dispatched') delete ui.armedDrop;
+        const menuItem = panel.items.find((item) => item.dedupKey === ui.itemMenu);
+        if (menuItem === undefined || menuItem.state === 'dispatched') delete ui.itemMenu;
         return renderQueue(panel, queues.get(ui.queue ?? '')?.stream, ui, host.now()).value;
       }
       if (run === undefined) return html`<div class="qempty">no run selected</div>`.value;
@@ -921,6 +924,11 @@ export function boot(host: PageHost): Page {
         addFieldsOwn = false;
       });
     },
+    'item-menu': (data) => {
+      if (ui.itemMenu === data.item || data.item === undefined) delete ui.itemMenu;
+      else ui.itemMenu = data.item;
+      mark('main');
+    },
     'requeue-item': (data) => {
       if (data.repo === undefined || data.workflow === undefined || data.item === undefined) return;
       queueOp(data.repo, data.workflow, 'requeue', { dedupKey: data.item });
@@ -982,7 +990,11 @@ export function boot(host: PageHost): Page {
     // Needs attention and the drawer shut first; then back to the cards from a timeline, keeping the selection; from
     // the cards, no selection.
     Escape: () => {
-      if (ui.attention) closeAttention();
+      if (ui.itemMenu !== undefined) {
+        delete ui.itemMenu;
+        delete ui.armedDrop;
+        mark('main');
+      } else if (ui.attention) closeAttention();
       else if (ui.file !== undefined) closeFile();
       else if (ui.timeline) actions['close-timeline']?.({});
       else selectCard(undefined);
@@ -994,12 +1006,17 @@ export function boot(host: PageHost): Page {
   };
 
   host.onAction((action, data) => {
-    // A click on anything but a start disarms it, and on anything but a drop disarms that.
+    // A click on anything but a start disarms it, and on anything but a drop disarms that. An item's menu shuts on any
+    // click but its ⋯, which toggles it, and the drop that arms.
+    const shuts =
+      ui.itemMenu !== undefined && action !== 'item-menu' && !(action === 'drop-item' && ui.armedDrop !== data.item);
     const disarms =
       (ui.armed !== undefined && action !== 'resume-run' && action !== 'restart-run') ||
-      (ui.armedDrop !== undefined && action !== 'drop-item');
+      (ui.armedDrop !== undefined && action !== 'drop-item') ||
+      shuts;
     if (ui.armed !== undefined && action !== 'resume-run' && action !== 'restart-run') delete ui.armed;
     if (ui.armedDrop !== undefined && action !== 'drop-item') delete ui.armedDrop;
+    if (shuts) delete ui.itemMenu;
     if (disarms) mark('main');
     actions[action]?.(data);
   });

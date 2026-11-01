@@ -187,17 +187,47 @@
       .act .num {
         width: 7em;
       }
-      .mvs {
+      .c-side {
+        flex: 0 0 auto;
         display: inline-flex;
-        gap: 4px;
-        margin-left: 8px;
+        align-items: center;
+        gap: 6px;
       }
-      .qacts {
+      .qmore {
+        position: relative;
         display: inline-flex;
-        gap: 4px;
-        margin-left: 8px;
       }
-      .qacts .btn,
+      .btn.more.open {
+        border-color: var(--line-2);
+        color: var(--fg);
+      }
+      .qmenu {
+        position: absolute;
+        top: calc(100% + 4px);
+        right: 0;
+        z-index: 5;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 10em;
+        padding: 4px;
+        border: 1px solid var(--line-2);
+        border-radius: 8px;
+        background: var(--panel);
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+      }
+      .qmenu .btn {
+        text-align: left;
+        padding: 5px 10px;
+        border-color: transparent;
+        background: transparent;
+      }
+      .qmenu .btn:hover {
+        background: var(--panel-2);
+      }
+      .qmenu .btn.armed {
+        border-color: var(--warn);
+      }
       .srcbar .btn {
         padding: 1px 6px;
         font-size: 10px;
@@ -215,9 +245,12 @@
       .qadd .txt {
         width: 14em;
       }
+      .mv-gap {
+        width: 28px;
+      }
       .btn.mv {
-        padding: 1px 6px;
-        font-size: 10px;
+        min-width: 28px;
+        padding: 2px 8px;
         line-height: 1.4;
       }
 
@@ -981,7 +1014,6 @@
         margin: 0 14px 4px;
         border: 1px solid var(--line);
         border-radius: 9px;
-        overflow: hidden;
         background: var(--panel);
       }
       .qbox .qrow2:first-child {
