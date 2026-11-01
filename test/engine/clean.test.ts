@@ -132,6 +132,20 @@ test('a run with no STATUS is refused, telling the user to stop it first', async
   });
 });
 
+test('a STATUS or a run.json that cannot be read refuses the clean, naming the file, and the run stays where it is', async () => {
+  await withTempRepo(async (repo) => {
+    const end = await suspendedRun(repo);
+    writeFileSync(join(end.dir, 'STATUS'), 'gone fishing\n');
+    expect(refusal(await clean(repo, end.runId))).toContain(`${join(end.dir, 'STATUS')} holds "gone fishing\\n"`);
+    writeStatus(end.dir, 'failed', 'workflow_failed');
+    chmodSync(join(end.dir, 'run.json'), 0o644);
+    writeFileSync(join(end.dir, 'run.json'), '{');
+    const refused = refusal(await clean(repo, end.runId));
+    expect(refused).toContain('run.json');
+    expect(existsSync(end.dir)).toBe(true);
+  });
+});
+
 test('a completed run is refused: only a failed run is cleaned', async () => {
   await withTempRepo(async (repo) => {
     const end = await suspendedRun(repo);
