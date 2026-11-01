@@ -217,3 +217,50 @@ test('a run whose header or summary source is a pull request carries its number,
   expect([byId('pr-13')?.pr, byId('pr-13')?.ticketKey]).toEqual([13, undefined]);
   expect([byId('ticket-1')?.pr, byId('ticket-1')?.ticketKey]).toEqual([undefined, 'FAKE-9']);
 });
+
+/** The rail's beta when its index entry carries `watching`. */
+function betaRail(watching?: { pid: number; workflows: string[] }) {
+  const repos = index(m.registryDir).map((repo) =>
+    repo.name === 'beta' && watching !== undefined ? { ...repo, watching } : repo,
+  );
+  const beta = railRepos(repos, NOW).find((repo) => repo.name === 'beta');
+  if (beta === undefined) throw new Error('no beta');
+  return beta;
+}
+
+const togglesOf = (repo: ReturnType<typeof betaRail>) =>
+  repo.workflows.map((workflow) => [workflow.name, workflow.toggle]);
+
+test('with no live watcher a workflow with a queue offers watch, one with runs alone offers nothing, and the repository has no watch set', () => {
+  const beta = betaRail();
+  expect(togglesOf(beta)).toEqual([
+    ['review', undefined],
+    [QUEUE_WORKFLOW, 'watch'],
+  ]);
+  expect(beta.watching).toBeUndefined();
+});
+
+test('a workflow in the live watch set offers unwatch, and a queued one outside it offers watch', () => {
+  const watched = betaRail({ pid: 1, workflows: [QUEUE_WORKFLOW] });
+  expect(togglesOf(watched)).toEqual([
+    ['review', undefined],
+    [QUEUE_WORKFLOW, 'unwatch'],
+  ]);
+  expect(watched.watching).toEqual([QUEUE_WORKFLOW]);
+  const empty = betaRail({ pid: 1, workflows: [] });
+  expect(togglesOf(empty)).toEqual([
+    ['review', undefined],
+    [QUEUE_WORKFLOW, 'watch'],
+  ]);
+  expect(empty.watching).toEqual([]);
+});
+
+test('a workflow in the watch set with no queue view is listed too, and offers unwatch', () => {
+  const beta = betaRail({ pid: 1, workflows: ['review', 'ghost', QUEUE_WORKFLOW] });
+  expect(togglesOf(beta)).toEqual([
+    ['ghost', 'unwatch'],
+    ['review', 'unwatch'],
+    [QUEUE_WORKFLOW, 'unwatch'],
+  ]);
+  expect(beta.workflows.find((workflow) => workflow.name === 'ghost')?.runs).toEqual([]);
+});

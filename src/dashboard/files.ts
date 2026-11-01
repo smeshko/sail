@@ -11,7 +11,7 @@ import { listRuns, type RunListing } from '../engine/runs';
 import { validateDocument } from '../engine/schemas';
 import { EVENTS_FILE, readEvents } from '../events/consumers/ndjson';
 import type { Summary } from '../events/summary';
-import { type RegistryEntry, type RegistryProblem, readRegistry } from '../watch/registry';
+import { liveSet, liveWatcher, type RegistryEntry, type RegistryProblem, readRegistry } from '../watch/registry';
 import { containedFile, inside } from './contained';
 import { type QueueView, queueViews } from './queues';
 
@@ -24,7 +24,12 @@ export type Repo = RegistryEntry & { problem?: string };
 export type RunItem = Omit<RunListing, 'dir'> & { source?: Source; summary: Summary | null };
 
 /** A repository with its runs and its queues: what the index stream sends. */
-export type IndexRepo = Repo & { runs: RunItem[]; queues: QueueView[] };
+export type IndexRepo = Repo & {
+  runs: RunItem[];
+  queues: QueueView[];
+  /** The live watcher of this repository and the workflows it watches, set only while it runs in this clone. */
+  watching?: { pid: number; workflows: string[] };
+};
 
 /** The files of a call the dashboard serves. */
 export const CALL_FILES = ['result.json', 'session.log', 'stdout.log', 'stderr.log'] as const;
@@ -135,7 +140,17 @@ export function runItems(entry: RegistryEntry): RunItem[] {
 export function index(registryDir: string): IndexRepo[] {
   return repos(registryDir).repos.map((repo) => {
     try {
-      return { ...repo, runs: runItems(repo), queues: queueViews(repo) };
+      const watcher = liveWatcher(repo);
+      const watching =
+        watcher?.sailDir === repo.sailDir
+          ? {
+              watching: {
+                pid: watcher.pid,
+                workflows: liveSet(repo.sailDir, watcher.pid).map((each) => each.workflow),
+              },
+            }
+          : {};
+      return { ...repo, runs: runItems(repo), queues: queueViews(repo), ...watching };
     } catch (error) {
       return { ...repo, runs: [], queues: [], problem: `its runs can't be listed: ${messageOf(error)}` };
     }

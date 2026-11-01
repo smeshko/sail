@@ -308,3 +308,42 @@ test("a running call's log is found in its call directory before its end, a corr
   expect(callFile(dir, 'tests#1', 'stdout.log')).toEqual({ missing: expect.any(String) });
   expect(callFile(dir, 'nope#1', 'stdout.log')).toEqual({ missing: expect.any(String) });
 });
+
+/** beta's registry entry with a watcher of `pid` in `sailDir`, and a queue stream for ticket-to-pr that adds it, then removes it when `removed`. */
+function betaWatcher(watcher: { pid: number; sailDir: string }, removed = false) {
+  const event = (seq: number, type: string) =>
+    `${JSON.stringify({ seq, ts: '2026-10-14T09:00:00.000Z', type, workflow: 'ticket-to-pr', pid: watcher.pid, label: 'sail', everyMs: 300000, maxConcurrentRuns: 2 })}\n`;
+  const dir = join(m.beta.clone, '.sail-runs', 'queue', 'ticket-to-pr');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'events.ndjson'), event(1, 'watch:added') + (removed ? event(2, 'watch:removed') : ''));
+  writeFileSync(
+    join(m.registryDir, 'beta.json'),
+    `${JSON.stringify({
+      ...entryOf(m.beta),
+      watcher: {
+        ...watcher,
+        startedAt: '2026-10-14T09:00:00.000Z',
+        ticketSource: 'fake',
+        labels: ['sail'],
+      },
+    })}\n`,
+  );
+}
+
+const watchingOf = (name: string) => index(m.registryDir).find((repo) => repo.name === name)?.watching;
+
+test('index carries watching { pid, workflows } for a repository whose live watcher runs in its .sail/, the set empty once it is unwatched', () => {
+  expect(watchingOf('beta')).toBeUndefined();
+  betaWatcher({ pid: process.pid, sailDir: m.beta.sailDir });
+  expect(watchingOf('beta')).toEqual({ pid: process.pid, workflows: ['ticket-to-pr'] });
+  betaWatcher({ pid: process.pid, sailDir: m.beta.sailDir }, true);
+  expect(watchingOf('beta')).toEqual({ pid: process.pid, workflows: [] });
+  expect(watchingOf('alpha')).toBeUndefined();
+});
+
+test('index leaves watching out for a dead pid and for a watcher in another clone', () => {
+  betaWatcher({ pid: 2 ** 22 + 12345, sailDir: m.beta.sailDir });
+  expect(watchingOf('beta')).toBeUndefined();
+  betaWatcher({ pid: process.pid, sailDir: m.alpha.sailDir });
+  expect(watchingOf('beta')).toBeUndefined();
+});
