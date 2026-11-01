@@ -1,7 +1,7 @@
 // cleanRun(): the checks that refuse a run still in use, the removals in order, and the archive of the run directory.
 // On the stub workflow and the fake adapters; a git-worktree workspace over a bare origin covers the remote branch.
 import { expect, test } from 'bun:test';
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createGitWorktreeWorkspace } from '../../src/adapters/workspace/git-worktree';
 import { type Cleaned, cleanRun } from '../../src/engine/clean';
@@ -328,6 +328,43 @@ test('worktree, local branch, remote branch and run ref are each removed and lis
     expect(existsSync(join(archived, 'events.ndjson'))).toBe(true);
     expect(existsSync(join(archived, 'run.json'))).toBe(true);
     expect(existsSync(end.dir)).toBe(false);
+  });
+});
+
+test("a run started from a pull request keeps the pull request's head branch, locally and on the remote, since sail did not make it", async () => {
+  await withTempRepo(async (repo) => {
+    withOrigin(repo);
+    const { end, branch } = await failedRun(repo);
+    const header = readRunHeader(end.dir);
+    const headSha = repo.git('rev-parse', 'HEAD').trim();
+    chmodSync(join(end.dir, 'run.json'), 0o644);
+    writeFileSync(
+      join(end.dir, 'run.json'),
+      JSON.stringify({ ...header, source: { kind: 'pr', number: 7, headSha, via: 'cli', forced: [] } }),
+    );
+    repo.git('update-ref', `refs/heads/${branch}`, 'HEAD');
+    repo.git('push', '--quiet', 'origin', `HEAD:refs/heads/${branch}`);
+    repo.git('update-ref', `refs/sail/runs/${end.runId}`, 'HEAD');
+    const workspace = createGitWorktreeWorkspace({
+      repo: repo.dir,
+      env: repo.env,
+      leasesDir: join(repo.dir, '.sail-runs', 'fake', 'leases'),
+    });
+    const cleaned = await clean(repo, end.runId, { workspace });
+    expect(cleaned).toEqual({
+      cleaned: {
+        runId: end.runId,
+        removed: ['worktree', 'run ref'],
+        archived: join(sailHome(repo), 'failed-runs', DAY, end.runId),
+      },
+    });
+    expect(ref(repo, `refs/heads/${branch}`)).toBe(true);
+    expect(
+      Bun.spawnSync(['git', 'ls-remote', '--heads', 'origin', branch], {
+        cwd: repo.dir,
+        env: repo.env,
+      }).stdout.toString(),
+    ).toContain(branch);
   });
 });
 
