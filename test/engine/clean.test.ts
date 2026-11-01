@@ -181,6 +181,31 @@ test('a live seeded run of it, which leases a branch of its own, refuses the cle
   });
 });
 
+test('of two live seeded runs of it, the refusal names the first by run id', async () => {
+  await withTempRepo(async (repo) => {
+    const { end, branch } = await failedRun(repo);
+    const adapters = await fakeAdapters(repo.dir);
+    const { url } = await adapters.ports.workspace.repository();
+    const header = readRunHeader(end.dir);
+    for (const [runId, suffix] of [
+      ['SEED-B', 'bbbb2222'],
+      ['SEED-A', 'aaaa1111'],
+    ] as const) {
+      const seededDir = join(repo.dir, '.sail-runs', runId);
+      mkdirSync(seededDir, { recursive: true });
+      const seededBranch = `${branch}-seeded-${suffix}`;
+      writeFileSync(
+        join(seededDir, 'run.json'),
+        JSON.stringify({ ...header, runId, fromRun: end.runId, reused: 1, branch: seededBranch }),
+      );
+      writeStatus(seededDir, 'suspended', 'until');
+      await adapters.ports.workspace.lease(url, seededBranch, { runId, runDir: seededDir, pid: process.pid });
+    }
+    const refused = refusal(await clean(repo, end.runId));
+    expect(refused).toBe(`run ${end.runId}: run SEED-A, seeded from it, leases ${branch}-seeded-aaaa1111`);
+  });
+});
+
 test('a seeded run of it still being opened, with only its OPENING, refuses the clean, naming that run', async () => {
   await withTempRepo(async (repo) => {
     const { end, branch } = await failedRun(repo);
