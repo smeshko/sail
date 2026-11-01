@@ -1,6 +1,5 @@
 // Needs attention, drawn: a top-bar button with the count, and, open, a pane with one list across both repositories,
-// each item a button whose data opens its run, its call and the inspector's tab, and an item with nothing to open drawn
-// without the action.
+// each item a button whose data opens its run and its call, and an item with nothing to open drawn without the action.
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { index } from '../../../src/dashboard/files';
 import { attention } from '../../../src/dashboard/page/attention';
@@ -13,7 +12,7 @@ beforeEach(() => {
 });
 afterEach(() => m.remove());
 
-test("FAKE-2's failure and the two errors are buttons in one list whose data opens the run, the key and the tab", () => {
+test("FAKE-2's failure and the two errors are buttons in one list whose data opens the run and the key", () => {
   const items = attention(index(m.registryDir));
   const button =
     '<button class="btn att-btn on" type="button" data-action="toggle-attention" title="needs attention (a)">⚑ needs attention<span class="badge">4</span></button>';

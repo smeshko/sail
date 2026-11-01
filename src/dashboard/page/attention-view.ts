@@ -1,7 +1,7 @@
 // Needs attention, drawn: a button in the top bar with how many items there are, which opens a pane over the page. The
-// pane has one row per item across every repository, each a button that opens its run, its call and the inspector's
-// tab. An item with nothing to open is drawn the same, without the action. A click outside the pane closes it. While
-// the list has items, the pane's header has an all clear button.
+// pane has one row per item across every repository, each a button that opens its run and its call. An item with
+// nothing to open is drawn the same, without the action. A click outside the pane closes it. While the list has items,
+// the pane's header has an all clear button.
 import type { AttentionItem } from './attention';
 import { html, type SafeHtml } from './html';
 
@@ -17,7 +17,7 @@ function row(item: AttentionItem): SafeHtml {
   if (opens === undefined) return html`<div class="sig sig-${item.kind}">${body}</div>`;
   return html`<button class="sig sig-${item.kind}" data-action="open" data-repo="${opens.repo}" data-run="${opens.runId}"${
     opens.key === undefined ? '' : html` data-key="${opens.key}"`
-  }${opens.tab === undefined ? '' : html` data-tab="${opens.tab}"`}>${body}</button>`;
+  }>${body}</button>`;
 }
 
 /** The button with its count, and while `open` the pane: the list, or a line saying nothing needs attention. */

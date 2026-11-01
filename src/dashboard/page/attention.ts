@@ -1,7 +1,7 @@
 // Needs attention: one list, across every repository, of what a person should look at. It comes from the index alone,
 // whose runs carry their summaries and whose repositories carry their queues, so no run is opened to build it. Each
-// item says what to open: its run, its call, and the inspector's tab, where the run's own files explain it. Only
-// failures are listed: a failed run, a call in error, a parked item and a problem.
+// item says what to open: its run and its call, where the run's own files explain it. Only failures are listed: a
+// failed run, a call in error, a parked item and a problem.
 
 import type { IndexRepo } from '../files';
 import { newestFirst, statusOf, stopReasonOf } from './index-model';
@@ -13,7 +13,6 @@ export interface Opens {
   repo: string;
   runId: string;
   key?: string;
-  tab?: string;
 }
 
 export interface AttentionItem {
