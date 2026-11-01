@@ -16,20 +16,18 @@
 //   from the events it emitted for the item since, so an add or a requeue its dispatch then dropped, as a ticket left
 //   In Progress is, exits 3 saying both, with the reason.
 //
+// The checks, the command to drop and the reading of what the watcher did are `src/watch/queue-commands.ts`'s, which
+// the dashboard's queue view shares.
+//
 // An item is named by its dedup key (`ticket:FAKE-1`, as the dashboard's commands print it) or its ticket key. Every
 // refusal is exit code 3.
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { isAlive as processIsAlive } from '../../adapters/leases';
-import { readStatus, runsDir as runsDirOf } from '../../engine/run-dir';
-import { resolveSource } from '../../engine/source';
-import { EVENTS_FILE } from '../../events/consumers/ndjson';
+import { runsDir as runsDirOf } from '../../engine/run-dir';
 import { clean } from '../../events/consumers/screen';
-import { dropCommand, type Command as QueueCommand } from '../../watch/inbox';
-import { readWatch } from '../../watch/poll';
-import { dedupKey, type QueueFile, type QueueItem, queueDir, readQueue } from '../../watch/queue-store';
+import { dropCommand } from '../../watch/inbox';
+import { commandFor, itemLine, outcomeOf, queueOf, streamMark } from '../../watch/queue-commands';
 import { liveSet } from '../../watch/registry';
-import { addsNoTicket, holderRefusal } from '../../watch/watcher';
+import { holderRefusal } from '../../watch/watcher';
 import { EXIT_OK, type ExitCode } from '../exit-codes';
 import type { Command, Io } from '../index';
 import { at, findProject, refuseAs } from './run-workflow';
@@ -51,41 +49,6 @@ const USAGE: Record<Op, string> = {
   move: 'sail queue move <workflow> <item> --before <item> | --after <item>',
 };
 
-const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`;
-
-/** `workflow`'s queue as its queue file holds it, undefined when it has none. One that can't be read throws. */
-function queueOf(runs: string, workflow: string): QueueFile | undefined {
-  const queue = readQueue(runs, workflow);
-  if (queue !== undefined && 'refused' in queue) throw new Error(queue.refused);
-  return queue;
-}
-
-/**
- * One item: `<state> <dedup key> <title>`, then what applies of its priority (unless none), run, attempts, retry time,
- * hold, what it waits on, `forced`, `moved` and reason.
- */
-function itemLine(item: QueueItem): string {
-  const details = [
-    item.priority === undefined || item.priority === 'none' ? undefined : `priority ${item.priority}`,
-    item.runId === undefined ? undefined : `run ${item.runId}`,
-    item.attempts === 0 ? undefined : plural(item.attempts, 'attempt'),
-    item.retryAt === undefined ? undefined : `retry at ${item.retryAt}`,
-    item.held === undefined ? undefined : `held until ${item.held.until}: ${clean(item.held.reason)}`,
-    item.waitingOn === undefined ? undefined : `waiting on ${item.waitingOn.map(clean).join(', ')}`,
-    item.forced === true ? 'forced' : undefined,
-    item.moved === true ? 'moved' : undefined,
-    item.reason === undefined ? undefined : clean(item.reason),
-  ].filter((detail) => detail !== undefined);
-  const line = `${item.state} ${item.dedupKey} ${clean(item.title)}`;
-  return details.length === 0 ? line : `${line} · ${details.join(', ')}`;
-}
-
-/** The item `ref` names, by its dedup key or its ticket key. */
-const itemOf = (queue: QueueFile | undefined, ref: string): QueueItem | undefined =>
-  queue?.items.find(
-    (item) => item.dedupKey === ref || (item.source.kind === 'ticket' && item.source.ticketKey === ref),
-  );
-
 const noQueue = (workflow: string) => `no queue for '${workflow}' in .sail-runs/queue: it has never been watched`;
 
 /** `sail queue ls`: the queue's polling, then each item, in queue order. */
@@ -101,43 +64,6 @@ function list(io: Io, runs: string, workflow: string): ExitCode {
   io.stdout(`${workflow}: label ${label}, last polled ${lastPolledAt ?? 'never'}${pause}${held}\n`);
   for (const item of queue.items) io.stdout(`${itemLine(item)}\n`);
   return EXIT_OK;
-}
-
-/** The lines of `workflow`'s queue event stream, each parsed, or undefined for a line that isn't JSON. */
-function streamLines(runs: string, workflow: string): (Record<string, unknown> | undefined)[] {
-  const file = join(queueDir(runs, workflow), EVENTS_FILE);
-  if (!existsSync(file)) return [];
-  return readFileSync(file, 'utf8')
-    .split('\n')
-    .filter((line) => line !== '')
-    .map((line) => {
-      try {
-        return JSON.parse(line);
-      } catch {
-        return undefined;
-      }
-    });
-}
-
-/** The event each change emits when the watcher applies it. */
-const APPLIED_AS = {
-  add: 'queue:item_added',
-  requeue: 'queue:requeued',
-  drop: 'queue:dropped',
-  move: 'queue:moved',
-} as const;
-const DONE_AS = { add: 'added', requeue: 'requeued', drop: 'dropped', move: 'moved' } as const;
-
-/** How the run `runId` stands, `<status>[ <stop reason>]`, when it has not ended; undefined when it has, or has none. */
-function unended(runs: string, runId: string | undefined): string | undefined {
-  if (runId === undefined) return undefined;
-  try {
-    const { status, stopReason } = readStatus(join(runs, runId));
-    if (status !== 'running' && status !== 'suspended') return undefined;
-    return stopReason === undefined ? status : `${status} ${stopReason}`;
-  } catch {
-    return undefined;
-  }
 }
 
 /** `sail queue`, on `deps`. */
@@ -184,63 +110,23 @@ export function queueCommand(deps: WatchDeps = {}): Command {
     const watched = liveSet(project.sailDir, pid).find((each) => each.workflow === workflow);
     if (watched === undefined) return refuse(`${watcher} does not watch '${workflow}'`);
 
-    const queue = queueOf(runs, workflow);
-    let command: QueueCommand;
-    let key: string | undefined;
-    if (op === 'poll') {
-      command = { op: 'poll', workflow };
-    } else if (op === 'add') {
-      const declared = await readWatch({ sailDir: project.sailDir, config: project.config, name: workflow });
-      if (!('refused' in declared) && declared.kind !== 'ticket') return refuse(addsNoTicket(workflow));
-      const { ticketSource } = project.adapters.ports;
-      const resolved = await resolveSource({ ref: ref ?? '', ticketSource, label: watched.label, force });
-      if ('refused' in resolved) return refuse(resolved.refused);
-      key = dedupKey({ kind: 'ticket', ticketKey: resolved.ticketKey });
-      const queued = itemOf(queue, key);
-      if (queued !== undefined && queued.state !== 'done') {
-        return refuse(`${key} is in ${workflow}'s queue already: ${itemLine(queued)}`);
-      }
-      command = { op: 'add', workflow, ticketKey: resolved.ticketKey, ...(force ? { force: true as const } : {}) };
-    } else {
-      const item = itemOf(queue, ref ?? '');
-      if (item === undefined) return refuse(`${workflow}'s queue has no item ${ref}`);
-      key = item.dedupKey;
-      if (op === 'drop' && item.state === 'dispatched') {
-        return refuse(`${key} can't be dropped: its run ${item.runId} has not ended: sail stop ${item.runId} first`);
-      }
-      if (op === 'requeue') {
-        if (item.state !== 'parked' && item.state !== 'failed') {
-          return refuse(`${key} is ${item.state}: only a parked or failed item is requeued`);
-        }
-        const run = unended(runs, item.runId);
-        if (run !== undefined) {
-          return refuse(
-            `${key} can't be requeued: its run ${item.runId} is ${run}, and holds its branch: sail resume ${item.runId} or sail stop ${item.runId} first`,
-          );
-        }
-      }
-      if (op === 'move') {
-        const target = itemOf(queue, String(side));
-        if (target === undefined) return refuse(`${workflow}'s queue has no item ${side}`);
-        if (target === item) return refuse(`${key} can't be moved next to itself`);
-        for (const each of [item, target]) {
-          if (each.state !== 'queued') return refuse(`${each.dedupKey} is ${each.state}: only a queued item is moved`);
-        }
-        command = {
-          op,
-          workflow,
-          dedupKey: key,
-          ...(typeof before === 'string' ? { before: target.dedupKey } : { after: target.dedupKey }),
-        };
-      } else {
-        command = { op, workflow, dedupKey: key };
-      }
-    }
+    const { ticketSource } = project.adapters.ports;
+    const checked = await commandFor(op, {
+      runs,
+      sailDir: project.sailDir,
+      config: project.config,
+      workflow,
+      label: watched.label,
+      ref: ref ?? '',
+      force,
+      ...(typeof before === 'string' ? { before } : {}),
+      ...(typeof behind === 'string' ? { after: behind } : {}),
+      ...(op === 'add' ? { ticketSource } : {}),
+    });
+    if ('refused' in checked) return refuse(checked.refused);
+    const { command, key } = checked;
 
-    // What the watcher did is read from the events it emits for the item after the command is dropped, not from the
-    // queue file alone: a dispatch may drop an item the watcher has just queued again, in the same tick.
-    const seqOf = (event: Record<string, unknown> | undefined) => (typeof event?.seq === 'number' ? event.seq : 0);
-    const mark = Math.max(0, ...streamLines(runs, workflow).map(seqOf));
+    const mark = streamMark(runs, workflow);
     const file = dropCommand(runs, command);
     if (!(await taken(file, deps))) {
       io.stdout(`${COMMAND}: ${watcher} has not taken the command yet: it waits in ${at(io, file)}\n`);
@@ -250,16 +136,10 @@ export function queueCommand(deps: WatchDeps = {}): Command {
       io.stdout(`${COMMAND}: ${watcher} polls ${workflow} now\n`);
       return EXIT_OK;
     }
-    const since = streamLines(runs, workflow).filter((event) => seqOf(event) > mark && event?.dedupKey === key);
-    if (!since.some((event) => event?.type === APPLIED_AS[op])) {
-      return refuse(`the watcher did not ${op} ${key}: its terminal says why`);
-    }
-    const after = itemOf(queueOf(runs, workflow), key ?? '');
-    if (after === undefined && op !== 'drop') {
-      const dropped = since.findLast((event) => event?.type === 'queue:dropped');
-      return refuse(`the watcher ${DONE_AS[op]} ${key}, then dropped it: ${clean(String(dropped?.reason ?? ''))}`);
-    }
-    io.stdout(`${COMMAND}: ${after === undefined ? `${key} dropped` : itemLine(after)}\n`);
+    const outcome = outcomeOf(runs, workflow, op, key ?? '', mark);
+    if ('refused' in outcome) return refuse(outcome.refused);
+    const { applied } = outcome;
+    io.stdout(`${COMMAND}: ${applied === undefined ? `${key} dropped` : itemLine(applied)}\n`);
     return EXIT_OK;
   };
 }
