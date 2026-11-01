@@ -227,6 +227,9 @@ export function boot(host: PageHost): Page {
           if (forced !== undefined) ui.addForce = forced !== '';
         }
         addFieldsOwn = true;
+        // An armed drop whose item is running or gone asks again once the item can be dropped.
+        const armedItem = panel.items.find((item) => item.dedupKey === ui.armedDrop);
+        if (armedItem === undefined || armedItem.state === 'dispatched') delete ui.armedDrop;
         return renderQueue(panel, queues.get(ui.queue ?? '')?.stream, ui, host.now()).value;
       }
       if (run === undefined) return html`<div class="qempty">no run selected</div>`.value;

@@ -1583,6 +1583,39 @@ test('the first click on drop arms it and posts nothing, the second posts the de
   ]);
 });
 
+test('an armed drop is disarmed when its item is drawn dispatched, so it asks again once the item can be dropped (review R6)', () => {
+  openBetaQueue();
+  const row = { ...BETA, item: 'ticket:FAKE-6' };
+  host.click({ action: 'drop-item', ...row });
+  host.advance(100);
+  const withState = (state: string) => {
+    const repos = indexMessage().repos.map((repo) => ({
+      ...repo,
+      queues: repo.queues.map((view) =>
+        view.queue === undefined
+          ? view
+          : {
+              ...view,
+              queue: {
+                ...view.queue,
+                items: view.queue.items.map((item) =>
+                  item.dedupKey === row.item ? { ...item, state: state as typeof item.state } : item,
+                ),
+              },
+            },
+      ),
+    }));
+    return { kind: 'index', repos };
+  };
+  host.push(host.open('index')[0], withState('dispatched'));
+  host.advance(100);
+  host.push(host.open('index')[0], withState('parked'));
+  host.advance(100);
+  expect([page?.ui.armedDrop, host.regions.main?.includes('confirm drop')]).toEqual([undefined, false]);
+  host.click({ action: 'drop-item', ...row });
+  expect(host.posts).toEqual([]);
+});
+
 test('a requeue click posts at once with the dedup key, and a 409 shows the CLI line as the notice (ADW-460)', async () => {
   openBetaQueue();
   host.postAnswer = {
