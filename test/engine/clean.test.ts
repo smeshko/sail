@@ -235,6 +235,18 @@ for (const [state, extra] of [
   });
 }
 
+test('a queue file that cannot be read refuses the clean, since an unanswered check is no permission', async () => {
+  await withTempRepo(async (repo) => {
+    const { end } = await failedRun(repo);
+    const dir = join(repo.dir, '.sail-runs', 'queue', 'ticket-to-pr');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'queue.json'), '{ not json');
+    const refused = refusal(await clean(repo, end.runId));
+    expect(refused).toContain('queue.json');
+    expect(existsSync(end.dir)).toBe(true);
+  });
+});
+
 test('a queue item that names another run does not refuse the clean', async () => {
   await withTempRepo(async (repo) => {
     const { end } = await failedRun(repo);

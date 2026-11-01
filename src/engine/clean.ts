@@ -51,14 +51,18 @@ export function archiveDir(env: Readonly<Record<string, string | undefined>>, da
   return join(machineDir(env), 'failed-runs', day, runId);
 }
 
-/** The items of every queue under `runs` that name run `runId`, in any state. A queue that can't be read is skipped. */
-export function queueItemsNaming(runs: string, runId: string): { workflow: string; item: QueueItem }[] {
+/** The items of every queue under `runs` that name run `runId`, in any state. A queue that can't be read refuses. */
+export function queueItemsNaming(
+  runs: string,
+  runId: string,
+): { workflow: string; item: QueueItem }[] | { refused: string } {
   const root = join(runs, QUEUE_DIR);
   if (!existsSync(root)) return [];
   const found: { workflow: string; item: QueueItem }[] = [];
   for (const workflow of readdirSync(root).sort()) {
     const queue = readQueue(runs, workflow);
-    if (queue === undefined || 'refused' in queue) continue;
+    if (queue === undefined) continue;
+    if ('refused' in queue) return queue;
     for (const item of queue.items) if (item.runId === runId) found.push({ workflow, item });
   }
   return found;
@@ -151,7 +155,9 @@ export async function cleanRun(options: CleanRunOptions): Promise<Cleaned> {
     }
   }
 
-  const named = queueItemsNaming(runs, runId)[0];
+  const naming = queueItemsNaming(runs, runId);
+  if ('refused' in naming) return { refused: `run ${runId}: the queues could not be checked: ${naming.refused}` };
+  const named = naming[0];
   if (named !== undefined) {
     return {
       refused: `queue item ${named.item.dedupKey} of ${named.workflow} (${named.item.state}) names run ${runId}: requeue it or drop it: \`sail queue requeue|drop\``,
