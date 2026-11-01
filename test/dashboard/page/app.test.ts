@@ -1682,6 +1682,23 @@ test('with Stop now ticked, the confirmation says so and the post is { now: true
   expect(host.posts).toEqual([{ path: `${FAKE_3_PATH}/stop`, body: { now: true } }]);
 });
 
+test('ticking Stop now once Stop is armed keeps it armed and makes it say so (review D1)', async () => {
+  settleQueue();
+  await openOffering('beta', FAKE_3_ID, m.beta.runDir);
+  host.click({ action: 'stop-run' });
+  host.advance(100);
+  host.fields.now = 'on';
+  host.click({ action: 'stop-now' });
+  host.advance(100);
+  expect(
+    buttons(host.regions.main)
+      .find(([, action]) => action === 'stop-run')
+      ?.slice(0, 3),
+  ).toEqual(['confirm stop now · ends its running call', 'stop-run', 'armed']);
+  expect(host.regions.main).toContain('data-action="stop-now" checked');
+  expect(host.posts).toEqual([]);
+});
+
 test('Clean arms with what it removes, posts {} on the second click, and leaves the run for the index with the cleaned line until a run is selected', async () => {
   await openOffering('alpha', FAKE_2_ID, fake2Dir(m));
   host.click({ action: 'clean-run' });

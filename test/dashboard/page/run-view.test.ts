@@ -263,9 +263,11 @@ test('Stop shows a Stop now box that is ticked as chosen, arms into the confirma
   const view = (ui: Partial<ReturnType<typeof initialUi>>, stop: StopOffer = { enabled: true }) =>
     renderRun(model, summaryOf(FAKE_3), { ...initialUi(0), ...ui }, NOW, { stop }).value;
   expect(view({})).toContain(
-    '<span class="act"><label class="lbl"><input type="checkbox" name="now"> stop now</label><button class="btn" data-action="stop-run">stop</button></span>',
+    '<span class="act"><label class="lbl"><input type="checkbox" name="now" data-action="stop-now"> stop now</label><button class="btn" data-action="stop-run">stop</button></span>',
   );
-  expect(view({ stopNow: true })).toContain('<input type="checkbox" name="now" checked> stop now');
+  expect(view({ stopNow: true })).toContain(
+    '<input type="checkbox" name="now" data-action="stop-now" checked> stop now',
+  );
   expect(view({ armed: 'stop' })).toContain(
     '<button class="btn armed" data-action="stop-run">confirm stop · at its next call boundary</button>',
   );

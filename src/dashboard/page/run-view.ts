@@ -166,7 +166,7 @@ function stopControl(offer: StopOffer, ui: UiState): SafeHtml {
     : ui.stopNow === true
       ? 'confirm stop now · ends its running call'
       : 'confirm stop · at its next call boundary';
-  return html`<span class="act"><label class="lbl"><input type="checkbox" name="now"${ui.stopNow === true ? ' checked' : ''}> stop now</label><button class="btn${armed ? ' armed' : ''}" data-action="stop-run">${label}</button></span>`;
+  return html`<span class="act"><label class="lbl"><input type="checkbox" name="now" data-action="stop-now"${ui.stopNow === true ? ' checked' : ''}> stop now</label><button class="btn${armed ? ' armed' : ''}" data-action="stop-run">${label}</button></span>`;
 }
 
 function cleanControl(offer: CleanOffer, ui: UiState): SafeHtml {

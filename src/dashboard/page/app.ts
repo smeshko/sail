@@ -993,6 +993,11 @@ export function boot(host: PageHost): Page {
     'restart-run': () => startRun('restart'),
     'stop-run': () => endRun('stop'),
     'clean-run': () => endRun('clean'),
+    // Ticking Stop now redraws an armed Stop's confirmation, which names what it will do.
+    'stop-now': () => {
+      ui.stopNow = host.value('now') === 'on';
+      mark('main');
+    },
     'toggle-queue-events': () => {
       ui.queueEvents = !ui.queueEvents;
       mark('main');
@@ -1051,7 +1056,7 @@ export function boot(host: PageHost): Page {
 
   host.onAction((action, data) => {
     // A click on anything but a run action disarms it, and on anything but a drop disarms that.
-    const runAction = ['resume-run', 'restart-run', 'stop-run', 'clean-run'].includes(action);
+    const runAction = ['resume-run', 'restart-run', 'stop-run', 'stop-now', 'clean-run'].includes(action);
     const disarms = (ui.armed !== undefined && !runAction) || (ui.armedDrop !== undefined && action !== 'drop-item');
     if (ui.armed !== undefined && !runAction) delete ui.armed;
     if (ui.armedDrop !== undefined && action !== 'drop-item') delete ui.armedDrop;
