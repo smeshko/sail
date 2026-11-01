@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { runActions } from '../../../src/dashboard/actions';
 import { callFile, findRepo, findRunDir, index } from '../../../src/dashboard/files';
 import { boot, CLEARED_KEY, FILTER_KEY, type Page, RAIL_KEY, THEME_KEY } from '../../../src/dashboard/page/app';
+import { attention, identity } from '../../../src/dashboard/page/attention';
 import type { ConnectHandlers, PageHost, Region } from '../../../src/dashboard/page/host';
 import { readEvents } from '../../../src/events/consumers/ndjson';
 import {
@@ -1986,6 +1987,36 @@ describe('all clear', () => {
     host.advance(100);
     expect(badge()).toBe('1');
     expect(host.regions.attention).toContain('failed: stage_error');
+  });
+
+  test('a prune keeps what another tab cleared in storage since this one loaded it', () => {
+    const fails = (repos: ReturnType<typeof index>) => {
+      const run = repos.find((repo) => repo.name === 'beta')?.runs.find((each) => each.runId === FAKE_3_ID);
+      if (run) run.status = { status: 'failed', stopReason: 'stage_error' };
+    };
+    const changed = (repos: ReturnType<typeof index>) => {
+      fails(repos);
+      for (const view of repos.find((repo) => repo.name === 'beta')?.queues ?? [])
+        for (const item of view.queue?.items ?? []) if (item.state === 'parked') item.attempts = 3;
+    };
+    bootOpen();
+    host.click({ action: 'clear-attention' });
+    // Another tab clears the new failure: its identity joins the four this tab cleared.
+    const failure = (() => {
+      const repos = index(m.registryDir);
+      fails(repos);
+      return attention(repos).find((item) => item.kind === 'failed' && item.runId === FAKE_3_ID);
+    })();
+    if (failure === undefined) throw new Error('no failure of FAKE-3');
+    const stored: string[] = JSON.parse(host.storage.get(CLEARED_KEY) ?? '[]');
+    host.storage.set(CLEARED_KEY, JSON.stringify([...stored, identity(failure)]));
+    // This tab's next index no longer lists the parked item it cleared, so it prunes and saves.
+    pushIndex(changed);
+    page?.stop();
+    bootOpen(changed);
+    expect(badge()).toBe('1');
+    expect(host.regions.attention).toContain('ticket:FAKE-6 parked after 3 attempts');
+    expect(host.regions.attention).not.toContain('failed: stage_error');
   });
 
   test('identities the newest index no longer lists are dropped from storage, and the listed ones stay', () => {

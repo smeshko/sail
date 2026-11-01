@@ -158,16 +158,16 @@ export function boot(host: PageHost): Page {
     }
   })();
   ui.expanded = names;
-  let cleared = new Set<string>(
-    (() => {
-      try {
-        const stored: unknown = JSON.parse(host.load(CLEARED_KEY) ?? '[]');
-        return Array.isArray(stored) && stored.every((id) => typeof id === 'string') ? (stored as string[]) : [];
-      } catch {
-        return [];
-      }
-    })(),
-  );
+  /** The cleared identities in storage now: another tab may have saved some since this one read them. */
+  const storedCleared = (): string[] => {
+    try {
+      const stored: unknown = JSON.parse(host.load(CLEARED_KEY) ?? '[]');
+      return Array.isArray(stored) && stored.every((id) => typeof id === 'string') ? (stored as string[]) : [];
+    } catch {
+      return [];
+    }
+  };
+  let cleared = new Set<string>(storedCleared());
   host.setInspector(ui.inspector);
 
   let index: IndexRepo[] | undefined;
@@ -717,7 +717,7 @@ export function boot(host: PageHost): Page {
     index = repos;
     const still = new Set(attention(repos).map(identity));
     if ([...cleared].some((id) => !still.has(id))) {
-      cleared = new Set([...cleared].filter((id) => still.has(id)));
+      cleared = new Set([...storedCleared(), ...cleared].filter((id) => still.has(id)));
       host.save(CLEARED_KEY, JSON.stringify([...cleared]));
     }
     syncQueues(repos);
@@ -1094,7 +1094,7 @@ export function boot(host: PageHost): Page {
       mark('attention');
     },
     'clear-attention': () => {
-      for (const id of drawn) cleared.add(id);
+      cleared = new Set([...storedCleared(), ...cleared, ...drawn]);
       host.save(CLEARED_KEY, JSON.stringify([...cleared]));
       mark('attention');
     },
