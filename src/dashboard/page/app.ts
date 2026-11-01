@@ -231,6 +231,8 @@ export function boot(host: PageHost): Page {
   const opened = () => (ui.timeline ? selected() : undefined);
 
   const listed = () => (index === undefined ? [] : attention(index).filter((item) => !cleared.has(identity(item))));
+  /** The identities of the rows needs attention last drew, which are what All clear clears. */
+  let drawn: string[] = [];
 
   const draw: Record<Region, () => string> = {
     rail: () => {
@@ -245,7 +247,11 @@ export function boot(host: PageHost): Page {
       fieldsOwn = true;
       return renderRail(railRepos(index, host.now()), ui, host.now(), offers).value;
     },
-    attention: () => renderAttention(listed(), ui.attention).value,
+    attention: () => {
+      const items = listed();
+      drawn = items.map(identity);
+      return renderAttention(items, ui.attention).value;
+    },
     main: () => {
       const panel = openQueue();
       if (panel !== undefined) {
@@ -1088,7 +1094,7 @@ export function boot(host: PageHost): Page {
       mark('attention');
     },
     'clear-attention': () => {
-      for (const item of listed()) cleared.add(identity(item));
+      for (const id of drawn) cleared.add(id);
       host.save(CLEARED_KEY, JSON.stringify([...cleared]));
       mark('attention');
     },

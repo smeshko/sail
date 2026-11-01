@@ -1971,6 +1971,23 @@ describe('all clear', () => {
     expect(host.regions.attention).toContain('ticket:FAKE-6 parked after 3 attempts');
   });
 
+  test('a failure that arrives before the pane is drawn again is not cleared with the rows on screen', () => {
+    bootOpen();
+    host.push(host.open('index')[0], {
+      kind: 'index',
+      repos: (() => {
+        const repos = index(m.registryDir);
+        const run = repos.find((repo) => repo.name === 'beta')?.runs.find((each) => each.runId === FAKE_3_ID);
+        if (run) run.status = { status: 'failed', stopReason: 'stage_error' };
+        return repos;
+      })(),
+    });
+    host.click({ action: 'clear-attention' });
+    host.advance(100);
+    expect(badge()).toBe('1');
+    expect(host.regions.attention).toContain('failed: stage_error');
+  });
+
   test('identities the newest index no longer lists are dropped from storage, and the listed ones stay', () => {
     host.storage.set(CLEARED_KEY, JSON.stringify(['gone']));
     bootOpen();
