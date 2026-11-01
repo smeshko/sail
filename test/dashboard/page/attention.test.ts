@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { index } from '../../../src/dashboard/files';
-import { attention } from '../../../src/dashboard/page/attention';
+import { type AttentionItem, attention, identity } from '../../../src/dashboard/page/attention';
 import {
   FAKE_2_ID,
   FAKE_3_ID,
@@ -130,4 +130,34 @@ test('a repository whose .sail/ is gone is a problem, after what else it needs, 
   const beta = attention(index(m.registryDir)).filter((item) => item.repo === 'beta');
   expect(beta.map((item) => [item.kind, item.title, item.opens])).toEqual([['problem', 'repository', undefined]]);
   expect(beta[0]?.detail).toContain('no longer exists');
+});
+
+test('an item has one identity, equal for equal items and different when any one of its seven fields differs', () => {
+  const base: AttentionItem = {
+    repo: 'alpha',
+    runId: 'r1',
+    key: 'implement#1',
+    workflow: 'w',
+    kind: 'error',
+    title: 'implement#1 ended in error',
+    detail: 'boom',
+  };
+  expect(identity({ ...base })).toBe(identity(base));
+  expect(identity({ ...base, opens: { repo: 'alpha', runId: 'r1' } })).toBe(identity(base));
+  const changed: Partial<AttentionItem>[] = [
+    { repo: 'beta' },
+    { kind: 'failed' },
+    { runId: 'r2' },
+    { key: 'tests#1' },
+    { workflow: 'x' },
+    { title: 'parked after 3 attempts' },
+    { detail: 'bang' },
+  ];
+  const ids = [base, ...changed.map((change) => ({ ...base, ...change }))].map(identity);
+  expect(new Set(ids).size).toBe(8);
+  const { runId: _runId, ...noRun } = base;
+  expect(identity(noRun)).not.toBe(identity(base));
+  expect(identity({ ...base, detail: 'a · b', title: 'c' })).not.toBe(
+    identity({ ...base, detail: 'b', title: 'c · a' }),
+  );
 });

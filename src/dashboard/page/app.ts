@@ -11,7 +11,8 @@
 //   the rail opens its queue in the centre, in place of the run, until a run is opened again. A queue that leaves the
 //   index gives the centre back to the run.
 // - Needs attention is a button in the top bar with its count. It opens a pane over the page, and `a` toggles it; Esc,
-//   a click outside it, and opening one of its items close it.
+//   a click outside it, and opening one of its items close it. Its All clear button hides the items listed at the click,
+//   remembered by their identities in the browser; an index that no longer lists an identity forgets it.
 // - Opening a stage card shows its timeline in the centre, drawn from the same run model, so it grows with the run
 //   socket's events. While the call runs and the timeline is followed, each draw scrolls it to its newest entry. The
 //   kinds of entry it hides hold for every call's timeline, and are saved like the theme. An opened script command shows
@@ -43,7 +44,7 @@ import type { QueueEvent, SailEvent } from '../../events/types';
 import type { RunActions } from '../actions';
 import type { IndexRepo } from '../files';
 import type { Message } from '../streams';
-import { attention } from './attention';
+import { attention, identity } from './attention';
 import { renderAttention } from './attention-view';
 import { isMarkdown, renderDrawer } from './drawer-view';
 import type { PageHost, Region } from './host';
@@ -72,6 +73,8 @@ export const THEME_KEY = 'sail-dashboard-theme';
 export const RAIL_KEY = 'sail-dashboard-rail-expanded';
 /** Where the kinds of entry the timeline hides are saved, comma-separated. */
 export const FILTER_KEY = 'sail-dashboard-timeline-hidden';
+/** Where the identities of the needs-attention items a person cleared are kept, as a JSON list of strings. */
+export const CLEARED_KEY = 'sail-dashboard-attention-cleared';
 export const RECONNECT_MS = 2000;
 export const FLUSH_MS = 100;
 export const LOG_REFRESH_MS = 1000;
@@ -155,6 +158,16 @@ export function boot(host: PageHost): Page {
     }
   })();
   ui.expanded = names;
+  let cleared = new Set<string>(
+    (() => {
+      try {
+        const stored: unknown = JSON.parse(host.load(CLEARED_KEY) ?? '[]');
+        return Array.isArray(stored) && stored.every((id) => typeof id === 'string') ? (stored as string[]) : [];
+      } catch {
+        return [];
+      }
+    })(),
+  );
   host.setInspector(ui.inspector);
 
   let index: IndexRepo[] | undefined;
@@ -217,6 +230,8 @@ export function boot(host: PageHost): Page {
   /** The card whose timeline the centre shows, when it shows one: a card selected before it exists shows the run. */
   const opened = () => (ui.timeline ? selected() : undefined);
 
+  const listed = () => (index === undefined ? [] : attention(index).filter((item) => !cleared.has(identity(item))));
+
   const draw: Record<Region, () => string> = {
     rail: () => {
       if (index === undefined) return html`<div class="qempty">connecting…</div>`.value;
@@ -230,7 +245,7 @@ export function boot(host: PageHost): Page {
       fieldsOwn = true;
       return renderRail(railRepos(index, host.now()), ui, host.now(), offers).value;
     },
-    attention: () => renderAttention(index === undefined ? [] : attention(index), ui.attention).value,
+    attention: () => renderAttention(listed(), ui.attention).value,
     main: () => {
       const panel = openQueue();
       if (panel !== undefined) {
@@ -694,6 +709,11 @@ export function boot(host: PageHost): Page {
     if (message?.kind !== 'index') return;
     const repos = message.repos;
     index = repos;
+    const still = new Set(attention(repos).map(identity));
+    if ([...cleared].some((id) => !still.has(id))) {
+      cleared = new Set([...cleared].filter((id) => still.has(id)));
+      host.save(CLEARED_KEY, JSON.stringify([...cleared]));
+    }
     syncQueues(repos);
     const lists = (name?: string, runId?: string) =>
       repos.some((repo) => repo.name === name && repo.runs.some((entry) => entry.runId === runId));
@@ -1065,6 +1085,11 @@ export function boot(host: PageHost): Page {
     },
     'toggle-attention': () => {
       ui.attention = !ui.attention;
+      mark('attention');
+    },
+    'clear-attention': () => {
+      for (const item of listed()) cleared.add(identity(item));
+      host.save(CLEARED_KEY, JSON.stringify([...cleared]));
       mark('attention');
     },
     'toggle-section': (data) => {

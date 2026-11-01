@@ -19,7 +19,7 @@ test("FAKE-2's failure and the two errors are buttons in one list whose data ope
     '<button class="btn att-btn on" type="button" data-action="toggle-attention" title="needs attention (a)">⚑ needs attention<span class="badge">4</span></button>';
   const markup = renderAttention(items, true).value;
   expect(markup).toStartWith(
-    `${button}<div class="att-scrim" data-action="toggle-attention"></div><div class="att-pane"><div class="rail-h"><span>needs attention</span><span class="c">4</span></div><div class="att-list">`,
+    `${button}<div class="att-scrim" data-action="toggle-attention"></div><div class="att-pane"><div class="rail-h"><span>needs attention</span><span class="c">4</span><button class="btn att-clear" type="button" data-action="clear-attention">all clear</button></div><div class="att-list">`,
   );
   expect(renderAttention(items, false).value).toBe(button.replace(' on"', '"'));
   expect(markup).toContain(
@@ -49,4 +49,13 @@ test('an empty list has no count on the button, and the open pane says nothing n
   expect(renderAttention([], true).value).toContain(
     '<div class="att-list"><div class="att-empty">nothing needs attention</div></div></div>',
   );
+});
+
+test('the open pane with items has an all clear button after its count, and the empty pane has none', () => {
+  const items = attention(index(m.registryDir));
+  expect(renderAttention(items, true).value).toContain(
+    '<span class="c">4</span><button class="btn att-clear" type="button" data-action="clear-attention">all clear</button></div>',
+  );
+  expect(renderAttention(items, false).value).not.toContain('clear-attention');
+  expect(renderAttention([], true).value).not.toContain('clear-attention');
 });

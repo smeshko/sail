@@ -93,3 +93,9 @@ function repoItems(repo: IndexRepo): AttentionItem[] {
 export function attention(index: readonly IndexRepo[]): AttentionItem[] {
   return [...index].sort((a, b) => (a.name < b.name ? -1 : Number(a.name > b.name))).flatMap(repoItems);
 }
+
+/** What an item is known by once a person has cleared it: every field that says what it is. */
+export function identity(item: AttentionItem): string {
+  const { repo, kind, runId, key, workflow, title, detail } = item;
+  return JSON.stringify([repo, kind, runId ?? null, key ?? null, workflow ?? null, title, detail]);
+}
