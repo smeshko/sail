@@ -21,7 +21,7 @@
 //
 // `sail queue` shares the live watcher's lookup and the wait for a command to be taken: `findWatcher()` and `taken()`.
 // The set read back from the queue streams is `liveSet()`, which the dashboard shares too.
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { BUILTINS } from '../../adapters/index';
 import { isAlive as processIsAlive } from '../../adapters/leases';
@@ -30,7 +30,7 @@ import { type ProjectConfig, type RunPort, readConfig } from '../../engine/confi
 import { runsDir as runsDirOf } from '../../engine/run-dir';
 import { formatIssue } from '../../engine/schemas';
 import { sameLabel } from '../../ports/labels';
-import { dropCommand } from '../../watch/inbox';
+import { commandTaken, dropCommand } from '../../watch/inbox';
 import { readWatch, readWatches, systemTimers, type Timers, type WatchDeclaration } from '../../watch/poll';
 import {
   findHolder,
@@ -64,9 +64,6 @@ export interface WatchDeps {
   /** The pid a watcher this command starts records itself under. */
   pid?: number;
 }
-
-const APPLY_TIMEOUT_MS = 15_000;
-const POLL_MS = 100;
 
 /** The environment without its unset variables, for the runs the watcher spawns. */
 function definedEnv(env: Readonly<Record<string, string | undefined>>): Record<string, string> {
@@ -132,13 +129,11 @@ async function locate(
 }
 
 /** Waits for the watcher to take the command in `file`: true once the file is gone, false after the timeout. */
-export async function taken(file: string, deps: WatchDeps): Promise<boolean> {
-  const deadline = performance.now() + (deps.applyTimeoutMs ?? APPLY_TIMEOUT_MS);
-  while (existsSync(file)) {
-    if (performance.now() > deadline) return false;
-    await Bun.sleep(deps.pollMs ?? POLL_MS);
-  }
-  return true;
+export function taken(file: string, deps: WatchDeps): Promise<boolean> {
+  return commandTaken(file, {
+    ...(deps.applyTimeoutMs === undefined ? {} : { timeoutMs: deps.applyTimeoutMs }),
+    ...(deps.pollMs === undefined ? {} : { pollMs: deps.pollMs }),
+  });
 }
 
 /**

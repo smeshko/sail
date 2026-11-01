@@ -1,6 +1,6 @@
-// The CLI commands the page shows to copy. The dashboard moves a queued item and resumes or restarts a run: what a
-// person would do about a parked item, they do in a terminal, and the page only says how. A run id, a workflow and a dedup key come from run
-// and queue files, so each is quoted for the shell unless it is a plain word: a pasted command runs only what it says.
+// The CLI commands the page shows to copy for a run (`runCommands`): the queue's changes are buttons, not commands. A
+// run id comes from run files, so it is quoted for the shell unless it is a plain word: a pasted command runs only what
+// it says.
 
 export interface Command {
   label: string;
@@ -19,13 +19,4 @@ export function runCommands(runId: string, status: string | undefined): Command[
   if (status === 'running') commands.push({ label: 'follow', command: `sail show ${run} --follow` });
   if (status === 'suspended') commands.push({ label: 'resume', command: `sail resume ${run}` });
   return commands;
-}
-
-/** What a person does with a parked item: queue it again, or drop it. */
-export function parkedCommands(workflow: string, dedupKey: string): Command[] {
-  const args = `${shellWord(workflow)} ${shellWord(dedupKey)}`;
-  return [
-    { label: 'requeue', command: `sail queue requeue ${args}` },
-    { label: 'drop', command: `sail queue drop ${args}` },
-  ];
 }

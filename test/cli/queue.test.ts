@@ -8,7 +8,6 @@ import { queueCommand } from '../../src/cli/commands/queue';
 import { type WatchDeps, watchCommand } from '../../src/cli/commands/watch';
 import { EXIT_OK, EXIT_REFUSED } from '../../src/cli/exit-codes';
 import type { Io } from '../../src/cli/index';
-import { parkedCommands } from '../../src/dashboard/page/commands';
 import { commandsDir } from '../../src/watch/inbox';
 import { queueDir } from '../../src/watch/queue-store';
 import { readEntry } from '../../src/watch/registry';
@@ -385,25 +384,6 @@ test('sail queue poll a makes the watcher poll a now', async () => {
       polls: 1,
       last: 1,
     });
-    await w.stop();
-  });
-}, 30_000);
-
-test("the dashboard's commands for a parked item run as printed: its requeue queues it again, and its drop then drops it", async () => {
-  await withTempRepo(async (repo) => {
-    const w = await running(repo, designated('FAKE-1', 'FAKE-2', 'FAKE-3'));
-    await parkTwo(w);
-    const [requeue, drop] = parkedCommands('a', 'ticket:FAKE-1').map(({ command }) => command.split(' '));
-    expect([requeue?.slice(0, 2), drop?.slice(0, 2)]).toEqual([
-      ['sail', 'queue'],
-      ['sail', 'queue'],
-    ]);
-    const requeued = await w.applied(requeue?.slice(2) ?? []);
-    const dropped = await w.applied(drop?.slice(2) ?? []);
-    expect([requeued, dropped]).toEqual([
-      { code: EXIT_OK, stdout: 'sail queue: queued ticket:FAKE-1 Ticket FAKE-1\n', stderr: '' },
-      { code: EXIT_OK, stdout: 'sail queue: ticket:FAKE-1 dropped\n', stderr: '' },
-    ]);
     await w.stop();
   });
 }, 30_000);

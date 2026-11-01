@@ -361,3 +361,15 @@ test('value() reads the named field of the main region, and answers undefined fo
   fake.elements.main = element();
   expect(host.value('raise')).toBeUndefined();
 });
+
+test("value() of a checkbox is 'on' while it is ticked and empty while it is not, whatever its value attribute says", () => {
+  const fake = fakeWindow();
+  const host = browserHost(fake.win);
+  fake.elements.main = element({
+    querySelector: (selectors: string) =>
+      selectors === '[name="add-force"]'
+        ? element({ type: 'checkbox', value: 'on', checked: false })
+        : element({ type: 'checkbox', checked: true }),
+  });
+  expect([host.value('add-force'), host.value('other')]).toEqual(['', 'on']);
+});

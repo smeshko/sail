@@ -138,8 +138,8 @@ export function railRepos(index: readonly IndexRepo[], now: number): RailRepo[] 
 /** The states in the order the queue view lists them: what is running now comes first. */
 export const QUEUE_STATES: readonly QueueItemState[] = ['dispatched', 'queued', 'failed', 'parked', 'done'];
 
-/** A queue item, and whether its run is one the rail lists, so the queue view can open it. */
-export type PanelItem = QueueItem & { runListed: boolean };
+/** A queue item, whether its run is one the rail lists so the queue view can open it, and whether that run has ended. */
+export type PanelItem = QueueItem & { runListed: boolean; runEnded: boolean };
 
 /** One watched workflow's queue in one repository. */
 export interface QueuePanel {
@@ -158,10 +158,17 @@ export function queuePanels(index: readonly IndexRepo[]): QueuePanel[] {
   return byName(index).flatMap((repo) =>
     repo.queues.map((view) => {
       const listed = new Set(repo.runs.map((run) => run.runId));
+      const live = new Set(
+        repo.runs.filter((run) => ['running', 'suspended'].includes(statusOf(run))).map((run) => run.runId),
+      );
       const items = QUEUE_STATES.flatMap((state) =>
         (view.queue?.items ?? [])
           .filter((item) => item.state === state)
-          .map((item) => ({ ...item, runListed: item.runId !== undefined && listed.has(item.runId) })),
+          .map((item) => ({
+            ...item,
+            runListed: item.runId !== undefined && listed.has(item.runId),
+            runEnded: item.runId === undefined || !live.has(item.runId),
+          })),
       );
       const counts = Object.fromEntries(
         QUEUE_STATES.map((state) => [state, items.filter((item) => item.state === state).length]),
@@ -184,4 +191,10 @@ export function watchState(events: readonly Pick<QueueEvent, 'type'>[]): WatchSt
   const last = events.findLast((event) => event.type === 'watch:added' || event.type === 'watch:removed');
   if (last === undefined) return 'unknown';
   return last.type === 'watch:added' ? 'watched' : 'not watched';
+}
+
+/** What the workflow polls, from the last `queue:polled` event of its queue's events. */
+export function pollKind(events: readonly { type: string }[]): 'ticket' | 'pr' | undefined {
+  const kind = (events.findLast((event) => event.type === 'queue:polled') as { kind?: unknown } | undefined)?.kind;
+  return kind === 'ticket' || kind === 'pr' ? kind : undefined;
 }

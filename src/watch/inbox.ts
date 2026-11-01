@@ -171,6 +171,22 @@ export async function drainCommands(runsDir: string, apply: (command: Command) =
   return drained;
 }
 
+/**
+ * Waits for the watcher to take the command in `file`: true once the file is gone, false after the timeout (15 s unless
+ * `timeoutMs`), looking every `pollMs` (100 ms).
+ */
+export async function commandTaken(
+  file: string,
+  { timeoutMs = 15_000, pollMs = 100 }: { timeoutMs?: number; pollMs?: number } = {},
+): Promise<boolean> {
+  const deadline = performance.now() + timeoutMs;
+  while (existsSync(file)) {
+    if (performance.now() > deadline) return false;
+    await Bun.sleep(pollMs);
+  }
+  return true;
+}
+
 /** Deletes every file in the inbox, temp files included, unapplied, and gives how many it deleted. */
 export function clearCommands(runsDir: string): number {
   const dir = commandsDir(runsDir);
