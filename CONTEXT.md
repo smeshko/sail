@@ -334,6 +334,10 @@ _Avoid_: start point, fork point
 `refs/sail/runs/<runId>` in the repository: where a run's commits are kept when its workspace is removed with its `HEAD` past its base and on no remote-tracking ref, recorded as `ref` on `workspace:released`. A failed run never pushed its branch, so this is where its work survives. `git branch` doesn't list it and gc keeps what it reaches; `git branch <name> refs/sail/runs/<runId>` recovers the work.
 _Avoid_: backup branch, rescue ref
 
+**Clean**:
+Removing what a failed run left behind (its worktree, its local and remote branch, its run ref) and moving its run directory to `failed-runs/<YYYY-MM-DD>/<run id>/` in sail's machine directory. `sail clean` does it. A run still used (leased by another run, named by a queue item, or whose branch has an open pull request) is refused.
+_Avoid_: delete, purge, prune
+
 **Branch**:
 Always the git branch, such as the one a run's workspace sits on. A workflow's routing decision is a route, never a branch.
 _Avoid_: using "branch" for a route or a fork in the workflow

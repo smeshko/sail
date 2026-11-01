@@ -218,3 +218,29 @@ test('fastForward answers moved false: the fake repository stands in for the rem
   const workspace = createFakeWorkspace({ repo: repo().dir, env: repo().env, leasesDir: tempDir() });
   expect(await workspace.fastForward?.()).toEqual({ moved: false });
 });
+
+test('the fake reads a branch in its repository as both local and remote, and removes it from both with one removal', async () => {
+  await withTempRepo(async (temp) => {
+    const workspace = createFakeWorkspace({ repo: temp.dir, env: temp.env });
+    expect(await workspace.branches('sail/b')).toEqual({ local: false, remote: false });
+    temp.git('update-ref', 'refs/heads/sail/b', temp.git('rev-parse', 'HEAD'));
+    expect(await workspace.branches('sail/b')).toEqual({ local: true, remote: true });
+    expect(await workspace.removeBranch('sail/b', 'local')).toEqual({ removed: true });
+    expect(await workspace.branches('sail/b')).toEqual({ local: false, remote: false });
+    expect(await workspace.removeBranch('sail/b', 'remote')).toEqual({ removed: false });
+    expect(await workspace.removeBranch('sail/b', 'local')).toEqual({ removed: false });
+  });
+});
+
+test('the fake removes a run ref, and answers removed false when it is gone', async () => {
+  await withTempRepo(async (temp) => {
+    const workspace = createFakeWorkspace({ repo: temp.dir, env: temp.env });
+    temp.git('update-ref', 'refs/sail/runs/r9', temp.git('rev-parse', 'HEAD'));
+    expect(await workspace.removeRunRef('r9')).toEqual({ removed: true });
+    expect(
+      Bun.spawnSync(['git', 'rev-parse', '--verify', '--quiet', 'refs/sail/runs/r9'], { cwd: temp.dir, env: temp.env })
+        .exitCode,
+    ).not.toBe(0);
+    expect(await workspace.removeRunRef('r9')).toEqual({ removed: false });
+  });
+});

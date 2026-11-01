@@ -91,6 +91,7 @@ export const OPERATIONS: Record<Port, string[]> = {
   ],
   harness: ['capabilities', 'run'],
   workspace: [
+    'branches',
     'capabilities',
     'create',
     'diff',
@@ -99,6 +100,8 @@ export const OPERATIONS: Record<Port, string[]> = {
     'readTree',
     'release',
     'releaseLease',
+    'removeBranch',
+    'removeRunRef',
     'reopen',
     'repository',
     'sweep',

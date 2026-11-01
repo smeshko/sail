@@ -28,10 +28,13 @@ import { defaultLeasesDir, heldLease, releaseLease, takeLease } from '../leases'
 import {
   addDetached,
   copyTree,
+  deleteLocalBranch,
+  deleteRunRef,
   diffWorkingTree,
   fastForwardClone,
   fetchRemote,
   gitSync,
+  hasLocalBranch,
   releaseWorktree,
   removeWorktree,
   reopenWorktree,
@@ -129,6 +132,13 @@ export function createGitWorktreeWorkspace(options: GitWorktreeOptions): Workspa
     );
   };
 
+  /** Whether the remote has `branch` now, asked of the remote itself rather than read from a tracking ref. */
+  const onRemote = async (branch: string): Promise<boolean> => {
+    const listed = gitSync(repo, ['ls-remote', '--heads', remote, `refs/heads/${branch}`], env, FETCH_TIMEOUT_MS);
+    if (listed.code !== 0) throw new PortError('workspace', 'branches', 'unavailable', listed.stderr);
+    return listed.stdout.trim() !== '';
+  };
+
   return {
     name: 'git-worktree',
     async repository() {
@@ -214,6 +224,21 @@ export function createGitWorktreeWorkspace(options: GitWorktreeOptions): Workspa
         releaseWorktree(repo, { runId: basename(runDir), runDir }, 'sweep', env),
       );
       return { ...swept, raw: null };
+    },
+    async branches(branch) {
+      return { local: hasLocalBranch(repo, branch, env), remote: await onRemote(branch) };
+    },
+    async removeBranch(branch, where) {
+      if (where === 'local') return deleteLocalBranch(repo, branch, env);
+      if (!(await onRemote(branch))) return { removed: false };
+      const deleted = gitSync(repo, ['push', remote, '--delete', `refs/heads/${branch}`], env, FETCH_TIMEOUT_MS);
+      if (deleted.code !== 0) throw new PortError('workspace', 'removeBranch', 'unavailable', deleted.stderr);
+      const tracking = `refs/remotes/${remote}/${branch}`;
+      if (resolveCommit(repo, tracking, env) !== undefined) gitSync(repo, ['update-ref', '-d', tracking], env);
+      return { removed: true };
+    },
+    async removeRunRef(runId) {
+      return deleteRunRef(repo, runId, env);
     },
     capabilities: () => ({ keep: true, sweep: true }),
   };

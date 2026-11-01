@@ -183,6 +183,41 @@ export function removeWorktree(
 /** The run ref, where a removed workspace's commits are kept: outside `refs/heads/`, so `git branch` never lists it. */
 export const runRef = (runId: string): string => `refs/sail/runs/${runId}`;
 
+/** Whether `ref` names something in `repo`. */
+function refExists(repo: string, ref: string, env?: Readonly<Record<string, string>>): boolean {
+  return gitSync(repo, ['rev-parse', '--verify', '--quiet', ref], env).code === 0;
+}
+
+/** Whether the clone has the local branch `branch`. */
+export function hasLocalBranch(repo: string, branch: string, env?: Readonly<Record<string, string>>): boolean {
+  return refExists(repo, `refs/heads/${branch}`, env);
+}
+
+/** Deletes the local branch `branch`, answering whether it was there. git refuses one checked out in any worktree: that is `unavailable`. */
+export function deleteLocalBranch(
+  repo: string,
+  branch: string,
+  env?: Readonly<Record<string, string>>,
+): { removed: boolean } {
+  if (!hasLocalBranch(repo, branch, env)) return { removed: false };
+  const deleted = gitSync(repo, ['branch', '-D', '--', branch], env);
+  if (deleted.code !== 0) throw new PortError('workspace', 'removeBranch', 'unavailable', deleted.stderr);
+  return { removed: true };
+}
+
+/** Deletes `runRef(runId)`, answering whether it was there. */
+export function deleteRunRef(
+  repo: string,
+  runId: string,
+  env?: Readonly<Record<string, string>>,
+): { removed: boolean } {
+  const ref = runRef(runId);
+  if (!refExists(repo, ref, env)) return { removed: false };
+  const deleted = gitSync(repo, ['update-ref', '-d', ref], env);
+  if (deleted.code !== 0) throw new PortError('workspace', 'removeRunRef', 'unavailable', deleted.stderr);
+  return { removed: true };
+}
+
 /**
  * The base `run.json` in `runDir` records, or undefined when there is none. Only `repository.baseSha` is read, so a
  * header that has since broken `sail.run.v1` still names its base.

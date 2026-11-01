@@ -4,7 +4,8 @@
 // `git-worktree` (src/adapters/workspace/git.ts) and differs from it in three things: it fetches nothing, its remote is
 // a constant (`fake://origin` unless set), and its definition keeps leases beside the repository's runs rather than
 // machine-wide. The branch is never checked out: a workspace records it for the later push of `HEAD:<branch>`, so only
-// the lease keeps two runs of one branch apart (ADR-0018). `holder()` reads the same leases.
+// the lease keeps two runs of one branch apart (ADR-0018). `holder()` reads the same leases. Its repository is both clone
+// and remote, so a branch in it reads as both the local and the remote branch, and removing it removes both.
 import { basename, join } from 'node:path';
 import type { ProviderEvent } from '../../events/types';
 import { PortError } from '../../ports/errors';
@@ -14,7 +15,10 @@ import { defaultLeasesDir, heldLease, releaseLease, takeLease } from '../leases'
 import {
   addDetached,
   copyTree,
+  deleteLocalBranch,
+  deleteRunRef,
   diffWorkingTree,
+  hasLocalBranch,
   releaseWorktree,
   reopenWorktree,
   resolveCommit,
@@ -106,6 +110,16 @@ export function createFakeWorkspace(options: FakeWorkspaceOptions): WorkspacePor
         releaseWorktree(repo, { runId: basename(runDir), runDir }, 'sweep', env),
       );
       return { ...swept, raw: null };
+    },
+    async branches(branch) {
+      const there = hasLocalBranch(repo, branch, env);
+      return { local: there, remote: there };
+    },
+    async removeBranch(branch, where) {
+      return where === 'local' ? deleteLocalBranch(repo, branch, env) : { removed: false };
+    },
+    async removeRunRef(runId) {
+      return deleteRunRef(repo, runId, env);
     },
     capabilities: () => ({ keep: true, sweep: true }),
   };

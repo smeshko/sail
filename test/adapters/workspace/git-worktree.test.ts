@@ -25,7 +25,7 @@ import { writeStatus } from '../../../src/engine/run-dir';
 import { copyFixture, edit } from '../../helpers/fixture';
 import { holdTempRepo } from '../../helpers/held-repo';
 import { withOrigin } from '../../helpers/origin';
-import { captureEvents, messageOf, portFailure, settle } from '../../helpers/ports';
+import { captureEvents, messageOf, portFailure, rejection as rejectionOf, settle } from '../../helpers/ports';
 import { type TempRepo, withTempRepo } from '../../helpers/temp-repo';
 import { type WorkspaceWorld, workspaceSuite } from '../../ports/workspace.suite';
 
@@ -828,6 +828,85 @@ test("a release whose commits can't be kept at their ref still removes the works
       message: `its commits at ${head} were not kept at refs/sail/runs/r1`,
       workspace: false,
       ref: 1,
+    });
+  });
+});
+
+describe('the clean removals', () => {
+  test('branches() reports a local branch and a branch on the remote independently', async () => {
+    await withTempRepo(async (repo) => {
+      withOrigin(repo);
+      const adapter = adapterOf(repo, world(repo));
+      const sha = repo.git('rev-parse', 'HEAD');
+      expect(await adapter.branches('sail/only-local')).toEqual({ local: false, remote: false });
+      repo.git('update-ref', 'refs/heads/sail/only-local', sha);
+      expect(await adapter.branches('sail/only-local')).toEqual({ local: true, remote: false });
+      repo.git('push', '--quiet', 'origin', `${sha}:refs/heads/sail/only-remote`);
+      expect(await adapter.branches('sail/only-remote')).toEqual({ local: false, remote: true });
+    });
+  });
+
+  test('branches() asks the remote afresh: a stale tracking ref is no remote branch', async () => {
+    await withTempRepo(async (repo) => {
+      withOrigin(repo);
+      const sha = repo.git('rev-parse', 'HEAD');
+      repo.git('push', '--quiet', 'origin', `${sha}:refs/heads/sail/stale`);
+      repo.git('fetch', '--quiet', 'origin');
+      repo.git('push', '--quiet', 'origin', '--delete', 'refs/heads/sail/stale');
+      repo.git('update-ref', 'refs/remotes/origin/sail/stale', sha);
+      expect(await adapterOf(repo, world(repo)).branches('sail/stale')).toEqual({ local: false, remote: false });
+    });
+  });
+
+  test("removeBranch removes a local branch, and answers removed false when it's gone", async () => {
+    await withTempRepo(async (repo) => {
+      withOrigin(repo);
+      const adapter = adapterOf(repo, world(repo));
+      repo.git('update-ref', 'refs/heads/sail/local', repo.git('rev-parse', 'HEAD'));
+      expect(await adapter.removeBranch('sail/local', 'local')).toEqual({ removed: true });
+      expect(await adapter.branches('sail/local')).toEqual({ local: false, remote: false });
+      expect(await adapter.removeBranch('sail/local', 'local')).toEqual({ removed: false });
+    });
+  });
+
+  test("removeBranch removes a remote branch and its tracking ref, and answers removed false when it's gone", async () => {
+    await withTempRepo(async (repo) => {
+      withOrigin(repo);
+      const adapter = adapterOf(repo, world(repo));
+      const sha = repo.git('rev-parse', 'HEAD');
+      repo.git('push', '--quiet', 'origin', `${sha}:refs/heads/sail/remote`);
+      repo.git('fetch', '--quiet', 'origin');
+      expect(await adapter.removeBranch('sail/remote', 'remote')).toEqual({ removed: true });
+      expect(await adapter.branches('sail/remote')).toEqual({ local: false, remote: false });
+      expect(
+        gitIn(repo, repo.dir, 'rev-parse', '--verify', '--quiet', 'refs/remotes/origin/sail/remote').code,
+      ).not.toBe(0);
+      expect(await adapter.removeBranch('sail/remote', 'remote')).toEqual({ removed: false });
+    });
+  });
+
+  test('removeBranch of a local branch checked out in the clone is unavailable, and keeps the branch', async () => {
+    await withTempRepo(async (repo) => {
+      withOrigin(repo);
+      const adapter = adapterOf(repo, world(repo));
+      repo.git('checkout', '--quiet', '-b', 'sail/checked-out');
+      expect(portFailure(await rejectionOf(adapter.removeBranch('sail/checked-out', 'local')))).toEqual({
+        port: 'workspace',
+        op: 'removeBranch',
+        code: 'unavailable',
+      });
+      expect(await adapter.branches('sail/checked-out')).toEqual({ local: true, remote: false });
+    });
+  });
+
+  test("removeRunRef removes refs/sail/runs/<id>, and answers removed false when it's gone", async () => {
+    await withTempRepo(async (repo) => {
+      withOrigin(repo);
+      const adapter = adapterOf(repo, world(repo));
+      repo.git('update-ref', 'refs/sail/runs/ADW-1-X', repo.git('rev-parse', 'HEAD'));
+      expect(await adapter.removeRunRef('ADW-1-X')).toEqual({ removed: true });
+      expect(gitIn(repo, repo.dir, 'rev-parse', '--verify', '--quiet', 'refs/sail/runs/ADW-1-X').code).not.toBe(0);
+      expect(await adapter.removeRunRef('ADW-1-X')).toEqual({ removed: false });
     });
   });
 });

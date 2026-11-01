@@ -85,5 +85,17 @@ export interface WorkspacePort {
    * every other ended run's is still removed. Resolves with both removed paths and failures, each sorted by path.
    */
   sweep(runsDir: string): Promise<Swept>;
+  /**
+   * Whether `branch` exists in the clone (`local`) and on the remote (`remote`). A read: it removes nothing and emits
+   * nothing. A remote that can't be asked is `unavailable`.
+   */
+  branches(branch: string): Promise<{ local: boolean; remote: boolean }>;
+  /**
+   * Deletes `branch` from the clone (`local`) or from the remote (`remote`). `removed: false` means it was already gone.
+   * A deletion git refuses, such as a branch checked out in the clone, is `unavailable`. Emits nothing.
+   */
+  removeBranch(branch: string, where: 'local' | 'remote'): Promise<{ removed: boolean }>;
+  /** Deletes `refs/sail/runs/<runId>`. `removed: false` means it was already gone. Emits nothing. */
+  removeRunRef(runId: string): Promise<{ removed: boolean }>;
   capabilities(): WorkspaceCapabilities;
 }
