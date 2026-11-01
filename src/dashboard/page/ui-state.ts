@@ -49,6 +49,10 @@ export interface UiState {
   itemMenu?: string;
   /** The item whose drop a first click has armed, by dedup key, which a second click drops. */
   armedDrop?: string;
+  /** The unwatch a first click has armed, as `<repo>` for every workflow or `<repo>/<workflow>`, which a second click makes. */
+  armedWatch?: string;
+  /** The answer to the last change of a repository's watch set, shown under its header until the next. */
+  watchNotice?: { repo: string; text: string };
   /** What was typed in the queue view's add field, and whether Force is ticked, kept across a draw. */
   addTicket?: string | undefined;
   addForce?: boolean;

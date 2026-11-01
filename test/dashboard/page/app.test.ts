@@ -1788,3 +1788,81 @@ test('a refused Stop or Clean shows its error beside the buttons and disarms, an
   await settle();
   expect(host.posts).toHaveLength(1);
 });
+
+/** The page booted on an index whose beta has a live watcher that watches `workflows`, or none. */
+function bootWatching(workflows?: string[]) {
+  page = boot(host);
+  const repos = index(m.registryDir).map((repo) =>
+    repo.name === 'beta' && workflows !== undefined ? { ...repo, watching: { pid: 4242, workflows } } : repo,
+  );
+  host.push(host.open('index')[0], { kind: 'index', repos });
+  host.advance(100);
+}
+const watchClick = (op: string, workflow?: string) =>
+  host.click({ action: 'watch-set', repo: 'beta', op, ...(workflow === undefined ? {} : { workflow }) });
+
+test('a Watch click posts the workflow to the repository watch route at once, and says it is watching until the answer', async () => {
+  bootWatching();
+  host.postAnswer = { status: 200, body: JSON.stringify({ message: 'sail watch: it watches ticket-to-pr' }) };
+  watchClick('watch', QUEUE_WORKFLOW);
+  expect(host.posts).toEqual([{ path: '/api/repos/beta/watch', body: { workflows: [QUEUE_WORKFLOW] } }]);
+  expect(page?.ui.watchNotice).toEqual({ repo: 'beta', text: 'watching…' });
+  await settle();
+  expect(page?.ui.watchNotice).toEqual({ repo: 'beta', text: 'sail watch: it watches ticket-to-pr' });
+  host.advance(100);
+  expect(host.regions.rail).toContain('<div class="lgrp-p">sail watch: it watches ticket-to-pr</div>');
+});
+
+test('an Unwatch click arms and posts nothing, another action disarms it, and the second click posts the workflow to the unwatch route', async () => {
+  bootWatching([QUEUE_WORKFLOW]);
+  host.click({ action: 'toggle-group', group: 'beta' });
+  host.click({ action: 'toggle-group', group: `beta/${QUEUE_WORKFLOW}` });
+  watchClick('unwatch', QUEUE_WORKFLOW);
+  host.advance(100);
+  expect([host.posts, page?.ui.armedWatch]).toEqual([[], `beta/${QUEUE_WORKFLOW}`]);
+  expect(host.regions.rail).toContain('unwatch? click again');
+  host.click({ action: 'toggle-group', group: 'alpha' });
+  host.advance(100);
+  expect(page?.ui.armedWatch).toBeUndefined();
+  expect(host.regions.rail).not.toContain('click again');
+  watchClick('unwatch', QUEUE_WORKFLOW);
+  expect(host.posts).toEqual([]);
+  host.postAnswer = { status: 200, body: JSON.stringify({ message: 'sail unwatch: done' }) };
+  watchClick('unwatch', QUEUE_WORKFLOW);
+  expect(host.posts).toEqual([{ path: '/api/repos/beta/unwatch', body: { workflows: [QUEUE_WORKFLOW] } }]);
+  expect([page?.ui.armedWatch, page?.ui.watchNotice]).toEqual([undefined, { repo: 'beta', text: 'unwatching…' }]);
+});
+
+test('Watch all posts an empty list at once, and Unwatch all posts one on its second click', async () => {
+  bootWatching([QUEUE_WORKFLOW]);
+  watchClick('watch');
+  expect(host.posts).toEqual([{ path: '/api/repos/beta/watch', body: { workflows: [] } }]);
+  host.posts.length = 0;
+  watchClick('unwatch');
+  expect([host.posts, page?.ui.armedWatch]).toEqual([[], 'beta']);
+  watchClick('unwatch');
+  expect(host.posts).toEqual([{ path: '/api/repos/beta/unwatch', body: { workflows: [] } }]);
+  await settle();
+});
+
+test('a 202 shows its waiting line, a 409 the CLI refusal, and no answer says so, each under the repository', async () => {
+  bootWatching();
+  const notices: (string | undefined)[] = [];
+  for (const answer of [
+    { status: 202, body: JSON.stringify({ message: 'the watcher of beta (pid 7) starts', pid: 7 }) },
+    { status: 202, body: JSON.stringify({ waiting: 'the watcher has not taken the command yet' }) },
+    { status: 409, body: JSON.stringify({ error: 'sail watch: no workflow declares a watch' }) },
+    { status: 0, body: '' },
+  ]) {
+    host.postAnswer = answer;
+    watchClick('watch');
+    await settle();
+    notices.push(page?.ui.watchNotice?.text);
+  }
+  expect(notices).toEqual([
+    'the watcher of beta (pid 7) starts',
+    'the watcher has not taken the command yet',
+    'sail watch: no workflow declares a watch',
+    'the watch could not be sent: the dashboard did not answer',
+  ]);
+});

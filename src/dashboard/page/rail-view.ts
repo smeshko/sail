@@ -3,7 +3,10 @@
 // each repository with its workflows, every one folded until the person opens it. A watched workflow's header carries a
 // queue badge that opens its queue. An open workflow shows a history line, whose `failed` and `done` parts each open
 // that status's finished runs, so a long tail of them never buries live work. Whatever is folded, the open run's row
-// and the open queue's workflow stay in sight under it, so the selection is never hidden.
+// and the open queue's workflow stay in sight under it, so the selection is never hidden. A workflow's header also
+// carries its Watch or Unwatch, and an opened repository a row with Watch all and, while its watch set isn't empty,
+// Unwatch all; an Unwatch armed by a first click reads `click again`. The answer to the last change shows under the
+// repository's header.
 import { ago, cost, duration } from './format';
 import { html, type SafeHtml } from './html';
 import { newestFirst, type RailRepo, type RailRun, type RailWorkflow, workflowOf } from './index-model';
@@ -124,16 +127,33 @@ function badge(group: string, queue: NonNullable<RailWorkflow['queue']>, ui: UiS
   }</button>`;
 }
 
-function workflowHeader(workflow: RailWorkflow, group: string, open: boolean, ui: UiState, now: number): SafeHtml {
+/** A watch or unwatch button for a workflow, or for the whole repository when `workflow` is left out. An armed unwatch asks for its second click. */
+function watchButton(repo: string, op: 'watch' | 'unwatch', ui: UiState, workflow?: string): SafeHtml {
+  const all = workflow === undefined;
+  const armed = op === 'unwatch' && ui.armedWatch === (all ? repo : queueId(repo, workflow));
+  const word = all ? `${op} all` : op;
+  return html`<button class="wf-act${armed ? ' armed' : ''}" data-action="watch-set" data-repo="${repo}" data-op="${op}"${
+    all ? '' : html` data-workflow="${workflow}"`
+  }>${armed ? `${word}? click again` : word}</button>`;
+}
+
+function workflowHeader(
+  repo: string,
+  workflow: RailWorkflow,
+  group: string,
+  open: boolean,
+  ui: UiState,
+  now: number,
+): SafeHtml {
   return html`<div class="wf-h"><button class="wf-t${open ? ' open' : ''}" data-action="toggle-group" data-group="${group}"><span class="caret">›</span><span class="nm">${workflow.name}</span></button>${
     workflow.queue === undefined ? '' : badge(group, workflow.queue, ui, now)
-  }${counts(workflow.runs)}</div>`;
+  }${workflow.toggle === undefined ? '' : watchButton(repo, workflow.toggle, ui, workflow.name)}${counts(workflow.runs)}</div>`;
 }
 
 function workflowGroup(repo: string, workflow: RailWorkflow, ui: UiState, now: number): SafeHtml {
   const group = queueId(repo, workflow.name);
   const open = ui.expanded.includes(group);
-  return html`<div class="wf">${workflowHeader(workflow, group, open, ui, now)}
+  return html`<div class="wf">${workflowHeader(repo, workflow, group, open, ui, now)}
 ${open ? historyLine(repo, group, workflow.runs, ui) : openRun(repo, workflow, ui)}</div>`;
 }
 
@@ -152,7 +172,15 @@ function repoGroup(repo: RailRepo, ui: UiState, now: number): SafeHtml {
 <button class="lgrp-h${open ? ' open' : ''}"${
     repo.remote === null ? '' : html` title="${repo.remote}"`
   } data-action="toggle-group" data-group="${repo.name}"><span class="caret">›</span><span class="nm">${repo.name}</span>${counts(repo.runs)}</button>
-${repo.problem === undefined ? '' : html`<div class="lgrp-p">${repo.problem}</div>`}
+${repo.problem === undefined ? '' : html`<div class="lgrp-p">${repo.problem}</div>`}${
+  ui.watchNotice?.repo === repo.name ? html`<div class="lgrp-p">${ui.watchNotice.text}</div>` : ''
+}${
+  open
+    ? html`<div class="lgrp-acts">${watchButton(repo.name, 'watch', ui)}${
+        (repo.watching ?? []).length > 0 ? watchButton(repo.name, 'unwatch', ui) : ''
+      }</div>`
+    : ''
+}
 ${open ? repo.workflows.map((workflow) => workflowGroup(repo.name, workflow, ui, now)) : repoSelection(repo, ui, now)}</div>`;
 }
 

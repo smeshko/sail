@@ -24,7 +24,7 @@
 import { isAlive as processIsAlive } from '../../adapters/leases';
 import { runsDir as runsDirOf } from '../../engine/run-dir';
 import { clean } from '../../events/consumers/screen';
-import { dropCommand } from '../../watch/inbox';
+import { dropCommand, NOT_TAKEN } from '../../watch/inbox';
 import { commandFor, itemLine, outcomeOf, queueOf, streamMark } from '../../watch/queue-commands';
 import { liveSet } from '../../watch/registry';
 import { holderRefusal } from '../../watch/watcher';
@@ -129,7 +129,7 @@ export function queueCommand(deps: WatchDeps = {}): Command {
     const mark = streamMark(runs, workflow);
     const file = dropCommand(runs, command);
     if (!(await taken(file, deps))) {
-      io.stdout(`${COMMAND}: ${watcher} has not taken the command yet: it waits in ${at(io, file)}\n`);
+      io.stdout(`${COMMAND}: ${watcher} ${NOT_TAKEN}: it waits in ${at(io, file)}\n`);
       return EXIT_OK;
     }
     if (op === 'poll') {

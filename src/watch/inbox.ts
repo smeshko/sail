@@ -29,6 +29,9 @@ import { z } from 'zod';
 
 export const COMMANDS_DIR = join('watcher', 'commands');
 
+/** The words that say a command is still in the inbox. */
+export const NOT_TAKEN = 'has not taken the command yet';
+
 /** Where command files are dropped under `.sail-runs/`. */
 export function commandsDir(runsDir: string): string {
   return join(runsDir, COMMANDS_DIR);

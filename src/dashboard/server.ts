@@ -19,7 +19,12 @@
 //    engine function `sail stop` or `sail clean` calls (src/engine/stop.ts, src/engine/clean.ts) in this process,
 //    with the clone's Workspace port, and is refused in the same words, 409. A stop answers 202 `{ message }`, since a
 //    running run ends later, and a clean 200 `{ message, removed, archived }`; a clean whose removal failed is 409
-//    with the failures, and its run directory stays.
+//    with the failures, and its run directory stays. The watch set is changed at `/api/repos/<repo>/watch` and
+//    `…/unwatch` (body `{ workflows: string[] }`, none meaning all): each runs `sail watch` or `sail unwatch` in the
+//    clone and passes the CLI's line and refusals through. A watch with no live watcher starts one, detached, its
+//    output in `.sail-runs/dashboard/watcher.log`, and answers 202 `{ message, pid }` once the registry records it; any
+//    other change logs to `watch-set.log` and answers 200 `{ message, workflows }`, 202 `{ waiting }` when the command
+//    is not taken yet, or 409 with the CLI's refusal.
 // 3. A WebSocket upgrade needs a same-origin `Origin`, or no `Origin` and the client header: browsers can't set headers
 //    on an upgrade, but always send `Origin`.
 // 4. A GET of exactly `/` is the page, which a navigation fetches with no header of its own. It holds no data: all it
@@ -34,6 +39,7 @@ import type { Server, ServerWebSocket } from 'bun';
 import { z } from 'zod';
 import { BUILTINS } from '../adapters/index';
 import { resolveAdapters } from '../engine/adapters';
+import { isPlainName } from '../engine/call-dir';
 import { cleanedMessage, cleanRun } from '../engine/clean';
 import { readConfig } from '../engine/config';
 import { credentialValues } from '../engine/redact';
@@ -43,7 +49,7 @@ import { newRunId } from '../engine/run-id';
 import { formatIssue } from '../engine/schemas';
 import { stoppedMessage, stopRun } from '../engine/stop';
 import type { TicketSource } from '../ports/ticket-source';
-import { commandTaken, dropCommand } from '../watch/inbox';
+import { commandTaken, dropCommand, NOT_TAKEN } from '../watch/inbox';
 import { commandFor, itemLine, outcomeOf, streamMark } from '../watch/queue-commands';
 import { queueItemsNaming, startingRun } from '../watch/queue-store';
 import { liveSet, liveWatcher, type RegistryEntry } from '../watch/registry';
@@ -113,6 +119,11 @@ const RESTART_PATH = /^\/api\/repos\/[^/]+\/runs\/[^/]+\/restart$/;
 /** The paths a run is stopped and cleaned at: `/api/repos/<repo>/runs/<run>/stop` and `…/clean`. */
 const STOP_PATH = /^\/api\/repos\/[^/]+\/runs\/[^/]+\/stop$/;
 const CLEAN_PATH = /^\/api\/repos\/[^/]+\/runs\/[^/]+\/clean$/;
+
+/** The paths the watch set is changed at: `/api/repos/<repo>/watch` and `…/unwatch`. */
+const WATCH_PATH = /^\/api\/repos\/[^/]+\/(watch|unwatch)$/;
+
+const WatchBody = z.strictObject({ workflows: z.array(z.string().min(1)) });
 
 const StopBody = z.strictObject({ now: z.boolean() });
 const CleanBody = z.strictObject({});
@@ -270,7 +281,7 @@ async function queueOpRoute(options: DashboardOptions, segments: string[], reque
     ...(options.applyPollMs === undefined ? {} : { pollMs: options.applyPollMs }),
   });
   if (!taken) {
-    const waiting = `${watched.named} has not taken the command yet: it waits in ${relative(entry.clone, file)}`;
+    const waiting = `${watched.named} ${NOT_TAKEN}: it waits in ${relative(entry.clone, file)}`;
     return Response.json({ waiting }, { status: 202 });
   }
   if (op === 'poll') return Response.json({ message: `${watched.named} polls ${workflow} now` });
@@ -305,19 +316,27 @@ async function bodyOf<T>(request: Request, schema: z.ZodType<T>, what: string): 
   return error(400, `not ${what}: ${[issue?.path.join('.'), issue?.message].filter(Boolean).join(' ')}`);
 }
 
+const runAnswers = (runId: string): StartAnswers => ({ held: () => ({ runId }), late: () => ({ runId }) });
+
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** What a wait answers 202 with: once the start holds, and when the wait runs out. */
+interface StartAnswers {
+  held(): unknown;
+  late(): unknown;
+}
 
 /**
  * Waits for the start `spawned` made: until `has()` holds, which is 202, or the child exits. An exit before `has()`
  * holds, a refusal's code 3, an internal error's or a signal's, is answered 409 with the last line it printed. A start
- * that takes longer than `startWaitMs` is 202: the run is detached and on its way.
+ * that takes longer than `startWaitMs` is 202: the child is detached and on its way.
  */
 async function started(
   spawned: SpawnedRun,
   log: string,
   startWaitMs: number,
   has: () => boolean,
-  runId: string,
+  answers: StartAnswers,
 ): Promise<Response> {
   let exit: number | null | undefined;
   spawned.exited.then((code) => {
@@ -325,10 +344,11 @@ async function started(
   });
   const deadline = Date.now() + startWaitMs;
   while (exit === undefined) {
-    if (has() || Date.now() >= deadline) return Response.json({ runId }, { status: 202 });
+    if (has()) return Response.json(answers.held(), { status: 202 });
+    if (Date.now() >= deadline) return Response.json(answers.late(), { status: 202 });
     await Promise.race([sleep(100), spawned.exited]);
   }
-  if (has()) return Response.json({ runId }, { status: 202 });
+  if (has()) return Response.json(answers.held(), { status: 202 });
   return error(409, lastLine(log, spawned.logFrom) ?? `the start exited ${exit ?? 'on a signal'}`);
 }
 
@@ -389,7 +409,7 @@ async function resumeRoute(starts: Starts, segments: string[], request: Request)
         return false;
       }
     };
-    return await started(spawned, log, options.startWaitMs ?? 120_000, suspended, runId);
+    return await started(spawned, log, options.startWaitMs ?? 120_000, suspended, runAnswers(runId));
   } finally {
     underway.delete(runId);
   }
@@ -431,9 +451,79 @@ async function restartRoute(starts: Starts, segments: string[], request: Request
     const args = ['run', '--from-run', runId, '--stage', stage, '--continue', '--run-id', minted];
     const spawned = spawnDetached(dirname(entry.sailDir), log, args, environmentOf(options), options.cli);
     const opened = () => existsSync(join(runs, minted, RUN_HEADER_FILE));
-    return await started(spawned, log, options.startWaitMs ?? 120_000, opened, minted);
+    return await started(spawned, log, options.startWaitMs ?? 120_000, opened, runAnswers(minted));
   } finally {
     underway.delete(runId);
+  }
+}
+
+/**
+ * Changes a repository's watch set by running `sail watch <names>` or `sail unwatch <names>` in its clone, and passes
+ * the CLI's own line and refusals through. With no live watcher a watch starts one, detached, its output in
+ * `.sail-runs/dashboard/watcher.log`: 202 `{ message, pid }` once the registry records it live in this clone. Any other
+ * change waits for the command to end, its output in `watch-set.log`: 200 `{ message, workflows }` with the set the
+ * watcher watches now, 202 `{ waiting }` when the command is not taken yet or still runs, 409 with the CLI's last line
+ * when it refuses or fails. The CLI makes every other check.
+ */
+async function watchSetRoute(starts: Starts, segments: string[], request: Request): Promise<Response> {
+  const { options, underway } = starts;
+  const [, , name = '', op = ''] = segments;
+  const entry = findRepo(options.registryDir, name);
+  if (entry === undefined) return error(404, `no repository '${name}'`);
+  const parsed = await bodyOf(request, WatchBody, 'a watch-set change');
+  if (parsed instanceof Response) return parsed;
+  const { workflows } = parsed.body;
+  const odd = workflows.find((each) => !isPlainName(each));
+  if (odd !== undefined) return error(400, `'${odd}' is no workflow name`);
+  if (!existsSync(entry.sailDir)) return error(409, `${entry.sailDir} no longer exists`);
+  const key = `watch-set ${name}`;
+  if (underway.has(key)) return error(409, `a watch-set change of '${name}' is already under way`);
+  underway.add(key);
+  try {
+    const waitMs = options.startWaitMs ?? 120_000;
+    const runs = runsDir(entry.sailDir);
+    const before = liveWatcher(entry);
+    const root = dirname(entry.sailDir);
+    if (op === 'watch' && before === undefined) {
+      const log = join(runs, 'dashboard', 'watcher.log');
+      const spawned = spawnDetached(root, log, ['watch', ...workflows], environmentOf(options), options.cli);
+      const here = () => {
+        const current = findRepo(options.registryDir, name);
+        const watcher = current === undefined ? undefined : liveWatcher(current);
+        return watcher?.sailDir === entry.sailDir ? watcher : undefined;
+      };
+      return await started(spawned, log, waitMs, () => here() !== undefined, {
+        held: () => {
+          const pid = here()?.pid ?? 0;
+          return {
+            message: `the watcher of '${name}' (pid ${pid}) starts, its output in .sail-runs/dashboard/watcher.log`,
+            pid,
+          };
+        },
+        late: () => ({
+          waiting: `the watcher of '${name}' is still starting: its output is in .sail-runs/dashboard/watcher.log`,
+        }),
+      });
+    }
+    const log = join(runs, 'dashboard', 'watch-set.log');
+    const spawned = spawnDetached(root, log, [op, ...workflows], environmentOf(options), options.cli);
+    const exit = await Promise.race([spawned.exited, sleep(waitMs).then(() => 'late' as const)]);
+    if (exit === 'late') {
+      return Response.json(
+        {
+          waiting: `the change of the watch set of '${name}' is still under way: its output is in .sail-runs/dashboard/watch-set.log`,
+        },
+        { status: 202 },
+      );
+    }
+    const line = lastLine(log, spawned.logFrom);
+    if (exit !== 0) return error(409, line ?? `sail ${op} exited ${exit ?? 'on a signal'}`);
+    const message = line ?? `sail ${op} exited 0`;
+    if (message.includes(NOT_TAKEN)) return Response.json({ waiting: message }, { status: 202 });
+    const set = before === undefined ? [] : liveSet(entry.sailDir, before.pid).map((each) => each.workflow);
+    return Response.json({ message, workflows: set });
+  } finally {
+    underway.delete(key);
   }
 }
 
@@ -533,11 +623,13 @@ export function guard(request: Request, port: number): Response | undefined {
     const path = new URL(request.url).pathname;
     if (
       request.method !== 'POST' ||
-      ![MOVE_PATH, QUEUE_OP_PATH, RESUME_PATH, RESTART_PATH, STOP_PATH, CLEAN_PATH].some((each) => each.test(path))
+      ![MOVE_PATH, QUEUE_OP_PATH, RESUME_PATH, RESTART_PATH, STOP_PATH, CLEAN_PATH, WATCH_PATH].some((each) =>
+        each.test(path),
+      )
     ) {
       return error(
         405,
-        'the dashboard answers only GET, and POST to a queue change, a resume, a restart, a stop or a clean',
+        'the dashboard answers only GET, and POST to a queue change, a resume, a restart, a stop, a clean, a watch or an unwatch',
         {
           Allow: 'GET',
         },
@@ -696,6 +788,10 @@ export function startDashboard(options: DashboardOptions): Dashboard | { refused
           if (start !== undefined) {
             self.timeout(request, 0);
             return start(starts, segments, request);
+          }
+          if (WATCH_PATH.test(path)) {
+            self.timeout(request, 0);
+            return watchSetRoute(starts, segments, request);
           }
           if (QUEUE_OP_PATH.test(path)) {
             self.timeout(request, 0);

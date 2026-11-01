@@ -68,7 +68,7 @@ test('each repository lists its workflows by name, the watched one with a warn q
   const groups = [...markup.matchAll(/data-action="toggle-group" data-group="([^"]+)"/g)].map(([, group]) => group);
   expect(groups).toEqual(['alpha', 'alpha/ticket-to-pr', 'beta', 'beta/review', 'beta/ticket-to-pr']);
   expect(markup).toContain(
-    '<div class="wf-h"><button class="wf-t open" data-action="toggle-group" data-group="beta/ticket-to-pr"><span class="caret">›</span><span class="nm">ticket-to-pr</span></button><button class="qbadge warn" title="polled 7d ago" data-action="select-queue" data-queue="beta/ticket-to-pr">1 queued</button><span class="counts"><span class="r">▶ 1</span><span>1</span></span></div>',
+    '<div class="wf-h"><button class="wf-t open" data-action="toggle-group" data-group="beta/ticket-to-pr"><span class="caret">›</span><span class="nm">ticket-to-pr</span></button><button class="qbadge warn" title="polled 7d ago" data-action="select-queue" data-queue="beta/ticket-to-pr">1 queued</button><button class="wf-act" data-action="watch-set" data-repo="beta" data-op="watch" data-workflow="ticket-to-pr">watch</button><span class="counts"><span class="r">▶ 1</span><span>1</span></span></div>',
   );
   expect(markup).toContain(
     '<div class="wf-h"><button class="wf-t open" data-action="toggle-group" data-group="alpha/ticket-to-pr"><span class="caret">›</span><span class="nm">ticket-to-pr</span></button><span class="counts"><span class="f">✗ 1</span><span>2</span></span></div>',
@@ -238,4 +238,74 @@ test('a run selected from the running block is marked sel', () => {
   const markup = rail({ repo: 'alpha', runId: RUNNING_ID });
   expect(markup).toContain(`<button class="run live-run sel"`);
   expect(liveRows(markup)).toEqual([`alpha ${RUNNING_ID} *`, `beta ${FAKE_3_ID}`]);
+});
+
+const button = (repo: string, op: string, text: string, workflow?: string, armed = false) =>
+  `<button class="wf-act${armed ? ' armed' : ''}" data-action="watch-set" data-repo="${repo}" data-op="${op}"${
+    workflow === undefined ? '' : ` data-workflow="${workflow}"`
+  }>${text}</button>`;
+
+/** A repository gamma whose `flow` is watched and whose `side` has a queue and is not. */
+const watchedRepo = (watching: string[] | undefined): RailRepo[] => [
+  {
+    name: 'gamma',
+    remote: null,
+    live: false,
+    runs: [],
+    workflows: [
+      { name: 'flow', runs: [], queue: { waiting: 0 }, toggle: 'unwatch' },
+      { name: 'side', runs: [], queue: { waiting: 0 }, toggle: 'watch' },
+      { name: 'plain', runs: [] },
+    ],
+    ...(watching === undefined ? {} : { watching }),
+  },
+];
+const gamma = (watching: string[] | undefined, fields = {}) =>
+  renderRail(
+    watchedRepo(watching),
+    { ...initialUi(0), expanded: ['gamma', 'gamma/flow', 'gamma/side', 'gamma/plain'], ...fields },
+    NOW,
+  ).value;
+
+test('a workflow with a queue that is not watched draws watch, one with runs alone none, and an opened repository draws watch all and no unwatch all with nothing watched', () => {
+  const markup = rail();
+  expect(markup).toContain(
+    `<span class="nm">ticket-to-pr</span></button><button class="qbadge warn" title="polled 7d ago" data-action="select-queue" data-queue="beta/ticket-to-pr">1 queued</button>${button('beta', 'watch', 'watch', 'ticket-to-pr')}<span class="counts">`,
+  );
+  expect(markup.match(/data-op="watch" data-workflow=/g)).toHaveLength(1);
+  expect(markup).toContain(`<div class="lgrp-acts">${button('alpha', 'watch', 'watch all')}</div>`);
+  expect(markup).toContain(`<div class="lgrp-acts">${button('beta', 'watch', 'watch all')}</div>`);
+  expect(markup).not.toContain('unwatch');
+  expect(folded()).not.toContain('lgrp-acts');
+});
+
+test('a watched workflow draws unwatch, an unwatched one with a queue draws watch, and unwatch all appears while the set is not empty', () => {
+  const markup = gamma(['flow']);
+  expect(markup).toContain(button('gamma', 'unwatch', 'unwatch', 'flow'));
+  expect(markup).toContain(button('gamma', 'watch', 'watch', 'side'));
+  expect(markup.match(/data-workflow="plain"/g)).toBeNull();
+  expect(markup).toContain(
+    `<div class="lgrp-acts">${button('gamma', 'watch', 'watch all')}${button('gamma', 'unwatch', 'unwatch all')}</div>`,
+  );
+  expect(gamma([])).toContain(`<div class="lgrp-acts">${button('gamma', 'watch', 'watch all')}</div>`);
+  expect(gamma(undefined)).not.toContain('unwatch all');
+});
+
+test('an armed unwatch reads unwatch? click again, and an armed unwatch all unwatch all? click again, and nothing else is armed', () => {
+  const one = gamma(['flow'], { armedWatch: 'gamma/flow' });
+  expect(one).toContain(button('gamma', 'unwatch', 'unwatch? click again', 'flow', true));
+  expect(one).toContain(button('gamma', 'unwatch', 'unwatch all'));
+  const all = gamma(['flow'], { armedWatch: 'gamma' });
+  expect(all).toContain(button('gamma', 'unwatch', 'unwatch all? click again', undefined, true));
+  expect(all).toContain(button('gamma', 'unwatch', 'unwatch', 'flow'));
+  expect(all.match(/armed/g)).toHaveLength(1);
+});
+
+test("the watch notice shows under its own repository's header, open or folded, and under no other", () => {
+  const notice = { repo: 'gamma', text: 'sail watch: no workflow declares a watch' };
+  expect(gamma(['flow'], { watchNotice: notice })).toContain(`</button>\n<div class="lgrp-p">${notice.text}</div>`);
+  const folded = renderRail(watchedRepo(['flow']), { ...initialUi(0), watchNotice: notice }, NOW).value;
+  expect(folded).toContain(`<div class="lgrp-p">${notice.text}</div>`);
+  expect(folded).not.toContain('lgrp-acts');
+  expect(rail({ watchNotice: notice })).not.toContain(notice.text);
 });
