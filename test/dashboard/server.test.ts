@@ -901,14 +901,20 @@ test('a POST to clean a failed run whose branch has an open pull request is 409,
   expect(existsSync(fake2Dir(m))).toBe(true);
 });
 
-test('a POST to clean a run a queue item names is 409', async () => {
+test('a POST to clean a failed run a queue item names is 409 with the engine words, and changes neither', async () => {
   m = seedFixtures();
+  writeFileSync(join(betaRun(), 'STATUS'), 'failed workflow_failed\n');
   const queue = join(queueDirOf(m), 'queue.json');
   const text = readFileSync(queue, 'utf8');
   const server = startPorts();
   const refused = await post(server, `/api/repos/beta/runs/${FAKE_3_ID}/clean`, startedBy('{}'));
-  expect(refused.status).toBe(409);
-  expect(readFileSync(queue, 'utf8')).toBe(text);
+  expect([refused.status, await refused.json()]).toEqual([
+    409,
+    {
+      error: `queue item ticket:FAKE-3 of ticket-to-pr (dispatched) names run ${FAKE_3_ID}: requeue it or drop it: \`sail queue requeue|drop\``,
+    },
+  ]);
+  expect([readFileSync(queue, 'utf8'), existsSync(betaRun())]).toEqual([text, true]);
 });
 
 test.each([
