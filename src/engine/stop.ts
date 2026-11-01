@@ -152,3 +152,12 @@ export async function stopRun(options: StopRunOptions): Promise<Stopped> {
     detach();
   }
 }
+
+/** The line `sail stop` prints, without its `sail stop: ` prefix, for a stop that was not refused. */
+export function stoppedMessage(runId: string, stopped: Exclude<Stopped, { refused: string }>): string {
+  if ('starting' in stopped) return `run ${runId} is still starting: it stops before its intake`;
+  if ('requested' in stopped) {
+    return `run ${runId} ${stopped.requested.now ? 'ends its running call now' : 'stops at its next call boundary'} (pid ${stopped.requested.pid})`;
+  }
+  return `run ${runId} stopped`;
+}

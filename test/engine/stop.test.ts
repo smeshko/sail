@@ -6,7 +6,7 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, write
 import { join } from 'node:path';
 import { type RunEnd, resumeWorkflow, runWorkflow } from '../../src/engine/runtime';
 import { validateRunDir } from '../../src/engine/schemas';
-import { stopRun } from '../../src/engine/stop';
+import { stoppedMessage, stopRun } from '../../src/engine/stop';
 import { PortError } from '../../src/ports/errors';
 import { fakeAdapters } from '../helpers/adapters';
 import { writeStub } from '../helpers/stub-workflow';
@@ -276,4 +276,19 @@ test.each<[string, Partial<Parameters<typeof stopRun>[0]>]>([
     });
     expect([stopped, readdirSync(runs)]).toEqual([{ refused: `no run '${STARTING}' in .sail-runs` }, []]);
   });
+});
+
+test('stoppedMessage gives the line for each outcome sail stop prints', () => {
+  const ended = { runId: 'R-1', dir: '/x', status: 'failed', stopReason: 'stopped', message: '' } as const;
+  expect([
+    stoppedMessage('R-1', { starting: true }),
+    stoppedMessage('R-1', { requested: { pid: 42 } }),
+    stoppedMessage('R-1', { requested: { pid: 42, now: true } }),
+    stoppedMessage('R-1', { ended }),
+  ]).toEqual([
+    'run R-1 is still starting: it stops before its intake',
+    'run R-1 stops at its next call boundary (pid 42)',
+    'run R-1 ends its running call now (pid 42)',
+    'run R-1 stopped',
+  ]);
 });

@@ -45,6 +45,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
+import { isAlive } from '../adapters/leases';
 import { replaceFile } from '../engine/durable';
 import type { NewQueueEvent, QueueEvent, ResumedFrom } from '../events/types';
 import { PORT_ERROR_CODES, type PortErrorCode } from '../ports/errors';
@@ -749,4 +750,10 @@ export function dispatchedItem(runsDir: string, runId: string): QueueItem | unde
     if (found !== undefined) return found;
   }
   return undefined;
+}
+
+/** Whether a dispatched run with this id is still starting: an item names it, and its process is alive or not yet known. */
+export function startingRun(runsDir: string, runId: string): boolean {
+  const item = dispatchedItem(runsDir, runId);
+  return item !== undefined && (item.pid === undefined || isAlive(item.pid));
 }

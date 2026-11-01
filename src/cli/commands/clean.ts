@@ -8,7 +8,7 @@
 import { homedir } from 'node:os';
 import { BUILTINS } from '../../adapters/index';
 import { resolveAdapters } from '../../engine/adapters';
-import { cleanRun } from '../../engine/clean';
+import { cleanedMessage, cleanRun } from '../../engine/clean';
 import { runsDir } from '../../engine/run-dir';
 import { listRuns } from '../../engine/runs';
 import { formatIssue } from '../../engine/schemas';
@@ -55,7 +55,6 @@ export async function clean(args: Parsed, io: Io): Promise<ExitCode> {
   };
 
   const home = env.HOME ?? homedir();
-  const shown = (path: string): string => (path.startsWith(`${home}/`) ? `~${path.slice(home.length)}` : path);
   let code: ExitCode = EXIT_OK;
   for (const runId of runIds) {
     const cleaned = await cleanRun({
@@ -70,10 +69,7 @@ export async function clean(args: Parsed, io: Io): Promise<ExitCode> {
       refuse(cleaned.refused);
       code = EXIT_REFUSED;
     } else if ('cleaned' in cleaned) {
-      const { removed, archived } = cleaned.cleaned;
-      io.stdout(
-        `cleaned ${runId}: ${removed.length > 0 ? removed.join(', ') : 'nothing left to remove'}; run directory -> ${shown(archived)}\n`,
-      );
+      io.stdout(`${cleanedMessage(runId, cleaned.cleaned, home)}\n`);
     } else {
       for (const failure of cleaned.failed.failures) io.stderr(`${COMMAND}: ${runId}: ${failure}\n`);
       io.stderr(`${COMMAND}: ${runId}: its run directory stays at .sail-runs/${runId}; clean it again\n`);

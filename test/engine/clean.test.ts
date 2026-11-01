@@ -4,7 +4,7 @@ import { expect, test } from 'bun:test';
 import { chmodSync, existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createGitWorktreeWorkspace } from '../../src/adapters/workspace/git-worktree';
-import { type Cleaned, cleanRun } from '../../src/engine/clean';
+import { type Cleaned, checkClean, cleanedMessage, cleanRun } from '../../src/engine/clean';
 import { writeOpening, writeStatus } from '../../src/engine/run-dir';
 import { readRunHeader } from '../../src/engine/run-header';
 import { type RunEnd, runWorkflow } from '../../src/engine/runtime';
@@ -453,4 +453,110 @@ test('a removal that fails still lets the rest run, is reported and keeps the ru
     });
     expect(existsSync(end.dir)).toBe(false);
   });
+});
+
+/** `checkClean()` over the same adapters as `clean()`. */
+async function check(repo: TempRepo, runId: string, more: { workspace?: WorkspacePort } = {}) {
+  const adapters = await fakeAdapters(repo.dir);
+  return checkClean({
+    sailDir: sailDir(repo),
+    runId,
+    workspace: more.workspace ?? adapters.ports.workspace,
+    queueItems: (id) => queueItemsNaming(join(repo.dir, '.sail-runs'), id),
+    codeHost: async () => adapters.ports.codeHost,
+    env: { SAIL_HOME: sailHome(repo) },
+    clock: NOW,
+  });
+}
+
+test('checkClean of a failed run gives the plan in removal order and removes nothing', async () => {
+  await withTempRepo(async (repo) => {
+    const { end, branch } = await failedRun(repo);
+    repo.git('update-ref', `refs/heads/${branch}`, 'HEAD');
+    expect(await check(repo, end.runId)).toEqual({
+      plan: {
+        runId: end.runId,
+        removes: ['worktree', `branch ${branch}`, 'remote branch', 'run ref'],
+        archive: join(sailHome(repo), 'failed-runs', DAY, end.runId),
+      },
+    });
+    expect(existsSync(end.dir)).toBe(true);
+    expect(existsSync(join(end.dir, 'workspace'))).toBe(true);
+    expect(existsSync(join(sailHome(repo), 'failed-runs'))).toBe(false);
+  });
+});
+
+test('checkClean of a pull-request run lists no branch', async () => {
+  await withTempRepo(async (repo) => {
+    const { end, branch } = await failedRun(repo);
+    repo.git('update-ref', `refs/heads/${branch}`, 'HEAD');
+    const header = readRunHeader(end.dir);
+    chmodSync(join(end.dir, 'run.json'), 0o644);
+    writeFileSync(
+      join(end.dir, 'run.json'),
+      JSON.stringify({
+        ...header,
+        source: { kind: 'pr', number: 7, headSha: repo.git('rev-parse', 'HEAD').trim(), via: 'cli', forced: [] },
+      }),
+    );
+    const checked = await check(repo, end.runId);
+    expect('plan' in checked ? checked.plan.removes : checked).toEqual(['worktree', 'run ref']);
+  });
+});
+
+test('checkClean of a stopped run, whose worktree is gone, lists only the run ref', async () => {
+  await withTempRepo(async (repo) => {
+    const end = await suspendedRun(repo);
+    await stopRun({ sailDir: sailDir(repo), runId: end.runId, adapters: await fakeAdapters(repo.dir) });
+    const checked = await check(repo, end.runId);
+    expect('plan' in checked && checked.plan.removes).toEqual(['run ref']);
+  });
+});
+
+test('checkClean gives cleanRun its refusals: a suspended run, a completed run, a leased branch, a queue item and an existing archive', async () => {
+  await withTempRepo(async (repo) => {
+    const { end, branch } = await failedRun(repo);
+    const refusals: string[] = [];
+    const both = async (): Promise<void> => {
+      const refused = refusal(await clean(repo, end.runId));
+      expect(refused).not.toContain('"cleaned"');
+      const checked = await check(repo, end.runId);
+      expect('refused' in checked && checked.refused).toBe(refused);
+      refusals.push(refused);
+    };
+    writeStatus(end.dir, 'suspended', 'until');
+    await both();
+    writeStatus(end.dir, 'completed');
+    await both();
+    writeStatus(end.dir, 'failed', 'workflow_failed');
+    const adapters = await fakeAdapters(repo.dir);
+    const { url } = await adapters.ports.workspace.repository();
+    await adapters.ports.workspace.lease(url, branch, {
+      runId: 'OTHER-1',
+      runDir: join(repo.dir, 'o'),
+      pid: process.pid,
+    });
+    await both();
+    await adapters.ports.workspace.releaseLease(url, branch, 'OTHER-1');
+    queued(repo, { state: 'parked', runId: end.runId, reason: 'gave up' });
+    await both();
+    queued(repo, { state: 'parked', runId: 'SOMEONE-ELSE', reason: 'gave up' });
+    mkdirSync(join(sailHome(repo), 'failed-runs', DAY, end.runId), { recursive: true });
+    await both();
+    expect(refusals).toHaveLength(5);
+    expect(new Set(refusals).size).toBe(5);
+  });
+});
+
+test('cleanedMessage gives the line sail clean prints, with the home shown as ~', () => {
+  expect(
+    cleanedMessage(
+      'R-1',
+      { removed: ['worktree', 'run ref'], archived: '/home/me/.sail/failed-runs/d/R-1' },
+      '/home/me',
+    ),
+  ).toBe('cleaned R-1: worktree, run ref; run directory -> ~/.sail/failed-runs/d/R-1');
+  expect(cleanedMessage('R-1', { removed: [], archived: '/elsewhere/R-1' }, '/home/me')).toBe(
+    'cleaned R-1: nothing left to remove; run directory -> /elsewhere/R-1',
+  );
 });

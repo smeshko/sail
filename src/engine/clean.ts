@@ -11,6 +11,8 @@
 //   `<sail home>/failed-runs/<YYYY-MM-DD>/<run id>/`. A failed removal keeps it where it is, so a second clean reads its
 //   header and finishes the job.
 //
+// `checkClean()` runs those checks alone, for a caller that wants the plan and the refusal without a removal.
+//
 // It needs only the Workspace port, the queues through a lookup the caller hands in, so the engine reads no queue file
 // itself, and the code host through a getter, so a run with no remote branch never needs the code host's credentials. It loads no workflow and writes into no run's event stream.
 import { cpSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync } from 'node:fs';
@@ -98,7 +100,16 @@ function move(from: string, to: string): void {
 
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
-export async function cleanRun(options: CleanRunOptions): Promise<Cleaned> {
+interface Checked {
+  header: ReturnType<typeof readRunHeader>;
+  /** Which of the run's branch the workspace has, as `branches()` said. */
+  present: { local: boolean; remote: boolean };
+  dir: string;
+  archived: string;
+}
+
+/** Every check a clean makes before it removes anything. */
+async function check(options: CleanRunOptions): Promise<{ refused: string } | Checked> {
   const { sailDir, runId, workspace } = options;
   const env = options.env ?? process.env;
   const runs = runsDir(sailDir);
@@ -127,7 +138,6 @@ export async function cleanRun(options: CleanRunOptions): Promise<Cleaned> {
     return { refused: messageOf(error) };
   }
   const { branch, repository } = header;
-  const run = { runId, runDir: dir };
 
   if (branch !== undefined && repository !== undefined) {
     try {
@@ -181,6 +191,16 @@ export async function cleanRun(options: CleanRunOptions): Promise<Cleaned> {
   const archived = archiveDir(env, date, runId);
   if (existsSync(archived)) return { refused: `run ${runId}: the archive ${archived} already exists` };
 
+  return { header, present, dir, archived };
+}
+
+export async function cleanRun(options: CleanRunOptions): Promise<Cleaned> {
+  const { runId, workspace } = options;
+  const checked = await check(options);
+  if ('refused' in checked) return checked;
+  const { header, dir, archived } = checked;
+  const { branch, repository } = header;
+  const run = { runId, runDir: dir };
   const removed: string[] = [];
   const failures: string[] = [];
   const attempt = async (thing: string, removal: () => Promise<boolean>): Promise<void> => {
@@ -219,4 +239,35 @@ export async function cleanRun(options: CleanRunOptions): Promise<Cleaned> {
   }
   if (failures.length > 0) return { failed: { runId, removed, failures, dir } };
   return { cleaned: { runId, removed, archived } };
+}
+
+/** What a clean would remove, in removal order, and where the run directory would go. */
+export interface CleanPlan {
+  runId: string;
+  removes: string[];
+  archive: string;
+}
+
+/** Runs every check of `cleanRun()` and removes nothing: the refusal, or what a clean would do. */
+export async function checkClean(options: CleanRunOptions): Promise<{ refused: string } | { plan: CleanPlan }> {
+  const checked = await check(options);
+  if ('refused' in checked) return checked;
+  const { header, present, dir, archived } = checked;
+  const { branch, repository } = header;
+  const removes: string[] = [];
+  if (repository !== undefined && existsSync(join(dir, header.workspace ?? 'workspace'))) removes.push('worktree');
+  if (branch !== undefined && repository !== undefined) {
+    if (header.source.kind !== 'pr') {
+      if (present.local) removes.push(`branch ${branch}`);
+      if (present.remote) removes.push('remote branch');
+    }
+    removes.push('run ref');
+  }
+  return { plan: { runId: options.runId, removes, archive: archived } };
+}
+
+/** The line `sail clean` prints for a run it cleaned; the machine's home shows as `~`. */
+export function cleanedMessage(runId: string, cleaned: { removed: string[]; archived: string }, home: string): string {
+  const shown = cleaned.archived.startsWith(`${home}/`) ? `~${cleaned.archived.slice(home.length)}` : cleaned.archived;
+  return `cleaned ${runId}: ${cleaned.removed.length > 0 ? cleaned.removed.join(', ') : 'nothing left to remove'}; run directory -> ${shown}`;
 }
