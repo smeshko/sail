@@ -225,6 +225,12 @@ export interface WorkflowOptions<In extends Intake = Intake> {
   readonly watch?: Watch;
   /** How many runs of a watched workflow may be in flight at once. */
   readonly maxConcurrentRuns?: number;
+  /**
+   * Runs a ticket that waits on an open prerequisite, in the queue and from a manual start alike, as
+   * `--ignore-prerequisites` does: for a workflow that needs nothing a prerequisite delivers, such as one that only
+   * judges its ticket. A watcher reads it when it starts watching the workflow.
+   */
+  readonly ignorePrerequisites?: boolean;
   /** The most one run may use, field by field over `project.yaml`'s `budgets.run`. */
   readonly budget?: { readonly maxUsd?: number; readonly maxMinutes?: number };
 }

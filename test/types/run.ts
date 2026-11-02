@@ -284,6 +284,11 @@ workflow('vague', { intake: ticket, watch: { every: '5 min' }, maxConcurrentRuns
 // @ts-expect-error TS2322: a misspelt option is an error, not an unwatched workflow
 workflow('misspelt', { intake: ticket, wacth: { every: '5m' } }, async () => undefined);
 
+// Any workflow may ignore prerequisites, watched or not: the option covers a manual start as well as the queue.
+workflow('independent', { intake: ticket, ignorePrerequisites: true }, async () => undefined);
+// @ts-expect-error TS2322: ignorePrerequisites is on or off, not a word
+workflow('loose', { intake: ticket, ignorePrerequisites: 'yes' }, async () => undefined);
+
 // A pull-request run's input: the host's text is untrusted, and the head sha and the files are the run's own.
 export const reviewsPr = workflow('reviews-pr', { intake: pr }, async (run) => {
   const body: Untrusted = run.input.body;

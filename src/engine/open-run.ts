@@ -652,7 +652,8 @@ export async function preflightRun(options: OpenRunOptions): Promise<Preflight |
   });
   if (options.signal?.aborted) return { refused: 'stopped before the run was opened' };
   if ('refused' in resolved) return resolved;
-  const open = options.ignorePrerequisites === true ? [] : openPrerequisites(resolved.ticket);
+  const ignored = options.ignorePrerequisites === true || loaded.workflow.ignorePrerequisites === true;
+  const open = ignored ? [] : openPrerequisites(resolved.ticket);
   if (open.length > 0) return waiting(waitingOnText(open));
   const { ticketKey } = resolved;
   const runId = runIdOf(ticketKey);

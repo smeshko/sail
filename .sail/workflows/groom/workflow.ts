@@ -198,6 +198,8 @@ export default workflow(
     watch: { every: '15m', label: LABEL },
     // One at a time, so two judgments of duplicates or merges never race each other.
     maxConcurrentRuns: 1,
+    // A judgment of a ticket needs nothing its prerequisites would deliver, so a blocked ticket is groomed all the same.
+    ignorePrerequisites: true,
     description:
       'judge a ticket for worth, merges, duplicates, staleness, labels and open questions, then merge, cancel or label it',
   },

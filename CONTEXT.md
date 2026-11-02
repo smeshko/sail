@@ -49,7 +49,7 @@ A state a designated ticket is picked up from: by default every state the ticket
 _Avoid_: ready state, eligible state
 
 **Prerequisite**:
-A ticket the ticket system says blocks another, reported by TicketSource's `get` with the state it is in now. It is *open* while that state is not completed or canceled, and also when the source can't read it. A ticket with an open prerequisite waits: it is not dispatched and its start is refused.
+A ticket the ticket system says blocks another, reported by TicketSource's `get` with the state it is in now. It is *open* while that state is not completed or canceled, and also when the source can't read it. A ticket with an open prerequisite waits: it is not dispatched and its start is refused, unless the workflow declares `ignorePrerequisites`, as one that only judges its ticket does.
 _Avoid_: blocker, dependency, blocked (an outcome)
 
 **Designated pull request**:

@@ -276,6 +276,19 @@ test('--dry-run --ignore-prerequisites on a ticket with an open prerequisite exi
   expect({ code, stdout, stderr }).toEqual({ code: EXIT_OK, stdout: ROSTER, stderr: '' });
 }, 60_000);
 
+test('--dry-run on a ticket with an open prerequisite exits 0 when its workflow declares ignorePrerequisites', async () => {
+  const { code, stderr } = await dryIn(['FAKE-1', '--dry-run'], (repo) => {
+    waitOnFake2(repo);
+    edit(
+      join(repo.dir, '.sail'),
+      'workflows/ticket-to-pr/workflow.ts',
+      'intake: ticket,',
+      'intake: ticket, ignorePrerequisites: true,',
+    );
+  });
+  expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+});
+
 test('--dry-run on a ticket whose prerequisite is Canceled exits 0', async () => {
   const { code, stderr } = await dryIn(['FAKE-1', '--dry-run'], (repo) =>
     patchTicket(join(repo.dir, '.sail'), 'FAKE-1', { prerequisites: ['FAKE-4'] }),

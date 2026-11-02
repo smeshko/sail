@@ -10,7 +10,7 @@ import { readJournal } from '../src/engine/journal';
 import { readStatus } from '../src/engine/run-dir';
 import { readEvents } from '../src/events/consumers/ndjson';
 import { openWatchTarget, pollOnce } from '../src/watch/poll';
-import { edit, seedHarness } from './helpers/fixture';
+import { edit, patchTicket, seedHarness } from './helpers/fixture';
 import { fakeTicket, onlyRun, writeGroomRepo } from './helpers/groom-fixture';
 import { runCaptured } from './helpers/run-captured';
 import { sail } from './helpers/sail-process';
@@ -253,6 +253,15 @@ test('after a groom run, a rerun is refused and a poll queues nothing', async ()
     expect(target.label).toBe('groom');
     expect(await pollOnce(target, now)).toBe('polled');
     expect(target.store.snapshot().items).toEqual([]);
+  });
+}, 120_000);
+
+test('groom judges a ticket whose prerequisite is open: judging a ticket needs nothing the prerequisite would deliver', async () => {
+  await withTempRepo(async (repo) => {
+    patchTicket(writeGroomRepo(repo), 'FAKE-2', { prerequisites: ['FAKE-99'] });
+    const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    expect(readStatus(onlyRun(repo.dir))).toEqual({ status: 'completed' });
   });
 }, 120_000);
 

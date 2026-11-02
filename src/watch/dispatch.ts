@@ -49,7 +49,10 @@
 //   held where it is, once it is eligible otherwise: it uses no slot, counts no attempt and is dropped for nothing. The
 //   item's `waitingOn` names the open prerequisites and `queue:waiting` says so when that list changes. The ticket is
 //   read fresh once per poll interval, not on every tick, so the first re-read past the last prerequisite closing
-//   starts it and clears `waitingOn`. A forced item's first dispatch reads the ticket for this alone, and waits too.
+//   starts it and clears `waitingOn`. A forced item's first dispatch reads the ticket for this alone, and waits too. A
+//   workflow that declares `ignorePrerequisites` holds nothing here, and its run's start refuses nothing. The watcher
+//   read that declaration when it added the workflow, so a start that still refuses says the definitions have moved on:
+//   this dispatcher holds from then on, rather than start a run on every tick that the run's own check turns away.
 // - **The start** is recorded before the process exists (`dispatched`, which counts the attempt and names the run),
 //   and its pid after (`spawned`, which emits `queue:dispatched`). The run's intake claims the ticket (D2), in `intake#1`:
 //   the dispatch only reads the ticket.
@@ -133,6 +136,8 @@ export interface DispatcherOptions {
   onHeld?: () => void;
   /** How long a waiting item goes before its ticket is read again: the watcher's poll interval. A minute by default. */
   waitingRecheckMs?: number;
+  /** Whether the workflow declares `ignorePrerequisites`, so no item of it waits. */
+  ignorePrerequisites?: boolean;
 }
 
 export interface Dispatcher {
@@ -171,6 +176,8 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
   /** When each waiting item's ticket was last read, by dedup key: it is read again only after `waitingRecheckMs`. */
   const waitingReadAt = new Map<string, number>();
   const waitingRecheckMs = options.waitingRecheckMs ?? 60_000;
+  /** Whether items skip the prerequisite check, until a start refuses for one. */
+  let ignorePrerequisites = options.ignorePrerequisites === true;
   const sail = options.sail ?? sdkFingerprint;
   /** Until the first settle is over: a live run found then is adopted. */
   let first = true;
@@ -342,7 +349,9 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
       }
       case 'waiting':
         // A prerequisite opened after the dispatch's re-check: the start never ran, so its attempt is given back, and
-        // the next re-check reads the ticket and holds the item as waiting.
+        // the next re-check reads the ticket and holds the item as waiting. A run that checks prerequisites means its
+        // workflow no longer ignores them, whatever it declared when this dispatcher was made.
+        ignorePrerequisites = false;
         dropHandOff(options.runsDir, runId);
         waitingReadAt.delete(item.dedupKey);
         store.deferred(item.dedupKey);
@@ -451,7 +460,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
 
   /** Whether the ticket has no open prerequisite. Otherwise the item waits, with them named, and starts nothing. */
   const prerequisitesDone = (item: QueueItem, ticket: Ticket): boolean => {
-    const open = openPrerequisites(ticket);
+    const open = ignorePrerequisites ? [] : openPrerequisites(ticket);
     store.waiting(item.dedupKey, waitingOnText(open));
     if (open.length > 0) waitingReadAt.set(item.dedupKey, now().getTime());
     else waitingReadAt.delete(item.dedupKey);

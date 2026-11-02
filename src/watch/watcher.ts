@@ -395,6 +395,7 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
       onError: (message) => print(errorLine(workflow, message, now())),
       onExit: kick,
       waitingRecheckMs: target.everyMs,
+      ignorePrerequisites: target.ignorePrerequisites === true,
       paused: () => configProblem !== undefined,
       pullBlocked: () => notFastForwarded,
       onHeld: () => {

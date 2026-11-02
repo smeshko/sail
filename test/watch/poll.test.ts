@@ -23,7 +23,7 @@ import {
 import { openQueue, type QueueFile, queueDir } from '../../src/watch/queue-store';
 import { stubAdapter } from '../helpers/adapters';
 import { fakeTimers } from '../helpers/fake-timers';
-import { copyFixture, write } from '../helpers/fixture';
+import { copyFixture, edit, write } from '../helpers/fixture';
 import { manualClock, queueEventIssues, queueEvents, ticket } from '../helpers/queue';
 import { withTempRepo } from '../helpers/temp-repo';
 
@@ -603,6 +603,17 @@ test("readWatches gives a fixture copy's ticket-to-pr and skips review, and refu
     const refused = await readWatches({ sailDir: sail, config: { label: 'sail' } });
     expect(refused).toEqual({ refused: expect.stringContaining('workflows/broken/workflow.ts') });
     expect('refused' in refused ? refused.refused : '').toContain('default-exports no workflow');
+  });
+});
+
+test('readWatch and readWatches carry a workflow that declares ignorePrerequisites', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = copyFixture(repo.dir);
+    edit(sail, 'workflows/ticket-to-pr/workflow.ts', 'intake: ticket,', 'intake: ticket, ignorePrerequisites: true,');
+    const options = { sailDir: sail, config: { label: 'sail' } };
+    expect(await readWatch({ ...options, name: 'ticket-to-pr' })).toMatchObject({ ignorePrerequisites: true });
+    const read = await readWatches(options);
+    expect('watches' in read ? read.watches[0]?.ignorePrerequisites : read).toBe(true);
   });
 });
 

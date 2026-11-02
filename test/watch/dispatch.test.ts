@@ -65,6 +65,7 @@ async function world(
     sail?: () => string;
     pullBlocked?: () => string | undefined;
     onHeld?: () => void;
+    ignorePrerequisites?: boolean;
   } = {},
 ): Promise<World> {
   writeTickets(writeStub(repo.dir), designated(count));
@@ -109,6 +110,7 @@ async function world(
       ...(options.sail === undefined ? {} : { sail: options.sail }),
       ...(options.pullBlocked === undefined ? {} : { pullBlocked: options.pullBlocked }),
       ...(options.onHeld === undefined ? {} : { onHeld: options.onHeld }),
+      ...(options.ignorePrerequisites === undefined ? {} : { ignorePrerequisites: options.ignorePrerequisites }),
     });
   return { runs, clock, store, ticketSource, adapters, spawner, settled, errors, dispatcher };
 }
@@ -1980,3 +1982,35 @@ test.each([
     });
   },
 );
+
+test('a workflow that ignores prerequisites starts a ticket whose prerequisite is open, and nothing says it waits', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 2, 2, { claiming: false, ignorePrerequisites: true });
+    patchTicket(join(repo.dir, '.sail'), 'FAKE-2', { prerequisites: ['FAKE-1'] });
+    await w.dispatcher().tick();
+    expect(spawnedKeys(w.spawner)).toEqual(['FAKE-1', 'FAKE-2']);
+    expect(states(w.store)).toEqual(['FAKE-1 dispatched 1', 'FAKE-2 dispatched 1']);
+    expect(w.store.snapshot().items[1]?.waitingOn).toBeUndefined();
+    expect(eventsOf(w.runs, 'queue:waiting')).toEqual([]);
+  });
+});
+
+test('a start refused as waiting after its workflow stopped ignoring prerequisites is held, not started on every tick', async () => {
+  await withTempRepo(async (repo) => {
+    // The dispatcher read `ignorePrerequisites` when it was made, and the definitions have moved on since.
+    const w = await world(repo, 1, 1, { claiming: false, ignorePrerequisites: true });
+    patchTicket(join(repo.dir, '.sail'), 'FAKE-1', { prerequisites: ['FAKE-9'] });
+    const dispatcher = w.dispatcher();
+    await dispatcher.tick();
+    expect(spawnedKeys(w.spawner)).toEqual(['FAKE-1']);
+    const waits =
+      'sail FAKE-1: the ticket waits on FAKE-9 (unreadable), a prerequisite that is not Done or Canceled. --ignore-prerequisites runs it anyway';
+    await w.spawner.end('FAKE-1', { refused: waits, code: 5 });
+    await dispatcher.tick();
+    expect(states(w.store)).toEqual(['FAKE-1 queued 0']);
+    expect(w.store.snapshot().items[0]?.waitingOn).toEqual(['FAKE-9 (unreadable)']);
+    w.clock.advance(FIVE_MINUTES);
+    await dispatcher.tick();
+    expect(spawnedKeys(w.spawner)).toEqual(['FAKE-1']);
+  });
+});

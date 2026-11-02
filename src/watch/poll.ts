@@ -40,6 +40,8 @@ export interface WatchDeclaration {
   label: string;
   everyMs: number;
   maxConcurrentRuns: number;
+  /** Its tickets don't wait on open prerequisites. */
+  ignorePrerequisites?: boolean;
 }
 
 /** One watched workflow, ready to poll. */
@@ -78,7 +80,14 @@ function declaration(
     return { refused: `workflow '${name}' ${problem}` };
   }
   const kind = pollKind(workflow);
-  return { workflow: name, kind, label: watchLabel(workflow, config), everyMs, maxConcurrentRuns };
+  return {
+    workflow: name,
+    kind,
+    label: watchLabel(workflow, config),
+    everyMs,
+    maxConcurrentRuns,
+    ...(workflow.ignorePrerequisites === true ? { ignorePrerequisites: true } : {}),
+  };
 }
 
 /**

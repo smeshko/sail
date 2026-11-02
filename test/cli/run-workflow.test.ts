@@ -544,6 +544,26 @@ test('sail FAKE-1 --ignore-prerequisites runs a ticket whose prerequisite is ope
   expect({ code, stderr, runs: runs.length }).toEqual({ code: EXIT_OK, stderr: '', runs: 1 });
 });
 
+/** Sets `ignorePrerequisites` on the stub's workflow, and gives FAKE-1 an open prerequisite. */
+const declaring = (value: boolean) => (sail: string) => {
+  edit(sail, 'workflows/ticket-to-pr/workflow.ts', 'intake: ticket,', `intake: ticket, ignorePrerequisites: ${value},`);
+  patchTicket(sail, 'FAKE-1', { prerequisites: ['FAKE-4'] });
+};
+
+test('sail FAKE-1 runs a ticket whose prerequisite is open when its workflow declares ignorePrerequisites', async () => {
+  const { code, stderr, runs } = await sailIn(['FAKE-1'], { testsPassAt: 1 }, declaring(true));
+  expect({ code, stderr, runs: runs.length }).toEqual({ code: EXIT_OK, stderr: '', runs: 1 });
+});
+
+test('sail FAKE-1 exits 5 when its workflow declares ignorePrerequisites: false', async () => {
+  const { code, stderr, touched } = await sailIn(['FAKE-1'], { testsPassAt: 1 }, declaring(false));
+  expect({ code, stderr, touched }).toEqual({
+    code: EXIT_WAITING,
+    stderr: `${WAITS} FAKE-4, ${IGNORE}`,
+    touched: false,
+  });
+});
+
 test.each<[string, Record<string, unknown>]>([
   ['Done', {}],
   ['Canceled', { state: { type: 'canceled', name: 'Canceled' } }],
