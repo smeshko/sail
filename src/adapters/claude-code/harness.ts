@@ -68,10 +68,18 @@ const SWITCHES: Readonly<Record<string, string>> = {
   CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1',
 };
 
-/** The session's environment: the allowlisted names of `env`, the preamble, which wins a clash, then the switches. */
+/** What the CLI sends in place of a subscription's OAuth token, so a session that has the token bills the API instead. */
+const OUTRANKS_OAUTH: ReadonlySet<string> = new Set(['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN']);
+
+/**
+ * The session's environment: the allowlisted names of `env`, the preamble, which wins a clash, then the switches. With
+ * an OAuth token, the session stays on the subscription: it doesn't see what would outrank the token.
+ */
 export function sessionEnv(preamble: Readonly<Record<string, string>>, env: Env): Record<string, string> {
+  const subscribed = (env.CLAUDE_CODE_OAUTH_TOKEN ?? '') !== '';
   const picked = Object.entries(env).filter(
-    (entry): entry is [string, string] => entry[1] !== undefined && allowlisted(entry[0]),
+    (entry): entry is [string, string] =>
+      entry[1] !== undefined && allowlisted(entry[0]) && !(subscribed && OUTRANKS_OAUTH.has(entry[0])),
   );
   return {
     ...Object.fromEntries(picked),

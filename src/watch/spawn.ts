@@ -15,8 +15,11 @@ import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync } f
 import { dirname, join } from 'node:path';
 import { queueDir } from './queue-store';
 
-/** The `sail` the watcher starts: this checkout's bin, on the Bun the watcher runs on. */
-const SAIL_CLI = [process.execPath, join(import.meta.dir, '..', 'cli', 'main.ts')];
+/**
+ * The `sail` the watcher starts: this checkout's bin, on the Bun the watcher runs on. Its cwd is the clone, and Bun would
+ * load the clone's `.env`, an application's secrets, into sail's environment.
+ */
+const SAIL_CLI = [process.execPath, '--no-env-file', join(import.meta.dir, '..', 'cli', 'main.ts')];
 
 /** Where the output of the dispatched run `runId` of `workflow` goes. */
 export function dispatchLog(runsDir: string, workflow: string, runId: string): string {

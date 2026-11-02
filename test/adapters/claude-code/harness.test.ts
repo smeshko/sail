@@ -279,7 +279,6 @@ test("the session's environment is the allowlisted names of sail's, the client a
     LC_ALL: 'C',
     TERM: 'xterm',
     CLAUDE_CONFIG_DIR: '/cfg',
-    ANTHROPIC_API_KEY: 'sk-ant-x',
     CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat-x',
     ANTHROPIC_BASE_URL: 'https://proxy',
     CLAUDE_CODE_USE_BEDROCK: '1',
@@ -295,9 +294,26 @@ test("the session's environment is the allowlisted names of sail's, the client a
   });
 });
 
+test.each(['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'])(
+  'a session with the OAuth token never sees %s: the CLI would send it instead, off the subscription',
+  (name) => {
+    const seen = sessionOptions(request(), { [name]: 'sk-ant-x', CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat-x' }).env;
+    expect(seen).toMatchObject({ CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat-x' });
+    expect(seen).not.toHaveProperty(name);
+  },
+);
+
+test.each([
+  ['no OAuth token', {}],
+  ['an empty OAuth token', { CLAUDE_CODE_OAUTH_TOKEN: '' }],
+])('a session with %s keeps the API key and the auth token', (_, token) => {
+  const credentials = { ANTHROPIC_API_KEY: 'sk-ant-x', ANTHROPIC_AUTH_TOKEN: 'sk-ant-y' };
+  expect(sessionOptions(request(), { ...credentials, ...token }).env).toMatchObject(credentials);
+});
+
 test('the session sees the OAuth token, and nothing the harness reports carries a credential', async () => {
   const env = { ANTHROPIC_API_KEY: 'sk-ant-secret-key', CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat-secret-token' };
-  expect(sessionOptions(request(), env).env).toMatchObject(env);
+  expect(sessionOptions(request(), env).env).toMatchObject({ CLAUDE_CODE_OAUTH_TOKEN: env.CLAUDE_CODE_OAUTH_TOKEN });
   const { result, capture } = await play(SUITE.done ?? [], {}, env);
   const reported = JSON.stringify([result, capture.events]);
   expect([reported.includes('secret-key'), reported.includes('secret-token')]).toEqual([false, false]);

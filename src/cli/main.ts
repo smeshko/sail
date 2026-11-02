@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env -S bun --no-env-file
 import { run } from './index';
 import { quietOnClosedPipe } from './output';
 import { detectTty } from './tty';
