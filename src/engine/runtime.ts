@@ -191,6 +191,11 @@ interface Unavailable {
   key: string;
 }
 
+/** A call whose script step was ended by a signal sail didn't send: its call's key. */
+interface Signalled {
+  key: string;
+}
+
 /** A call that hit the provider's usage limit. */
 interface Limited {
   key: string;
@@ -649,6 +654,14 @@ async function drive(
     );
     return hit ? { key: callKeyOf(String(result.key)) } : undefined;
   };
+  /** A call (or a step of one) that ended in `error` by a signal sail didn't send, and doesn't return its errors: its key. */
+  const signalledOf = (result: Record<string, unknown>, call: PendingCall): Signalled | undefined => {
+    if (result.outcome !== 'error' || call.onError === 'return') return undefined;
+    const hit = ((result.errors ?? []) as { reason: string; code?: string }[]).some(
+      (error) => error.reason === 'exit_code' && error.code === 'signalled',
+    );
+    return hit ? { key: callKeyOf(String(result.key)) } : undefined;
+  };
   /** Suspends the run on a port that was unavailable: the call is left unjournaled, and the workspace kept. */
   const portUnavailable = (hit: Unavailable): Promise<RunEnd> => {
     bus.emit({ type: 'run:suspended', stopReason: 'port_unavailable', key: hit.key });
@@ -661,6 +674,9 @@ async function drive(
     });
   };
   const interrupted = (message: string): Promise<RunEnd> => suspended('interrupted', message);
+  /** Suspends the run on a script step a signal sail didn't send ended: the call is left unjournaled. */
+  const killed = (hit: Signalled): Promise<RunEnd> =>
+    interrupted(`${hit.key} was ended by a signal sail didn't send: a resume runs it again`);
   const stopNow = new AbortController();
   let stoppedDuring: string | undefined;
   /** Poll only while a call runs; leave the request for the boundary to take. */
@@ -747,7 +763,8 @@ async function drive(
               callSignal?.aborted ||
               ranOut(result) ||
               limitedOf(result) !== undefined ||
-              unavailableOf(result, call) !== undefined
+              unavailableOf(result, call) !== undefined ||
+              signalledOf(result, call) !== undefined
             )
               return false;
             journal(result, paths, undefined, call.fingerprints);
@@ -1010,6 +1027,11 @@ async function drive(
           running = undefined;
           return await portUnavailable(unavailable);
         }
+        const signalled = signalledOf(result, one.call);
+        if (signalled !== undefined) {
+          running = undefined;
+          return await killed(signalled);
+        }
         // Stopped short of its last step, the call is left for the next replay to ask for again.
         if (stopped === true || ranOut(result)) {
           running = undefined;
@@ -1033,6 +1055,8 @@ async function drive(
       let usageLimited: Limited | undefined;
       /** The first call of the group that ended on an unavailable port. */
       let unavailable: Unavailable | undefined;
+      /** The first call of the group that ended by a signal sail didn't send. */
+      let signalled: Signalled | undefined;
       // A resume may run one call of a group, and it isn't the group's first.
       running = live.size === 1 ? [...live][0] : undefined;
       /** The relay's key is the running call's while exactly one of the group's runs, and none otherwise. */
@@ -1054,6 +1078,11 @@ async function drive(
             const down = unavailableOf(result, each.call);
             if (down !== undefined) {
               unavailable ??= down;
+              return;
+            }
+            const killedBy = signalledOf(result, each.call);
+            if (killedBy !== undefined) {
+              signalled ??= killedBy;
               return;
             }
             if (stopped === true || ranOut(result)) return;
@@ -1088,6 +1117,7 @@ async function drive(
       if (stopNow.signal.aborted) return await stoppedNow(first);
       if (usageLimited !== undefined) return await limitReached(usageLimited);
       if (unavailable !== undefined) return await portUnavailable(unavailable);
+      if (signalled !== undefined) return await killed(signalled);
     }
   } catch (error) {
     bus.emit({ type: 'error:crash', message: messageOf(error), ...(running === undefined ? {} : { key: running }) });
