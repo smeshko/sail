@@ -3,16 +3,23 @@
 // are every failed run of the repository with --failed. It resolves only the Workspace port, and the code host only when
 // a run's branch is on the remote, so a clean needs no credentials otherwise.
 //
+// A cleaned ticket run's ticket is moved from started back to unstarted through TicketSource `update` (the engine's
+// `resetTicket()`), resolved lazily at the first ticket run; a ticket in any other state is left alone. A reset that fails
+// is reported and exits 1, the clean's archive staying.
+//
 // Exit 3 when any run was refused, else 1 when any removal failed, else 0. Each run is cleaned in turn, whatever the
 // ones before it came to.
 import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { BUILTINS } from '../../adapters/index';
 import { resolveAdapters } from '../../engine/adapters';
-import { cleanedMessage, cleanRun } from '../../engine/clean';
+import { cleanedMessage, cleanRun, resetTicket } from '../../engine/clean';
 import { runsDir } from '../../engine/run-dir';
+import { readRunHeader } from '../../engine/run-header';
 import { listRuns } from '../../engine/runs';
 import { formatIssue } from '../../engine/schemas';
 import type { CodeHost } from '../../ports/code-host';
+import type { TicketSource } from '../../ports/ticket-source';
 import { queueItemsNaming } from '../../watch/queue-store';
 import { EXIT_FAILED, EXIT_OK, EXIT_REFUSED, type ExitCode } from '../exit-codes';
 import type { Io, Parsed } from '../index';
@@ -54,9 +61,42 @@ export async function clean(args: Parsed, io: Io): Promise<ExitCode> {
     return host;
   };
 
+  let tickets: Promise<TicketSource | { refused: string }> | undefined;
+  const ticketSource = (): Promise<TicketSource | { refused: string }> => {
+    tickets ??= (async () => {
+      const resolved = await resolveAdapters({
+        sailDir: project.sailDir,
+        config: project.config,
+        builtins: BUILTINS,
+        env,
+        ports: ['ticketSource'],
+      });
+      if ('issues' in resolved) return { refused: resolved.issues.map((issue) => formatIssue(issue)).join('; ') };
+      return resolved.ports.ticketSource;
+    })();
+    return tickets;
+  };
+  const isTicketRun = (runId: string): boolean => {
+    try {
+      return readRunHeader(join(runsDir(project.sailDir), runId)).source.kind === 'ticket';
+    } catch {
+      return false;
+    }
+  };
+
   const home = env.HOME ?? homedir();
   let code: ExitCode = EXIT_OK;
   for (const runId of runIds) {
+    let source: TicketSource | undefined;
+    if (isTicketRun(runId)) {
+      const resolved = await ticketSource();
+      if ('refused' in resolved) {
+        refuse(`run ${runId}: its ticket can't be reset: ${resolved.refused}`);
+        code = EXIT_REFUSED;
+        continue;
+      }
+      source = resolved;
+    }
     const cleaned = await cleanRun({
       sailDir: project.sailDir,
       runId,
@@ -70,6 +110,20 @@ export async function clean(args: Parsed, io: Io): Promise<ExitCode> {
       code = EXIT_REFUSED;
     } else if ('cleaned' in cleaned) {
       io.stdout(`${cleanedMessage(runId, cleaned.cleaned, home)}\n`);
+      if (source !== undefined) {
+        const reset = await resetTicket({
+          ticketSource: source,
+          source: cleaned.cleaned.source,
+          runId,
+          runsDir: runsDir(project.sailDir),
+        });
+        if ('reset' in reset) io.stdout(`reset ${reset.reset.ticketKey} to ${reset.reset.state.name}\n`);
+        else if ('failed' in reset) {
+          const key = cleaned.cleaned.source.kind === 'ticket' ? cleaned.cleaned.source.ticketKey : runId;
+          io.stderr(`${COMMAND}: ${runId}: its ticket ${key} was not reset: ${reset.failed}\n`);
+          if (code !== EXIT_REFUSED) code = EXIT_FAILED;
+        }
+      }
     } else {
       for (const failure of cleaned.failed.failures) io.stderr(`${COMMAND}: ${runId}: ${failure}\n`);
       io.stderr(`${COMMAND}: ${runId}: its run directory stays at .sail-runs/${runId}; clean it again\n`);

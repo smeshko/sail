@@ -1,7 +1,7 @@
 // `sail clean <run>... | --failed`: the selection, the exit codes of a refusal and of a failed removal, and a clean
 // that never resolves the code host when the branch is not on the remote.
 import { expect, test } from 'bun:test';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { EXIT_FAILED, EXIT_OK, EXIT_REFUSED } from '../../src/cli/exit-codes';
 import { writeStatus } from '../../src/engine/run-dir';
@@ -87,7 +87,10 @@ test('sail clean <failed> <completed> cleans the first, refuses the second and e
     const result = await sail(repo, 'clean', failed, completed);
     expect(result.code).toBe(EXIT_REFUSED);
     expect(result.stdout).toMatch(new RegExp(`^cleaned ${failed}: worktree; run directory -> `));
-    expect(result.stdout.split('\n').filter(Boolean)).toHaveLength(1);
+    expect(result.stdout.split('\n').filter(Boolean)).toEqual([
+      expect.stringMatching(new RegExp(`^cleaned ${failed}: `)),
+      'reset FAKE-1 to Todo',
+    ]);
     expect(result.stderr).toBe(`sail clean: run ${completed} completed: only a failed run is cleaned\n`);
     expect(exists(repo, failed)).toBe(false);
     expect(exists(repo, completed)).toBe(true);
@@ -113,6 +116,51 @@ test('sail clean --failed cleans only the failed runs, and says so when there ar
       stdout: '',
       stderr: 'sail clean: no failed runs\n',
     });
+  });
+});
+
+const ticketState = async (repo: TempRepo, key = 'FAKE-1') =>
+  (await (await fakeAdapters(repo.dir)).ports.ticketSource.get(key)).state;
+
+test('sail clean --failed moves the started ticket of a cleaned run back to unstarted and says so', async () => {
+  await withTempRepo(async (repo) => {
+    project(repo);
+    const failed = await run(repo, 'FAKE-1', 'failed');
+    expect((await ticketState(repo)).type).toBe('started');
+    const result = await sail(repo, 'clean', '--failed');
+    expect(result.code).toBe(EXIT_OK);
+    expect(result.stdout).toContain('\nreset FAKE-1 to Todo\n');
+    expect(result.stderr).toBe('');
+    expect(await ticketState(repo)).toEqual({ type: 'unstarted', name: 'Todo' });
+    expect(exists(repo, failed)).toBe(false);
+  });
+});
+
+test('sail clean prints no reset for a ticket that is no longer started, and leaves it', async () => {
+  await withTempRepo(async (repo) => {
+    project(repo);
+    const failed = await run(repo, 'FAKE-1', 'failed');
+    await (await fakeAdapters(repo.dir)).ports.ticketSource.update('FAKE-1', { state: 'done' });
+    const result = await sail(repo, 'clean', failed);
+    expect(result.code).toBe(EXIT_OK);
+    expect(result.stdout).not.toContain('reset');
+    expect((await ticketState(repo)).type).toBe('completed');
+  });
+});
+
+test('sail clean exits 1 when the ticket cannot be reset, naming the ticket, and the clean stays archived', async () => {
+  await withTempRepo(async (repo) => {
+    project(repo);
+    const failed = await run(repo, 'FAKE-1', 'failed');
+    const path = join(repo.dir, '.sail-runs', 'fake', 'tickets.json');
+    const seed = JSON.parse(readFileSync(path, 'utf8'));
+    seed.tickets[0].answers = { update: ['unavailable'] };
+    writeFileSync(path, JSON.stringify(seed));
+    const result = await sail(repo, 'clean', failed);
+    expect(result.code).toBe(EXIT_FAILED);
+    expect(result.stderr).toContain(`sail clean: ${failed}: its ticket FAKE-1 was not reset: `);
+    expect(exists(repo, failed)).toBe(false);
+    expect((await ticketState(repo)).type).toBe('started');
   });
 });
 
