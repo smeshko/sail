@@ -268,7 +268,7 @@ async function cleanRepository(repository: Repository): Promise<ExitCode> {
     const file = dropCommand(runs, settling.command);
     if (!(await taken(file, deps))) {
       io.stdout(
-        `${COMMAND}: the watcher of '${workflow}' (pid ${watching.pid}) ${NOT_TAKEN}: it waits in ${at(io, file)}`,
+        `${COMMAND}: ${prefix}the watcher of '${workflow}' (pid ${watching.pid}) ${NOT_TAKEN}: it waits in ${at(io, file)}\n`,
       );
       continue;
     }

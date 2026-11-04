@@ -338,7 +338,17 @@ async function queued(repo: TempRepo, watching = true) {
     interrupts.interrupt();
     await exited;
   };
-  return { named, unnamed, cleaned, items, stop };
+  /** Runs `sail clean <argv>` with no tick of the watcher, so the command it drops is never taken. */
+  const untaken = async (...argv: string[]) => {
+    const printed = { stdout: '', stderr: '' };
+    const values = Object.fromEntries(argv.map((arg) => [arg.slice(2), true]));
+    const code = await cleanCommand({ isAlive, pollMs: 5, applyTimeoutMs: 50 })(
+      { values, positionals: [] },
+      handle(printed),
+    );
+    return { code, ...printed };
+  };
+  return { named, unnamed, cleaned, untaken, items, stop };
 }
 
 const labels = async (repo: TempRepo) => (await (await fakeAdapters(repo.dir)).ports.ticketSource.get('FAKE-1')).labels;
@@ -447,6 +457,26 @@ test('sail clean --drop whose label removal fails exits 1, sends no command and 
     expect(commandFiles(repo)).toEqual([]);
     expect(w.items().find((item) => item.dedupKey === 'ticket:FAKE-1')).toMatchObject({ state: 'parked' });
     expect(await labels(repo)).toContain('sail-a');
+    await w.stop();
+  });
+}, 60_000);
+
+test('sail clean --all-repos --requeue whose command the watcher has not taken says so on a line of its own, prefixed with the repository name', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await queued(repo);
+    const result = await w.untaken('--failed', '--all-repos', '--requeue');
+    expect(result.stderr).toBe('');
+    expect(result.code).toBe(EXIT_OK);
+    const lines = result.stdout.split('\n');
+    expect(lines.filter(Boolean)).toEqual([
+      expect.stringMatching(new RegExp(`^stub: cleaned ${w.named}: `)),
+      'stub: reset FAKE-1 to Todo',
+      expect.stringMatching(
+        /^sail clean: stub: the watcher of 'a' \(pid 4242\) has not taken the command yet: it waits in /,
+      ),
+      expect.stringMatching(new RegExp(`^stub: cleaned ${w.unnamed}: `)),
+      'stub: reset FAKE-2 to Todo',
+    ]);
     await w.stop();
   });
 }, 60_000);
