@@ -201,6 +201,7 @@ export default {
     addLabel: nothing,
     removeLabel: nothing,
     comment: nothing,
+    updatePullRequest: nothing,
     capabilities: () => ({ checks: false, labels: true, drafts: true, mergeMethods: [] }),
   }),
 };

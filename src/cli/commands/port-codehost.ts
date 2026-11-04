@@ -37,7 +37,8 @@ import {
   Rerun,
   UpdatedPullRequest,
 } from '../../ports/types';
-import { EmptyBody, type PortCall, type PortOperation, type PortTable } from './port';
+import type { PortCall, PortOperation, PortTable } from './port';
+import { EmptyBody } from './port-body';
 
 /**
  * `answer`, which the code host's `op` gave, as `schema` parses it. An answer that is no `what` is a PortError of
