@@ -5,7 +5,7 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { createFakeCodeHost } from '../src/adapters/fake/code-host';
 import { createFakeTicketSource } from '../src/adapters/fake/ticket-source';
-import { EXIT_OK, EXIT_REFUSED, EXIT_SUSPENDED } from '../src/cli/exit-codes';
+import { EXIT_FAILED, EXIT_OK, EXIT_REFUSED, EXIT_SUSPENDED } from '../src/cli/exit-codes';
 import { readJournal } from '../src/engine/journal';
 import { readStatus } from '../src/engine/run-dir';
 import { readEvents } from '../src/events/consumers/ndjson';
@@ -84,6 +84,36 @@ test('a groom run on fakes reads FAKE-2 unclaimed, comments the report and swaps
     expect(unlabelled.map((event) => (event as { label?: string }).label)).toEqual(['groom']);
     const labelled = readEvents(dir).filter((event) => event.type === 'ticket:labelled');
     expect(labelled.map((event) => (event as { label?: string }).label)).toEqual(['open-questions']);
+  });
+}, 120_000);
+
+test('a blocked check hands the ticket over: commented, needs-human on, groom off, still in Backlog', async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeGroomRepo(repo);
+    seedHarness(sailDir, 'worth', [
+      { outcome: 'blocked', reason: 'the ticket names another repository', messages: [], turns: 1 },
+    ]);
+    repo.git('add', '.sail/fake/harness.json');
+    repo.git('commit', '-q', '-m', 'block worth');
+
+    const { code } = await runCaptured(RUN, repo.dir, { env: repo.env });
+    expect(code).toBe(EXIT_FAILED);
+    const dir = onlyRun(repo.dir);
+    expect(readJournal(dir).entries.at(-1)?.key).toBe('hand-over-ticket#1');
+
+    const ticket = fakeTicket(repo.dir, 'FAKE-2');
+    expect(ticket.labels).toEqual(['needs-human']);
+    expect(ticket.state).toEqual({ type: 'unstarted', name: 'Backlog' });
+    expect(lastComment(repo.dir)).toContain('worth blocked: the ticket names another repository');
+
+    const events = readEvents(dir);
+    const types = events.map((event) => event.type);
+    expect(types).not.toContain('ticket:updated');
+    expect(types).not.toContain('ticket:claimed');
+    const labels = (type: string) =>
+      events.filter((event) => event.type === type).map((event) => (event as { label?: string }).label);
+    expect(labels('ticket:unlabelled')).toEqual(['groom']);
+    expect(labels('ticket:labelled')).toEqual(['needs-human']);
   });
 }, 120_000);
 

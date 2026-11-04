@@ -5,9 +5,11 @@
 // factory's plan stage did, and a plan that leaves no question open is attached to the ticket. The act step applies what
 // the workflow lets through, attaches the plan, comments the report, takes the `groom` label off and puts `groomed` (an
 // action ended the ticket), `open-questions` (a person must answer, then put `groom` back) or `planned` and `factory` on,
-// so the watcher grooms each ticket once and the factory implements the plan. Composition only: every contract lives on
-// its stage.
+// so the watcher grooms each ticket once and the factory implements the plan. A stage that ends blocked hands the ticket
+// to a person instead (the hand-over-ticket stage): the `groom` label comes off and `needs-human` goes on, with the
+// state left alone. Composition only: every contract lives on its stage.
 import { workflow, type z } from 'sail';
+import { handOverTicket } from '../../stages/hand-over-ticket/stage';
 import { readTicket } from './intake';
 import type { Decision, Findings, Verdict } from './schemas';
 import { duplicates } from './stages/01-duplicates/stage';
@@ -201,7 +203,7 @@ export default workflow(
   'groom',
   {
     intake: readTicket,
-    version: 2,
+    version: 3,
     watch: { every: '15m', label: LABEL },
     // One at a time, so two judgments of duplicates or merges never race each other.
     maxConcurrentRuns: 1,
@@ -214,6 +216,10 @@ export default workflow(
     const brief = run.intake.files['brief.md'];
     const others = run.intake.files['others.md'];
     const { ticketKey } = run.input;
+    const handOff = async (reason: string) => {
+      await run.stage(handOverTicket, { ticketKey, label: LABEL, reason, workflow: 'groom', unstart: false });
+      return run.fail(reason);
+    };
 
     const [dup, earned, stale, open] = await run.all([
       [duplicates, { brief, others }],
@@ -221,10 +227,10 @@ export default workflow(
       [staleness, { brief, others }],
       [questions, { brief, others }],
     ]);
-    if (dup.outcome === 'blocked') return run.fail(`duplicates blocked: ${dup.reason}`);
-    if (earned.outcome === 'blocked') return run.fail(`worth blocked: ${earned.reason}`);
-    if (stale.outcome === 'blocked') return run.fail(`staleness blocked: ${stale.reason}`);
-    if (open.outcome === 'blocked') return run.fail(`questions blocked: ${open.reason}`);
+    if (dup.outcome === 'blocked') return handOff(`duplicates blocked: ${dup.reason}`);
+    if (earned.outcome === 'blocked') return handOff(`worth blocked: ${earned.reason}`);
+    if (stale.outcome === 'blocked') return handOff(`staleness blocked: ${stale.reason}`);
+    if (open.outcome === 'blocked') return handOff(`questions blocked: ${open.reason}`);
 
     const findings = {
       duplicates: dup.output,
@@ -233,7 +239,7 @@ export default workflow(
       questions: open.output,
     };
     const decided = await run.stage(decide, { brief, others, findings });
-    if (decided.outcome === 'blocked') return run.fail(`decide blocked: ${decided.reason}`);
+    if (decided.outcome === 'blocked') return handOff(`decide blocked: ${decided.reason}`);
     const report = decided.files['report.md'];
     const verdict = limit(decided.output, {
       findings,
@@ -249,7 +255,7 @@ export default workflow(
 
     // create-plan, for the ticket as the applied actions leave it. Its questions hold the plan back.
     const planned = await run.stage(plan, { brief, report, actions: verdict.apply });
-    if (planned.outcome === 'blocked') return run.fail(`plan blocked: ${planned.reason}`);
+    if (planned.outcome === 'blocked') return handOff(`plan blocked: ${planned.reason}`);
     const { questions: asked, ...written } = planned.output;
     const acted =
       asked.length > 0
