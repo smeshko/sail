@@ -12,7 +12,7 @@ export const checkFix = agent('check-fix', {
     fixed: value(Fixed),
     since: value(z.string()),
     jev: value(FixAsked),
-    // The description as the fixes left it, when a finding about it was fixed.
+    // The description as the host holds it, when a finding it checks is about it.
     description: value(z.string()).optional(),
   },
   output: FixChecked,

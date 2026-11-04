@@ -223,18 +223,19 @@ export default workflow(
         });
         if (fixed.outcome === 'blocked') return handOff(`fix blocked: ${fixed.reason}`);
         // A finding about the description is fixed by rewriting it: the agent can't call the code host, so a script does.
-        let rewritten: string | undefined;
         if (fixed.output.body !== null) {
           const updated = await run.stage(updateDescription, { pr: number, body: fixed.output.body });
           if (updated.outcome === 'failed') return run.fail('update-description failed');
-          description = rewritten = updated.output.body;
+          description = updated.output.body;
         }
+        // check-fix judges a finding about the description against the body the host holds, rewritten this pass or not.
+        const described = targets.some((target) => target.about === 'description') ? description : undefined;
         // Jev's answers are a hint for check-fix, which runs on every pass: a clear yes never stands in for it.
         const asked = await run.stage(jevFix, { findings: { findings: targets }, fixed: fixed.output, since });
         const [agent, again] = await run.all([
           [
             checkFix,
-            { findings: { findings: targets }, fixed: fixed.output, since, jev: asked.output, description: rewritten },
+            { findings: { findings: targets }, fixed: fixed.output, since, jev: asked.output, description: described },
           ],
           [validate],
         ]);

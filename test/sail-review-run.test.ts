@@ -624,32 +624,39 @@ test('a fix that blocks while landing blocks the next merge, which comments why,
   });
 }, 120_000);
 
+/** Seeds review-requirements with one finding about the description, R1, and the judge with R1 as the one target. */
+function describeOnly(repo: TempRepo) {
+  const sail = join(repo.dir, '.sail');
+  const seeds = JSON.parse(readFileSync(join(sail, 'fake', 'harness.json'), 'utf8'));
+  const [requirements] = seeds['review-requirements'];
+  requirements.output.findings = [
+    {
+      severity: 'medium',
+      file: '',
+      title: 'The description claims a footer the change does not add',
+      detail: 'The Summary promises a total line; the diff only changes notes.txt.',
+      about: 'description',
+    },
+  ];
+  seedHarness(sail, 'review-requirements', [requirements]);
+  const [judge] = seeds.judge;
+  // R1 is the description finding; the others the fakes seed are dropped, so it is the one target.
+  const others = judge.output.decisions.filter((each: { finding: string }) => each.finding !== 'R1');
+  judge.output.decisions = [
+    { finding: 'R1', verdict: 'fix', rationale: 'The description is wrong.', ticket: null },
+    ...others.map((each: { verdict: string }) =>
+      each.verdict === 'fix' ? { ...each, verdict: 'drop', ticket: null } : each,
+    ),
+  ];
+  seedHarness(sail, 'judge', [judge]);
+  return seeds;
+}
+
 test("a finding about the pull request's description is fixed by rewriting its body, and check-fix reads the new one", async () => {
   await withTempRepo(async (repo) => {
     setUp(repo);
     const sail = join(repo.dir, '.sail');
-    const seeds = JSON.parse(readFileSync(join(sail, 'fake', 'harness.json'), 'utf8'));
-    const [requirements] = seeds['review-requirements'];
-    requirements.output.findings = [
-      {
-        severity: 'medium',
-        file: '',
-        title: 'The description claims a footer the change does not add',
-        detail: 'The Summary promises a total line; the diff only changes notes.txt.',
-        about: 'description',
-      },
-    ];
-    seedHarness(sail, 'review-requirements', [requirements]);
-    const [judge] = seeds.judge;
-    // R1 is the description finding; the others the fakes seed are dropped, so it is the one target.
-    const others = judge.output.decisions.filter((each: { finding: string }) => each.finding !== 'R1');
-    judge.output.decisions = [
-      { finding: 'R1', verdict: 'fix', rationale: 'The description is wrong.', ticket: null },
-      ...others.map((each: { verdict: string }) =>
-        each.verdict === 'fix' ? { ...each, verdict: 'drop', ticket: null } : each,
-      ),
-    ];
-    seedHarness(sail, 'judge', [judge]);
+    const seeds = describeOnly(repo);
     const body = '## Summary\n\nA note in notes.txt.\n\nCloses FAKE-1';
     seedHarness(sail, 'fix#1', [
       { ...seeds.fix[0], output: { fixes: [{ finding: 'R1', commit: null, note: 'Rewrote the Summary.' }], body } },
@@ -683,5 +690,41 @@ test('a review that fixes only the change rewrites no description', async () => 
     const { code, keys } = await review(repo);
     expect(code).toBe(0);
     expect(keys.some((key) => key.startsWith('update-description'))).toBe(false);
+  });
+});
+
+test('check-fix reads the rewritten description on a later pass whose fix leaves it as it is', async () => {
+  await withTempRepo(async (repo) => {
+    setUp(repo);
+    const sail = join(repo.dir, '.sail');
+    const seeds = describeOnly(repo);
+    const body = '## Summary\n\nA note in notes.txt.\n\nCloses FAKE-1';
+    seedHarness(sail, 'fix#1', [
+      { ...seeds.fix[0], output: { fixes: [{ finding: 'R1', commit: null, note: 'Rewrote the Summary.' }], body } },
+    ]);
+    seedHarness(sail, 'check-fix#1', [
+      {
+        ...seeds['check-fix'][0],
+        output: { items: [{ finding: 'R1', resolved: false, detail: 'Not checked yet.' }], findings: [] },
+      },
+    ]);
+    seedHarness(sail, 'fix#2', [
+      {
+        ...seeds.fix[0],
+        output: { fixes: [{ finding: 'R1', commit: null, note: 'The description is right.' }], body: null },
+      },
+    ]);
+    seedHarness(sail, 'check-fix#2', [
+      {
+        ...seeds['check-fix'][0],
+        output: { items: [{ finding: 'R1', resolved: true, detail: 'Holds.' }], findings: [] },
+      },
+    ]);
+    const { code, stderr, keys, dir } = await review(repo);
+    expect({ code, stderr: code === 0 ? '' : stderr }).toEqual({ code: 0, stderr: '' });
+    expect(keys.filter((key) => key.startsWith('update-description'))).toEqual(['update-description#1']);
+    expect(keys).toContain('check-fix#2');
+    const folder = readdirSync(dir).find((name) => name.endsWith('-check-fix')) ?? '';
+    expect(readFileSync(join(dir, folder, 'call-2', 'in', 'description.txt'), 'utf8')).toBe(body);
   });
 });
