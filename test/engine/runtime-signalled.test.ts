@@ -220,3 +220,38 @@ export default workflow('own', { intake: own, version: 1 }, async (run) => run.i
     });
   });
 });
+
+test('in a multi-step stage, a step ended by an outside signal is left unjournaled after the step that passed, and the run is suspended interrupted', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = copyFixture(repo.dir);
+    const stage = `workflows/${TRIO}/stages/two`;
+    write(
+      sail,
+      `${stage}/stage.ts`,
+      `import { script, stage, z } from 'sail';
+const output = z.object({ name: z.string() });
+export const two = stage('two', {
+  output,
+  steps: [script('first', { run: './first.sh', output }), script('second', { run: './second.sh', output })],
+});
+`,
+    );
+    chmodSync(write(sail, `${stage}/first.sh`, '#!/usr/bin/env bash\necho \'{"name":"first"}\'\n'), 0o755);
+    chmodSync(write(sail, `${stage}/second.sh`, '#!/usr/bin/env bash\nkill -TERM $$\n'), 0o755);
+    write(
+      sail,
+      `workflows/${TRIO}/workflow.ts`,
+      `import { workflow } from 'sail';
+import { ticket } from 'sail/intakes';
+import { two } from './stages/two/stage';
+export default workflow('${TRIO}', { intake: ticket, version: 1 }, async (run) => run.stage(two));
+`,
+    );
+    const end = await ran(repo.dir, TRIO);
+    expect({ status: end.status, stopReason: end.stopReason, journal: keys(end.dir) }).toEqual({
+      status: 'suspended',
+      stopReason: 'interrupted',
+      journal: ['intake#1', 'two#1/first'],
+    });
+  });
+});
