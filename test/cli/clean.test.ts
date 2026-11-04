@@ -481,6 +481,53 @@ test('sail clean --all-repos --requeue whose command the watcher has not taken s
   });
 }, 60_000);
 
+test('sail clean --failed --all-repos --drop settles the named run through the watcher the registry records, and a bare --all-repos refuses it naming both flags', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await queued(repo);
+    const bare = await w.cleaned('--failed', '--all-repos');
+    expect(bare.code).toBe(EXIT_REFUSED);
+    expect(bare.stderr).toBe(
+      `sail clean: stub: queue item ticket:FAKE-1 of a (parked) names run ${w.named}: clean it with --requeue or --drop, or \`sail queue requeue|drop\`\n`,
+    );
+    expect(bare.stdout).toContain(`stub: cleaned ${w.unnamed}:`);
+    expect(exists(repo, w.named)).toBe(true);
+
+    const result = await w.cleaned('--failed', '--all-repos', '--drop');
+    expect(result.stderr).toBe('');
+    expect(result.code).toBe(EXIT_OK);
+    expect(result.stdout.split('\n').filter(Boolean)).toEqual([
+      expect.stringMatching(new RegExp(`^stub: cleaned ${w.named}: `)),
+      'stub: reset FAKE-1 to Todo',
+      'stub: ticket:FAKE-1 dropped',
+    ]);
+    expect(w.items().map((item) => item.dedupKey)).toEqual(['ticket:FAKE-3']);
+    expect(await labels(repo)).toEqual(['sail']);
+    await w.stop();
+  });
+}, 60_000);
+
+test('sail clean --failed --all-repos --requeue with no live watcher refuses the named run with nothing removed, and cleans the unnamed one', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await queued(repo, false);
+    recordEntry(registryDir(join(repo.home, 'sail-home')), {
+      schema: 'sail.registry.v1',
+      name: 'stub',
+      remote: null,
+      clone: repo.dir,
+      sailDir: join(repo.dir, '.sail'),
+      updatedAt: START,
+    });
+    const result = await w.cleaned('--failed', '--all-repos', '--requeue');
+    expect(result.code).toBe(EXIT_REFUSED);
+    expect(result.stderr).toContain(
+      `sail clean: stub: run ${w.named}: no watcher is running for 'stub' here: sail watch a first\n`,
+    );
+    expect(result.stdout).toContain(`stub: cleaned ${w.unnamed}:`);
+    expect(exists(repo, w.named)).toBe(true);
+    expect(w.items().map((item) => item.state)).toEqual(['parked']);
+  });
+}, 60_000);
+
 test('sail clean --requeue with no live watcher refuses the named run with nothing removed, and cleans the unnamed one', async () => {
   await withTempRepo(async (repo) => {
     const w = await queued(repo, false);
