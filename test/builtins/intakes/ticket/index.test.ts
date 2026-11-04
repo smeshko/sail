@@ -353,3 +353,39 @@ test('a ticket another start claimed is a lost claim: the body throws a PortErro
   expect(readdirSync(out)).toEqual([]);
   expect((await ticketSource.get('FAKE-7')).comments.some((each) => each.body.startsWith('sail run '))).toBe(false);
 });
+
+test('a hosted attachment is downloaded under attachments/, one over the cap or unreadable is skipped, a link is left alone', async () => {
+  const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 255, 1]);
+  const hosted = (n: number) => `fake://tickets/FAKE-7/attachments/${n}`;
+  const seeded = {
+    ...SEED,
+    attachments: [
+      { name: 'shot.png', url: hosted(1), mimeType: 'image/png', base64: PNG.toString('base64') },
+      { name: 'huge.bin', url: hosted(2), base64: '', size: 85 * 1024 * 1024 },
+      { name: 'gone.txt', url: hosted(3), content: 'x', answer: 'unavailable' },
+      ...SEED.attachments,
+    ],
+  };
+  const { output, out } = await ran(seeded as typeof SEED);
+  expect(readdirSync(out).sort()).toEqual(['attachments', 'brief.md', 'ticket.json']);
+  expect(readdirSync(join(out, 'attachments'))).toEqual(['shot.png']);
+  expect(readFileSync(join(out, 'attachments', 'shot.png')).equals(PNG)).toBe(true);
+  const attachments = (output as { attachments: Record<string, unknown>[] }).attachments;
+  expect(attachments[0]).toEqual({
+    name: 'shot.png',
+    url: hosted(1),
+    mimeType: 'image/png',
+    path: 'attachments/shot.png',
+  });
+  expect(attachments[1]?.skipped).toBe('huge.bin: 85 MiB, over the 20 MiB cap, not downloaded');
+  expect(attachments[1]).not.toHaveProperty('path');
+  expect(String(attachments[2]?.skipped)).toStartWith('gone.txt: not downloaded: ');
+  expect(attachments[3]).toEqual(SEED.attachments[0]);
+  expect<unknown>(TicketInput.parse(output)).toEqual(output);
+  expect(JSON.parse(readFileSync(join(out, 'ticket.json'), 'utf8')).attachments).toEqual(attachments);
+  const marked = wrapped(briefIn(out));
+  expect(marked['ticket FAKE-7, attachment 1 path']).toBe('attachments/shot.png');
+  expect(marked['ticket FAKE-7, attachment 2 note']).toContain('over the 20 MiB cap');
+  expect(marked['ticket FAKE-7, attachment 3 note']).toContain('not downloaded');
+  expect(marked).not.toHaveProperty('ticket FAKE-7, attachment 4 path');
+});

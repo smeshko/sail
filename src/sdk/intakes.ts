@@ -6,7 +6,9 @@ import { untrusted } from './untrusted';
 
 /**
  * A ticket as the `ticket` intake hands it to the workflow: `run.input`. Every string the provider returned is marked
- * untrusted, the ticket's URL included, which is checked as a URL too. The ticket key is the run's own.
+ * untrusted, the ticket's URL included, which is checked as a URL too. The ticket key is the run's own. An attachment
+ * the provider hosts is downloaded into `attachments/` of the intake's call directory: its `path` is relative to that
+ * directory, or `skipped` says why it wasn't downloaded. A link to elsewhere has neither.
  */
 export const TicketInput = z.object({
   ticketKey: z.string(),
@@ -15,11 +17,19 @@ export const TicketInput = z.object({
   acceptanceCriteria: z.array(untrusted()),
   labels: z.array(untrusted()),
   links: z.array(z.object({ url: untrusted(), title: untrusted().optional() })),
-  attachments: z.array(z.object({ name: untrusted(), url: untrusted(), mimeType: untrusted().optional() })),
+  attachments: z.array(
+    z.object({
+      name: untrusted(),
+      url: untrusted(),
+      mimeType: untrusted().optional(),
+      path: untrusted().optional(),
+      skipped: untrusted().optional(),
+    }),
+  ),
 });
 export type TicketInput = z.infer<typeof TicketInput>;
 
-/** The built-in intake for ticket sources. The engine runs its body, which leaves `ticket.json` and `brief.md`. */
+/** The built-in intake for ticket sources. The engine runs its body, which leaves `ticket.json`, `brief.md` and the downloaded `attachments/`. */
 export const ticket = intake('ticket', {
   accepts: ['ticket'],
   output: TicketInput,

@@ -6,6 +6,7 @@ import {
   chmodSync,
   existsSync,
   lstatSync,
+  mkdirSync,
   readdirSync,
   readFileSync,
   renameSync,
@@ -706,5 +707,17 @@ test("seeding a stage whose first call belongs to a group copies only the calls 
       members: ['01-a', '02-b', '03-c'].filter((path) => existsSync(join(opened.dir, path))),
       until: opened.until,
     }).toEqual({ journal: ['intake#1'], reused: ['intake#1'], members: [], until: 'a' });
+  });
+}, 60_000);
+
+test("a seeded run carries the intake's downloaded attachments over with the rest of its call directory", async () => {
+  await withTempRepo(async (repo) => {
+    const from = await source.copyInto(repo.dir);
+    const attachments = join(from.dir, '00-intake', 'call-1', 'out', 'attachments');
+    mkdirSync(attachments, { recursive: true });
+    writeFileSync(join(attachments, 'shot.png'), Buffer.from([0x89, 0x50, 0, 255]));
+    const opened = openedFrom(await seed(repo, { fromRun: from.runId }));
+    const copied = join(opened.dir, '00-intake', 'call-1', 'out', 'attachments', 'shot.png');
+    expect([...readFileSync(copied)]).toEqual([0x89, 0x50, 0, 255]);
   });
 }, 60_000);

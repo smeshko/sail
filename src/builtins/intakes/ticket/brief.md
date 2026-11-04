@@ -38,7 +38,7 @@ None stated.
 {{#if attachments}}
 - Attachments:
 {{#each attachments}}
-  - {{name}}: {{url}}
+  - {{name}}: {{url}}{{#if path}} (downloaded to {{path}}){{/if}}{{#if skipped}} ({{skipped}}){{/if}}
 {{/each}}
 {{/if}}
 {{#if comments}}
