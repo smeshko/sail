@@ -1,11 +1,12 @@
 // The duplicate check a filer runs: open tickets, untrusted excerpts, and the one same-work question.
 import { spawnSync } from 'node:child_process';
+import { MAX_REQUEST_BYTES } from './jev-check.mjs';
 
 /** Confidence at which a filer treats two pieces of work as the same. */
 export const SAME_WORK = 0.8;
 /** Bound requests by count and serialized UTF-8 bytes, as ADW-387 bounds banned-word questions. */
 export const MAX_QUESTIONS = 64;
-export const MAX_REQUEST_BYTES = 64_000;
+export { MAX_REQUEST_BYTES };
 /** Maximum passage length in the request; full text is retained when filing. */
 export const DESCRIPTION_CHARS = 600;
 /** An excerpt with a marker when cut. */
