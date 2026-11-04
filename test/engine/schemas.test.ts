@@ -755,6 +755,13 @@ test('result: dispatch reports only the branch the document claims to be', () =>
   expect(paths('sail.result.v1', { ...multiStepResult, steps: [] })).toEqual(['/steps']);
 });
 
+test('result: an agent result declares no workspace, which nothing writes: one that carries it is refused, naming it', () => {
+  expect(validateDocument('sail.result.v1', agentResult)).toEqual([]);
+  const workspace = { headSha: 'a'.repeat(40), commitsAdded: 0, diffStat: '' };
+  const issues = validateDocument('sail.result.v1', { ...agentResult, workspace });
+  expect(issues.map((issue) => [issue.path, issue.message])).toEqual([['/workspace', 'is not allowed']]);
+});
+
 test('result: a script result declares no codeHost, which nothing writes: one that carries it is refused, naming it', () => {
   const issues = validateDocument('sail.result.v1', { ...scriptResult, codeHost: { operation: 'merge' } });
   expect(issues.map((issue) => [issue.path, issue.message])).toEqual([['/codeHost', 'is not allowed']]);

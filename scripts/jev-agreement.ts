@@ -1,7 +1,7 @@
 // Measures Jev against the check agents on past runs, to set CLEAR_YES from data: `bun scripts/jev-agreement.ts <run
 // directory>...`, from a repository holding the branches those runs reviewed. For each journaled `check-tasks` and
 // `check-fix` call that is done, it rebuilds the state the jev-tasks and jev-fix stages ask Jev about, at the commit the
-// call saw, asks through `sail port jev ask`, and prints per stage how Jev's answers agree with the agent's at each
+// call saw (the run's `workspace:created` base, and the head of the implement or fix call before it), asks through `sail port jev ask`, and prints per stage how Jev's answers agree with the agent's at each
 // threshold, and what the calls Jev could have answered alone would have saved.
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -65,17 +65,69 @@ function verdicts(stage: string, output: unknown): [string, boolean][] {
   return items.map((each) => [each.finding, each.resolved]);
 }
 
+/** The base the run's workspace started from: the first `workspace:created` event's. */
+function baseOf(runDir: string): string | undefined {
+  for (const line of read(runDir, 'events.ndjson').split('\n')) {
+    if (!line.includes('"workspace:created"')) continue;
+    const event = JSON.parse(line) as { type: string; baseSha?: string };
+    if (event.type === 'workspace:created') return event.baseSha;
+  }
+  return undefined;
+}
+
+type Entry = ReturnType<typeof readJournal>['entries'][number];
+
+/** The last non-null commit of the nearest entry before `index`, of stage `stage`, that has one. */
+function headBefore(
+  entries: Entry[],
+  index: number,
+  stage: string,
+  commits: (output: unknown) => (string | null)[],
+): string | undefined {
+  for (let i = index - 1; i >= 0; i--) {
+    const entry = entries[i] as Entry;
+    if (entry.stage !== stage) continue;
+    const head = commits(entry.output)
+      .filter((commit) => commit !== null)
+      .at(-1);
+    if (head !== undefined) return head;
+  }
+  return undefined;
+}
+
+const HEADS: Record<string, { stage: string; commits: (output: unknown) => (string | null)[]; missing: string }> = {
+  'check-tasks': {
+    stage: 'implement',
+    commits: (output) => (output as { tasks: { commit: string | null }[] }).tasks.map((task) => task.commit),
+    missing: 'no implement commit before it',
+  },
+  'check-fix': {
+    stage: 'fix',
+    commits: (output) => (output as { fixes: { commit: string | null }[] }).fixes.map((fix) => fix.commit),
+    missing: 'no fix commit before it',
+  },
+};
+
 export function collect(runDir: string, lib: Lib, out: string, notes: string[]): Call[] {
-  const { baseSha } = JSON.parse(read(runDir, 'run.json')) as { baseSha: string };
+  const baseSha = baseOf(runDir);
+  if (baseSha === undefined) {
+    notes.push(`${runDir}: no workspace:created event`);
+    return [];
+  }
   const calls: Call[] = [];
-  for (const entry of readJournal(runDir).entries) {
+  const { entries } = readJournal(runDir);
+  for (const [index, entry] of entries.entries()) {
     if (entry.outcome !== 'done' || (entry.stage !== 'check-tasks' && entry.stage !== 'check-fix')) continue;
     const result = JSON.parse(read(runDir, entry.resultPath)) as {
-      workspace?: { headSha: string };
       usage?: { costUsd: number };
       durationMs?: number;
     };
-    const sha = result.workspace?.headSha ?? 'HEAD';
+    const find = HEADS[entry.stage] as (typeof HEADS)[string];
+    const sha = headBefore(entries, index, find.stage, find.commits);
+    if (sha === undefined) {
+      notes.push(`${entry.key} in ${runDir}: ${find.missing}`);
+      continue;
+    }
     const run: Run = (args) => lib.git(args.map((arg) => arg.replace(lib.BASE, baseSha).replace(/HEAD$/, sha)));
     let asked: Answered;
     try {
