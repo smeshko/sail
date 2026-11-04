@@ -13,6 +13,8 @@ export const fix = agent('fix', {
     /** The ticket each commit names, unbound for a pull request with none. */
     ticketKey: value(z.string()).optional(),
     base: value(z.string()),
+    /** The pull request's description as it stands, for a finding about it. */
+    description: value(z.string()),
   },
   output: Fixed,
   model: 'deep',

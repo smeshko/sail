@@ -7,7 +7,14 @@ import { Findings, FixAsked, FixChecked, Fixed } from '../../schemas';
 export const checkFix = agent('check-fix', {
   prompt: './prompt.md',
   // jev: what Jev answered about each finding before this agent was called, a hint where to look.
-  consumes: { findings: value(Findings), fixed: value(Fixed), since: value(z.string()), jev: value(FixAsked) },
+  consumes: {
+    findings: value(Findings),
+    fixed: value(Fixed),
+    since: value(z.string()),
+    jev: value(FixAsked),
+    // The description as the fixes left it, when a finding about it was fixed.
+    description: value(z.string()).optional(),
+  },
   output: FixChecked,
   model: 'default',
   permissions: readonly,

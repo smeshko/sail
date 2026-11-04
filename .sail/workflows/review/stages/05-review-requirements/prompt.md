@@ -17,7 +17,8 @@ You review only. Don't change any file.
 3. For each constraint (a limit, a format, a term, a thing not to change), check the change keeps it.
 4. Read the diff for what the requirements didn't ask for: behaviour added, a default changed, an option, a file touched
    that no criterion needs.
-5. Read the pull request's description against the diff: what it says the change does is what the change does.
+5. Read the pull request's description against the diff: what it says the change does is what the change does. A finding about the description alone (a claim the diff doesn't bear
+   out, a criterion it leaves out) sets `about` to `description`; every other finding leaves it out.
 
 ## Checklist
 

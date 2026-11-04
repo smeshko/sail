@@ -34,6 +34,7 @@ import { fix } from './stages/12-fix/stage';
 import { jevFix } from './stages/12-jev-fix/stage';
 import { checkFix } from './stages/13-check-fix/stage';
 import { push } from './stages/14-push/stage';
+import { updateDescription } from './stages/15-update-description/stage';
 import { attachDemonstration } from './stages/16-attach-demonstration/stage';
 import { report } from './stages/17-report/stage';
 import { merge } from './stages/18-merge/stage';
@@ -61,7 +62,7 @@ export default workflow(
   'review',
   {
     intake: pr,
-    version: 6,
+    version: 7,
     watch: { every: '5m' },
     // Two pull requests at a time, though each merge moves the base the other is being reviewed against.
     maxConcurrentRuns: 2,
@@ -208,6 +209,7 @@ export default workflow(
     const rounds: z.infer<typeof ReviewRecord>['rounds'] = [];
     let open: z.infer<typeof ReviewRecord>['open'] = [];
     let resolved = targets.length === 0;
+    let description: string = run.input.body;
     if (!resolved) {
       for (const iteration of run.loop('fix', { max: FIX_PASSES, feedback: FixFeedback })) {
         const round = rounds.length + 1;
@@ -217,12 +219,23 @@ export default workflow(
           feedback: iteration.previous,
           ticketKey,
           base,
+          description,
         });
         if (fixed.outcome === 'blocked') return handOff(`fix blocked: ${fixed.reason}`);
+        // A finding about the description is fixed by rewriting it: the agent can't call the code host, so a script does.
+        let rewritten: string | undefined;
+        if (fixed.output.body !== null) {
+          const updated = await run.stage(updateDescription, { pr: number, body: fixed.output.body });
+          if (updated.outcome === 'failed') return run.fail('update-description failed');
+          description = rewritten = updated.output.body;
+        }
         // Jev's answers are a hint for check-fix, which runs on every pass: a clear yes never stands in for it.
         const asked = await run.stage(jevFix, { findings: { findings: targets }, fixed: fixed.output, since });
         const [agent, again] = await run.all([
-          [checkFix, { findings: { findings: targets }, fixed: fixed.output, since, jev: asked.output }],
+          [
+            checkFix,
+            { findings: { findings: targets }, fixed: fixed.output, since, jev: asked.output, description: rewritten },
+          ],
           [validate],
         ]);
         if (agent.outcome === 'blocked') return handOff(`check-fix blocked: ${agent.reason}`);
@@ -368,6 +381,7 @@ export default workflow(
           findings: { findings: targets },
           ticketKey,
           base,
+          description: run.input.body,
         });
         if (fixed.outcome === 'blocked') {
           blocked = `fix blocked: ${fixed.reason}`;
