@@ -445,6 +445,40 @@ test('a fix pass that commits nothing but leaves a different finding open gets t
   });
 }, 120_000);
 
+/** Seeds the validate stage's reports by call: each a failing test's name, or null for a validation that passes. */
+function seedValidate(repo: TempRepo, failing: (string | null)[]): void {
+  const reports = failing.map((name) =>
+    name === null
+      ? {
+          exit: 0,
+          output: { ok: true, uncommitted: [], verify: { ok: true, exitCode: 0, tail: ' 1990 pass\n 0 fail' } },
+        }
+      : {
+          exit: 1,
+          output: {
+            ok: false,
+            uncommitted: [],
+            verify: { ok: false, exitCode: 1, tail: `1 failing test:\n\n(fail) ${name}\n\n 1989 pass\n 1 fail` },
+          },
+        },
+  );
+  writeFileSync(join(repo.dir, '.sail', 'fake', 'scripts', 'validate.json'), JSON.stringify(reports));
+}
+
+test('a fix pass that lists no commit but leaves a different validation failure gets the next pass', async () => {
+  await withTempRepo(async (repo) => {
+    setUp(repo);
+    const seeds = idleSecondFix(repo);
+    seedHarness(join(repo.dir, '.sail'), 'check-fix#2', seeds['check-fix#1']);
+    seedHarness(join(repo.dir, '.sail'), 'check-fix#3', seeds['check-fix#1']);
+    seedValidate(repo, ['a zero total', 'a zero total', 'a rounded total']);
+    const { code, keys } = await review(repo);
+    expect(code).not.toBe(0);
+
+    expect(keys.filter((key) => key.startsWith('fix#'))).toEqual(['fix#1', 'fix#2', 'fix#3']);
+  });
+}, 120_000);
+
 test('a low-severity finding the judge sends to a ticket is not filed, and a medium one is', async () => {
   await withTempRepo(async (repo) => {
     setUp(repo);

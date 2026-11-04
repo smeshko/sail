@@ -211,7 +211,15 @@ export default workflow(
     let open: z.infer<typeof ReviewRecord>['open'] = [];
     let resolved = targets.length === 0;
     let description: string = run.input.body;
-    let before = { ids: new Set(targets.map((target) => target.id)), failed: validated.outcome === 'failed' };
+    // What a validation failed on: a pass that fixes one failing test and meets another has changed something.
+    const failure = (validation: typeof validated) =>
+      validation.outcome === 'failed'
+        ? JSON.stringify([
+            validation.output.uncommitted,
+            validation.output.verify.failures ?? validation.output.verify.tail,
+          ])
+        : null;
+    let before = { ids: new Set(targets.map((target) => target.id)), failed: failure(validated) };
     if (!resolved) {
       for (const iteration of run.loop('fix', { max: FIX_PASSES, feedback: FixFeedback })) {
         const round = rounds.length + 1;
@@ -270,7 +278,7 @@ export default workflow(
           break;
         }
         const changed = fixed.output.body !== null || fixed.output.fixes.some((each) => each.commit !== null);
-        const failed = again.outcome === 'failed';
+        const failed = failure(again);
         const same =
           fresh.length === 0 &&
           failed === before.failed &&
