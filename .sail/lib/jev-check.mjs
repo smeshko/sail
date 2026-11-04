@@ -154,6 +154,23 @@ export function triageState(findings, diffText) {
   return { state, asked };
 }
 
+/**
+ * The request for the largest prefix of cited findings that fits MAX_REQUEST_BYTES, stopping at the first that doesn't:
+ * `{ state, asked, questions, note }`, the note saying how many cited findings were left to the judge.
+ */
+export function triageRequest(findings, diffText) {
+  const cited = findings.filter((finding) => citedHunks(diffText, finding.file));
+  let request = { state: triageState([], diffText).state, asked: [], questions: {} };
+  for (let n = 1; n <= cited.length; n++) {
+    const { state, asked } = triageState(cited.slice(0, n), diffText);
+    const questions = triageQuestions(asked);
+    if (Buffer.byteLength(JSON.stringify({ state, questions })) > MAX_REQUEST_BYTES) break;
+    request = { state, asked, questions };
+  }
+  const omitted = cited.length - request.asked.length;
+  return { ...request, note: omitted > 0 ? `${omitted} findings left to the judge (request limit)` : '' };
+}
+
 export function triageQuestions(ids) {
   return Object.fromEntries(
     ids.flatMap((id) => [

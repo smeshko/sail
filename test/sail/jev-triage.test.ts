@@ -1,6 +1,6 @@
 // Review triage helpers and the script stage on the fake Jev.
 import { expect, test } from 'bun:test';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { writeOwnSail } from '../helpers/own-sail';
 import { withTempRepo } from '../helpers/temp-repo';
@@ -86,7 +86,13 @@ test.each(['validate', 'leak-check', 'demonstrate', 'checks'])('%s always stops 
   ).toBeNull();
 });
 
-async function stageCase(findings: ReturnType<typeof finding>[], supported = 0.97, verdict = 'drop', jev = true) {
+async function stageCase(
+  findings: ReturnType<typeof finding>[],
+  supported = 0.97,
+  verdict = 'drop',
+  jev = true,
+  diffText = DIFF,
+) {
   return withTempRepo(async (repo) => {
     const answers = Object.fromEntries(
       findings.flatMap(({ id }) => [
@@ -100,7 +106,7 @@ async function stageCase(findings: ReturnType<typeof finding>[], supported = 0.9
     const input = join(repo.home, 'findings.json');
     const diff = join(repo.home, 'diff.patch');
     writeFileSync(input, JSON.stringify({ findings }));
-    writeFileSync(diff, DIFF);
+    writeFileSync(diff, diffText);
     const child = Bun.spawnSync(['bash', join(repo.dir, '.sail/workflows/review/stages/11-jev-triage/run.sh')], {
       cwd: repo.dir,
       env: {
@@ -117,7 +123,7 @@ async function stageCase(findings: ReturnType<typeof finding>[], supported = 0.9
     return {
       output: JSON.parse(child.stdout.toString()),
       request:
-        jev && findings.some((f) => f.file === 'notes.txt:1')
+        jev && existsSync(join(out, 'jev-request.json'))
           ? JSON.parse(readFileSync(join(out, 'jev-request.json'), 'utf8'))
           : null,
     };
@@ -164,4 +170,62 @@ test('with no adapters.jev every finding goes to the judge', async () => {
   const { output } = await stageCase([finding()], 0.97, 'drop', false);
   expect([output.asked, output.decided, output.judge]).toEqual([false, [], ['R1']]);
   expect(output.note.length).toBeGreaterThan(0);
+});
+
+const BIG_HUNK = `@@ -0,0 +1,300 @@\n${`+${'x'.repeat(99)}\n`.repeat(300)}`;
+const BIG_DIFF = `diff --git a/big.txt b/big.txt\n--- a/big.txt\n+++ b/big.txt\n${BIG_HUNK}`;
+const bigFinding = (id: string) => finding(id, 'medium', 'bugs', 'big.txt');
+
+test('triageRequest keeps the findings that fit and notes how many it left out', () => {
+  const request = lib.triageRequest([bigFinding('R1'), bigFinding('R2'), bigFinding('R3')], BIG_DIFF);
+  expect({
+    asked: request.asked,
+    questions: Object.keys(request.questions),
+    findings: Object.keys(request.state.findings),
+    fits:
+      Buffer.byteLength(JSON.stringify({ state: request.state, questions: request.questions })) <=
+      lib.MAX_REQUEST_BYTES,
+    note: request.note,
+  }).toEqual({
+    asked: ['R1', 'R2'],
+    questions: ['R1:supported', 'R1:verdict', 'R2:supported', 'R2:verdict'],
+    findings: ['R1', 'R2'],
+    fits: true,
+    note: '1 findings left to the judge (request limit)',
+  });
+});
+
+test('triageRequest keeps every finding when they fit, with no note', () => {
+  const findings = [finding(), finding('R2', 'medium', 'bugs', 'other.ts'), finding('R3')];
+  const request = lib.triageRequest(findings, DIFF);
+  const built = lib.triageState(findings, DIFF);
+  expect(request).toEqual({
+    state: built.state,
+    asked: ['R1', 'R3'],
+    questions: lib.triageQuestions(['R1', 'R3']),
+    note: '',
+  });
+});
+
+test('the stage, given more findings than fit, asks Jev about the leading ones and sends the rest to the judge', async () => {
+  const { output, request } = await stageCase(
+    [bigFinding('R1'), bigFinding('R2'), bigFinding('R3')],
+    0.97,
+    'drop',
+    true,
+    BIG_DIFF,
+  );
+  expect({
+    asked: output.asked,
+    questions: Object.keys(request.questions),
+    decided: output.decided.map((d: { finding: string }) => d.finding),
+    judge: output.judge,
+    note: output.note,
+  }).toEqual({
+    asked: true,
+    questions: ['R1:supported', 'R1:verdict', 'R2:supported', 'R2:verdict'],
+    decided: ['R1', 'R2'],
+    judge: ['R3'],
+    note: '1 findings left to the judge (request limit)',
+  });
 });
