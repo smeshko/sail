@@ -2,7 +2,9 @@
 import { z } from 'zod';
 /**
  * A ticket as the `ticket` intake hands it to the workflow: `run.input`. Every string the provider returned is marked
- * untrusted, the ticket's URL included, which is checked as a URL too. The ticket key is the run's own.
+ * untrusted, the ticket's URL included, which is checked as a URL too. The ticket key is the run's own. An attachment
+ * the provider hosts is downloaded into `attachments/` of the intake's call directory: its `path` is relative to that
+ * directory, or `skipped` says why it wasn't downloaded. A link to elsewhere has neither.
  */
 export declare const TicketInput: z.ZodObject<{
     ticketKey: z.ZodString;
@@ -18,10 +20,12 @@ export declare const TicketInput: z.ZodObject<{
         name: z.core.$ZodBranded<z.ZodString, "untrusted", "out">;
         url: z.core.$ZodBranded<z.ZodString, "untrusted", "out">;
         mimeType: z.ZodOptional<z.core.$ZodBranded<z.ZodString, "untrusted", "out">>;
+        path: z.ZodOptional<z.core.$ZodBranded<z.ZodString, "untrusted", "out">>;
+        skipped: z.ZodOptional<z.core.$ZodBranded<z.ZodString, "untrusted", "out">>;
     }, z.core.$strip>>;
 }, z.core.$strip>;
 export type TicketInput = z.infer<typeof TicketInput>;
-/** The built-in intake for ticket sources. The engine runs its body, which leaves `ticket.json` and `brief.md`. */
+/** The built-in intake for ticket sources. The engine runs its body, which leaves `ticket.json`, `brief.md` and the downloaded `attachments/`. */
 export declare const ticket: import("./intake").Intake<z.ZodObject<{
     ticketKey: z.ZodString;
     title: z.core.$ZodBranded<z.ZodString, "untrusted", "out">;
@@ -36,6 +40,8 @@ export declare const ticket: import("./intake").Intake<z.ZodObject<{
         name: z.core.$ZodBranded<z.ZodString, "untrusted", "out">;
         url: z.core.$ZodBranded<z.ZodString, "untrusted", "out">;
         mimeType: z.ZodOptional<z.core.$ZodBranded<z.ZodString, "untrusted", "out">>;
+        path: z.ZodOptional<z.core.$ZodBranded<z.ZodString, "untrusted", "out">>;
+        skipped: z.ZodOptional<z.core.$ZodBranded<z.ZodString, "untrusted", "out">>;
     }, z.core.$strip>>;
 }, z.core.$strip>, {
     'ticket.json': "file";
