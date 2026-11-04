@@ -655,7 +655,7 @@ async function drive(
     return hit ? { key: callKeyOf(String(result.key)) } : undefined;
   };
   /** A call (or a step of one) that ended in `error` by a signal sail didn't send, and doesn't return its errors: its key. */
-  const signalledOf = (result: Record<string, unknown>, call: PendingCall): Signalled | undefined => {
+  const signalledOf = (result: Record<string, unknown>, call: Pick<PendingCall, 'onError'>): Signalled | undefined => {
     if (result.outcome !== 'error' || call.onError === 'return') return undefined;
     const hit = ((result.errors ?? []) as { reason: string; code?: string }[]).some(
       (error) => error.reason === 'exit_code' && error.code === 'signalled',
@@ -904,6 +904,9 @@ async function drive(
       if (stopNow.signal.aborted) return await stoppedNow(INTAKE_KEY);
       if (signal?.aborted || ('stopped' in ran && ran.stopped))
         return await interrupted(`stopped during ${INTAKE_KEY}`);
+      // An intake has no onError: a step of it ended by a signal sail didn't send is left for a resume to run again.
+      const signalled = signalledOf(ran.result, {});
+      if (signalled !== undefined) return await killed(signalled);
       intake = journal(ran.result, ran.paths);
       running = undefined;
       options.onCall?.(intake);

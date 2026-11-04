@@ -190,3 +190,33 @@ test('in a group, a member ended by an outside signal is left unjournaled while 
     });
   });
 });
+
+test("a repository intake's script step ended by an outside signal suspends the run interrupted, with intake#1 not journaled", async () => {
+  await withTempRepo(async (repo) => {
+    const sail = copyFixture(repo.dir);
+    write(
+      sail,
+      'workflows/own/intake.ts',
+      `import { intake, script, z } from 'sail';
+const output = z.object({ ready: z.boolean() });
+export const own = intake('own', { accepts: ['ticket'], output, steps: [script('shape', { run: './shape.sh', output })] });
+`,
+    );
+    chmodSync(write(sail, 'workflows/own/shape.sh', '#!/usr/bin/env bash\nkill -TERM $$\n'), 0o755);
+    write(
+      sail,
+      'workflows/own/workflow.ts',
+      `import { workflow } from 'sail';
+import { own } from './intake';
+export default workflow('own', { intake: own, version: 1 }, async (run) => run.input);
+`,
+    );
+    const end = await ran(repo.dir, 'own');
+    expect({ status: end.status, stopReason: end.stopReason, message: end.message, journal: keys(end.dir) }).toEqual({
+      status: 'suspended',
+      stopReason: 'interrupted',
+      message: "intake#1 was ended by a signal sail didn't send: a resume runs it again",
+      journal: [],
+    });
+  });
+});
