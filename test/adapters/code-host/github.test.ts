@@ -527,6 +527,85 @@ test('a title, body or comment that holds the token is refused as invalid, and n
   });
 });
 
+test("updatePullRequest gives a body that dropped the ticket marker its marker back, so the pull request's ticket stays", async () => {
+  const on = world({
+    pullRequests: [{ number: 7, head: 'sail/designated', body: 'Adds the flag.\n\n<!-- sail:ticket FAKE-1 -->' }],
+  });
+  const adapter = host(on);
+  const from = on.requests.length;
+  const updated = await adapter.updatePullRequest(7, { body: 'Adds the --shout flag.' });
+  const patches = on.requests.slice(from).filter((request) => request.method === 'PATCH');
+  expect({
+    sent: patches.map((request) => request.body),
+    ticketKey: updated.ticketKey,
+    body: updated.body,
+    read: (await adapter.getPullRequest(7)).ticketKey,
+  }).toEqual({
+    sent: [{ body: `Adds the --shout flag.${MARKER_LINE}` }],
+    ticketKey: 'FAKE-1',
+    body: `Adds the --shout flag.${MARKER_LINE}`,
+    read: 'FAKE-1',
+  });
+});
+
+test('updatePullRequest sends a body that keeps the ticket marker as it is, with no second marker', async () => {
+  const on = world({
+    pullRequests: [{ number: 7, head: 'sail/designated', body: 'Adds the flag.\n\n<!-- sail:ticket FAKE-1 -->' }],
+  });
+  const adapter = host(on);
+  const from = on.requests.length;
+  const kept = `Adds the --shout flag.${MARKER_LINE}`;
+  const updated = await adapter.updatePullRequest(7, { body: kept });
+  expect({
+    sent: on.requests
+      .slice(from)
+      .filter((request) => request.method === 'PATCH')
+      .map((request) => request.body),
+    body: updated.body,
+  }).toEqual({ sent: [{ body: kept }], body: kept });
+});
+
+test('updatePullRequest sends only the field that differs, and nothing at all when none does', async () => {
+  const on = world({ pullRequests: [{ number: 7, head: 'sail/designated', title: 'Same', body: 'Same body.' }] });
+  const capture = captureEvents();
+  const adapter = host(on, capture.emit);
+  const from = on.requests.length;
+  await adapter.updatePullRequest(7, { title: 'Same', body: 'Different body.' });
+  await adapter.updatePullRequest(7, { title: 'Same', body: 'Different body.' });
+  expect({
+    sent: on.requests
+      .slice(from)
+      .filter((request) => request.method === 'PATCH')
+      .map((request) => request.body),
+    events: capture.events,
+  }).toEqual({
+    sent: [{ body: 'Different body.' }],
+    events: [{ type: 'codehost:pr_updated', number: 7, changed: ['body'] }],
+  });
+});
+
+test('updatePullRequest refuses a title or body that holds the token as invalid, and sends nothing', async () => {
+  const on = world();
+  const capture = captureEvents();
+  const adapter = host(on, capture.emit);
+  const errors = [
+    await rejection(adapter.updatePullRequest(7, { title: `Add ${TOKEN}` })),
+    await rejection(adapter.updatePullRequest(7, { body: `token=${encodeURIComponent(TOKEN)}` })),
+  ];
+  expect({
+    failures: errors.map((error) => (error instanceof PortError ? [error.op, error.code, error.message] : error)),
+    requests: on.routes(),
+    events: capture.events,
+  }).toEqual({
+    failures: [
+      ['updatePullRequest', 'invalid', "codeHost.updatePullRequest: the pull request's title or body holds the token"],
+      ['updatePullRequest', 'invalid', "codeHost.updatePullRequest: the pull request's title or body holds the token"],
+    ],
+    requests: [],
+    events: [],
+  });
+});
+
 test('capabilities offer checks, labels, drafts and every merge method, with no request and no event', async () => {
   const on = world();
   const capture = captureEvents();

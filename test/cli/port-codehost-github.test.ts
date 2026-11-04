@@ -175,6 +175,31 @@ test('list-designated on github, every operation now offered, prints the labelle
   });
 });
 
+test('update-pull-request on github sets the body, keeps the ticket marker the pull request holds, and the port events file holds codehost:pr_updated', async () => {
+  await onGitHub(async (on) => {
+    await openOne(on);
+    const pull = on.world.pullRequests[0];
+    if (pull === undefined) throw new Error('no pull request opened');
+    pull.body = 'Adds the flag.\n\n<!-- sail:ticket FAKE-1 -->';
+    writeFileSync(join(on.repo.dir, 'new.md'), 'Adds the --shout flag.\n');
+    const events = join(on.repo.home, 'port-events.ndjson');
+    const updated = await on.codehost(['update-pull-request', '1', '--body-file', 'new.md'], { SAIL_EVENTS: events });
+    expect({
+      code: updated.code,
+      stderr: updated.stderr,
+      ticketKey: printed(updated.stdout).ticketKey,
+      held: pull.body,
+      events: appended(events),
+    }).toEqual({
+      code: EXIT_OK,
+      stderr: '',
+      ticketKey: 'FAKE-1',
+      held: 'Adds the --shout flag.\n\n\n<!-- sail:ticket FAKE-1 -->',
+      events: [{ type: 'codehost:pr_updated', number: 1, changed: ['body'] }],
+    });
+  });
+});
+
 /** Pushes the commit as BRANCH and opens pull request 1 from it, in the world: its head sha. */
 async function openOne({ repo, codehost }: OnGitHub): Promise<string> {
   writeFileSync(join(repo.dir, 'b.md'), 'Adds the flag.\n');

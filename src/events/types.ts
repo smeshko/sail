@@ -71,6 +71,7 @@ export const EVENT_TYPES = [
   'codehost:checks_rerun',
   'codehost:labelled',
   'codehost:commented',
+  'codehost:pr_updated',
   'codehost:merged',
   'jev:asked',
   'workspace:leased',
@@ -375,6 +376,8 @@ interface Payloads {
   'codehost:checks_rerun': { key?: string; number: number; headSha: string; checks: string[] };
   'codehost:labelled': { key?: string; number: number; label: string; change: 'added' | 'removed' };
   'codehost:commented': { key?: string; number: number; body: string };
+  /** A pull request's title or body changed: the fields, never the new text. Never empty. */
+  'codehost:pr_updated': { key?: string; number: number; changed: ('title' | 'body')[] };
   'codehost:merged': { key?: string; number: number; method: MergeMethod; sha: string };
   /** A Jev call that was answered: the model, how many questions it held, how long it took and what it used. */
   'jev:asked': {

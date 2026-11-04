@@ -381,6 +381,26 @@ export function createFakeCodeHost(options: FakeCodeHostOptions): CodeHost {
       emit({ type: 'codehost:commented', number, body });
       return posted;
     },
+    async updatePullRequest(number, update) {
+      if (update.title === undefined && update.body === undefined) {
+        throw new PortError('codeHost', 'updatePullRequest', 'invalid', 'the update names neither a title nor a body');
+      }
+      const { updated, changed } = store.change((world) => {
+        const pr = find(world, 'updatePullRequest', number);
+        const changed: ('title' | 'body')[] = [];
+        if (update.title !== undefined && update.title !== pr.title) {
+          pr.title = update.title;
+          changed.push('title');
+        }
+        if (update.body !== undefined && update.body !== pr.body) {
+          pr.body = update.body;
+          changed.push('body');
+        }
+        return { updated: { ...toPullRequest(world, pr), body: pr.body }, changed };
+      });
+      if (changed.length > 0) emit({ type: 'codehost:pr_updated', number, changed });
+      return updated;
+    },
     capabilities: () => ({ checks: true, labels: true, drafts: true, mergeMethods: ['merge', 'squash', 'rebase'] }),
   };
 }

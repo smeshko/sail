@@ -12,6 +12,8 @@ export const Finding = z.object({
   file: z.string(),
   title: z.string(),
   detail: z.string(),
+  /** What it is about: the change (the default), or the pull request's description, which a fix rewrites instead of committing. */
+  about: z.enum(['change', 'description']).optional(),
 });
 
 /** The reviewers, one stage each. */
@@ -123,6 +125,8 @@ export const Fixed = z.object({
       note: z.string(),
     }),
   ),
+  /** The pull request's whole description, corrected, when a finding about it was fixed. Null otherwise. */
+  body: z.string().nullable(),
 });
 
 export const FixChecked = z.object({

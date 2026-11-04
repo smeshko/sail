@@ -18,6 +18,7 @@ import {
   PullRequestDetails,
   Pushed,
   Rerun,
+  UpdatedPullRequest,
 } from '../../src/ports/types';
 import {
   type Captured,
@@ -282,6 +283,7 @@ export function codeHostSuite(label: string, make: MakeCodeHost, unarranged: rea
       ['addLabel', () => adapter.addLabel(missing, world.label)],
       ['removeLabel', () => adapter.removeLabel(missing, world.label)],
       ['comment', () => adapter.comment(missing, 'hello')],
+      ['updatePullRequest', () => adapter.updatePullRequest(missing, { title: 'T' })],
     ];
     const failures = [];
     for (const [, call] of calls) failures.push(portFailure(await rejection(call())));
@@ -495,6 +497,53 @@ export function codeHostSuite(label: string, make: MakeCodeHost, unarranged: rea
     expect(parseIssues(Posted, posted)).toEqual([]);
     expect(capture.events).toEqual([{ type: 'codehost:commented', number: world.designated, body: 'Checks passed.' }]);
     expectValidEvents(capture);
+  });
+
+  test(`${label}: updatePullRequest changes the title and body, answers the new body, and emits codehost:pr_updated naming both`, async () => {
+    const { adapter, world, capture } = await start();
+    const updated = await adapter.updatePullRequest(world.designated, { title: 'A new title', body: 'A new body.' });
+    const read = await adapter.getPullRequest(world.designated);
+    expect(parseIssues(UpdatedPullRequest, updated)).toEqual([]);
+    expect({ answered: [updated.title, updated.body], read: [read.title, read.body] }).toEqual({
+      answered: ['A new title', 'A new body.'],
+      read: ['A new title', 'A new body.'],
+    });
+    expect(capture.events).toEqual([
+      { type: 'codehost:pr_updated', number: world.designated, changed: ['title', 'body'] },
+    ]);
+    expectValidEvents(capture);
+  });
+
+  test(`${label}: updatePullRequest with only a body leaves the title, and names only the body`, async () => {
+    const { adapter, world, capture } = await start();
+    const before = await adapter.getPullRequest(world.designated);
+    const updated = await adapter.updatePullRequest(world.designated, { body: 'Only the body.' });
+    expect({ title: updated.title, body: updated.body }).toEqual({ title: before.title, body: 'Only the body.' });
+    expect(capture.events).toEqual([{ type: 'codehost:pr_updated', number: world.designated, changed: ['body'] }]);
+  });
+
+  test(`${label}: updatePullRequest to the values the pull request holds emits nothing`, async () => {
+    const { adapter, world, capture } = await start();
+    await adapter.updatePullRequest(world.designated, { title: 'Held', body: 'Held body.' });
+    capture.events.length = 0;
+    const again = await adapter.updatePullRequest(world.designated, { title: 'Held', body: 'Held body.' });
+    expect({ title: again.title, body: again.body, events: capture.events }).toEqual({
+      title: 'Held',
+      body: 'Held body.',
+      events: [],
+    });
+  });
+
+  test(`${label}: updatePullRequest naming neither title nor body rejects as invalid, and emits nothing`, async () => {
+    const { adapter, world, capture } = await start();
+    const before = await adapter.getPullRequest(world.designated);
+    const error = await rejection(adapter.updatePullRequest(world.designated, {}));
+    const after = await adapter.getPullRequest(world.designated);
+    expect({ failure: portFailure(error), same: [after.title, after.body], events: capture.events }).toEqual({
+      failure: { port: 'codeHost', op: 'updatePullRequest', code: 'invalid' },
+      same: [before.title, before.body],
+      events: [],
+    });
   });
 
   test(`${label}: capabilities parse, and offer the squash merge the suite uses`, async () => {

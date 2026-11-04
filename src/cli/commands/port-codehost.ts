@@ -14,6 +14,7 @@
 //   add-label <pr> <label>
 //   remove-label <pr> <label>
 //   comment <pr> [--body-file <path>]
+//   update-pull-request <pr> [--title <text>] [--body-file <path>]
 //
 // `<pr>` goes through the adapter's `parseRef`: a number, `#12`, or a pull-request URL the host owns. `--ticket` is
 // passed on as given: only the code host is resolved, so no ticket source parses it. `--method` too, and the port
@@ -34,8 +35,10 @@ import {
   PullRequestDetails,
   Pushed,
   Rerun,
+  UpdatedPullRequest,
 } from '../../ports/types';
 import type { PortCall, PortOperation, PortTable } from './port';
+import { EmptyBody } from './port-body';
 
 /**
  * `answer`, which the code host's `op` gave, as `schema` parses it. An answer that is no `what` is a PortError of
@@ -149,6 +152,31 @@ export const CODEHOST: PortTable<'codeHost'> = {
     comment: onPullRequest(
       { positionals: ['pr'], options: { 'body-file': { value: 'path' } }, body: true },
       async (host, number, { body }) => answered('comment', 'Posted', Posted, await host.comment(number, await body())),
+    ),
+    // A body is never cleared: an empty one with `--title` changes the title alone, and without it is refused.
+    'update-pull-request': onPullRequest(
+      {
+        positionals: ['pr'],
+        options: { title: { value: 'text', filled: true }, 'body-file': { value: 'path' } },
+        body: true,
+      },
+      async (host, number, { values, body }) => {
+        const title = text(values.title);
+        const description = await body().catch((error: unknown) => {
+          if (title !== undefined && error instanceof EmptyBody) return undefined;
+          throw error;
+        });
+        const update = {
+          ...(title === undefined ? {} : { title }),
+          ...(description === undefined ? {} : { body: description }),
+        };
+        return answered(
+          'updatePullRequest',
+          'UpdatedPullRequest',
+          UpdatedPullRequest,
+          await host.updatePullRequest(number, update),
+        );
+      },
     ),
   },
 };

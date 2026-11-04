@@ -53,6 +53,12 @@ export function ticketKeyOf(body: string | null | undefined): string | undefined
   return [...(body ?? '').matchAll(MARKER)].at(-1)?.[1];
 }
 
+/** `next`, with the ticket marker of the `current` body put back when `next` lacks it, so the pull request's ticket stays. */
+export function keepTicketMarker(current: string | null | undefined, next: string): string {
+  const key = ticketKeyOf(current);
+  return key === undefined || ticketKeyOf(next) === key ? next : withTicketMarker(next, key);
+}
+
 export function toPullRequest(node: GitHubPull): PullRequest {
   const ticketKey = ticketKeyOf(node.body);
   return {

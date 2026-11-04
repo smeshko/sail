@@ -135,7 +135,7 @@
           {
             "criterion": "`sail show <run>` ends with `total $<cost>`",
             "shown": true,
-            "evidence": "`sail show FAKE-1-01M5…` ended with `total $1.35`"
+            "evidence": "`sail show FAKE-1-01M5\u2026` ended with `total $1.35`"
           },
           {
             "criterion": "A run with no agent calls prints `total $0.00`",
@@ -144,7 +144,7 @@
           }
         ],
         "skipped": null,
-        "transcript": "$ sail show FAKE-1-01M5\n…\ntotal $1.35\nexit 0"
+        "transcript": "$ sail show FAKE-1-01M5\n\u2026\ntotal $1.35\nexit 0"
       },
       "turns": 14,
       "usage": {
@@ -236,7 +236,8 @@
             "commit": "2222222222222222222222222222222222222222",
             "note": "Rounds in cents."
           }
-        ]
+        ],
+        "body": null
       },
       "turns": 40,
       "usage": {

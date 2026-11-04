@@ -91,6 +91,7 @@ export const OPERATIONS: Record<Port, string[]> = {
     'push',
     'removeLabel',
     'rerunChecks',
+    'updatePullRequest',
   ],
   harness: ['capabilities', 'run'],
   workspace: [

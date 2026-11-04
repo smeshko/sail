@@ -12,6 +12,8 @@ import type {
   PullRequestDetails,
   Pushed,
   Rerun,
+  UpdatedPullRequest,
+  UpdatePullRequest,
 } from './types';
 
 export interface OpenPullRequest {
@@ -76,5 +78,12 @@ export interface CodeHost {
   removeLabel(number: number, label: string): Promise<Labelled>;
   /** Emits `codehost:commented`. */
   comment(number: number, body: string): Promise<Posted>;
+  /**
+   * Changes the pull request's title, body or both, and answers it with the body the host now holds. A request that names
+   * neither is refused `invalid`, with nothing sent. It reads the pull request first and sends nothing when nothing would
+   * change, and emits `codehost:pr_updated`, naming the fields, only on a change. The GitHub adapter keeps the pull
+   * request's ticket marker in the body.
+   */
+  updatePullRequest(number: number, update: UpdatePullRequest): Promise<UpdatedPullRequest>;
   capabilities(): CodeHostCapabilities;
 }

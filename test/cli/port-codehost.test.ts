@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EXIT_FAILED, EXIT_OK, EXIT_REFUSED } from '../../src/cli/exit-codes';
 import { run } from '../../src/cli/index';
-import { PullRequest, PullRequestDetails, Pushed } from '../../src/ports/types';
+import { PullRequest, PullRequestDetails, Pushed, UpdatedPullRequest } from '../../src/ports/types';
 import { copyFixture, edit, write } from '../helpers/fixture';
 import { type CaptureOptions, runCaptured } from '../helpers/run-captured';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
@@ -270,7 +270,7 @@ test.each<[string, string[], string]>([
   [
     '--title given to push',
     ['codehost', 'push', 'sail/x', '--title', 'T'],
-    "option '--title' belongs to sail port ticket-source create or sail port ticket-source edit or sail port ticket-source attach or sail port codehost open-pull-request",
+    "option '--title' belongs to sail port ticket-source create or sail port ticket-source edit or sail port ticket-source attach or sail port codehost open-pull-request or sail port codehost update-pull-request",
   ],
   [
     '--label given to ticket-source get',
@@ -366,6 +366,7 @@ export default {
     addLabel: nothing,
     removeLabel: nothing,
     comment: nothing,
+    updatePullRequest: nothing,
     capabilities: () => ({ checks: true, labels: true, drafts: true, mergeMethods: ['merge'] }),
   }),
 };
@@ -406,6 +407,7 @@ const USAGE = `${TICKET_USAGE}${UPDATE_USAGE}${CREATE_USAGE}${RELABEL_USAGE}${AT
        sail port codehost merge <pr> --method <merge|squash|rebase> --expected-head-sha <sha>
        sail port codehost add-label|remove-label <pr> <label>
        sail port codehost comment <pr> [--body-file <path>]
+       sail port codehost update-pull-request <pr> [--title <text>] [--body-file <path>]
        sail port jev ask [--model <id>] [--body-file <path>]
        sail port render --untrusted --source <text> [--inline]
        sail port render --untrusted --each [--inline]
@@ -691,6 +693,71 @@ test("comment posts the body from --body-file, or from stdin without it, and pri
   });
 });
 
+test("update-pull-request sets the body from --body-file, or from stdin, and prints the port's UpdatedPullRequest with that body", async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    writeFileSync(join(repo.dir, 'body.md'), 'From the file.\n');
+    const titles = [
+      oneLine((await codehost(repo, ['get-pull-request', '1'])).stdout).title,
+      oneLine((await codehost(repo, ['get-pull-request', '2'])).stdout).title,
+    ];
+    const fromFile = await codehost(repo, ['update-pull-request', '1', '--body-file', 'body.md']);
+    const fromStdin = await codehost(repo, ['update-pull-request', '#2'], { stdin: 'From stdin.\n' });
+    expect([fromFile.code, fromStdin.code, fromFile.stderr + fromStdin.stderr]).toEqual([EXIT_OK, EXIT_OK, '']);
+    const printed = [fromFile, fromStdin].map(({ stdout }) => {
+      const line = oneLine(stdout);
+      expect<unknown>(UpdatedPullRequest.parse(line)).toEqual(line);
+      return [line.number, line.title, line.body];
+    });
+    expect(printed).toEqual([
+      [1, titles[0], 'From the file.\n'],
+      [2, titles[1], 'From stdin.\n'],
+    ]);
+    expect(
+      world(repo.dir)
+        .pullRequests.map((pr: { body: string }) => pr.body)
+        .slice(0, 2),
+    ).toEqual(['From the file.\n', 'From stdin.\n']);
+  });
+});
+
+test('update-pull-request with --title alone changes only the title, and with neither is refused with exit 3 and changes nothing', async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    const first = { body: oneLine((await codehost(repo, ['get-pull-request', '1'])).stdout).body };
+    const before = { body: oneLine((await codehost(repo, ['get-pull-request', '2'])).stdout).body };
+    const titled = await codehost(repo, ['update-pull-request', '2', '--title', 'FAKE-2: Print the version'], {
+      stdin: '',
+    });
+    const after = world(repo.dir).pullRequests[1];
+    expect({ code: titled.code, title: oneLine(titled.stdout).title, held: [after.title, after.body] }).toEqual({
+      code: EXIT_OK,
+      title: 'FAKE-2: Print the version',
+      held: ['FAKE-2: Print the version', before.body],
+    });
+
+    const neither = await codehost(repo, ['update-pull-request', '1'], { stdin: '' });
+    expect([neither.code, neither.stdout, neither.stderr]).toEqual([
+      EXIT_REFUSED,
+      '',
+      'sail port: codehost update-pull-request needs a body, and stdin is empty\n',
+    ]);
+    expect(world(repo.dir).pullRequests[0].body).toBe(first.body);
+  });
+});
+
+test('update-pull-request on a pull request that does not exist exits 1, naming codeHost.updatePullRequest and not_found', async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    const missing = await codehost(repo, ['update-pull-request', '99', '--title', 'x'], { stdin: '' });
+    expect([missing.code, missing.stdout, missing.stderr]).toEqual([
+      EXIT_FAILED,
+      '',
+      'sail port: codeHost.updatePullRequest: no pull request #99 (not_found)\n',
+    ]);
+  });
+});
+
 test('with SAIL_EVENTS set, each operation appends what its adapter emitted: checks, a merge that landed, a label that changed and a comment each one event, and a read, a merge that did not land and a label already there none', async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
@@ -773,7 +840,7 @@ test.each<[string, string[], string]>([
   [
     '--body-file given to add-label',
     ['add-label', '1', 'x', '--body-file', 'note.md'],
-    "option '--body-file' belongs to sail port ticket-source comment or sail port ticket-source create or sail port ticket-source edit or sail port codehost open-pull-request or sail port codehost comment or sail port jev ask",
+    "option '--body-file' belongs to sail port ticket-source comment or sail port ticket-source create or sail port ticket-source edit or sail port codehost open-pull-request or sail port codehost comment or sail port codehost update-pull-request or sail port jev ask",
   ],
 ])('%s exits 3, naming where the option belongs', async (_, args, problem) => {
   await withTempRepo(async (repo) => {

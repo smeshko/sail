@@ -113,6 +113,7 @@ export const PORT_OPERATIONS = {
     'addLabel',
     'removeLabel',
     'comment',
+    'updatePullRequest',
     'capabilities',
   ]),
   harness: operations<Harness>()(['run', 'capabilities']),

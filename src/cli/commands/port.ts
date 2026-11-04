@@ -75,6 +75,7 @@ import {
 } from '../../ports/types';
 import { EXIT_FAILED, EXIT_OK, type ExitCode } from '../exit-codes';
 import type { Io, Parsed } from '../index';
+import { EmptyBody } from './port-body';
 import { CODEHOST } from './port-codehost';
 import { JEV } from './port-jev';
 import { findProject, refuseAs } from './run-workflow';
@@ -113,15 +114,6 @@ export interface PortCall {
    * is refused there, and never returned.
    */
   body(): Promise<string>;
-}
-
-/** A body that was read and held nothing: the operation is refused before its port is called. */
-class EmptyBody extends Error {
-  // Written out, not implicit: Bun reads an implicit subclass constructor as uncovered.
-  constructor(message: string) {
-    super(message);
-    this.name = 'EmptyBody';
-  }
 }
 
 /** One operation of a port, as this command runs it: the one shape every port's table has. */
