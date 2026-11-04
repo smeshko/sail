@@ -116,7 +116,7 @@ export interface PortCall {
 }
 
 /** A body that was read and held nothing: the operation is refused before its port is called. */
-class EmptyBody extends Error {
+export class EmptyBody extends Error {
   // Written out, not implicit: Bun reads an implicit subclass constructor as uncovered.
   constructor(message: string) {
     super(message);
