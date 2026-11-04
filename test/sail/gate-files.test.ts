@@ -333,6 +333,12 @@ function adapterModules(config: unknown): string[] {
     .map((use) => relative(ROOT, join(ROOT, '.sail', use)));
 }
 
+// The modules the review workflow, the guard and the config's adapters reach that are not gate files.
+function ungatedGraph(config: unknown): { reached: string[]; ungated: string[] } {
+  const reached = reach(['.sail/workflows/review/workflow.ts', '.sail/lib/gate-files.mjs', ...adapterModules(config)]);
+  return { reached, ungated: reached.filter((path) => !lib.isGateFile(path)) };
+}
+
 test('an adapter module the config names joins the derived graph', () => {
   const config = {
     adapters: {
@@ -342,12 +348,16 @@ test('an adapter module the config names joins the derived graph', () => {
     },
   };
   expect(adapterModules(config)).toEqual(['.sail/adapters/gh.ts', 'x.ts']);
-  expect(lib.isGateFile('.sail/adapters/gh.ts')).toBe(false);
+});
+
+test('a config naming an ungated adapter module fails the derived graph', () => {
+  const config = { adapters: { codeHost: { use: './lib/demo.mjs' } } };
+  expect(ungatedGraph(config).ungated).toEqual(['.sail/lib/demo.mjs']);
 });
 
 test('every module the review workflow and the guard reach is a gate file', () => {
   const config = Bun.YAML.parse(readFileSync(join(ROOT, '.sail/project.yaml'), 'utf8'));
-  const reached = reach(['.sail/workflows/review/workflow.ts', '.sail/lib/gate-files.mjs', ...adapterModules(config)]);
+  const { reached, ungated } = ungatedGraph(config);
   expect(lib.isGateFile('.sail/project.yaml')).toBe(true);
   expect(reached).toEqual(
     expect.arrayContaining([
@@ -362,7 +372,7 @@ test('every module the review workflow and the guard reach is a gate file', () =
       '.sail/workflows/review/stages/19-sync-base/sync.mjs',
     ]),
   );
-  expect(reached.filter((path) => !lib.isGateFile(path))).toEqual([]);
+  expect(ungated).toEqual([]);
   const missesSchemas = (path: string) => lib.isGateFile(path) && path !== '.sail/workflows/review/schemas.ts';
   expect(reached.filter((path) => !missesSchemas(path))).toEqual(['.sail/workflows/review/schemas.ts']);
 });
