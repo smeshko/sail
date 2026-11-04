@@ -1,20 +1,29 @@
 // `sail clean <run>... | --failed`: the selection, the exit codes of a refusal and of a failed removal, and a clean
 // that never resolves the code host when the branch is not on the remote.
 import { expect, test } from 'bun:test';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { cleanCommand } from '../../src/cli/commands/clean';
+import { type WatchDeps, watchCommand } from '../../src/cli/commands/watch';
 import { EXIT_FAILED, EXIT_OK, EXIT_REFUSED } from '../../src/cli/exit-codes';
+import type { Io } from '../../src/cli/index';
 import { writeStatus } from '../../src/engine/run-dir';
 import { readRunHeader } from '../../src/engine/run-header';
 import { runWorkflow } from '../../src/engine/runtime';
+import { commandsDir } from '../../src/watch/inbox';
+import { queueDir } from '../../src/watch/queue-store';
+import { readEntry, recordEntry, registryDir } from '../../src/watch/registry';
 import { fakeAdapters } from '../helpers/adapters';
+import { fakeTimers } from '../helpers/fake-timers';
 import { edit } from '../helpers/fixture';
 import { withOrigin } from '../helpers/origin';
-import { runCaptured } from '../helpers/run-captured';
+import { fakeInterrupts, runCaptured } from '../helpers/run-captured';
+import { sail as sailProcess } from '../helpers/sail-process';
 import { writeStub } from '../helpers/stub-workflow';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
+import { fakeSpawner, writeTickets, writeWatched } from '../helpers/watched';
 
-const USAGE = 'sail clean: usage: sail clean <run>... | --failed\n';
+const USAGE = 'sail clean: usage: sail clean <run>... | --failed [--all-repos] [--requeue|--drop]\n';
 
 const env = (repo: TempRepo) => ({ ...repo.env, SAIL_HOME: join(dirname(repo.dir), 'sail-home') });
 const sail = (repo: TempRepo, ...argv: string[]) => runCaptured(argv, repo.dir, { env: env(repo) });
@@ -87,7 +96,10 @@ test('sail clean <failed> <completed> cleans the first, refuses the second and e
     const result = await sail(repo, 'clean', failed, completed);
     expect(result.code).toBe(EXIT_REFUSED);
     expect(result.stdout).toMatch(new RegExp(`^cleaned ${failed}: worktree; run directory -> `));
-    expect(result.stdout.split('\n').filter(Boolean)).toHaveLength(1);
+    expect(result.stdout.split('\n').filter(Boolean)).toEqual([
+      expect.stringMatching(new RegExp(`^cleaned ${failed}: `)),
+      'reset FAKE-1 to Todo',
+    ]);
     expect(result.stderr).toBe(`sail clean: run ${completed} completed: only a failed run is cleaned\n`);
     expect(exists(repo, failed)).toBe(false);
     expect(exists(repo, completed)).toBe(true);
@@ -113,6 +125,51 @@ test('sail clean --failed cleans only the failed runs, and says so when there ar
       stdout: '',
       stderr: 'sail clean: no failed runs\n',
     });
+  });
+});
+
+const ticketState = async (repo: TempRepo, key = 'FAKE-1') =>
+  (await (await fakeAdapters(repo.dir)).ports.ticketSource.get(key)).state;
+
+test('sail clean --failed moves the started ticket of a cleaned run back to unstarted and says so', async () => {
+  await withTempRepo(async (repo) => {
+    project(repo);
+    const failed = await run(repo, 'FAKE-1', 'failed');
+    expect((await ticketState(repo)).type).toBe('started');
+    const result = await sail(repo, 'clean', '--failed');
+    expect(result.code).toBe(EXIT_OK);
+    expect(result.stdout).toContain('\nreset FAKE-1 to Todo\n');
+    expect(result.stderr).toBe('');
+    expect(await ticketState(repo)).toEqual({ type: 'unstarted', name: 'Todo' });
+    expect(exists(repo, failed)).toBe(false);
+  });
+});
+
+test('sail clean prints no reset for a ticket that is no longer started, and leaves it', async () => {
+  await withTempRepo(async (repo) => {
+    project(repo);
+    const failed = await run(repo, 'FAKE-1', 'failed');
+    await (await fakeAdapters(repo.dir)).ports.ticketSource.update('FAKE-1', { state: 'done' });
+    const result = await sail(repo, 'clean', failed);
+    expect(result.code).toBe(EXIT_OK);
+    expect(result.stdout).not.toContain('reset');
+    expect((await ticketState(repo)).type).toBe('completed');
+  });
+});
+
+test('sail clean exits 1 when the ticket cannot be reset, naming the ticket, and the clean stays archived', async () => {
+  await withTempRepo(async (repo) => {
+    project(repo);
+    const failed = await run(repo, 'FAKE-1', 'failed');
+    const path = join(repo.dir, '.sail-runs', 'fake', 'tickets.json');
+    const seed = JSON.parse(readFileSync(path, 'utf8'));
+    seed.tickets[0].answers = { update: ['unavailable'] };
+    writeFileSync(path, JSON.stringify(seed));
+    const result = await sail(repo, 'clean', failed);
+    expect(result.code).toBe(EXIT_FAILED);
+    expect(result.stderr).toContain(`sail clean: ${failed}: its ticket FAKE-1 was not reset: `);
+    expect(exists(repo, failed)).toBe(false);
+    expect((await ticketState(repo)).type).toBe('started');
   });
 });
 
@@ -148,5 +205,405 @@ test('sail clean refuses a run whose branch is on the remote when the code host 
     expect(result.code).toBe(EXIT_REFUSED);
     expect(result.stderr).toStartWith(`sail clean: run ${failed}: the open pull requests of `);
     expect(exists(repo, failed)).toBe(true);
+  });
+});
+
+/** A failed run of `ticket` made by a `sail` process of its own, since one process opens one run of a repository. */
+async function failedByProcess(
+  repo: TempRepo,
+  ticket: string,
+  processEnv: Record<string, string> = env(repo),
+): Promise<string> {
+  const before = new Set(existsSync(join(repo.dir, '.sail-runs')) ? readdirSync(join(repo.dir, '.sail-runs')) : []);
+  await sailProcess(repo.dir, processEnv, [ticket, '--until', 'spec']);
+  const made = readdirSync(join(repo.dir, '.sail-runs')).find(
+    (name) => name.startsWith(`${ticket}-`) && !before.has(name),
+  );
+  if (made === undefined) throw new Error(`no run of ${ticket} was made`);
+  writeStatus(join(repo.dir, '.sail-runs', made), 'failed', 'workflow_failed');
+  return made;
+}
+
+const START = '2026-10-15T09:00:00.000Z';
+const WATCHER_PID = 4242;
+
+/**
+ * The stub with a watched workflow `a` (label sail-a, cap 1) whose queue holds a parked item of FAKE-1 naming FAKE-1's
+ * failed run, and a second failed run of FAKE-2 that no item names. With `watching`, a watcher of `a` runs in process
+ * on fake timers and has dispatched FAKE-3, which fills the cap so a requeued item stays queued.
+ */
+async function queued(repo: TempRepo, watching = true) {
+  project(repo);
+  const sail = join(repo.dir, '.sail');
+  writeWatched(sail, 'a', { label: 'sail-a', cap: 1 });
+  writeTickets(sail, [
+    { key: 'FAKE-1', labels: ['sail', 'sail-a'] },
+    { key: 'FAKE-2', labels: ['sail'] },
+    { key: 'FAKE-3', labels: ['sail-a'] },
+  ]);
+  const named = await run(repo, 'FAKE-1', 'failed');
+  const unnamed = await failedByProcess(repo, 'FAKE-2');
+  const runs = join(repo.dir, '.sail-runs');
+  const dir = queueDir(runs, 'a');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, 'queue.json'),
+    JSON.stringify({
+      version: 1,
+      workflow: 'a',
+      updatedAt: START,
+      polling: { label: 'sail-a', failures: 0 },
+      items: [
+        {
+          dedupKey: 'ticket:FAKE-1',
+          source: { kind: 'ticket', ticketKey: 'FAKE-1' },
+          title: 'Ticket FAKE-1',
+          url: 'fake://tickets/FAKE-1',
+          state: 'parked',
+          attempts: 2,
+          addedAt: START,
+          runId: named,
+          reason: 'spec blocked',
+        },
+      ],
+    }),
+  );
+  const sailEnv = { ...repo.env, SAIL_HOME: join(repo.home, 'sail-home') };
+  const timers = fakeTimers(START);
+  const spawner = fakeSpawner(runs);
+  const isAlive = (pid: number) => pid === WATCHER_PID || spawner.isAlive(pid);
+  const deps: WatchDeps = {
+    timers,
+    now: timers.now,
+    spawn: spawner.spawn,
+    resume: spawner.resume,
+    isAlive,
+    pid: WATCHER_PID,
+  };
+  const interrupts = fakeInterrupts();
+  const handle = (printed: { stdout: string; stderr: string }, onInterrupt?: Io['onInterrupt']): Io => ({
+    cwd: repo.dir,
+    env: sailEnv,
+    stdout: (text) => {
+      printed.stdout += text;
+    },
+    stderr: (text) => {
+      printed.stderr += text;
+    },
+    ...(onInterrupt === undefined ? {} : { onInterrupt }),
+  });
+  let exited: Promise<unknown> = Promise.resolve();
+  if (watching) {
+    exited = Promise.resolve(
+      watchCommand(deps)(
+        { values: {}, positionals: ['a'] },
+        handle({ stdout: '', stderr: '' }, interrupts.onInterrupt),
+      ),
+    );
+    const deadline = performance.now() + 10_000;
+    while (readEntry(join(repo.home, 'sail-home', 'watchers'), 'stub')?.watcher === undefined) {
+      if (performance.now() > deadline) throw new Error('the watcher did not start');
+      await Bun.sleep(5);
+    }
+    await timers.advance(1000);
+  }
+  /** Runs `sail clean <argv>` beside the watcher, ticking it once the command has dropped its file. */
+  const cleaned = async (...argv: string[]) => {
+    const printed = { stdout: '', stderr: '' };
+    const values: Record<string, boolean> = {};
+    const positionals: string[] = [];
+    for (const arg of argv) {
+      if (arg.startsWith('--')) values[arg.slice(2)] = true;
+      else positionals.push(arg);
+    }
+    let ended = false;
+    const done = Promise.resolve(
+      cleanCommand({ isAlive, pollMs: 5, applyTimeoutMs: 5000 })({ values, positionals }, handle(printed)),
+    ).finally(() => {
+      ended = true;
+    });
+    const deadline = performance.now() + 20_000;
+    const dropped = () =>
+      existsSync(commandsDir(runs)) && readdirSync(commandsDir(runs)).some((name) => name.endsWith('.json'));
+    while (!dropped() && !ended) {
+      if (performance.now() > deadline) throw new Error('no command was dropped');
+      await Bun.sleep(5);
+    }
+    if (!ended) await timers.advance(1000);
+    return { code: await done, ...printed };
+  };
+  const items = (): Record<string, unknown>[] =>
+    JSON.parse(readFileSync(join(dir, 'queue.json'), 'utf8')).items as Record<string, unknown>[];
+  const stop = async () => {
+    interrupts.interrupt();
+    await exited;
+  };
+  /** Runs `sail clean <argv>` with no tick of the watcher, so the command it drops is never taken. */
+  const untaken = async (...argv: string[]) => {
+    const printed = { stdout: '', stderr: '' };
+    const values = Object.fromEntries(argv.map((arg) => [arg.slice(2), true]));
+    const code = await cleanCommand({ isAlive, pollMs: 5, applyTimeoutMs: 50 })(
+      { values, positionals: [] },
+      handle(printed),
+    );
+    return { code, ...printed };
+  };
+  return { named, unnamed, cleaned, untaken, items, stop };
+}
+
+const labels = async (repo: TempRepo) => (await (await fakeAdapters(repo.dir)).ports.ticketSource.get('FAKE-1')).labels;
+
+test('sail clean --failed without --requeue or --drop refuses the run a queue item names, naming both flags, and still cleans the others', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await queued(repo);
+    const result = await w.cleaned('--failed');
+    expect(result.code).toBe(EXIT_REFUSED);
+    expect(result.stderr).toBe(
+      `sail clean: queue item ticket:FAKE-1 of a (parked) names run ${w.named}: clean it with --requeue or --drop, or \`sail queue requeue|drop\`\n`,
+    );
+    expect(result.stdout).toContain(`cleaned ${w.unnamed}:`);
+    expect(exists(repo, w.named)).toBe(true);
+    expect(exists(repo, w.unnamed)).toBe(false);
+    expect(w.items().find((item) => item.dedupKey === 'ticket:FAKE-1')).toMatchObject({
+      state: 'parked',
+      runId: w.named,
+    });
+    await w.stop();
+  });
+}, 60_000);
+
+test('sail clean --requeue cleans the named run, resets its ticket and queues its item again through the watcher', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await queued(repo);
+    const result = await w.cleaned(w.named, '--requeue');
+    expect(result.stderr).toBe('');
+    expect(result.code).toBe(EXIT_OK);
+    expect(result.stdout.split('\n').filter(Boolean)).toEqual([
+      expect.stringMatching(new RegExp(`^cleaned ${w.named}: `)),
+      'reset FAKE-1 to Todo',
+      'requeued queued ticket:FAKE-1 Ticket FAKE-1',
+    ]);
+    expect(exists(repo, w.named)).toBe(false);
+    const [item] = w.items();
+    expect(item).toMatchObject({ dedupKey: 'ticket:FAKE-1', state: 'queued' });
+    expect(item).not.toHaveProperty('runId');
+    expect((await ticketState(repo)).type).toBe('unstarted');
+    expect(await labels(repo)).toContain('sail-a');
+    await w.stop();
+  });
+}, 60_000);
+
+test('sail clean --drop cleans the named run, drops its item through the watcher and takes the watcher label off the ticket', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await queued(repo);
+    const result = await w.cleaned(w.named, '--drop');
+    expect(result.stderr).toBe('');
+    expect(result.code).toBe(EXIT_OK);
+    expect(result.stdout.split('\n').filter(Boolean)).toEqual([
+      expect.stringMatching(new RegExp(`^cleaned ${w.named}: `)),
+      'reset FAKE-1 to Todo',
+      'ticket:FAKE-1 dropped',
+    ]);
+    expect(w.items().map((item) => item.dedupKey)).toEqual(['ticket:FAKE-3']);
+    expect(exists(repo, w.named)).toBe(false);
+    expect(await labels(repo)).toEqual(['sail']);
+    await w.stop();
+  });
+}, 60_000);
+
+/** Scripts the fake ticket source to refuse every `op` call on FAKE-1 from here on. */
+function refuseOn(repo: TempRepo, op: 'update' | 'removeLabel'): void {
+  const path = join(repo.dir, '.sail-runs', 'fake', 'tickets.json');
+  const world = JSON.parse(readFileSync(path, 'utf8'));
+  world.tickets.find((ticket: { ticketKey: string }) => ticket.ticketKey === 'FAKE-1').answers = {
+    [op]: ['unavailable'],
+  };
+  writeFileSync(path, JSON.stringify(world));
+}
+
+const commandFiles = (repo: TempRepo): string[] => {
+  const dir = commandsDir(join(repo.dir, '.sail-runs'));
+  return existsSync(dir) ? readdirSync(dir).filter((name) => name.endsWith('.json')) : [];
+};
+
+test('sail clean --requeue whose ticket reset fails exits 1, sends no command and says how to settle the item by hand', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await queued(repo);
+    refuseOn(repo, 'update');
+    const result = await w.cleaned(w.named, '--requeue');
+    expect(result.code).toBe(EXIT_FAILED);
+    expect(result.stderr).toContain(`sail clean: ${w.named}: its ticket FAKE-1 was not reset: `);
+    expect(result.stderr).toContain(
+      `sail clean: ${w.named}: queue item ticket:FAKE-1 of a still names it: settle it with \`sail queue requeue a ticket:FAKE-1\`\n`,
+    );
+    expect(exists(repo, w.named)).toBe(false);
+    expect(commandFiles(repo)).toEqual([]);
+    expect(w.items().find((item) => item.dedupKey === 'ticket:FAKE-1')).toMatchObject({ state: 'parked' });
+    await w.stop();
+  });
+}, 60_000);
+
+test('sail clean --drop whose label removal fails exits 1, sends no command and says how to settle the item by hand', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await queued(repo);
+    refuseOn(repo, 'removeLabel');
+    const result = await w.cleaned(w.named, '--drop');
+    expect(result.code).toBe(EXIT_FAILED);
+    expect(result.stderr).toContain(`sail clean: ${w.named}: the label sail-a was not removed from FAKE-1: `);
+    expect(result.stderr).toContain(
+      `sail clean: ${w.named}: queue item ticket:FAKE-1 of a still names it: settle it with \`sail queue drop a ticket:FAKE-1\`\n`,
+    );
+    expect(exists(repo, w.named)).toBe(false);
+    expect(commandFiles(repo)).toEqual([]);
+    expect(w.items().find((item) => item.dedupKey === 'ticket:FAKE-1')).toMatchObject({ state: 'parked' });
+    expect(await labels(repo)).toContain('sail-a');
+    await w.stop();
+  });
+}, 60_000);
+
+test('sail clean --all-repos --requeue whose command the watcher has not taken says so on a line of its own, prefixed with the repository name', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await queued(repo);
+    const result = await w.untaken('--failed', '--all-repos', '--requeue');
+    expect(result.stderr).toBe('');
+    expect(result.code).toBe(EXIT_OK);
+    const lines = result.stdout.split('\n');
+    expect(lines.filter(Boolean)).toEqual([
+      expect.stringMatching(new RegExp(`^stub: cleaned ${w.named}: `)),
+      'stub: reset FAKE-1 to Todo',
+      expect.stringMatching(
+        /^sail clean: stub: the watcher of 'a' \(pid 4242\) has not taken the command yet: it waits in /,
+      ),
+      expect.stringMatching(new RegExp(`^stub: cleaned ${w.unnamed}: `)),
+      'stub: reset FAKE-2 to Todo',
+    ]);
+    await w.stop();
+  });
+}, 60_000);
+
+test('sail clean --failed --all-repos --drop settles the named run through the watcher the registry records, and a bare --all-repos refuses it naming both flags', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await queued(repo);
+    const bare = await w.cleaned('--failed', '--all-repos');
+    expect(bare.code).toBe(EXIT_REFUSED);
+    expect(bare.stderr).toBe(
+      `sail clean: stub: queue item ticket:FAKE-1 of a (parked) names run ${w.named}: clean it with --requeue or --drop, or \`sail queue requeue|drop\`\n`,
+    );
+    expect(bare.stdout).toContain(`stub: cleaned ${w.unnamed}:`);
+    expect(exists(repo, w.named)).toBe(true);
+
+    const result = await w.cleaned('--failed', '--all-repos', '--drop');
+    expect(result.stderr).toBe('');
+    expect(result.code).toBe(EXIT_OK);
+    expect(result.stdout.split('\n').filter(Boolean)).toEqual([
+      expect.stringMatching(new RegExp(`^stub: cleaned ${w.named}: `)),
+      'stub: reset FAKE-1 to Todo',
+      'stub: ticket:FAKE-1 dropped',
+    ]);
+    expect(w.items().map((item) => item.dedupKey)).toEqual(['ticket:FAKE-3']);
+    expect(await labels(repo)).toEqual(['sail']);
+    await w.stop();
+  });
+}, 60_000);
+
+test('sail clean --failed --all-repos --requeue with no live watcher refuses the named run with nothing removed, and cleans the unnamed one', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await queued(repo, false);
+    recordEntry(registryDir(join(repo.home, 'sail-home')), {
+      schema: 'sail.registry.v1',
+      name: 'stub',
+      remote: null,
+      clone: repo.dir,
+      sailDir: join(repo.dir, '.sail'),
+      updatedAt: START,
+    });
+    const result = await w.cleaned('--failed', '--all-repos', '--requeue');
+    expect(result.code).toBe(EXIT_REFUSED);
+    expect(result.stderr).toContain(
+      `sail clean: stub: run ${w.named}: no watcher is running for 'stub' here: sail watch a first\n`,
+    );
+    expect(result.stdout).toContain(`stub: cleaned ${w.unnamed}:`);
+    expect(exists(repo, w.named)).toBe(true);
+    expect(w.items().map((item) => item.state)).toEqual(['parked']);
+  });
+}, 60_000);
+
+test('sail clean --requeue with no live watcher refuses the named run with nothing removed, and cleans the unnamed one', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await queued(repo, false);
+    const result = await w.cleaned('--failed', '--requeue');
+    expect(result.code).toBe(EXIT_REFUSED);
+    expect(result.stderr).toContain(`run ${w.named}: no watcher is running for 'stub' here: sail watch a first`);
+    expect(result.stdout).toContain(`cleaned ${w.unnamed}:`);
+    expect(exists(repo, w.named)).toBe(true);
+    expect(existsSync(join(repo.dir, '.sail-runs', w.named, 'workspace'))).toBe(true);
+    expect((await ticketState(repo)).type).toBe('started');
+    expect(w.items().map((item) => item.state)).toEqual(['parked']);
+  });
+}, 60_000);
+
+test('sail clean --requeue with --drop is refused with the usage line', async () => {
+  await withTempRepo(async (repo) => {
+    project(repo);
+    expect(await sail(repo, 'clean', '--failed', '--requeue', '--drop')).toEqual({
+      code: EXIT_REFUSED,
+      stdout: '',
+      stderr: USAGE,
+    });
+  });
+});
+
+test('sail clean --failed --all-repos cleans the failed runs of every registered repository from a directory with no .sail/, prefixing each line with the repository name, and skips a missing clone', async () => {
+  await withTempRepo(async (first) => {
+    await withTempRepo(async (second) => {
+      const sailHome = join(dirname(first.dir), 'shared-sail-home');
+      const shared = (repo: TempRepo) => ({ ...repo.env, SAIL_HOME: sailHome });
+      project(first);
+      project(second);
+      edit(join(second.dir, '.sail'), 'project.yaml', 'name: stub', 'name: second');
+      const one = await failedByProcess(first, 'FAKE-1', shared(first));
+      const two = await failedByProcess(second, 'FAKE-1', shared(second));
+      recordEntry(registryDir(sailHome), {
+        schema: 'sail.registry.v1',
+        name: 'gone',
+        remote: null,
+        clone: join(dirname(first.dir), 'no-such-clone'),
+        sailDir: join(dirname(first.dir), 'no-such-clone', '.sail'),
+        updatedAt: '2026-10-15T09:00:00.000Z',
+      });
+      const elsewhere = join(dirname(first.dir), 'elsewhere');
+      mkdirSync(elsewhere);
+
+      const result = await runCaptured(['clean', '--failed', '--all-repos'], elsewhere, { env: shared(first) });
+      expect(result.stderr).toBe(
+        `sail clean: gone: its clone ${join(dirname(first.dir), 'no-such-clone')} is missing: skipped\n`,
+      );
+      expect(result.code).toBe(EXIT_OK);
+      expect(result.stdout.split('\n').filter(Boolean)).toEqual([
+        expect.stringMatching(new RegExp(`^second: cleaned ${two}: `)),
+        'second: reset FAKE-1 to Todo',
+        expect.stringMatching(new RegExp(`^stub: cleaned ${one}: `)),
+        'stub: reset FAKE-1 to Todo',
+      ]);
+      expect(exists(first, one)).toBe(false);
+      expect(exists(second, two)).toBe(false);
+      expect(await runCaptured(['clean', '--failed', '--all-repos'], elsewhere, { env: shared(first) })).toEqual({
+        code: EXIT_OK,
+        stdout: '',
+        stderr: `sail clean: gone: its clone ${join(dirname(first.dir), 'no-such-clone')} is missing: skipped\nsail clean: no failed runs\n`,
+      });
+    });
+  });
+}, 120_000);
+
+test('sail clean with --all-repos but no --failed, or with run ids, is refused with the usage line', async () => {
+  await withTempRepo(async (repo) => {
+    project(repo);
+    expect(await sail(repo, 'clean', 'FAKE-1-x', '--all-repos')).toEqual({
+      code: EXIT_REFUSED,
+      stdout: '',
+      stderr: USAGE,
+    });
+    expect(await sail(repo, 'clean', '--all-repos')).toEqual({ code: EXIT_REFUSED, stdout: '', stderr: USAGE });
   });
 });
