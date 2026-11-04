@@ -396,8 +396,8 @@ test('a script killed by SIGKILL from outside sail is exit_code, signalled, nami
   });
 });
 
-test('a script killed by SIGTERM or SIGHUP from outside sail is exit_code, signalled', async () => {
-  for (const signal of ['TERM', 'HUP']) {
+test('a script killed by SIGTERM, SIGHUP or SIGINT from outside sail is exit_code, signalled', async () => {
+  for (const signal of ['TERM', 'HUP', 'INT']) {
     const s = setup();
     s.run(`kill -${signal} $$`);
     const run = await scriptKind.run(tests(), s.context);
