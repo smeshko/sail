@@ -382,7 +382,7 @@ export default workflow(
           findings: { findings: targets },
           ticketKey,
           base,
-          description: run.input.body,
+          description,
         });
         if (fixed.outcome === 'blocked') {
           blocked = `fix blocked: ${fixed.reason}`;

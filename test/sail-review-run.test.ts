@@ -728,3 +728,29 @@ test('check-fix reads the rewritten description on a later pass whose fix leaves
     expect(readFileSync(join(dir, folder, 'call-2', 'in', 'description.txt'), 'utf8')).toBe(body);
   });
 });
+
+test("a fix while landing is shown the description the fix loop rewrote, not the pull request's first", async () => {
+  await withTempRepo(async (repo) => {
+    setUp(repo);
+    const sail = join(repo.dir, '.sail');
+    const seeds = describeOnly(repo);
+    const body = '## Summary\n\nA note in notes.txt.\n\nCloses FAKE-1';
+    seedHarness(sail, 'fix#1', [
+      { ...seeds.fix[0], output: { fixes: [{ finding: 'R1', commit: null, note: 'Rewrote the Summary.' }], body } },
+    ]);
+    seedHarness(sail, 'check-fix#1', [
+      {
+        ...seeds['check-fix'][0],
+        output: { items: [{ finding: 'R1', resolved: true, detail: 'Holds.' }], findings: [] },
+      },
+    ]);
+    editPullRequest(repo, {
+      checks: [{ name: 'verify', statuses: ['failed', 'failed', 'passed'], log: '(fail) a timing test\n 1 fail' }],
+    });
+    const { code, stderr, keys, dir } = await review(repo);
+    expect({ code, stderr: code === 0 ? '' : stderr }).toEqual({ code: 0, stderr: '' });
+    expect(landing(keys)).toContain('fix#2');
+    const folder = readdirSync(dir).find((name) => /^\d+-fix$/.test(name)) ?? '';
+    expect(readFileSync(join(dir, folder, 'call-2', 'in', 'description.txt'), 'utf8')).toBe(body);
+  });
+}, 120_000);
