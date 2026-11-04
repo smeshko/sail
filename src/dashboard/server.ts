@@ -573,6 +573,7 @@ async function stopRoute(starts: Starts, segments: string[], request: Request): 
 /**
  * Cleans a failed run as `sail clean` does: the engine's `cleanRun()` in this process, which makes all its checks
  * before any removal. Answers 200 with the line `sail clean` prints, or 409 with the refusal or the failed removals.
+ * Unlike `sail clean`, it resets no ticket and settles no queue item: a run a queue item names is refused.
  */
 async function cleanRoute(starts: Starts, segments: string[], request: Request): Promise<Response> {
   const { options, underway } = starts;
