@@ -857,6 +857,21 @@ test('a fix pass that rewrites the description to the text it already holds ends
   });
 }, 120_000);
 
+test('a fix pass that only rewrites the description, leaving the same finding open, gets the next pass', async () => {
+  await withTempRepo(async (repo) => {
+    setUp(repo);
+    describeOpen(repo, [
+      '## Summary\n\nA note.\n\nCloses FAKE-1',
+      '## Summary\n\nA note in notes.txt.\n\nCloses FAKE-1',
+      '## Summary\n\nOne note in notes.txt.\n\nCloses FAKE-1',
+    ]);
+    const { code, keys } = await review(repo);
+    expect(code).not.toBe(0);
+
+    expect(keys.filter((key) => key.startsWith('fix#'))).toEqual(['fix#1', 'fix#2', 'fix#3']);
+  });
+}, 120_000);
+
 test("a fix while landing is shown the description the fix loop rewrote, not the pull request's first", async () => {
   await withTempRepo(async (repo) => {
     setUp(repo);
