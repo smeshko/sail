@@ -492,3 +492,126 @@ test('a ticket without prerequisites has no prerequisites key', async () => {
   const source = createFakeTicketSource(prerequisiteSeed());
   expect('prerequisites' in (await source.get('FAKE-1'))).toBe(false);
 });
+
+// Downloads.
+
+/** A seed whose FAKE-1 holds `attachments` as a seed writes them. */
+function seedWithFiles(attachments: object[]): { seed: string; state: string } {
+  const dir = tempDir();
+  const seed = join(dir, 'tickets.json');
+  writeFileSync(
+    seed,
+    JSON.stringify({
+      tickets: [
+        {
+          ticketKey: 'FAKE-1',
+          title: 'Ticket',
+          description: '',
+          state: { type: 'unstarted', name: 'Todo' },
+          labels: [],
+          comments: [],
+          links: [],
+          attachments,
+        },
+      ],
+    }),
+  );
+  return { seed, state: join(dir, 'state.json') };
+}
+
+const URL_1 = 'fake://tickets/FAKE-1/attachments/1';
+
+test('download serves a seeded file from its content or its base64, with its mime type and name, and emits ticket:downloaded', async () => {
+  const capture = captureEvents();
+  const source = createFakeTicketSource({
+    ...seedWithFiles([
+      { name: 'note.txt', url: URL_1, mimeType: 'text/plain', content: 'héllo' },
+      { name: 'shot.png', url: 'fake://tickets/FAKE-1/attachments/2', mimeType: 'image/png', base64: 'iVBORw0KGgo=' },
+    ]),
+    emit: capture.emit,
+  });
+  const text = await source.download('FAKE-1', URL_1);
+  const image = await source.download('FAKE-1', 'fake://tickets/FAKE-1/attachments/2');
+  expect([new TextDecoder().decode(text.bytes), text.size, text.contentType]).toEqual(['héllo', 6, 'text/plain']);
+  expect([[...image.bytes], image.size, image.contentType]).toEqual([
+    [137, 80, 78, 71, 13, 10, 26, 10],
+    8,
+    'image/png',
+  ]);
+  expect(capture.events).toEqual([
+    {
+      type: 'ticket:downloaded',
+      ticketKey: 'FAKE-1',
+      name: 'note.txt',
+      contentType: 'text/plain',
+      size: 6,
+      url: URL_1,
+    },
+    {
+      type: 'ticket:downloaded',
+      ticketKey: 'FAKE-1',
+      name: 'shot.png',
+      contentType: 'image/png',
+      size: 8,
+      url: 'fake://tickets/FAKE-1/attachments/2',
+    },
+  ]);
+  expect(eventIssues(capture.stamped('intake#1'))).toEqual([]);
+});
+
+test('download refuses a seeded size over the cap as invalid, naming it, and a scripted unavailable as unavailable, emitting nothing', async () => {
+  const capture = captureEvents();
+  const source = createFakeTicketSource({
+    ...seedWithFiles([
+      { name: 'video.mov', url: URL_1, size: 89128960 },
+      { name: 'gone.png', url: 'fake://tickets/FAKE-1/attachments/2', answer: 'unavailable', content: 'x' },
+    ]),
+    emit: capture.emit,
+  });
+  const big = await rejection(source.download('FAKE-1', URL_1));
+  const gone = await rejection(source.download('FAKE-1', 'fake://tickets/FAKE-1/attachments/2'));
+  expect([portFailure(big), messageOf(big)]).toEqual([
+    { port: 'ticketSource', op: 'download', code: 'invalid' },
+    'ticketSource.download: 85 MiB, over the 20 MiB cap',
+  ]);
+  expect(portFailure(gone)).toEqual({ port: 'ticketSource', op: 'download', code: 'unavailable' });
+  expect(capture.events).toEqual([]);
+});
+
+test('download of a hosted URL the ticket lacks, or one with no bytes behind it, is not_found, and of an unknown ticket too', async () => {
+  const source = createFakeTicketSource(seedWithFiles([{ name: 'empty', url: URL_1 }]));
+  const failures = [];
+  for (const [key, url] of [
+    ['FAKE-1', URL_1],
+    ['FAKE-1', 'fake://tickets/FAKE-1/attachments/9'],
+    ['FAKE-7', URL_1],
+  ] as const) {
+    failures.push((portFailure(await rejection(source.download(key, url))) as { code: string }).code);
+  }
+  expect(failures).toEqual(['not_found', 'not_found', 'not_found']);
+});
+
+test("get shows a seeded file as the port's attachment, without its content, base64, size or answer, in the ticket and its raw", async () => {
+  const source = createFakeTicketSource(
+    seedWithFiles([
+      { name: 'n.txt', url: URL_1, mimeType: 'text/plain', content: 'x', base64: 'eA==', size: 1, answer: 'ok' },
+    ]),
+  );
+  const ticket = await source.get('FAKE-1');
+  expect(ticket.attachments).toEqual([{ name: 'n.txt', url: URL_1, mimeType: 'text/plain' }]);
+  expect((ticket.raw as { attachments: unknown }).attachments).toEqual([
+    { name: 'n.txt', url: URL_1, mimeType: 'text/plain' },
+  ]);
+});
+
+test('hosts is true for a fake upload URL and false for a link, another scheme and a lookalike', () => {
+  const source = createFakeTicketSource(files());
+  const urls = [
+    URL_1,
+    'https://www.figma.com/file/abc',
+    'fake://tickets/FAKE-1',
+    'fake://tickets/FAKE-1/attachments/1/../x',
+    'fake://tickets/FAKE-1/attachments/x',
+  ];
+  expect(urls.map((url) => source.hosts(url))).toEqual([true, false, false, false, false]);
+});

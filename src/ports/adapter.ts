@@ -95,6 +95,8 @@ export const PORT_OPERATIONS = {
     'relate',
     'edit',
     'attach',
+    'hosts',
+    'download',
     'capabilities',
   ]),
   codeHost: operations<CodeHost>()([

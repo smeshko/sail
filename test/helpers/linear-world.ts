@@ -67,7 +67,7 @@ export interface LinearWorldSeed {
 /** A canned answer for failure injection. */
 export interface WorldResponse {
   readonly status: number;
-  /** Sent as JSON, or as it is when a string. */
+  /** Sent as JSON, or as it is when a string or bytes. */
   readonly body?: unknown;
   readonly headers?: Readonly<Record<string, string>>;
 }
@@ -95,7 +95,7 @@ export interface LinearWorld {
   serve(): { url: string; stop(): void };
   /** Every request the world received, in order. */
   readonly requests: WorldRequest[];
-  /** The files the world's storage took, in order. */
+  /** The files the world's storage took, in order. A GET of one is a request of `download`. */
   readonly uploads: WorldUpload[];
   /** The operation names of the requests, in order. */
   operations(): string[];
@@ -515,6 +515,34 @@ export function createLinearWorld(seed: LinearWorldSeed): LinearWorld {
   };
 
   /**
+   * A GET of a file the storage took: its bytes with the content type and length it was stored with, for the API key
+   * the world accepts, and 404 for a file it never took. A failure `failNext('download', …)` set answers first, once.
+   */
+  function serveAsset(url: string, headers: Record<string, string>): WorldResponse {
+    requests.push({ method: 'GET', operationName: 'download', query: '', variables: { url }, headers });
+    const failure = failures.find(
+      (candidate) => candidate.operationName === 'download' && candidate.after === undefined,
+    );
+    if (failure !== undefined) {
+      failures.splice(failures.indexOf(failure), 1);
+      return failure.response;
+    }
+    if (seed.apiKey !== undefined && headers.authorization !== seed.apiKey) {
+      return { status: 401, body: 'Unauthorized' };
+    }
+    const upload = uploads.find((candidate) => candidate.url.replace('/upload/', '/assets/') === url);
+    if (upload === undefined) return { status: 404, body: 'NotFound' };
+    return {
+      status: 200,
+      body: upload.bytes,
+      headers: {
+        'Content-Type': upload.headers['content-type'] ?? 'application/octet-stream',
+        'Content-Length': String(upload.bytes.byteLength),
+      },
+    };
+  }
+
+  /**
    * A PUT to the storage: taken when it carries the signature, content type and size its upload was signed for, and
    * refused with 403 otherwise, as a signed URL is. A failure `failNext('upload', …)` set answers first.
    */
@@ -572,13 +600,15 @@ export function createLinearWorld(seed: LinearWorldSeed): LinearWorld {
     new Response(
       response.body === undefined
         ? null
-        : typeof response.body === 'string'
+        : typeof response.body === 'string' || response.body instanceof Uint8Array
           ? response.body
           : JSON.stringify(response.body),
       {
         status: response.status,
         headers: {
-          ...(typeof response.body === 'string' ? {} : { 'Content-Type': 'application/json' }),
+          ...(typeof response.body === 'string' || response.body instanceof Uint8Array
+            ? {}
+            : { 'Content-Type': 'application/json' }),
           ...response.headers,
         },
       },
@@ -593,6 +623,7 @@ export function createLinearWorld(seed: LinearWorldSeed): LinearWorld {
         const bytes = init.body instanceof Uint8Array ? init.body : new Uint8Array();
         return toResponse(store(input, headers, bytes));
       }
+      if (init.method === 'GET') return toResponse(serveAsset(input, headers));
       const text = typeof init.body === 'string' ? init.body : '';
       return toResponse(answer(init.method ?? 'GET', headers, text));
     },
@@ -605,6 +636,7 @@ export function createLinearWorld(seed: LinearWorldSeed): LinearWorld {
           if (request.method === 'PUT') {
             return toResponse(store(request.url, headers, new Uint8Array(await request.arrayBuffer())));
           }
+          if (request.method === 'GET') return toResponse(serveAsset(request.url, headers));
           return toResponse(answer(request.method, headers, await request.text()));
         },
       });

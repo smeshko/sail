@@ -53,6 +53,7 @@
         "ticket:commented",
         "ticket:created",
         "ticket:attached",
+        "ticket:downloaded",
         "ticket:labelled",
         "ticket:unlabelled",
         "ticket:related",
@@ -237,6 +238,10 @@
     {
       "if": { "properties": { "type": { "const": "ticket:attached" } }, "required": ["type"] },
       "then": { "$ref": "#/$defs/ticketAttached" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "ticket:downloaded" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/ticketDownloaded" }
     },
     {
       "if": { "properties": { "type": { "const": "ticket:labelled" } }, "required": ["type"] },
@@ -1242,6 +1247,20 @@
         "url": { "type": "string" }
       },
       "required": ["ticketKey", "name", "contentType", "size", "url"],
+      "unevaluatedProperties": false
+    },
+    "ticketDownloaded": {
+      "type": "object",
+      "$ref": "#/$defs/envelope",
+      "properties": {
+        "key": true,
+        "ticketKey": { "type": "string" },
+        "name": { "type": "string" },
+        "contentType": { "type": "string" },
+        "size": { "type": "integer", "minimum": 0 },
+        "url": { "type": "string" }
+      },
+      "required": ["ticketKey", "name", "size", "url"],
       "unevaluatedProperties": false
     },
     "ticketLabelled": {

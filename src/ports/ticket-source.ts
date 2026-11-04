@@ -62,8 +62,33 @@ export interface TicketEdit {
   readonly description?: string;
 }
 
+/** A file `download` fetched: its bytes, the content type the provider served it with, and its size in bytes. */
+export interface Downloaded {
+  readonly bytes: Uint8Array;
+  readonly contentType?: string;
+  readonly size: number;
+}
+
+/** What `download` takes beside the URL. */
+export interface DownloadOptions {
+  readonly signal?: AbortSignal;
+  /** The most bytes it reads. `MAX_ATTACHMENT_BYTES` when left out. */
+  readonly maxBytes?: number;
+}
+
 /** The largest file `attach` takes: 20 MiB. */
 export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+
+const MIB = 1024 * 1024;
+
+/**
+ * Why a file of `bytes` is over a cap of `max`: `85 MiB, over the 20 MiB cap`, or `over the 20 MiB cap` when the size
+ * is not known because the read stopped at the cap. Caps under 1 MiB are said in bytes.
+ */
+export function overCap(bytes: number | undefined, max: number): string {
+  const unit = (n: number) => (max >= MIB ? `${Number((n / MIB).toFixed(1))} MiB` : `${n} bytes`);
+  return `${bytes === undefined ? '' : `${unit(bytes)}, `}over the ${unit(max)} cap`;
+}
 
 /**
  * Refuses a file `attach` can't send, before any request: no name, a content type that isn't one (`type/subtype`), no
@@ -141,6 +166,15 @@ export interface TicketSource {
    * Uploads the file and attaches it to the ticket, after `checkAttachment()` passes it. Emits `ticket:attached`.
    */
   attach(ticketKey: string, file: NewAttachment): Promise<Attached>;
+  /** Whether `url` names a file this provider stores itself, so that `download` may fetch it. Pure: it sends nothing. */
+  hosts(url: string): boolean;
+  /**
+   * The bytes of a file the provider hosts, fetched with the adapter's own credentials. A URL it doesn't host (a link,
+   * another host, another scheme) rejects `invalid` before any request, and so does a file over `maxBytes`, which is
+   * never read past the cap. A missing file is `not_found`, a refused one `forbidden`, an unreachable one `unavailable`.
+   * Emits `ticket:downloaded`.
+   */
+  download(ticketKey: string, url: string, options?: DownloadOptions): Promise<Downloaded>;
   capabilities(): TicketSourceCapabilities;
 }
 

@@ -866,6 +866,14 @@ test('at trace, an event of every type prints a line of its own', () => {
       ),
     ],
     [
+      { type: 'ticket:downloaded', ticketKey: 'FAKE-1', name: 'a.png', contentType: 'image/png', size: 3, url: 'u' },
+      head(
+        '',
+        '· ticket:downloaded {"ticketKey":"FAKE-1","name":"a.png","contentType":"image/png","size":3,"url":"u"}',
+        w,
+      ),
+    ],
+    [
       { type: 'ticket:labelled', ticketKey: 'FAKE-1', label: 'Bug', labels: ['sail', 'Bug'] },
       head('', '· ticket:labelled {"ticketKey":"FAKE-1","label":"Bug","labels":["sail","Bug"]}', w),
     ],

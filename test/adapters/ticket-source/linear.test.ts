@@ -40,6 +40,8 @@ import { type MakeTicketSource, ticketSourceSuite } from '../../ports/ticket-sou
 
 /** A marker key: the world refuses any other. */
 const KEY = 'lin_api_MARKER_adapter_5c2e07';
+/** Where the offline world stores files. */
+const UPLOADS = 'https://uploads.linear.test';
 const URL_OF = (key: string) => `https://linear.app/${WORLD_WORKSPACE}/issue/${key}`;
 const RATE_LIMITED = {
   status: 400,
@@ -115,6 +117,7 @@ function linear(seed: LinearWorldSeed = SEED, options: { inReview?: string; emit
     endpoint: LINEAR_ENDPOINT,
     apiKey: KEY,
     fetch: world.fetch,
+    uploadsOrigin: UPLOADS,
     emit: options.emit ?? capture.emit,
     ...(options.inReview === undefined ? {} : { inReview: options.inReview }),
   });
@@ -1369,4 +1372,161 @@ test('get asks for the state of each inverse relation, and reports the ticket bl
     'inverseRelations(first: 250) { nodes { type issue { identifier title url state { name type } } } }',
   );
   expect('prerequisites' in (await adapter.get('ADW-1'))).toBe(false);
+});
+
+// Downloads.
+
+const codeOf = (error: unknown) => (portFailure(error) as { code: string }).code;
+
+/** An ADW-1 file in the world's storage, attached through the adapter: its URL. */
+async function stored(made: Made, file = FILE): Promise<string> {
+  const { url } = await made.adapter.attach('ADW-1', file);
+  made.capture.events.length = 0;
+  made.world.requests.length = 0;
+  return url;
+}
+
+test('download GETs the asset with the API key and gives its bytes, its content type and size, and emits ticket:downloaded naming the file by the URL', async () => {
+  const made = linear();
+  const url = await stored(made);
+  const downloaded = await made.adapter.download('ADW-1', url);
+  expect([...downloaded.bytes]).toEqual([...FILE.bytes]);
+  expect([downloaded.size, downloaded.contentType]).toEqual([8, 'image/png']);
+  expect(
+    made.world.requests.map((request) => [request.method, request.variables.url, request.headers.authorization]),
+  ).toEqual([['GET', url, KEY]]);
+  expect(made.capture.events).toEqual([
+    { type: 'ticket:downloaded', ticketKey: 'ADW-1', name: 'run view.png', contentType: 'image/png', size: 8, url },
+  ]);
+  expect(eventIssues(made.capture.stamped('intake#1'))).toEqual([]);
+});
+
+test('download refuses a URL that only looks like the uploads host as invalid, with no request at all', async () => {
+  const requested: string[] = [];
+  const adapter = createLinearTicketSource({
+    team: 'ADW',
+    endpoint: LINEAR_ENDPOINT,
+    apiKey: KEY,
+    fetch: async (input) => {
+      requested.push(input);
+      return new Response('x');
+    },
+  });
+  const urls = [
+    'https://uploads.linear.app/org/file',
+    'http://uploads.linear.app/a',
+    'https://uploads.linear.app.evil.com/a',
+    'https://user:pw@uploads.linear.app/a',
+    'https://uploads.linear.app:8443/a',
+    'https://evil.com/?u=https://uploads.linear.app/a',
+    'https://linear.app/sail-test/issue/ADW-1',
+    'not a url',
+  ];
+  const hosted = urls.map((url) => adapter.hosts(url));
+  const failures = [];
+  for (const url of urls.slice(1)) failures.push(portFailure(await rejection(adapter.download('ADW-1', url))));
+  expect(hosted).toEqual([true, false, false, false, false, false, false, false]);
+  expect(failures).toEqual(urls.slice(1).map(() => ({ port: 'ticketSource', op: 'download', code: 'invalid' })));
+  expect(requested).toEqual([]);
+});
+
+test('download follows a redirect to the uploads host with the key, and refuses one to another host without a request to it', async () => {
+  const made = linear();
+  const url = await stored(made);
+  made.world.failNext('download', { status: 302, headers: { Location: url } });
+  expect([...(await made.adapter.download('ADW-1', url)).bytes]).toEqual([...FILE.bytes]);
+  expect(made.world.requests.map((request) => request.headers.authorization)).toEqual([KEY, KEY]);
+
+  made.world.requests.length = 0;
+  made.capture.events.length = 0;
+  made.world.failNext('download', { status: 302, headers: { Location: 'https://evil.com/steal' } });
+  const error = await rejection(made.adapter.download('ADW-1', url));
+  expect(portFailure(error)).toEqual({ port: 'ticketSource', op: 'download', code: 'invalid' });
+  expect(made.world.requests.map((request) => request.variables.url)).toEqual([url]);
+  expect(made.capture.events).toEqual([]);
+});
+
+test('download gives up on a redirect chain of more than three hops as unavailable', async () => {
+  const made = linear();
+  const url = await stored(made);
+  for (let hop = 0; hop < 4; hop++) made.world.failNext('download', { status: 302, headers: { Location: url } });
+  const error = await rejection(made.adapter.download('ADW-1', url));
+  expect(portFailure(error)).toEqual({ port: 'ticketSource', op: 'download', code: 'unavailable' });
+  expect(made.world.requests).toHaveLength(4);
+});
+
+test('download maps 401 and 403 to forbidden, 404 to not_found, other statuses and a dead network to unavailable, emitting nothing', async () => {
+  const made = linear();
+  const url = await stored(made);
+  const codes: string[] = [];
+  for (const status of [401, 403, 404, 500]) {
+    made.world.failNext('download', { status, body: 'no' });
+    codes.push(codeOf(await rejection(made.adapter.download('ADW-1', url))));
+  }
+  const dead = createLinearTicketSource({
+    team: 'ADW',
+    endpoint: LINEAR_ENDPOINT,
+    apiKey: KEY,
+    uploadsOrigin: UPLOADS,
+    fetch: () => Promise.reject(new TypeError('connection refused')),
+  });
+  const error = await rejection(dead.download('ADW-1', url));
+  codes.push(codeOf(error));
+  expect(codes).toEqual(['forbidden', 'forbidden', 'not_found', 'unavailable', 'unavailable']);
+  expect(messageOf(error)).toContain('connection refused');
+  expect(made.capture.events).toEqual([]);
+});
+
+/** A fetch answering with a body of `chunks` chunks of 1 MiB, with or without a Content-Length, counting how many were pulled. */
+function streaming(chunks: number, length: boolean) {
+  const pulled = { chunks: 0 };
+  const fetch: Fetch = async () => {
+    let sent = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (sent === chunks) return controller.close();
+        sent++;
+        pulled.chunks++;
+        controller.enqueue(new Uint8Array(1024 * 1024));
+      },
+    });
+    return new Response(body, length ? { headers: { 'Content-Length': String(chunks * 1024 * 1024) } } : {});
+  };
+  return { pulled, fetch };
+}
+
+test('download stops reading a body that outgrows the cap with no Content-Length, and refuses it as invalid', async () => {
+  const { pulled, fetch } = streaming(500, false);
+  const adapter = createLinearTicketSource({
+    team: 'ADW',
+    endpoint: LINEAR_ENDPOINT,
+    apiKey: KEY,
+    uploadsOrigin: UPLOADS,
+    fetch,
+  });
+  const error = await rejection(
+    adapter.download('ADW-1', `${UPLOADS}/assets/1/big.bin`, { maxBytes: 4 * 1024 * 1024 }),
+  );
+  expect(failure(error)).toEqual([
+    { port: 'ticketSource', op: 'download', code: 'invalid' },
+    'ticketSource.download: over the 4 MiB cap',
+  ]);
+  expect(pulled.chunks).toBeLessThan(10);
+});
+
+test('download refuses a body whose Content-Length is over the cap without reading any of it', async () => {
+  const { pulled, fetch } = streaming(30, true);
+  const adapter = createLinearTicketSource({
+    team: 'ADW',
+    endpoint: LINEAR_ENDPOINT,
+    apiKey: KEY,
+    uploadsOrigin: UPLOADS,
+    fetch,
+  });
+  const error = await rejection(adapter.download('ADW-1', `${UPLOADS}/assets/1/big.bin`));
+  expect(failure(error)).toEqual([
+    { port: 'ticketSource', op: 'download', code: 'invalid' },
+    'ticketSource.download: 30 MiB, over the 20 MiB cap',
+  ]);
+  expect(pulled.chunks).toBeLessThan(3);
 });

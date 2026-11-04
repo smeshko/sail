@@ -420,6 +420,47 @@ export function ticketSourceSuite(label: string, make: MakeTicketSource): void {
     expect(capture.events).toEqual([]);
   });
 
+  test(`${label}: download gives the bytes an attach stored, the content type it was stored with and their size, and emits one valid ticket:downloaded`, async () => {
+    const { adapter, world, capture } = await start();
+    const attached = await adapter.attach(world.designated, TRANSCRIPT);
+    expect(adapter.hosts(attached.url)).toBe(true);
+    capture.events.length = 0;
+    const downloaded = await adapter.download(world.designated, attached.url);
+    expect([...downloaded.bytes]).toEqual([...TRANSCRIPT.bytes]);
+    expect(downloaded.size).toBe(TRANSCRIPT.bytes.byteLength);
+    expect(downloaded.contentType?.split(';')[0]).toBe('text/plain');
+    expect(capture.events).toEqual([
+      {
+        type: 'ticket:downloaded',
+        ticketKey: world.designated,
+        name: expect.any(String),
+        contentType: expect.any(String),
+        size: TRANSCRIPT.bytes.byteLength,
+        url: attached.url,
+      },
+    ]);
+    expectValidEvents(capture);
+  });
+
+  test(`${label}: hosts is false for a URL the provider doesn't store, and download of it rejects invalid, emitting nothing`, async () => {
+    const { adapter, world, capture } = await start();
+    expect(adapter.hosts('https://example.com/x')).toBe(false);
+    const error = await rejection(adapter.download(world.designated, 'https://example.com/x'));
+    expect(portFailure(error)).toEqual({ port: 'ticketSource', op: 'download', code: 'invalid' });
+    expect(capture.events).toEqual([]);
+  });
+
+  test(`${label}: download rejects invalid a file over the maxBytes it is given, emitting nothing`, async () => {
+    const { adapter, world, capture } = await start();
+    const attached = await adapter.attach(world.designated, TRANSCRIPT);
+    capture.events.length = 0;
+    const error = await rejection(
+      adapter.download(world.designated, attached.url, { maxBytes: TRANSCRIPT.bytes.byteLength - 1 }),
+    );
+    expect(portFailure(error)).toEqual({ port: 'ticketSource', op: 'download', code: 'invalid' });
+    expect(capture.events).toEqual([]);
+  });
+
   test(`${label}: capabilities parse, and update takes every move they list to a state of that move's type`, async () => {
     const { adapter, world } = await start();
     const capabilities = adapter.capabilities();
