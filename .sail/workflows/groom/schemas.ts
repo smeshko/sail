@@ -75,6 +75,11 @@ export const Action = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('blocks'), to: z.string() }),
   /** `to` must land before this ticket can start: written as `to`'s `blocks` relation, which the watcher waits on. */
   z.object({ kind: z.literal('blocked_by'), to: z.string() }),
+  /**
+   * The ticket is real work but not the factory's: it needs no code change, needs a measurement or a person's
+   * walkthrough, or belongs in another repository. It is labelled `manual` and never planned.
+   */
+  z.object({ kind: z.literal('manual'), reason: z.string() }),
   z.object({ kind: z.literal('edit'), title: z.string().optional(), description: z.string().optional() }),
   z.object({ kind: z.literal('cancel'), reason: z.string() }),
   /**
@@ -105,14 +110,14 @@ export const Planned = PlanOutput.extend({ questions: z.array(Question).max(2) }
 /**
  * The actions the workflow lets through, the ones it only reports, the questions it posts, the label the groomed ticket
  * ends with, and the plan act attaches: `groomed` for a ticket an action ended, `open-questions` while a person must
- * answer, and `planned` once the plan is written, which puts `factory` on too.
+ * answer, `manual` for a ticket only a person can do, and `planned` once the plan is written, which puts `factory` on too.
  */
 export const Verdict = z.object({
   apply: z.array(Action),
   reported: z.array(z.string()),
-  /** The open questions the comment posts: none once an action ended the ticket. */
+  /** The open questions the comment posts: none once an action ended the ticket or ruled it manual. */
   questions: z.array(Question),
-  outcome: z.enum(['groomed', 'open-questions', 'planned']),
+  outcome: z.enum(['groomed', 'manual', 'open-questions', 'planned']),
   /** The plan's structured part when the outcome is `planned`, and null otherwise. */
   plan: PlanOutput.nullable(),
 });
@@ -123,7 +128,7 @@ export const Acted = z.object({
   failed: z.array(z.string()),
   comment: z.string(),
   unlabelled: z.boolean(),
-  /** The labels put on: the outcome, and `factory` beside `planned`. */
+  /** The labels put on: the outcome (`manual` included), and `factory` beside `planned`. */
   labelled: z.array(z.string()),
   /** The attached plan's URL, or null when no plan was attached. */
   attached: z.string().nullable(),

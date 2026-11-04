@@ -3,7 +3,7 @@
 // line: the plan's structured part, this run, the commit the workspace stands on and when it was attached, which is how
 // the factory finds the plan. Then it comments report.md, a `## Plan` section for a planned ticket, an `## Open questions`
 // section rendered from the verdict's questions and an `## Actions` section on it, then swaps the label in $INPUT_LABEL
-// for the verdict's outcome, `groomed`, `open-questions`, or `planned` with `factory` beside it. The swap is
+// for the verdict's outcome, `groomed`, `manual`, `open-questions`, or `planned` with `factory` beside it. The swap is
 // tried three times, a second apart, as open.sh does for its comment, so a short provider failure after the report is
 // posted does not fail the step. The report ends with a line naming the run, and the step reads the ticket first and
 // comments only when no comment holds that line: a later try has a fresh $STAGE_OUT, so the guard lives on the ticket.
@@ -79,6 +79,7 @@ function apply(action) {
     const fields = [action.title !== undefined && 'title', action.description !== undefined && 'description'];
     return `edit ${fields.filter(Boolean).join(' and ')}`;
   }
+  if (action.kind === 'manual') return `manual (${action.reason})`;
   if (action.kind === 'cancel') {
     port(['ticket-source', 'update', ticketKey, '--state', 'canceled']);
     return `cancel (${action.reason})`;
@@ -110,7 +111,7 @@ function apply(action) {
 
 /** The action as the Actions section names it before it is applied. */
 function named(action) {
-  if (action.kind === 'edit' || action.kind === 'cancel' || action.kind === 'labels') return action.kind;
+  if (['edit', 'cancel', 'labels', 'manual'].includes(action.kind)) return action.kind;
   if (action.kind === 'merge') return `merge ${action.absorb.join(', ')} into ${action.into}`;
   return `${action.kind} ${action.kind === 'duplicate' ? action.of : action.to}`;
 }
@@ -211,6 +212,8 @@ writeFileSync(
 const posted = current.comments.some((each) => each.body.split('\n').some((line) => line.trim() === marker));
 const comment = posted ? { url: current.url } : port(['ticket-source', 'comment', ticketKey, '--body-file', body]);
 for (const name of outcomeLabels) tried(['ticket-source', 'add-label', ticketKey, name]);
+// A regroomed ticket can carry `factory`; a manual ticket is not the factory's.
+if (verdict.outcome === 'manual') tried(['ticket-source', 'remove-label', ticketKey, 'factory']);
 const relabelled = tried(['ticket-source', 'remove-label', ticketKey, label]);
 console.log(
   JSON.stringify({
