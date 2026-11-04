@@ -1075,6 +1075,27 @@ test('a ticket its own run claimed and then failed is retried with --force, not 
   });
 });
 
+test('a failed run whose ticket was handed over is dropped as undesignated, not retried', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 1, 1);
+    const dispatcher = w.dispatcher();
+    await dispatcher.tick();
+    await w.spawner.claims();
+    await w.ticketSource.removeLabel('FAKE-1', 'sail');
+    await w.ticketSource.addLabel('FAKE-1', 'needs-human');
+    await w.ticketSource.update('FAKE-1', { state: 'unstarted' });
+    await w.spawner.end('FAKE-1', { status: 'failed', stopReason: 'workflow_failed' });
+    await dispatcher.tick();
+    w.clock.advance(FIVE_MINUTES);
+    await dispatcher.tick();
+    expect(w.spawner.runs.map((run) => [run.ticketKey, run.force])).toEqual([['FAKE-1', false]]);
+    expect(eventsOf(w.runs, 'queue:dropped')).toEqual([
+      { dedupKey: 'ticket:FAKE-1', reason: "it is not designated: it carries no 'sail' label" },
+    ]);
+    expect(states(w.store)).toEqual([]);
+  });
+});
+
 test('a parked item whose run claimed its ticket and was stopped runs again with --force once requeued', async () => {
   await withTempRepo(async (repo) => {
     const w = await world(repo, 1, 1);
