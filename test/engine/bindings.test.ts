@@ -1,5 +1,14 @@
 import { afterEach, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -272,4 +281,58 @@ test("a fromStep binding the engine supplies is written as an earlier step left 
     description: `${result}#/output`,
     body: '05-publish/call-1/out/pr-body.md',
   });
+});
+
+test("a bound file brings the attachments/ folder beside its source into $STAGE_IN, so the brief's paths resolve beside it", () => {
+  const s = scratch();
+  const brief = s.source('brief.md', '- spec.md: https://x (downloaded to attachments/spec.md, beside this brief)\n');
+  const ticket = s.source('ticket.json', '{}\n');
+  const folder = join(brief, '..', 'attachments');
+  mkdirSync(join(folder, 'nested'), { recursive: true });
+  writeFileSync(join(folder, 'spec.md'), '# spec\n');
+  writeFileSync(join(folder, 'nested', 'today.light.png'), 'png');
+  const consumes: Consumes = { brief: file('brief.md'), ticket: file('ticket.json') };
+  const supplied = { brief: fileAt(brief), ticket: fileAt(ticket) };
+  expect(bindingProblems(consumes, supplied)).toEqual([]);
+  const { inputs } = materialise(consumes, supplied, s.stageIn);
+  expect(inputs).toEqual({ INPUT_BRIEF: join(s.stageIn, 'brief.md'), INPUT_TICKET: join(s.stageIn, 'ticket.json') });
+  expect(readFileSync(join(s.stageIn, 'attachments', 'spec.md'), 'utf8')).toBe('# spec\n');
+  expect(readFileSync(join(s.stageIn, 'attachments', 'nested', 'today.light.png'), 'utf8')).toBe('png');
+});
+
+test('a bound file with no attachments/ folder beside it brings nothing more', () => {
+  const s = scratch();
+  const path = s.source('draft.md', '# spec\n');
+  materialise({ spec: file('spec.md') }, { spec: fileAt(path) }, s.stageIn);
+  expect(readdirSync(s.stageIn)).toEqual(['spec.md']);
+});
+
+test('a link inside the attachments/ folder is left out of $STAGE_IN', () => {
+  const s = scratch();
+  const brief = s.source('brief.md', 'b\n');
+  const folder = join(brief, '..', 'attachments');
+  mkdirSync(folder);
+  writeFileSync(join(folder, 'spec.md'), 'ok\n');
+  symlinkSync('/etc/hosts', join(folder, 'hosts'));
+  materialise({ brief: file('brief.md') }, { brief: fileAt(brief) }, s.stageIn);
+  expect(readdirSync(join(s.stageIn, 'attachments'))).toEqual(['spec.md']);
+});
+
+test('two bound files bringing attachments/ folders from different places, or a binding named attachments, are problems', () => {
+  const a = scratch();
+  const b = scratch();
+  const one = a.source('brief.md', 'a\n');
+  const two = b.source('other.md', 'b\n');
+  mkdirSync(join(one, '..', 'attachments'));
+  mkdirSync(join(two, '..', 'attachments'));
+  expect(
+    bindingProblems({ brief: file('brief.md'), other: file('other.md') }, { brief: fileAt(one), other: fileAt(two) }),
+  ).toEqual(["'brief' and 'other' both bring an attachments/ folder, from different places"]);
+  const plain = scratch().source('x.md', 'x\n');
+  expect(
+    bindingProblems(
+      { brief: file('brief.md'), clash: file('attachments') },
+      { brief: fileAt(one), clash: fileAt(plain) },
+    ),
+  ).toEqual(["'clash' is written to $STAGE_IN as 'attachments', where 'brief' brings its attachments/ folder"]);
 });
