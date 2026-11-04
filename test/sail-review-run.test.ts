@@ -822,6 +822,41 @@ test('check-fix reads the rewritten description on a later pass whose fix leaves
   });
 });
 
+/**
+ * Seeds the description finding R1 left open by every check-fix, and each fix pass with no commit and the body
+ * `bodies` gives it by pass.
+ */
+function describeOpen(repo: TempRepo, bodies: (string | null)[]): void {
+  const sail = join(repo.dir, '.sail');
+  const seeds = describeOnly(repo);
+  for (const [index, body] of bodies.entries()) {
+    seedHarness(sail, `fix#${index + 1}`, [
+      { ...seeds.fix[0], output: { fixes: [{ finding: 'R1', commit: null, note: 'Rewrote the Summary.' }], body } },
+    ]);
+  }
+  seedHarness(sail, 'check-fix', [
+    {
+      ...seeds['check-fix'][0],
+      output: {
+        items: [{ finding: 'R1', resolved: false, detail: 'The Summary still promises a footer.' }],
+        findings: [],
+      },
+    },
+  ]);
+}
+
+test('a fix pass that rewrites the description to the text it already holds ends the fix loop', async () => {
+  await withTempRepo(async (repo) => {
+    setUp(repo);
+    const body = '## Summary\n\nA note in notes.txt.\n\nCloses FAKE-1';
+    describeOpen(repo, [body, body, body]);
+    const { code, keys } = await review(repo);
+    expect(code).not.toBe(0);
+
+    expect(keys.filter((key) => key.startsWith('fix#'))).toEqual(['fix#1', 'fix#2']);
+  });
+}, 120_000);
+
 test("a fix while landing is shown the description the fix loop rewrote, not the pull request's first", async () => {
   await withTempRepo(async (repo) => {
     setUp(repo);

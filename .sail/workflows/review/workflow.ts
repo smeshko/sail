@@ -232,6 +232,8 @@ export default workflow(
           description,
         });
         if (fixed.outcome === 'blocked') return handOff(`fix blocked: ${fixed.reason}`);
+        // A body the same as the description the host holds changes nothing, though the update still sends it.
+        const rewritten = fixed.output.body !== null && fixed.output.body !== description;
         // A finding about the description is fixed by rewriting it: the agent can't call the code host, so a script does.
         if (fixed.output.body !== null) {
           const updated = await run.stage(updateDescription, { pr: number, body: fixed.output.body });
@@ -277,7 +279,7 @@ export default workflow(
           resolved = true;
           break;
         }
-        const changed = fixed.output.body !== null || fixed.output.fixes.some((each) => each.commit !== null);
+        const changed = rewritten || fixed.output.fixes.some((each) => each.commit !== null);
         const failed = failure(again);
         const same =
           fresh.length === 0 &&
