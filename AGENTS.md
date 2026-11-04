@@ -57,9 +57,11 @@ Linear, team `ADW`. Issues are `ADW-<n>`. Apply every label that fits:
 - Type: `feature`, `bug`, `refactoring`
 - Platform: `core`, `cli`, `dashboard`
 - Source: `dogfooding`, `code-review`, `field-report`
-- `epic` marks an epic's parent issue.
-- `groom` goes on every ticket filed into the backlog, so the groom workflow judges it, as sail's follow-up filing
-  does. An epic and its planned phases skip it.
+- `groom` goes on every ticket filed into the backlog, as sail's follow-up filing does. The groom workflow judges the
+  ticket, then plans one worth doing: it attaches `plan.md` and puts `planned` and `factory` on, or puts
+  `open-questions` on. Once a person answers in the description's `## Rulings` section, `groom` goes back on.
+- `factory` starts the factory on the plan groom attached last. A ticket with no plan attached fails the run: put
+  `groom` on it instead.
 
 ## Vocabulary
 

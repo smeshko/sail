@@ -471,7 +471,20 @@ const labelEvents = (repoDir: string, type: 'ticket:labelled' | 'ticket:unlabell
     .filter((event) => event.type === type)
     .map((event) => (event as { label?: string }).label);
 
-test('groom labels a ticket with no open question groomed', async () => {
+/** FAKE-2's attachments as the fake holds them, each with its bytes as text. */
+const attachedTo = (repoDir: string) =>
+  (
+    fakeTicket(repoDir, 'FAKE-2').attachments as { name: string; url: string; mimeType?: string; base64?: string }[]
+  ).map((each) => ({ ...each, text: Buffer.from(each.base64 ?? '', 'base64').toString('utf8') }));
+
+/** The AttachedPlan an attached plan.md ends with. */
+function trailerOf(text: string): Record<string, unknown> {
+  const match = /^<!-- sail:plan (\{.*\}) -->$/.exec(text.trimEnd().split('\n').at(-1) ?? '');
+  if (match === null) throw new Error(`no sail:plan trailer ends:\n${text}`);
+  return JSON.parse(match[1] as string);
+}
+
+test('groom plans a ticket with no open question: attaches plan.md with its trailer, labels it planned and factory, and comments its tasks', async () => {
   await withTempRepo(async (repo) => {
     const sailDir = writeGroomRepo(repo);
     reseed(sailDir, 'decide', (output) => {
@@ -480,10 +493,89 @@ test('groom labels a ticket with no open question groomed', async () => {
     const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
     expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
 
-    expect(fakeTicket(repo.dir, 'FAKE-2').labels).toEqual(['groomed']);
+    const dir = onlyRun(repo.dir);
+    const runId = basename(dir);
+    expect(
+      readJournal(dir)
+        .entries.map((entry) => entry.key)
+        .slice(5),
+    ).toEqual(['decide#1', 'plan#1', 'act#1']);
+    // The planner plans the ticket as the applied actions leave it: here, the judge's title edit.
+    const actions = JSON.parse(readFileSync(join(dir, '06-plan', 'call-1', 'in', 'actions.json'), 'utf8'));
+    expect(actions).toEqual([{ kind: 'edit', title: NEW_TITLE }]);
+
+    const ticket = fakeTicket(repo.dir, 'FAKE-2');
+    expect(ticket.labels).toEqual(['planned', 'factory']);
+    expect(ticket.state).toEqual({ type: 'unstarted', name: 'Backlog' });
+    const [attached, ...more] = attachedTo(repo.dir);
+    expect(more).toEqual([]);
+    expect(attached?.name).toBe(`plan.md (sail run ${runId})`);
+    expect(attached?.mimeType).toBe('text/markdown');
+    expect(attached?.text).toStartWith("# Plan: Total cost in sail show's footer\n");
+    expect(attached?.text).toContain('## Task details');
+    expect(trailerOf(attached?.text ?? '')).toEqual({
+      version: 1,
+      slug: 'show-total-cost',
+      scope: 'cli',
+      risk: 'large',
+      tasks: [
+        {
+          id: 'TASK-001',
+          title: 'Print the total cost in the footer',
+          type: 'impl',
+          commit: "feat(cli): print the run's total cost in sail show's footer",
+        },
+      ],
+      run: runId,
+      base: expect.stringMatching(/^[0-9a-f]{40}$/),
+      attachedAt: expect.stringMatching(/^\d{4}-\d\d-\d\dT/),
+    });
+
     const comment = lastComment(repo.dir);
-    expect(comment).toContain('Labelled `groomed`.');
-    expect(comment).toContain('## Open questions\n\n- none\n\n## Actions');
+    expect(comment).toContain(
+      [
+        '## Plan',
+        '',
+        `Risk: large. The factory implements the attached [plan.md](${attached?.url}):`,
+        '',
+        '- TASK-001 (impl): Print the total cost in the footer',
+        '',
+        '## Open questions',
+        '',
+        '- none',
+        '',
+        '## Actions',
+      ].join('\n'),
+    );
+    expect(comment).toContain('Labelled `planned` and `factory`.');
+    expect(labelEvents(repo.dir, 'ticket:labelled')).toEqual(['planned', 'factory']);
+    const act = readJournal(dir).entries.find((entry) => entry.key === 'act#1');
+    expect(act?.output).toMatchObject({ labelled: ['planned', 'factory'], attached: attached?.url });
+  });
+}, 120_000);
+
+test("groom attaches no plan while the planner asks: it labels the ticket open-questions and posts the planner's questions", async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeGroomRepo(repo);
+    reseed(sailDir, 'decide', (output) => {
+      output.questions = [];
+    });
+    reseed(sailDir, 'plan', (output) => {
+      output.questions = [question('Count reused calls?')];
+    });
+    const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+
+    const ticket = fakeTicket(repo.dir, 'FAKE-2');
+    expect(ticket.labels).toEqual(['open-questions']);
+    expect(ticket.attachments).toEqual([]);
+    const comment = lastComment(repo.dir);
+    expect(comment).not.toContain('## Plan');
+    expect(comment).toContain('1. Count reused calls?');
+    expect(comment).toContain('   - **exclude (recommended)**: the total counts only the calls this run made');
+    expect(comment).toContain('Labelled `open-questions`.');
+    expect(labelEvents(repo.dir, 'ticket:labelled')).toEqual(['open-questions']);
+    expect(readEvents(onlyRun(repo.dir)).map((event) => event.type)).not.toContain('ticket:attached');
   });
 }, 120_000);
 
@@ -502,6 +594,9 @@ test('groom cancels a ticket the worth check gave cancel at the threshold, and l
     const ticket = fakeTicket(repo.dir, 'FAKE-2');
     expect(ticket.state).toEqual({ type: 'canceled', name: 'Canceled' });
     expect(ticket.labels).toEqual(['groomed']);
+    // A ticket an action ended is never planned.
+    expect(readJournal(onlyRun(repo.dir)).entries.map((entry) => entry.key)).not.toContain('plan#1');
+    expect(ticket.attachments).toEqual([]);
     const comment = lastComment(repo.dir);
     expect(comment).toContain('- applied: cancel (a tidy-up nobody would notice)');
     expect(comment).toContain('## Open questions\n\n- none\n\n## Actions');
@@ -787,6 +882,26 @@ test('a groom run suspended after its report posts no second report on resume, a
     const after = fakeTicket(repo.dir, 'FAKE-2');
     expect(after.labels).toEqual(['open-questions']);
     expect(after.comments).toHaveLength(2);
+    expect(reports(repo.dir)).toHaveLength(1);
+  });
+}, 120_000);
+
+test('a groom run suspended after attaching its plan attaches it once on resume, and labels the ticket planned and factory', async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeGroomRepo(repo);
+    reseed(sailDir, 'decide', (output) => {
+      output.questions = [];
+    });
+    scriptLabels(repo, { removeLabel: ['unavailable', 'unavailable', 'unavailable', 'ok'] });
+    const first = await sail(repo.dir, repo.env, RUN);
+    expect(first.code).toBe(EXIT_SUSPENDED);
+    const runId = basename(onlyRun(repo.dir));
+    expect(attachedTo(repo.dir)).toHaveLength(1);
+
+    const resumed = await sail(repo.dir, repo.env, ['resume', runId]);
+    expect(resumed.code).toBe(EXIT_OK);
+    expect(attachedTo(repo.dir).map((each) => each.name)).toEqual([`plan.md (sail run ${runId})`]);
+    expect(fakeTicket(repo.dir, 'FAKE-2').labels).toEqual(['planned', 'factory']);
     expect(reports(repo.dir)).toHaveLength(1);
   });
 }, 120_000);

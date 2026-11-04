@@ -1,6 +1,7 @@
 // groom's contracts, shared by its intake, stages and workflow: the ticket it reads, what each check finds, what the
-// judge decides, and what the act step did.
+// judge decides, what the planner wrote, and what the act step did.
 import { untrusted, z } from 'sail';
+import { PlanOutput } from '../../lib/plan';
 
 export const GroomInput = z.object({
   ticketKey: z.string(),
@@ -93,13 +94,25 @@ export const Decision = z.object({
   questions: z.array(Question).max(2),
 });
 
-/** The actions the workflow lets through, the ones it only reports, the questions it posts, and the label the groomed ticket ends with. */
-export const Plan = z.object({
+/**
+ * What the planner submits beside plan.md: the plan's structured part, and the open questions it could not settle, at
+ * most two. A plan with questions is not attached: the ticket waits for a person's answers and is groomed again.
+ */
+export const Planned = PlanOutput.extend({ questions: z.array(Question).max(2) });
+
+/**
+ * The actions the workflow lets through, the ones it only reports, the questions it posts, the label the groomed ticket
+ * ends with, and the plan act attaches: `groomed` for a ticket an action ended, `open-questions` while a person must
+ * answer, and `planned` once the plan is written, which puts `factory` on too.
+ */
+export const Verdict = z.object({
   apply: z.array(Action),
   reported: z.array(z.string()),
   /** The open questions the comment posts: none once an action ended the ticket. */
   questions: z.array(Question),
-  outcome: z.enum(['groomed', 'open-questions']),
+  outcome: z.enum(['groomed', 'open-questions', 'planned']),
+  /** The plan's structured part when the outcome is `planned`, and null otherwise. */
+  plan: PlanOutput.nullable(),
 });
 
 export const Acted = z.object({
@@ -108,5 +121,8 @@ export const Acted = z.object({
   failed: z.array(z.string()),
   comment: z.string(),
   unlabelled: z.boolean(),
-  labelled: z.string(),
+  /** The labels put on: the outcome, and `factory` beside `planned`. */
+  labelled: z.array(z.string()),
+  /** The attached plan's URL, or null when no plan was attached. */
+  attached: z.string().nullable(),
 });
