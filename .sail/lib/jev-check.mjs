@@ -159,10 +159,15 @@ export function triageState(findings, diffText) {
  * `{ state, asked, questions, note }`, the note saying how many cited findings were left to the judge.
  */
 export function triageRequest(findings, diffText) {
-  const cited = findings.filter((finding) => citedHunks(diffText, finding.file));
+  const cited = findings
+    .map((finding) => ({ finding, hunks: citedHunks(diffText, finding.file) }))
+    .filter(({ hunks }) => hunks);
   let request = { state: triageState([], diffText).state, asked: [], questions: {} };
-  for (let n = 1; n <= cited.length; n++) {
-    const { state, asked } = triageState(cited.slice(0, n), diffText);
+  for (const { finding, hunks } of cited) {
+    const { id, source, severity, file, title, detail } = finding;
+    const entry = { claim: { source, severity, file, title, detail }, hunks: cut(hunks) };
+    const state = { ...request.state, findings: { ...request.state.findings, [id]: entry } };
+    const asked = [...request.asked, id];
     const questions = triageQuestions(asked);
     if (Buffer.byteLength(JSON.stringify({ state, questions })) > MAX_REQUEST_BYTES) break;
     request = { state, asked, questions };

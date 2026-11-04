@@ -207,6 +207,19 @@ test('triageRequest keeps every finding when they fit, with no note', () => {
   });
 });
 
+test('triageRequest reads the diff once per finding, not once per prefix', () => {
+  let reads = 0;
+  const diff = Object.assign(new String(DIFF), {
+    split(separator: RegExp) {
+      reads++;
+      return DIFF.split(separator);
+    },
+  });
+  const findings = Array.from({ length: 10 }, (_, i) => finding(`R${i + 1}`));
+  const request = lib.triageRequest(findings, diff);
+  expect({ asked: request.asked.length, reads }).toEqual({ asked: 10, reads: 10 });
+});
+
 test('the stage, given more findings than fit, asks Jev about the leading ones and sends the rest to the judge', async () => {
   const { output, request } = await stageCase(
     [bigFinding('R1'), bigFinding('R2'), bigFinding('R3')],
