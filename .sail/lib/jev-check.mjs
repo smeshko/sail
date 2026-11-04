@@ -16,6 +16,8 @@ import { join } from 'node:path';
 export const CLEAR_YES = 0.8;
 /** The most characters of one diff in a request, so a large change can't make it unaskable. */
 export const MAX_DIFF = 40_000;
+/** The most bytes of one Jev request, `{ state, questions }` as JSON: TypeSafe answers `max_tokens_exceeded` past its input limit. */
+export const MAX_REQUEST_BYTES = 64_000;
 /** The branch's base, as the check agents read it. */
 export const BASE = 'origin/staging';
 
@@ -38,11 +40,19 @@ export function noul(instructions, yes, no) {
 
 /**
  * Asks Jev `questions` about `state` through `sail port jev ask`, the request kept as `jev-request.json` in `out`.
- * `{ asked: true, model, answers }`, or `{ asked: false, note }` when the port refuses, fails or answers nothing.
+ * `{ asked: true, model, answers }`, or `{ asked: false, note }` when the request is over MAX_REQUEST_BYTES, or the port
+ * refuses, fails or answers nothing.
  */
 export function askNouls(questions, state, out) {
   const file = join(out, 'jev-request.json');
-  writeFileSync(file, JSON.stringify({ state, questions }));
+  const body = JSON.stringify({ state, questions });
+  writeFileSync(file, body);
+  const bytes = Buffer.byteLength(body);
+  if (bytes > MAX_REQUEST_BYTES)
+    return {
+      asked: false,
+      note: `the request is ${bytes} bytes, over the ${MAX_REQUEST_BYTES}-byte limit Jev accepts`,
+    };
   const result = spawnSync('sail', ['port', 'jev', 'ask', '--body-file', file], {
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
@@ -270,7 +280,7 @@ export const BANNED_YES = 0.8;
 export const BANNED_CONTEXT = 3;
 /** Bound both question count and serialized request bytes; omitted candidates are reported, not judged. */
 export const BANNED_MAX_QUESTIONS = 64;
-export const BANNED_MAX_REQUEST_BYTES = 64_000;
+export const BANNED_MAX_REQUEST_BYTES = MAX_REQUEST_BYTES;
 
 export function parseGlossary(text) {
   const entries = [];
