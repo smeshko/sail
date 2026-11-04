@@ -98,6 +98,11 @@ function apply(action) {
     for (const name of chosen) port(['ticket-source', 'add-label', ticketKey, name]);
     return `labels ${chosen.join(', ')}`;
   }
+  if (action.kind === 'blocked_by') {
+    // The port writes a blocked-by side from the other ticket: `to` blocks this one.
+    port(['ticket-source', 'relate', action.to, '--kind', 'blocks', '--to', ticketKey]);
+    return `blocked_by ${action.to}`;
+  }
   const other = action.kind === 'duplicate' ? action.of : action.to;
   port(['ticket-source', 'relate', ticketKey, '--kind', action.kind, '--to', other]);
   return `${action.kind} ${other}`;

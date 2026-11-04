@@ -115,7 +115,7 @@ function heldCancel(context: Context): string | undefined {
  * `duplicate`, a `cancel` or a `merge` that absorbs this ticket ends it, and no other of them applies after that; a
  * ticket that survives a merge is never canceled. A `cancel` passes the worth check's numbers as `CANCEL` says, a `merge`
  * as `MERGE_CONFIDENCE` and `DUPLICATE_CONFIDENCE` say,
- * never for a kept ticket, and one `merge` and one `labels` apply per run. An `edit` that names nothing to change is reported. A relation of any kind is applied only to one of `others`,
+ * never for a kept ticket, and one `merge` and one `labels` apply per run. An `edit` that names nothing to change is reported. A relation of any kind (`related`, `blocks`, `blocked_by`) is applied only to one of `others`,
  * never to `ticketKey` itself: the judge and the checks read the ticket's text, which can name any key.
  */
 function limit(decision: z.infer<typeof Decision>, context: Context): z.infer<typeof Verdict> {

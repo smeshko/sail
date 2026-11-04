@@ -466,6 +466,8 @@ test('groom reports, never applies, a relation to its own ticket or to one the i
       { kind: 'duplicate', of: 'FAKE-9' },
       { kind: 'related', to: 'FAKE-2' },
       { kind: 'blocks', to: 'FAKE-9' },
+      { kind: 'blocked_by', to: 'FAKE-2' },
+      { kind: 'blocked_by', to: 'FAKE-9' },
     ];
     seedHarness(sailDir, 'decide', [answer]);
     const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
@@ -480,11 +482,34 @@ test('groom reports, never applies, a relation to its own ticket or to one the i
       '- reported, not marked: duplicate of FAKE-9 (not an open ticket the intake listed)',
       '- reported, not marked: related FAKE-2 (this ticket itself)',
       '- reported, not marked: blocks FAKE-9 (not an open ticket the intake listed)',
+      '- reported, not marked: blocked_by FAKE-2 (this ticket itself)',
+      '- reported, not marked: blocked_by FAKE-9 (not an open ticket the intake listed)',
     ]) {
       expect(comment).toContain(line);
     }
     expect(comment).not.toContain('- applied:');
     expect(comment).not.toContain('- failed:');
+  });
+}, 120_000);
+
+test('groom records a prerequisite the judge names as blocked_by: FAKE-2 is blocked by FAKE-1', async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeGroomRepo(repo);
+    reseed(sailDir, 'decide', (output) => {
+      output.actions = [{ kind: 'blocked_by', to: 'FAKE-1' }];
+    });
+    const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+
+    const ticket = fakeTicket(repo.dir, 'FAKE-2');
+    // The fake stores a ticket's prerequisites as bare keys.
+    expect(ticket.prerequisites as unknown).toEqual(['FAKE-1']);
+    expect(ticket.links.map((link) => link.title ?? '').some((title) => title.startsWith('blocked by FAKE-1'))).toBe(
+      true,
+    );
+    const related = readEvents(onlyRun(repo.dir)).filter((event) => event.type === 'ticket:related');
+    expect(related).toContainEqual(expect.objectContaining({ ticketKey: 'FAKE-1', kind: 'blocks', to: 'FAKE-2' }));
+    expect(lastComment(repo.dir)).toContain('- applied: blocked_by FAKE-1');
   });
 }, 120_000);
 

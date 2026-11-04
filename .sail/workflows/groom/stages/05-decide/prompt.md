@@ -33,6 +33,7 @@ Choose from this set, and nothing else is available to you:
 | `labels` `set` | the ticket's labels are wrong or missing: `set` names its `type`, `platform` and, when one fits, `source` |
 | `related` `to` | another ticket is different work in the same code or toward the same goal, and a reader of either should know |
 | `blocks` `to` | this ticket must land before the ticket `to` can |
+| `blocked_by` `to` | the ticket `to` must land before this one can start: an unlanded prerequisite, never `related` |
 | `edit` `title` and/or `description` | the title misleads, or the description lacks what you verified, such as the files involved |
 
 **Merge.** This ticket is `into` or one of `absorb`. Make the survivor the broader ticket, or the older one when neither
@@ -42,6 +43,7 @@ lines. One `merge` per run, absorbing at most five tickets.
 
 **Related is not a weak merge.** When the worth check named a ticket at 0.6 or more, or you would put one pull request
 over both, choose `merge`, not `related`. Use `related` only for work that stays separate.
+A prerequisite that has not landed is `blocked_by`, which the watcher waits on, never `related`.
 
 **Labels.** Every ticket carries exactly one type (`feature`, `bug`, `refactoring`), exactly one platform (`core`, `cli`,
 `dashboard`), and at most one source (`dogfooding`, `code-review`, `field-report`). Choose `labels` whenever the ticket

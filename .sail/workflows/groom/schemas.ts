@@ -73,6 +73,8 @@ export const Action = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('duplicate'), of: z.string() }),
   z.object({ kind: z.literal('related'), to: z.string() }),
   z.object({ kind: z.literal('blocks'), to: z.string() }),
+  /** `to` must land before this ticket can start: written as `to`'s `blocks` relation, which the watcher waits on. */
+  z.object({ kind: z.literal('blocked_by'), to: z.string() }),
   z.object({ kind: z.literal('edit'), title: z.string().optional(), description: z.string().optional() }),
   z.object({ kind: z.literal('cancel'), reason: z.string() }),
   /**
