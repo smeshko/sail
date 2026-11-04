@@ -335,7 +335,7 @@ _Avoid_: start point, fork point
 _Avoid_: backup branch, rescue ref
 
 **Clean**:
-Removing what a failed run left behind (its worktree, its local and remote branch, its run ref) and moving its run directory to `failed-runs/<YYYY-MM-DD>/<run id>/` in sail's machine directory. `sail clean` does it. A run still used (leased by another run, named by a queue item, or whose branch has an open pull request) is refused.
+Removing what a failed run left behind (its worktree, its local and remote branch, its run ref) and moving its run directory to `failed-runs/<YYYY-MM-DD>/<run id>/` in sail's machine directory. `sail clean` does it. A run still used (leased by another run, named by a queue item, or whose branch has an open pull request) is refused. Clean also moves the run's ticket back from started to unstarted, and settles a queue item that names the run when told to: `--requeue` or `--drop` reach the repository's live watcher as a command file, as `sail queue` does. `--failed --all-repos` cleans the failed runs of every registered repository, from any directory.
 _Avoid_: delete, purge, prune
 
 **Branch**:

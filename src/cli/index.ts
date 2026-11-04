@@ -49,8 +49,10 @@ Usage:
   sail login codex [--device]                                Log in to a ChatGPT subscription for pi's openai-codex models
   sail resume <run> [-q|-v|-vv]                              Resume a suspended or crashed run
   sail stop <run> [--now]                                    Stop at the next call boundary, or end the running call now
-  sail clean <run>... | --failed [--requeue|--drop]          Remove a failed run's worktree, branches and run ref, archive its run
-                                                             directory, reset its ticket, and settle its queue item
+  sail clean <run>... | --failed [--all-repos] [--requeue|--drop]
+                                                             Remove a failed run's worktree, branches and run ref, archive its run
+                                                             directory, reset its ticket, and settle its queue item; --all-repos
+                                                             does so for every registered repository
   sail run --from-run <run> --stage <stage> [--continue] [--run-id <id>]
                                                              Rerun one stage on another run's earlier calls: a seeded run
   sail runs                                                  List the runs in .sail-runs/
@@ -282,7 +284,12 @@ const commands = new Map<string, CommandSpec>([
   [
     'clean',
     {
-      options: { failed: { type: 'boolean' }, requeue: { type: 'boolean' }, drop: { type: 'boolean' } },
+      options: {
+        failed: { type: 'boolean' },
+        'all-repos': { type: 'boolean' },
+        requeue: { type: 'boolean' },
+        drop: { type: 'boolean' },
+      },
       positionals: Number.POSITIVE_INFINITY,
       command: clean,
     },

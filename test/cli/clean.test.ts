@@ -12,7 +12,7 @@ import { readRunHeader } from '../../src/engine/run-header';
 import { runWorkflow } from '../../src/engine/runtime';
 import { commandsDir } from '../../src/watch/inbox';
 import { queueDir } from '../../src/watch/queue-store';
-import { readEntry } from '../../src/watch/registry';
+import { readEntry, recordEntry, registryDir } from '../../src/watch/registry';
 import { fakeAdapters } from '../helpers/adapters';
 import { fakeTimers } from '../helpers/fake-timers';
 import { edit } from '../helpers/fixture';
@@ -23,7 +23,7 @@ import { writeStub } from '../helpers/stub-workflow';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
 import { fakeSpawner, writeTickets, writeWatched } from '../helpers/watched';
 
-const USAGE = 'sail clean: usage: sail clean <run>... | --failed [--requeue|--drop]\n';
+const USAGE = 'sail clean: usage: sail clean <run>... | --failed [--all-repos] [--requeue|--drop]\n';
 
 const env = (repo: TempRepo) => ({ ...repo.env, SAIL_HOME: join(dirname(repo.dir), 'sail-home') });
 const sail = (repo: TempRepo, ...argv: string[]) => runCaptured(argv, repo.dir, { env: env(repo) });
@@ -209,9 +209,13 @@ test('sail clean refuses a run whose branch is on the remote when the code host 
 });
 
 /** A failed run of `ticket` made by a `sail` process of its own, since one process opens one run of a repository. */
-async function failedByProcess(repo: TempRepo, ticket: string): Promise<string> {
-  const before = new Set(readdirSync(join(repo.dir, '.sail-runs')));
-  await sailProcess(repo.dir, env(repo), [ticket, '--until', 'spec']);
+async function failedByProcess(
+  repo: TempRepo,
+  ticket: string,
+  processEnv: Record<string, string> = env(repo),
+): Promise<string> {
+  const before = new Set(existsSync(join(repo.dir, '.sail-runs')) ? readdirSync(join(repo.dir, '.sail-runs')) : []);
+  await sailProcess(repo.dir, processEnv, [ticket, '--until', 'spec']);
   const made = readdirSync(join(repo.dir, '.sail-runs')).find(
     (name) => name.startsWith(`${ticket}-`) && !before.has(name),
   );
@@ -419,5 +423,60 @@ test('sail clean --requeue with --drop is refused with the usage line', async ()
       stdout: '',
       stderr: USAGE,
     });
+  });
+});
+
+test('sail clean --failed --all-repos cleans the failed runs of every registered repository from a directory with no .sail/, prefixing each line with the repository name, and skips a missing clone', async () => {
+  await withTempRepo(async (first) => {
+    await withTempRepo(async (second) => {
+      const sailHome = join(dirname(first.dir), 'shared-sail-home');
+      const shared = (repo: TempRepo) => ({ ...repo.env, SAIL_HOME: sailHome });
+      project(first);
+      project(second);
+      edit(join(second.dir, '.sail'), 'project.yaml', 'name: stub', 'name: second');
+      const one = await failedByProcess(first, 'FAKE-1', shared(first));
+      const two = await failedByProcess(second, 'FAKE-1', shared(second));
+      recordEntry(registryDir(sailHome), {
+        schema: 'sail.registry.v1',
+        name: 'gone',
+        remote: null,
+        clone: join(dirname(first.dir), 'no-such-clone'),
+        sailDir: join(dirname(first.dir), 'no-such-clone', '.sail'),
+        updatedAt: '2026-10-15T09:00:00.000Z',
+      });
+      const elsewhere = join(dirname(first.dir), 'elsewhere');
+      mkdirSync(elsewhere);
+
+      const result = await runCaptured(['clean', '--failed', '--all-repos'], elsewhere, { env: shared(first) });
+      expect(result.stderr).toBe(
+        `sail clean: gone: its clone ${join(dirname(first.dir), 'no-such-clone')} is missing: skipped\n`,
+      );
+      expect(result.code).toBe(EXIT_OK);
+      expect(result.stdout.split('\n').filter(Boolean)).toEqual([
+        expect.stringMatching(new RegExp(`^second: cleaned ${two}: `)),
+        'second: reset FAKE-1 to Todo',
+        expect.stringMatching(new RegExp(`^stub: cleaned ${one}: `)),
+        'stub: reset FAKE-1 to Todo',
+      ]);
+      expect(exists(first, one)).toBe(false);
+      expect(exists(second, two)).toBe(false);
+      expect(await runCaptured(['clean', '--failed', '--all-repos'], elsewhere, { env: shared(first) })).toEqual({
+        code: EXIT_OK,
+        stdout: '',
+        stderr: `sail clean: gone: its clone ${join(dirname(first.dir), 'no-such-clone')} is missing: skipped\nsail clean: no failed runs\n`,
+      });
+    });
+  });
+}, 120_000);
+
+test('sail clean with --all-repos but no --failed, or with run ids, is refused with the usage line', async () => {
+  await withTempRepo(async (repo) => {
+    project(repo);
+    expect(await sail(repo, 'clean', 'FAKE-1-x', '--all-repos')).toEqual({
+      code: EXIT_REFUSED,
+      stdout: '',
+      stderr: USAGE,
+    });
+    expect(await sail(repo, 'clean', '--all-repos')).toEqual({ code: EXIT_REFUSED, stdout: '', stderr: USAGE });
   });
 });
