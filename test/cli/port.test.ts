@@ -900,8 +900,18 @@ test("attach puts --file on the ticket under --title, typed by its extension or 
     );
     expect(given.code).toBe(EXIT_OK);
     expect(fakeTicket(repo.dir, 'FAKE-1').attachments).toEqual([
-      { name: 'Transcript', url: 'fake://tickets/FAKE-1/attachments/1', mimeType: 'text/plain;charset=utf-8' },
-      { name: 'view.snapshot', url: 'fake://tickets/FAKE-1/attachments/2', mimeType: 'text/html' },
+      {
+        name: 'Transcript',
+        url: 'fake://tickets/FAKE-1/attachments/1',
+        mimeType: 'text/plain;charset=utf-8',
+        base64: Buffer.from('$ sail show FAKE-1\ntotal $1.35\n').toString('base64'),
+      },
+      {
+        name: 'view.snapshot',
+        url: 'fake://tickets/FAKE-1/attachments/2',
+        mimeType: 'text/html',
+        base64: Buffer.from('<main>total $1.35</main>').toString('base64'),
+      },
     ]);
   });
 });
@@ -935,6 +945,73 @@ test('attach without --file exits 3 with the usage, which lists attach', async (
     expect(refused.stderr).toContain(
       '\n       sail port ticket-source attach <ticket> --file <path> [--title <text>] [--content-type <type>]\n',
     );
+  });
+});
+
+// `sail port ticket-source download`: the files the provider hosts, written to a directory, with a JSON report.
+
+test('download writes the hosted files to --out, prints each path or skip reason, and leaves a link as never fetched', async () => {
+  await withTempRepo(async (repo) => {
+    fixtureWithLinked(repo.dir);
+    writeFileSync(join(repo.dir, 'shot.png'), new Uint8Array([137, 80, 78, 71]));
+    const attached = await runCaptured(['port', 'ticket-source', 'attach', 'FAKE-1', '--file', 'shot.png'], repo.dir);
+    expect(attached.code).toBe(EXIT_OK);
+    const downloaded = await runCaptured(['port', 'ticket-source', 'download', 'FAKE-1', '--out', 'got'], repo.dir);
+    expect({ code: downloaded.code, stderr: downloaded.stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    const report = oneLine(downloaded.stdout) as { ticketKey: string; files: Record<string, string>[] };
+    expect(report.ticketKey).toBe('FAKE-1');
+    expect(report.files).toEqual([
+      { name: 'shot.png', url: 'fake://tickets/FAKE-1/attachments/1', path: join(repo.dir, 'got', 'shot.png') },
+    ]);
+    expect([...readFileSync(join(repo.dir, 'got', 'shot.png'))]).toEqual([137, 80, 78, 71]);
+  });
+});
+
+test('download marks a link as never fetched, and defaults --out to attachments', async () => {
+  await withTempRepo(async (repo) => {
+    fixtureWithLinked(repo.dir);
+    const downloaded = await runCaptured(['port', 'ticket-source', 'download', 'FAKE-5'], repo.dir);
+    expect({ code: downloaded.code, stderr: downloaded.stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    const report = oneLine(downloaded.stdout) as { files: Record<string, string>[] };
+    expect(report.files).toHaveLength(1);
+    expect(report.files[0]?.skipped).toStartWith('never fetched');
+    expect(report.files[0]).not.toHaveProperty('path');
+    expect(existsSync(join(repo.dir, 'attachments'))).toBe(true);
+  });
+});
+
+test('download with an --out that is a file exits 3 before any call, and an unknown ticket exits 1', async () => {
+  await withTempRepo(async (repo) => {
+    fixtureWithLinked(repo.dir);
+    writeFileSync(join(repo.dir, 'taken'), 'x');
+    const refused = await runCaptured(['port', 'ticket-source', 'download', 'FAKE-1', '--out', 'taken'], repo.dir);
+    expect({ code: refused.code, stdout: refused.stdout }).toEqual({ code: EXIT_REFUSED, stdout: '' });
+    expect(refused.stderr).toStartWith('sail port: --out names taken, which exists and is no directory\n');
+    const missing = await runCaptured(['port', 'ticket-source', 'download', 'FAKE-99', '--out', 'got'], repo.dir);
+    expect({ code: missing.code, stdout: missing.stdout }).toEqual({ code: EXIT_FAILED, stdout: '' });
+    expect(existsSync(join(repo.dir, 'got'))).toBe(false);
+  });
+});
+
+test('with SAIL_EVENTS set, a download appends one ticket:downloaded, and the usage lists download', async () => {
+  await withTempRepo(async (repo) => {
+    fixtureWithLinked(repo.dir);
+    const file = join(repo.dir, 'out', 'port-events.ndjson');
+    mkdirSync(join(repo.dir, 'out'));
+    writeFileSync(join(repo.dir, 'shot.png'), new Uint8Array([137, 80, 78, 71]));
+    await runCaptured(['port', 'ticket-source', 'attach', 'FAKE-1', '--file', 'shot.png'], repo.dir);
+    const downloaded = await runCaptured(['port', 'ticket-source', 'download', 'FAKE-1', '--out', 'got'], repo.dir, {
+      env: { SAIL_EVENTS: file },
+    });
+    expect(downloaded.code).toBe(EXIT_OK);
+    const events = readFileSync(file, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    expect(events.map((each) => each.type)).toEqual(['ticket:fetched', 'ticket:downloaded']);
+    expect(events[1]).toMatchObject({ ticketKey: 'FAKE-1', name: 'shot.png', size: 4 });
+    const usage = await runCaptured(['port', 'ticket-source'], repo.dir);
+    expect(usage.stderr).toContain('\n       sail port ticket-source download <ticket> [--out <dir>]\n');
   });
 });
 
