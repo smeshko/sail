@@ -862,6 +862,18 @@ test('result: a port error may carry the code unavailable, and no other code', (
   }).toEqual({ unavailable: [], other: ['/errors/0/code'] });
 });
 
+test('result and journal: an error may carry the code signalled, and no other code', () => {
+  const failing = { ...scriptResult, outcome: 'error' };
+  const exit = { reason: 'exit_code', message: 'ended by signal SIGTERM' };
+  const stepError = (code: string) => ({ ...STEP_LINE, outcome: 'error', errors: [{ ...exit, code }] });
+  expect({
+    result: paths('sail.result.v1', { ...failing, errors: [{ ...exit, code: 'signalled' }] }),
+    resultOther: paths('sail.result.v1', { ...failing, errors: [{ ...exit, code: 'other' }] }),
+    journal: paths('sail.journal.v1', stepError('signalled')),
+    journalOther: paths('sail.journal.v1', stepError('other')),
+  }).toEqual({ result: [], resultOther: ['/errors/0/code'], journal: [], journalOther: ['/errors/0/code'] });
+});
+
 test("result: a script's exit code is null only beside the signal that ended it, and exit is left out if it never started", () => {
   const killed = { ...scriptResult, outcome: 'error', errors: [{ reason: 'timeout', message: 'timed out after 1s' }] };
   expect(paths('sail.result.v1', { ...killed, exit: { code: null, signal: 'SIGTERM' } })).toEqual([]);

@@ -56,6 +56,8 @@ const LISTS = ['passed', 'failed', 'error'] as const;
 
 const SCRIPT_PORTS: Record<ScriptPort, Port> = { 'ticket-source': 'ticketSource', codehost: 'codeHost', jev: 'jev' };
 
+// Signals a kill from outside sail sends. A script that kills itself with one on purpose to fail should exit non-zero instead.
+const OUTSIDE_SIGNALS = new Set<string>(['SIGTERM', 'SIGKILL', 'SIGHUP', 'SIGINT']);
 const SLOT_NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 /** How often a step queued for its slot looks again, unless the context says otherwise. */
@@ -377,7 +379,11 @@ async function runScript(step: ScriptStep, context: StepContext): Promise<StepRu
     const how = end.signal === null ? `exited with code ${end.code}` : `ended by signal ${end.signal}`;
     return ended({ reason: 'exit_code', message: `interrupted, then ${how}` }, record);
   }
-  if (end.signal !== null) return ended({ reason: 'exit_code', message: `ended by signal ${end.signal}` }, record);
+  if (end.signal !== null) {
+    const message = `ended by signal ${end.signal}`;
+    const code = OUTSIDE_SIGNALS.has(end.signal) ? ({ code: 'signalled' } as const) : {};
+    return ended({ reason: 'exit_code', ...code, message }, record);
+  }
   // A step that didn't pass because a provider was unreachable is an error, never a verdict: the run suspends to retry it.
   const outage = ported.events.find(
     (event): event is Extract<typeof event, { type: 'error:port' }> =>
