@@ -401,6 +401,56 @@ test('sail clean --drop cleans the named run, drops its item through the watcher
   });
 }, 60_000);
 
+/** Scripts the fake ticket source to refuse every `op` call on FAKE-1 from here on. */
+function refuseOn(repo: TempRepo, op: 'update' | 'removeLabel'): void {
+  const path = join(repo.dir, '.sail-runs', 'fake', 'tickets.json');
+  const world = JSON.parse(readFileSync(path, 'utf8'));
+  world.tickets.find((ticket: { ticketKey: string }) => ticket.ticketKey === 'FAKE-1').answers = {
+    [op]: ['unavailable'],
+  };
+  writeFileSync(path, JSON.stringify(world));
+}
+
+const commandFiles = (repo: TempRepo): string[] => {
+  const dir = commandsDir(join(repo.dir, '.sail-runs'));
+  return existsSync(dir) ? readdirSync(dir).filter((name) => name.endsWith('.json')) : [];
+};
+
+test('sail clean --requeue whose ticket reset fails exits 1, sends no command and says how to settle the item by hand', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await queued(repo);
+    refuseOn(repo, 'update');
+    const result = await w.cleaned(w.named, '--requeue');
+    expect(result.code).toBe(EXIT_FAILED);
+    expect(result.stderr).toContain(`sail clean: ${w.named}: its ticket FAKE-1 was not reset: `);
+    expect(result.stderr).toContain(
+      `sail clean: ${w.named}: queue item ticket:FAKE-1 of a still names it: settle it with \`sail queue requeue a ticket:FAKE-1\`\n`,
+    );
+    expect(exists(repo, w.named)).toBe(false);
+    expect(commandFiles(repo)).toEqual([]);
+    expect(w.items().find((item) => item.dedupKey === 'ticket:FAKE-1')).toMatchObject({ state: 'parked' });
+    await w.stop();
+  });
+}, 60_000);
+
+test('sail clean --drop whose label removal fails exits 1, sends no command and says how to settle the item by hand', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await queued(repo);
+    refuseOn(repo, 'removeLabel');
+    const result = await w.cleaned(w.named, '--drop');
+    expect(result.code).toBe(EXIT_FAILED);
+    expect(result.stderr).toContain(`sail clean: ${w.named}: the label sail-a was not removed from FAKE-1: `);
+    expect(result.stderr).toContain(
+      `sail clean: ${w.named}: queue item ticket:FAKE-1 of a still names it: settle it with \`sail queue drop a ticket:FAKE-1\`\n`,
+    );
+    expect(exists(repo, w.named)).toBe(false);
+    expect(commandFiles(repo)).toEqual([]);
+    expect(w.items().find((item) => item.dedupKey === 'ticket:FAKE-1')).toMatchObject({ state: 'parked' });
+    expect(await labels(repo)).toContain('sail-a');
+    await w.stop();
+  });
+}, 60_000);
+
 test('sail clean --requeue with no live watcher refuses the named run with nothing removed, and cleans the unnamed one', async () => {
   await withTempRepo(async (repo) => {
     const w = await queued(repo, false);

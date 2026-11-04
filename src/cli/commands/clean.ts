@@ -12,7 +12,8 @@
 // checked first, as `sail queue requeue|drop` checks it (a live watcher of this repository, watching the item's
 // workflow), so a refusal leaves the run whole. The run is cleaned and its ticket reset, and only then does the command
 // reach the watcher as a command file; --drop takes the watcher's label off the ticket too. A reset that failed settles
-// nothing: dispatch would only drop a requeued ticket still In Progress.
+// nothing: dispatch would only drop a requeued ticket still In Progress. A reset or label removal that fails after the
+// archive says the `sail queue requeue|drop` that settles the item by hand, since a second clean no longer lists the run.
 //
 // --all-repos (with --failed) does so for every repository in the machine's registry, from any directory: each is loaded
 // from its registered clone, its lines are prefixed `<name>: `, and its watcher is the one the registry records. A clone
@@ -243,13 +244,22 @@ async function cleanRepository(repository: Repository): Promise<ExitCode> {
         ready = false;
       }
     }
-    if (settling === undefined || !ready) continue;
-
+    if (settling === undefined) continue;
     const { item, workflow, watching } = settling;
+    const unsettled = (): void =>
+      warn(
+        `${runId}: queue item ${item.dedupKey} of ${workflow} still names it: settle it with \`sail queue ${op} ${workflow} ${item.dedupKey}\``,
+      );
+    if (!ready) {
+      unsettled();
+      continue;
+    }
+
     if (drop && item.source.kind === 'ticket') {
       const problem = await removeLabel(item.source.ticketKey, watching.label);
       if (problem !== undefined) {
         warn(`${runId}: ${problem}`);
+        unsettled();
         failed();
         continue;
       }
