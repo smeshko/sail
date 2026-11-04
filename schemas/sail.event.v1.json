@@ -64,6 +64,7 @@
         "codehost:checks_rerun",
         "codehost:labelled",
         "codehost:commented",
+        "codehost:pr_updated",
         "codehost:merged",
         "jev:asked",
         "workspace:leased",
@@ -282,6 +283,10 @@
     {
       "if": { "properties": { "type": { "const": "codehost:commented" } }, "required": ["type"] },
       "then": { "$ref": "#/$defs/codehostCommented" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "codehost:pr_updated" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/codehostPrUpdated" }
     },
     {
       "if": { "properties": { "type": { "const": "codehost:merged" } }, "required": ["type"] },
@@ -1385,6 +1390,18 @@
         "body": { "type": "string" }
       },
       "required": ["number", "body"],
+      "unevaluatedProperties": false
+    },
+    "codehostPrUpdated": {
+      "description": "a pull request's title or body changed: the fields, never the new text",
+      "type": "object",
+      "$ref": "#/$defs/envelope",
+      "properties": {
+        "key": true,
+        "number": { "type": "integer", "minimum": 1 },
+        "changed": { "type": "array", "items": { "enum": ["title", "body"] }, "minItems": 1, "uniqueItems": true }
+      },
+      "required": ["number", "changed"],
       "unevaluatedProperties": false
     },
     "codehostMerged": {

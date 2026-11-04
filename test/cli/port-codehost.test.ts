@@ -366,6 +366,7 @@ export default {
     addLabel: nothing,
     removeLabel: nothing,
     comment: nothing,
+    updatePullRequest: nothing,
     capabilities: () => ({ checks: true, labels: true, drafts: true, mergeMethods: ['merge'] }),
   }),
 };

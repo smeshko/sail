@@ -609,6 +609,7 @@ const PROVIDER: NewEvent[] = [
   { type: 'codehost:checks_rerun', key: OPEN, number: 1, headSha: SHA, checks: ['ci'] },
   { type: 'codehost:labelled', key: OPEN, number: 1, label: 'sail', change: 'added' },
   { type: 'codehost:commented', number: 1, body: 'Checks passed.' },
+  { type: 'codehost:pr_updated', key: OPEN, number: 1, changed: ['title', 'body'] },
   { type: 'codehost:merged', number: 1, method: 'squash', sha: 'f569e7f50659194ebd39f2f141e95091f40791da' },
   { type: 'workspace:leased', ...lease, took: 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3M' },
   { type: 'workspace:lease_released', ...lease },
@@ -656,6 +657,15 @@ test('provider events: a key where D10 allows one, and the rules each payload ad
     check({ type: 'codehost:checks_rerun', number: 1, headSha: SHA, checks: ['ci'], extra: true }),
     check({ type: 'codehost:checks_rerun', number: 1, headSha: SHA, checks: [] }),
   ]).toEqual([[], issue('/extra', 'is not allowed'), issue('/checks', 'must NOT have fewer than 1 items')]);
+  expect([
+    check({ type: 'codehost:pr_updated', number: 1, changed: ['body'] }),
+    check({ type: 'codehost:pr_updated', number: 1, changed: [] }),
+    check({ type: 'codehost:pr_updated', number: 1, changed: ['labels'] }),
+  ]).toEqual([
+    [],
+    issue('/changed', 'must NOT have fewer than 1 items'),
+    issue('/changed/0', 'must be equal to one of the allowed values'),
+  ]);
 });
 
 test('event: a run:suspended on the usage limit names its call and may carry the reset time, and takes no budget field', () => {

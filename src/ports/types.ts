@@ -137,6 +137,16 @@ export const PullRequestDetails = PullRequest.extend({
 });
 export type PullRequestDetails = z.infer<typeof PullRequestDetails>;
 
+/** What `updatePullRequest` changes: the title, the body, or both. A field left out stays as it is. */
+export interface UpdatePullRequest {
+  readonly title?: string;
+  readonly body?: string;
+}
+
+/** The pull request `updatePullRequest` leaves, with the body the host now holds (`''` when it has none). */
+export const UpdatedPullRequest = PullRequest.extend({ body: z.string() });
+export type UpdatedPullRequest = z.infer<typeof UpdatedPullRequest>;
+
 export const Pushed = z.object({ branch: z.string(), headSha: z.string(), raw: Raw });
 export type Pushed = z.infer<typeof Pushed>;
 

@@ -13,7 +13,14 @@ import type { CodeHost } from '../../ports/code-host';
 import { PortError } from '../../ports/errors';
 import { holdsLabel, sameLabel } from '../../ports/labels';
 import type { ProviderOptions } from '../../ports/ticket-source';
-import { type Labelled, MergeRequest, type MergeResult, mergeRequestIssue, type PullRequest } from '../../ports/types';
+import {
+  type Labelled,
+  MergeRequest,
+  type MergeResult,
+  mergeRequestIssue,
+  type PullRequest,
+  type UpdatedPullRequest,
+} from '../../ports/types';
 import { gitSync, stripUserinfo } from '../workspace/git';
 import { readCheckLog, readChecks, rerunFailed } from './github-checks';
 import { createGitHubClient, type Fetch, GITHUB_API_URL } from './github-client';
@@ -21,6 +28,7 @@ import {
   type GitHubComment,
   type GitHubPull,
   isFork,
+  keepTicketMarker,
   toPullRequest,
   toPullRequestDetails,
   withTicketMarker,
@@ -360,6 +368,31 @@ export function createGitHubCodeHost(options: GitHubCodeHostOptions): CodeHost {
         );
         emit({ type: 'codehost:commented', number, body: text });
         return { id: String(posted.id), url: posted.html_url, raw: posted };
+      }),
+    updatePullRequest: (number, update) =>
+      guarded(async (): Promise<UpdatedPullRequest> => {
+        if (update.title === undefined && update.body === undefined) {
+          throw new PortError(
+            'codeHost',
+            'updatePullRequest',
+            'invalid',
+            'the update names neither a title nor a body',
+          );
+        }
+        unsent('updatePullRequest', "the pull request's title or body", update.title ?? '', update.body ?? '');
+        const op = 'updatePullRequest';
+        const current = await client.request<GitHubPull>(op, 'GET', client.repoPath('pulls', number));
+        const sent: { title?: string; body?: string } = {};
+        if (update.title !== undefined && update.title !== current.title) sent.title = update.title;
+        if (update.body !== undefined) {
+          const body = keepTicketMarker(current.body, update.body);
+          if (body !== (current.body ?? '')) sent.body = body;
+        }
+        const changed = (['title', 'body'] as const).filter((field) => sent[field] !== undefined);
+        if (changed.length === 0) return { ...toPullRequest(current), body: current.body ?? '' };
+        const node = await client.request<GitHubPull>(op, 'PATCH', client.repoPath('pulls', number), sent);
+        emit({ type: 'codehost:pr_updated', number, changed });
+        return { ...toPullRequest(node), body: node.body ?? '' };
       }),
     capabilities: () => ({ checks: true, labels: true, drafts: true, mergeMethods: ['merge', 'squash', 'rebase'] }),
   };

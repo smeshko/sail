@@ -924,6 +924,10 @@ test('at trace, an event of every type prints a line of its own', () => {
       head('', '· codehost:commented {"number":1,"body":"hi"}', w),
     ],
     [
+      { type: 'codehost:pr_updated', number: 1, changed: ['title', 'body'] },
+      head('', '· codehost:pr_updated {"number":1,"changed":["title","body"]}', w),
+    ],
+    [
       { type: 'codehost:merged', number: 1, method: 'squash', sha: 'f569e7f' },
       head('', '· codehost:merged {"number":1,"method":"squash","sha":"f569e7f"}', w),
     ],

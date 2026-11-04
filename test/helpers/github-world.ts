@@ -15,7 +15,7 @@ export interface WorldPull {
   title: string;
   body: string;
   /** Answered as GitHub's `null`: a pull request opened with no description. */
-  readonly nullBody: boolean;
+  nullBody: boolean;
   readonly head: string;
   readonly base: string;
   headSha: string;
@@ -400,6 +400,17 @@ export function createGitHubWorld(seed: GitHubWorldSeed): GitHubWorld {
     if (method === 'GET' && pull !== null) {
       const pr = find(Number(pull[1]));
       return pr === undefined ? notFound() : json(200, node(pr));
+    }
+    if (method === 'PATCH' && pull !== null) {
+      const pr = find(Number(pull[1]));
+      if (pr === undefined) return notFound();
+      const asked = body as { title?: string; body?: string };
+      if (asked.title !== undefined) pr.title = asked.title;
+      if (asked.body !== undefined) {
+        pr.body = asked.body;
+        pr.nullBody = false;
+      }
+      return json(200, node(pr));
     }
     const labels = /^\/issues\/(\d+)\/labels$/.exec(path);
     if (method === 'POST' && labels !== null) {
