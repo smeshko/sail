@@ -1,5 +1,6 @@
 // The gate files: what `bun run verify` reads, so a pull request changing one could loosen its own check. Keep this
-// literal beside EVERYTHING in scripts/affected-tests.ts and .github/workflows/verify.yml.
+// literal beside EVERYTHING in scripts/affected-tests.ts and .github/workflows/verify.yml. The config and its
+// workspace setup script at the end are not read by verify: they are here because they load code into the review run.
 export const GATE_FILES = [
   'package.json',
   'bun.lock',
