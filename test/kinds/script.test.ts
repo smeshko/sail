@@ -386,14 +386,33 @@ test('exitCodes fills the lists it leaves out, and a code listed under error is 
   expect(exitCodeMap(tests())).toEqual({ passed: [0], failed: [1], error: [] });
 });
 
-test('a script killed by a signal is exit_code, naming the signal', async () => {
+test('a script killed by SIGKILL from outside sail is exit_code, signalled, naming the signal', async () => {
   const s = setup();
   s.run('kill -KILL $$');
   expect(await scriptKind.run(tests(), s.context)).toMatchObject({
     outcome: 'error',
-    errors: [{ reason: 'exit_code', message: 'ended by signal SIGKILL' }],
+    errors: [{ reason: 'exit_code', code: 'signalled', message: 'ended by signal SIGKILL' }],
     record: { exit: { code: null, signal: 'SIGKILL' } },
   });
+});
+
+test('a script killed by SIGTERM or SIGHUP from outside sail is exit_code, signalled', async () => {
+  for (const signal of ['TERM', 'HUP']) {
+    const s = setup();
+    s.run(`kill -${signal} $$`);
+    const run = await scriptKind.run(tests(), s.context);
+    expect(run.errors).toEqual([{ reason: 'exit_code', code: 'signalled', message: `ended by signal SIG${signal}` }]);
+  }
+});
+
+test('a script ended by a crash signal is exit_code with no code', async () => {
+  for (const signal of ['SEGV', 'ABRT']) {
+    const s = setup();
+    s.run(`kill -${signal} $$`);
+    const run = await scriptKind.run(tests(), s.context);
+    expect(run.errors).toEqual([{ reason: 'exit_code', message: `ended by signal SIG${signal}` }]);
+    expect(run.errors[0]).not.toHaveProperty('code');
+  }
 });
 
 test('an interrupted script is error, even when it handles SIGTERM, leaves its report and exits 0', async () => {
@@ -416,6 +435,7 @@ test('an interrupted script is error, even when it handles SIGTERM, leaves its r
     record: { exit: { code: 0, mapped: 'passed' } },
   });
   expect(readFileSync(s.context.paths.stdout, 'utf8')).toBe(`${PASSING}\n`);
+  expect(run.errors[0]).not.toHaveProperty('code');
 });
 
 test('a script that removes its log ends invalid_output', async () => {

@@ -74,7 +74,7 @@
           },
           "message": { "type": "string", "minLength": 1 },
           "resetsAt": { "$ref": "#/$defs/ts" },
-          "code": { "const": "unavailable" }
+          "code": { "enum": ["unavailable", "signalled"] }
         },
         "required": ["reason", "message"],
         "additionalProperties": false
