@@ -60,6 +60,7 @@ export const EVENT_TYPES = [
   'ticket:commented',
   'ticket:created',
   'ticket:attached',
+  'ticket:downloaded',
   'ticket:labelled',
   'ticket:unlabelled',
   'ticket:related',
@@ -336,6 +337,15 @@ interface Payloads {
   'ticket:created': { key?: string; ticketKey: string; title: string; url: string };
   /** A file `attach` attached: its name, content type and size in bytes, and the attachment's URL. */
   'ticket:attached': { key?: string; ticketKey: string; name: string; contentType: string; size: number; url: string };
+  /** A file `download` fetched: its name as the ticket gives it, its content type when served with one, its size in bytes and URL. */
+  'ticket:downloaded': {
+    key?: string;
+    ticketKey: string;
+    name: string;
+    contentType?: string;
+    size: number;
+    url: string;
+  };
   /** A label `addLabel` added: the label and the ticket's labels afterwards. */
   'ticket:labelled': { key?: string; ticketKey: string; label: string; labels: string[] };
   /** A label `removeLabel` removed: the label and the ticket's labels afterwards. */

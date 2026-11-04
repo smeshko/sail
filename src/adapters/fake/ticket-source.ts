@@ -4,7 +4,14 @@
 import { z } from 'zod';
 import type { ProviderEvent } from '../../events/types';
 import { PortError } from '../../ports/errors';
-import { checkAttachment, fetchInterrupted, type ProviderOptions, type TicketSource } from '../../ports/ticket-source';
+import {
+  checkAttachment,
+  fetchInterrupted,
+  MAX_ATTACHMENT_BYTES,
+  overCap,
+  type ProviderOptions,
+  type TicketSource,
+} from '../../ports/ticket-source';
 import {
   Attachment,
   Comment,
@@ -56,6 +63,19 @@ export function checkFakePickUp(pickUp: readonly string[]): void {
 
 const TicketAnswers = z.array(z.enum(['ok', 'unavailable'])).min(1);
 
+/**
+ * An attachment as the seed holds it: the port's, with the file behind it. `content` is UTF-8 text and `base64` bytes;
+ * `size` is the size the file reports, so a seed can stand for an oversized file without holding it; `answer` of
+ * `unavailable` is the provider refusing the download.
+ */
+const StoredAttachment = Attachment.extend({
+  content: z.string().optional(),
+  base64: z.string().optional(),
+  size: z.number().int().nonnegative().optional(),
+  answer: z.enum(['ok', 'unavailable']).optional(),
+});
+type StoredAttachment = z.infer<typeof StoredAttachment>;
+
 /** A ticket as the seed holds it: its URL and `raw` are derived. */
 const StoredTicket = z.object({
   ticketKey: z.string(),
@@ -66,7 +86,7 @@ const StoredTicket = z.object({
   labels: z.array(z.string()),
   comments: z.array(Comment),
   links: z.array(Link),
-  attachments: z.array(Attachment),
+  attachments: z.array(StoredAttachment),
   /** The keys of the tickets that block this one. A key no ticket of the world has is an unreadable prerequisite. */
   prerequisites: z.array(z.string()).optional(),
   /** What each comment, update, add-label or remove-label call is answered, the last repeating: `unavailable` is the provider refusing it, a PortError. */
@@ -127,10 +147,26 @@ const URL_KEY = /^fake:\/\/tickets\/(FAKE-\d+)$/;
 const ticketNumber = (ticketKey: string): number => Number(ticketKey.slice('FAKE-'.length));
 
 /** A copy of the stored ticket without its scripts, so changing what a caller is given never reaches the store. */
-const bare = (stored: StoredTicket): Omit<StoredTicket, 'answers' | 'reads'> => {
-  const { answers: _answers, reads: _reads, ...rest } = structuredClone(stored);
-  return rest;
+const bare = (
+  stored: StoredTicket,
+): Omit<StoredTicket, 'answers' | 'reads' | 'attachments'> & {
+  attachments: Attachment[];
+} => {
+  const { answers: _answers, reads: _reads, attachments, ...rest } = structuredClone(stored);
+  return { ...rest, attachments: attachments.map(portAttachment) };
 };
+
+/** The port's attachment: the stored one without the file behind it. */
+const portAttachment = ({
+  content: _c,
+  base64: _b,
+  size: _s,
+  answer: _a,
+  ...attachment
+}: StoredAttachment): Attachment => attachment;
+
+/** The fake's own uploads: where `attach` puts a file. */
+const HOSTED = /^fake:\/\/tickets\/FAKE-\d+\/attachments\/\d+$/;
 
 type ScriptedOp = 'comment' | 'update' | 'addLabel' | 'removeLabel';
 
@@ -370,12 +406,48 @@ export function createFakeTicketSource(options: FakeTicketSourceOptions): Ticket
         const ticket = find(world, 'attach', ticketKey);
         const url = `fake://tickets/${ticketKey}/attachments/${ticket.attachments.length + 1}`;
         const attachment = { name, url, mimeType: file.contentType };
-        ticket.attachments.push(attachment);
+        ticket.attachments.push({ ...attachment, base64: Buffer.from(file.bytes).toString('base64') });
         return { url, raw: structuredClone(attachment) };
       });
       const { contentType, bytes } = file;
       emit({ type: 'ticket:attached', ticketKey, name, contentType, size: bytes.byteLength, url: attached.url });
       return attached;
+    },
+    hosts: (url) => HOSTED.test(url),
+    async download(ticketKey, url, options) {
+      if (!HOSTED.test(url)) {
+        throw new PortError('ticketSource', 'download', 'invalid', 'not a file the fake ticket source stores');
+      }
+      if (options?.signal?.aborted) throw fetchInterrupted('download', url);
+      const stored = find(store.read(), 'download', ticketKey).attachments.find((each) => each.url === url);
+      if (stored === undefined) {
+        throw new PortError('ticketSource', 'download', 'not_found', `${ticketKey} has no attachment at ${url}`);
+      }
+      if (stored.answer === 'unavailable') {
+        throw new PortError('ticketSource', 'download', 'unavailable', 'fake: download refused (scripted)');
+      }
+      const max = options?.maxBytes ?? MAX_ATTACHMENT_BYTES;
+      const bytes =
+        stored.base64 !== undefined
+          ? new Uint8Array(Buffer.from(stored.base64, 'base64'))
+          : stored.content !== undefined
+            ? new TextEncoder().encode(stored.content)
+            : undefined;
+      const size = stored.size ?? bytes?.byteLength ?? 0;
+      if (size > max) throw new PortError('ticketSource', 'download', 'invalid', overCap(size, max));
+      if (bytes === undefined) {
+        throw new PortError('ticketSource', 'download', 'not_found', `the fake holds no bytes for ${url}`);
+      }
+      const { mimeType: contentType } = stored;
+      emit({
+        type: 'ticket:downloaded',
+        ticketKey,
+        name: stored.name,
+        ...(contentType === undefined ? {} : { contentType }),
+        size,
+        url,
+      });
+      return { bytes, size, ...(contentType === undefined ? {} : { contentType }) };
     },
     capabilities: () => ({
       comments: true,

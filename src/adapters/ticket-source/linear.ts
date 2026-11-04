@@ -7,7 +7,15 @@ import { z } from 'zod';
 import type { ProviderEvent } from '../../events/types';
 import type { AdapterDefinition } from '../../ports/adapter';
 import { PortError } from '../../ports/errors';
-import { checkAttachment, type ProviderOptions, type TicketSource } from '../../ports/ticket-source';
+import {
+  checkAttachment,
+  type Downloaded,
+  type DownloadOptions,
+  MAX_ATTACHMENT_BYTES,
+  overCap,
+  type ProviderOptions,
+  type TicketSource,
+} from '../../ports/ticket-source';
 import {
   type ListedTicket,
   type Relabelled,
@@ -33,7 +41,12 @@ export interface LinearTicketSourceOptions extends ProviderOptions {
   readonly endpoint: string;
   readonly apiKey: string;
   readonly fetch?: Fetch;
+  /** The origin of the files Linear hosts. `LINEAR_UPLOADS_ORIGIN` unless a test serves them elsewhere. */
+  readonly uploadsOrigin?: string;
 }
+
+/** Where Linear stores the files uploaded to its tickets. `download` sends the API key here and nowhere else. */
+export const LINEAR_UPLOADS_ORIGIN = 'https://uploads.linear.app';
 
 const TICKET = `query SailTicket($team: String!, $number: Float!) {
   issues(filter: { team: { key: { eq: $team } }, number: { eq: $number } }, first: 1) { nodes { ${TICKET_FIELDS} } }
@@ -140,6 +153,9 @@ const ATTACH = `mutation SailAttach($issueId: String!, $url: String!, $title: St
 
 /** How long the PUT of a file's bytes may take. */
 const UPLOAD_TIMEOUT_MS = 120_000;
+
+/** How many redirects `download` follows, each to a URL that is again Linear's own. */
+const MAX_REDIRECTS = 3;
 
 /** The Linear state types sail reads as unstarted: the ones a designated ticket is picked up from, and a `pickUp` entry may be. */
 const UNSTARTED_TYPES = ['triage', 'backlog', 'unstarted'];
@@ -464,6 +480,121 @@ function buildLinearTicketSource(options: LinearTicketSourceOptions): {
     );
   }
 
+  const uploadsOrigin = options.uploadsOrigin ?? LINEAR_UPLOADS_ORIGIN;
+
+  /** Whether `url` is a file in Linear's storage: its origin exactly, no userinfo. The only URLs the key is sent to. */
+  function hosts(url: string): boolean {
+    if (!URL.canParse(url)) return false;
+    const parsed = new URL(url);
+    return parsed.origin === uploadsOrigin && parsed.username === '' && parsed.password === '';
+  }
+
+  const unavailable = (message: string) => new PortError('ticketSource', 'download', 'unavailable', message);
+
+  /** GETs `url` and each hosted redirect it leads to, up to `MAX_REDIRECTS`, sending the key only to hosted URLs. */
+  async function fetchHosted(url: string, signal: AbortSignal): Promise<Response> {
+    let current = url;
+    for (let hops = 0; ; hops++) {
+      let response: Response;
+      try {
+        response = await send(current, {
+          method: 'GET',
+          headers: { Authorization: options.apiKey },
+          redirect: 'manual',
+          signal,
+        });
+      } catch (error) {
+        const timedOut = error instanceof Error && error.name === 'TimeoutError';
+        throw unavailable(
+          timedOut
+            ? `Linear's upload host did not answer within ${UPLOAD_TIMEOUT_MS} ms`
+            : `Linear's upload host is unreachable: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      if (response.status < 300 || response.status >= 400) return response;
+      const location = response.headers.get('location');
+      await response.body?.cancel().catch(() => {});
+      const next = location !== null && URL.canParse(location, current) ? new URL(location, current).href : undefined;
+      if (next === undefined) throw unavailable(`Linear's upload host redirected without saying where`);
+      if (!hosts(next)) {
+        throw new PortError(
+          'ticketSource',
+          'download',
+          'invalid',
+          'the file redirects away from the files Linear stores',
+        );
+      }
+      if (hops === MAX_REDIRECTS) throw unavailable(`Linear's upload host redirected more than ${MAX_REDIRECTS} times`);
+      current = next;
+    }
+  }
+
+  async function download(ticketKey: string, url: string, downloadOptions: DownloadOptions = {}): Promise<Downloaded> {
+    if (!hosts(url)) {
+      throw new PortError('ticketSource', 'download', 'invalid', 'not a file Linear stores: it is never fetched');
+    }
+    const max = downloadOptions.maxBytes ?? MAX_ATTACHMENT_BYTES;
+    const timeout = AbortSignal.timeout(UPLOAD_TIMEOUT_MS);
+    const signal = downloadOptions.signal === undefined ? timeout : AbortSignal.any([timeout, downloadOptions.signal]);
+    const response = await fetchHosted(url, signal);
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => {});
+      const code =
+        response.status === 401 || response.status === 403
+          ? 'forbidden'
+          : response.status === 404
+            ? 'not_found'
+            : 'unavailable';
+      throw new PortError(
+        'ticketSource',
+        'download',
+        code,
+        `Linear's upload host refused the file: ${response.status}`,
+      );
+    }
+    const declared = response.headers.get('content-length');
+    if (declared !== null && Number(declared) > max) {
+      await response.body?.cancel().catch(() => {});
+      throw new PortError('ticketSource', 'download', 'invalid', overCap(Number(declared), max));
+    }
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    try {
+      const reader = response.body?.getReader();
+      while (reader !== undefined) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > max) {
+          await reader.cancel().catch(() => {});
+          throw new PortError('ticketSource', 'download', 'invalid', overCap(undefined, max));
+        }
+        chunks.push(value);
+      }
+    } catch (error) {
+      if (error instanceof PortError) throw error;
+      throw unavailable(`the file stopped arriving: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    const bytes = new Uint8Array(size);
+    let at = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, at);
+      at += chunk.byteLength;
+    }
+    const contentType = response.headers.get('content-type') ?? undefined;
+    const last = new URL(url).pathname.split('/').pop() ?? '';
+    const name = decodeURIComponent(last) || url;
+    emit({
+      type: 'ticket:downloaded',
+      ticketKey,
+      name,
+      ...(contentType === undefined ? {} : { contentType }),
+      size,
+      url,
+    });
+    return { bytes, size, ...(contentType === undefined ? {} : { contentType }) };
+  }
+
   async function move(op: string, id: string, to: TicketMove): Promise<{ state: TicketState; raw: object }> {
     return moveTo(op, id, await target(op, to));
   }
@@ -716,6 +847,8 @@ function buildLinearTicketSource(options: LinearTicketSourceOptions): {
       emit({ type: 'ticket:attached', ticketKey, name: title, contentType, size: bytes.byteLength, url });
       return { url, raw: data };
     },
+    hosts,
+    download,
     capabilities: () => ({
       comments: true,
       links: true,

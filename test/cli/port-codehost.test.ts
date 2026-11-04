@@ -21,7 +21,8 @@ const CREATE_USAGE = '       sail port ticket-source create --title <text> [--la
 const RELABEL_USAGE =
   '       sail port ticket-source add-label|remove-label <ticket> <label>\n       sail port ticket-source relate <ticket> --kind <related|blocks|duplicate> --to <ticket>\n       sail port ticket-source edit <ticket> [--title <text>] [--body-file <path>]\n';
 const ATTACH_USAGE =
-  '       sail port ticket-source attach <ticket> --file <path> [--title <text>] [--content-type <type>]\n';
+  '       sail port ticket-source attach <ticket> --file <path> [--title <text>] [--content-type <type>]\n' +
+  '       sail port ticket-source download <ticket> [--out <dir>]\n';
 const PUSH_USAGE = '       sail port codehost push <branch>\n';
 const OPEN_USAGE =
   '       sail port codehost open-pull-request --base <branch> --head <branch> --title <text> [--body-file <path>] [--draft] [--ticket <ticket key>] [--label <name>]...\n';

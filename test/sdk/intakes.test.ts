@@ -93,6 +93,8 @@ test('TicketInput marks as untrusted every string the provider returned, and lea
     attachmentName: isUntrusted(attachment.name),
     attachmentUrl: isUntrusted(attachment.url),
     mimeType: isUntrusted(attachment.mimeType.unwrap()),
+    path: isUntrusted(attachment.path.unwrap()),
+    skipped: isUntrusted(attachment.skipped.unwrap()),
   }).toEqual({
     ticketKey: false,
     title: true,
@@ -104,9 +106,11 @@ test('TicketInput marks as untrusted every string the provider returned, and lea
     attachmentName: true,
     attachmentUrl: true,
     mimeType: true,
+    path: true,
+    skipped: true,
   });
   expect(Object.keys(link)).toEqual(['url', 'title']);
-  expect(Object.keys(attachment)).toEqual(['name', 'url', 'mimeType']);
+  expect(Object.keys(attachment)).toEqual(['name', 'url', 'mimeType', 'path', 'skipped']);
 });
 
 test("a prompt that prints the input's URL or an attachment's MIME type keeps a fake closing delimiter inside the wrapper", () => {

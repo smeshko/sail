@@ -18,6 +18,9 @@
 //                                                   sets its description from the file or stdin, and its title
 //   sail port ticket-source attach <ticket> --file <path> [--title <text>] [--content-type <type>]
 //                                                   uploads the file and attaches it: its type from its extension
+//   sail port ticket-source download <ticket> [--out <dir>]
+//                                                   downloads the files the provider hosts into the directory (default
+//                                                   ./attachments): each one's path or why it was skipped
 //   sail port codehost <operation> ...              a CodeHost operation: the table is in port-codehost.ts
 //   sail port jev ask [--model <id>] [--body-file <path>]    asks Jev the questions in the JSON body: port-jev.ts
 //   sail port render --untrusted --source <text> [--inline]    stdin, wrapped as untrusted input
@@ -41,9 +44,10 @@
 // and is found from the working directory otherwise. A `.sail/` in a run's `definition/`, the copy a run started from
 // committed definitions works on, works on the clone that holds the run, as the run's own adapters do. Only the port
 // asked for is resolved, so no other adapter is loaded or asked for its credentials. `render` is a helper beside the ports: it needs no `.sail/`.
-import { readFileSync, statSync } from 'node:fs';
-import { basename, dirname, resolve } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
 import { z } from 'zod';
+import { downloadAttachments } from '../../engine/attachments';
 import type { Port } from '../../engine/config';
 import { appendPortEvent } from '../../engine/port-events';
 import { wrapUntrusted } from '../../engine/render';
@@ -381,6 +385,35 @@ const attachOperation: PortOperation<TicketSource> = {
   },
 };
 
+/**
+ * The files the ticket's provider hosts, downloaded into `--out` (`attachments` under the working directory by default,
+ * created when missing): each file's absolute path, or why it was skipped, and a link that was never fetched. An
+ * `--out` that exists and is no directory is refused before the port is called.
+ */
+const downloadOperation: PortOperation<TicketSource> = {
+  positionals: ['ticket'],
+  options: { out: { value: 'dir', filled: true } },
+  async run(source, { cwd, positionals: [ref = ''], values }) {
+    const ticketKey = source.parseKey(ref);
+    if (ticketKey === undefined) return { refused: notATicket(ref, source.name) };
+    const named = typeof values.out === 'string' ? values.out : 'attachments';
+    const dir = resolve(cwd, named);
+    if (existsSync(dir) && !isDirectory(dir))
+      return { refused: `--out names ${named}, which exists and is no directory` };
+    const ticket = await getTicket(source, ticketKey);
+    mkdirSync(dir, { recursive: true });
+    const outcomes = await downloadAttachments(source, ticketKey, ticket.attachments, dir);
+    const files = outcomes.map((each) => ({
+      name: each.name,
+      url: each.url,
+      ...(each.file === undefined ? {} : { path: join(dir, each.file) }),
+      ...(each.skipped === undefined ? {} : { skipped: each.skipped }),
+      ...(each.link === true ? { skipped: 'never fetched: a link, not a file the provider hosts' } : {}),
+    }));
+    return { value: { ticketKey, files } };
+  },
+};
+
 /** `links` and `attachments` are no operations of the port: they read `get`'s answer. */
 const TICKET_SOURCE: PortTable<'ticketSource'> = {
   port: 'ticketSource',
@@ -398,6 +431,7 @@ const TICKET_SOURCE: PortTable<'ticketSource'> = {
     relate: relateOperation,
     edit: editOperation,
     attach: attachOperation,
+    download: downloadOperation,
   },
 };
 

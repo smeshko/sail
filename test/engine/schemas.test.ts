@@ -574,6 +574,15 @@ const PROVIDER: NewEvent[] = [
     size: 42,
     url: 'fake://tickets/FAKE-1/attachments/1',
   },
+  {
+    type: 'ticket:downloaded',
+    key: OPEN,
+    ticketKey: 'FAKE-1',
+    name: 'shot.png',
+    contentType: 'image/png',
+    size: 8,
+    url: 'fake://tickets/FAKE-1/attachments/1',
+  },
   { type: 'ticket:labelled', key: OPEN, ticketKey: 'FAKE-1', label: 'Bug', labels: ['sail', 'Bug'] },
   { type: 'ticket:unlabelled', key: OPEN, ticketKey: 'FAKE-1', label: 'Bug', labels: ['sail'] },
   {
