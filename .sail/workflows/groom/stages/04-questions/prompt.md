@@ -7,6 +7,8 @@ the ticket uses and the repository doesn't, a dependency on something undecided.
 only what it can't answer. The repository includes `docs/`, a local copy of the design docs: ADRs in `docs/adr/`, plans
 and their decisions in `docs/artifacts/plans/` (finished ones in `archive/`), epics in `docs/artifacts/epics/`. A
 question that a decision there settles is not open: quote the decision and cite it as `docs/…:line` instead of asking.
+A `## Rulings` section in the ticket's description holds a person's answers to questions an earlier grooming asked: a
+question a ruling answers is not open either.
 
 Each question stands alone: a person reading only it knows what to answer. Don't ask for confirmation of what the
 ticket already says, and don't ask about style. A clear ticket has no questions, and an empty list is the right answer.

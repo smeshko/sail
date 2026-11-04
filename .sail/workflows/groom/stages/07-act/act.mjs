@@ -1,9 +1,14 @@
-// Applies the actions in $INPUT_ACTIONS to the ticket in $INPUT_TICKETKEY, comments report.md, an `## Open questions`
-// section rendered from the plan's questions and an `## Actions` section on it, then swaps the label in $INPUT_LABEL for the plan's outcome, `groomed` or `open-questions`. The swap is
+// Applies the actions in $INPUT_ACTIONS (the verdict) to the ticket in $INPUT_TICKETKEY. For a `planned` verdict it
+// attaches $INPUT_PLAN, the plan.md the plan stage wrote, with an AttachedPlan trailer (.sail/lib/plan.ts) as its last
+// line: the plan's structured part, this run, the commit the workspace stands on and when it was attached, which is how
+// the factory finds the plan. Then it comments report.md, a `## Plan` section for a planned ticket, an `## Open questions`
+// section rendered from the verdict's questions and an `## Actions` section on it, then swaps the label in $INPUT_LABEL
+// for the verdict's outcome, `groomed`, `open-questions`, or `planned` with `factory` beside it. The swap is
 // tried three times, a second apart, as open.sh does for its comment, so a short provider failure after the report is
 // posted does not fail the step. The report ends with a line naming the run, and the step reads the ticket first and
 // comments only when no comment holds that line: a later try has a fresh $STAGE_OUT, so the guard lives on the ticket.
-// When the report was already posted, `comment` in the output is the ticket's URL. An action
+// When the report was already posted, `comment` in the output is the ticket's URL, and a plan already attached under
+// this run's title is not attached again. An action
 // the port refuses is listed as failed and stops nothing. The comment goes before the labels, so a run that fails before
 // the end leaves the ticket designated. Every action sets a whole value (a description, a state, a relation, a label), so
 // a retry that applies it again changes nothing. Prints the Acted.
@@ -15,8 +20,12 @@ import { join } from 'node:path';
 const read = (name) => readFileSync(process.env[name], 'utf8');
 const ticketKey = read('INPUT_TICKETKEY').trim();
 const label = read('INPUT_LABEL').trim();
-const plan = JSON.parse(read('INPUT_ACTIONS'));
+const verdict = JSON.parse(read('INPUT_ACTIONS'));
 const report = read('INPUT_REPORT').trimEnd();
+const planDoc = process.env.INPUT_PLAN ? read('INPUT_PLAN').trimEnd() : null;
+if (verdict.outcome === 'planned' && (planDoc === null || verdict.plan === null)) {
+  throw new Error('a planned verdict needs its plan.md and its plan');
+}
 
 /** Each label group AGENTS.md names: a `labels` action takes off the group's other labels before it adds its own. */
 const GROUPS = {
@@ -103,7 +112,7 @@ function named(action) {
 
 const applied = [];
 const failed = [];
-for (const action of plan.apply) {
+for (const action of verdict.apply) {
   try {
     applied.push(apply(action));
   } catch (error) {
@@ -115,11 +124,13 @@ const section = [
   '## Actions',
   '',
   ...applied.map((line) => `- applied: ${line}`),
-  ...plan.reported.map((line) => `- reported, not marked: ${line}`),
+  ...verdict.reported.map((line) => `- reported, not marked: ${line}`),
   ...failed.map((line) => `- failed: ${line}`),
 ];
 if (section.length === 2) section.push('- none');
-section.push('', `Labelled \`${plan.outcome}\`.`);
+/** The labels the ticket ends with: the outcome, and `factory` beside `planned`, so the factory implements the plan. */
+const outcomeLabels = verdict.outcome === 'planned' ? ['planned', 'factory'] : [verdict.outcome];
+section.push('', `Labelled ${outcomeLabels.map((name) => `\`${name}\``).join(' and ')}.`);
 
 /**
  * The questions as a numbered list: each option with what it means, the recommended one marked, then why and the cites.
@@ -146,21 +157,64 @@ function questioned(questions) {
   return lines;
 }
 
+const current = port(['ticket-source', 'get', ticketKey]);
+
+/**
+ * Attaches plan.md with its AttachedPlan trailer, unless this run attached it already: the attachment's URL. The
+ * trailer is one HTML comment, so the plan reads the same in Markdown, and the factory parses the line back.
+ */
+function attachPlan() {
+  const title = `plan.md (sail run ${process.env.RUN_ID})`;
+  const already = current.attachments.find((each) => each.name === title);
+  if (already !== undefined) return already.url;
+  const base = spawnSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' });
+  if (base.status !== 0) throw new Error(`git rev-parse HEAD: ${base.stderr.trim()}`);
+  const trailer = {
+    version: 1,
+    ...verdict.plan,
+    run: process.env.RUN_ID,
+    base: base.stdout.trim(),
+    attachedAt: new Date().toISOString(),
+  };
+  const file = join(process.env.STAGE_OUT, 'plan.md');
+  writeFileSync(file, `${planDoc}\n\n<!-- sail:plan ${JSON.stringify(trailer)} -->\n`);
+  const args = ['ticket-source', 'attach', ticketKey, '--file', file, '--title', title];
+  return tried([...args, '--content-type', 'text/markdown']).url;
+}
+
+const attached = verdict.outcome === 'planned' ? attachPlan() : null;
+
+/** The plan's risk and tasks, so a reader of the comment sees what the factory will do without opening the file. */
+function planned() {
+  if (verdict.plan === null || attached === null) return [];
+  return [
+    '## Plan',
+    '',
+    `Risk: ${verdict.plan.risk}. The factory implements the attached [plan.md](${attached}):`,
+    '',
+    ...verdict.plan.tasks.map((task) => `- ${task.id} (${task.type}): ${task.title}`),
+    '',
+  ];
+}
+
 const marker = `sail run ${process.env.RUN_ID} groomed this ticket.`;
 const body = join(process.env.STAGE_OUT, 'comment.md');
-writeFileSync(body, `${report}\n\n${questioned(plan.questions).join('\n')}\n\n${section.join('\n')}\n\n${marker}\n`);
-const current = port(['ticket-source', 'get', ticketKey]);
+writeFileSync(
+  body,
+  `${report}\n\n${[...planned(), ...questioned(verdict.questions)].join('\n')}\n\n${section.join('\n')}\n\n${marker}\n`,
+);
 const posted = current.comments.some((each) => each.body.split('\n').some((line) => line.trim() === marker));
 const comment = posted ? { url: current.url } : port(['ticket-source', 'comment', ticketKey, '--body-file', body]);
-tried(['ticket-source', 'add-label', ticketKey, plan.outcome]);
+for (const name of outcomeLabels) tried(['ticket-source', 'add-label', ticketKey, name]);
 const relabelled = tried(['ticket-source', 'remove-label', ticketKey, label]);
 console.log(
   JSON.stringify({
     applied,
-    reported: plan.reported,
+    reported: verdict.reported,
     failed,
     comment: comment.url,
     unlabelled: !relabelled.labels.includes(label),
-    labelled: plan.outcome,
+    labelled: outcomeLabels,
+    attached,
   }),
 );

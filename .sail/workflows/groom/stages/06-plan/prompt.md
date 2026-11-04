@@ -1,10 +1,18 @@
-Write an implementation plan for the change the brief asks for. You only plan: read the code, never change it.
+Write an implementation plan for the change the ticket asks for, so the factory can implement it with no planning of its
+own. You only plan: read the code, never change it.
 
 ## 1. Explore
 
 Gather enough context to plan without guessing:
 
-- Read the brief at `{{brief}}` in full: the ticket, its acceptance criteria and its comments.
+- Read the brief at `{{brief}}` in full: the ticket, its acceptance criteria and its comments. A `## Rulings` section
+  in its description holds a person's answers to questions an earlier grooming asked: follow them.
+- Read the grooming report at `{{report}}`: what grooming verified about the ticket, and under `## Assumptions` the
+  choices it made on open points. Plan on those choices unless the code shows one wrong, and say so in Decisions.
+- `$STAGE_IN/actions.json` lists what grooming applies to the ticket. An `edit` replaces its title or description, and a
+  `merge` whose `into` is this ticket replaces its description with the merged one: plan the ticket as they leave it.
+- `docs/` holds a local copy of the design docs: ADRs in `docs/adr/`, plans and their decisions in
+  `docs/artifacts/plans/`. Cite a decision there by its number rather than deciding the point again.
 - Locate the entry points, types, modules and tests the change touches, under `src/` and `test/`. Follow imports and
   calls far enough to see how the pieces connect. Read `CONTEXT.md` for the terms to use.
 - Check recent history for related changes: `git log --oneline -20`.
@@ -13,13 +21,18 @@ Gather enough context to plan without guessing:
 You read and never run: not the tests, not the gate, and no scratch file outside `$STAGE_OUT`. Reason from the code
 and the tests as written: the tests take minutes, and validation runs them after implement.
 
-## 2. Resolve every question yourself
+## 2. Resolve what you can, ask what you can't
 
 No one answers questions during this run. Settle each open point from the ticket, the code and the conventions, and
-record it as a Decision or an Assumption. Where two approaches exist, reason through both, pick one and record why.
+record it as a Decision. Where two approaches exist, reason through both, pick one and record why.
 
-If the ticket is too vague to plan without guessing its goal or its acceptance, end the step **blocked**, naming the
-questions a human must answer. Don't plan around a guess.
+Ask only when a guess would plan the wrong change: the ticket's goal or its acceptance is unclear, or a choice changes
+what a user sees and neither the code nor the docs settle it. Submit such points as `questions`, **at most two**, the
+ones a person most needs to answer. A question the Rulings or the report's Assumptions already answer is not open.
+
+With questions, the plan is not attached: the ticket waits for the answers and is groomed again. Still complete the plan
+on your recommended answers, since its sections are checked either way. A change that needs a path implement can't
+write (below) is a question too: ask how the ticket should change.
 
 ## 3. Write the plan
 
@@ -49,13 +62,13 @@ Break the work into tasks, numbered `TASK-001`, `TASK-002`, … in order:
 - Final validation is not a task: the workflow runs `bun run gate` after the last task.
 - Implement may write only `src/`, `test/`, `types/`, `schemas/`, `bin/`, `scripts/`, `.sail/`, `.githooks/`, the root
   configs (`package.json`, `bun.lock`, `bunfig.toml`, `tsconfig.json`, `biome.json`), `AGENTS.md` and `CONTEXT.md`.
-  If the change needs any other path, end the step **blocked**, naming the path: implement would block on it.
+  If the change needs any other path, ask about it as a question, naming the path: implement would block on it.
 - Implement may add an npm dependency with `bun add --exact <package>`, and the task that first imports it adds it.
   A program installed on the machine is not one: CI has only what `package.json` and `bun.lock` name.
 
 ## 4. Plan the demonstration
 
-Once the pull request is open, the review workflow shows the change working the way a user would see it, and checks it
+Once the factory's pull request is open, the review workflow shows the change working the way a user would see it, and checks it
 against the plan's Demonstration section, which the pull request's body carries and you write now, before any code
 exists. Pick the change's surface:
 
@@ -88,3 +101,13 @@ only a test can observe, such as a test rewritten or added, gets no bullet.
 
 Submit the plan's slug (kebab-case, a few words), the Conventional Commits scope its commits share, its risk, and its
 tasks, each with its id, title, type and suggested commit, matching the plan's Tasks list.
+
+Submit `questions` too, an empty list when you settled everything. Each one has:
+
+- `ask`: the question, containing a `?`
+- `options`: two to four, each with the `option` (a short name) and what choosing it `means` day to day
+- `recommend`: the text of one option, exactly as in `options`, the one the plan assumes
+- `why`: why you recommend it
+- `cites`: at least one `file:line` (or `file:line-line`) in the repository that your recommendation rests on
+
+A question that breaks one of these, or a third question, is rejected and you must submit again.

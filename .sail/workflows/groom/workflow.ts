@@ -1,18 +1,22 @@
-// groom: a groom-labelled ticket in, one comment out. The ticket is read without a claim, so it stays where it is unless
-// groom cancels it, merges it into another, or marks it a duplicate. Four agent checks look at it at once (duplicates,
-// worth, staleness and open questions); a judge writes the report, chooses actions from a fixed set and confirms the open
-// questions; the act step applies what the workflow lets through, comments the report, takes the `groom` label off and
-// puts `groomed` or `open-questions` on, so the watcher grooms each ticket once. Composition only: every contract lives
-// on its stage.
+// groom: a groom-labelled ticket in, one comment out, and for a ticket worth doing, its plan. The ticket is read without
+// a claim, so it stays where it is unless groom cancels it, merges it into another, or marks it a duplicate. Four agent
+// checks look at it at once (duplicates, worth, staleness and open questions); a judge writes the report, chooses actions
+// from a fixed set and confirms the open questions. A ticket that survives them with none open is planned, as the
+// factory's plan stage did, and a plan that leaves no question open is attached to the ticket. The act step applies what
+// the workflow lets through, attaches the plan, comments the report, takes the `groom` label off and puts `groomed` (an
+// action ended the ticket), `open-questions` (a person must answer, then put `groom` back) or `planned` and `factory` on,
+// so the watcher grooms each ticket once and the factory implements the plan. Composition only: every contract lives on
+// its stage.
 import { workflow, type z } from 'sail';
 import { readTicket } from './intake';
-import type { Decision, Findings, Plan } from './schemas';
+import type { Decision, Findings, Verdict } from './schemas';
 import { duplicates } from './stages/01-duplicates/stage';
 import { worth } from './stages/02-worth/stage';
 import { staleness } from './stages/03-staleness/stage';
 import { questions } from './stages/04-questions/stage';
 import { decide } from './stages/05-decide/stage';
-import { act } from './stages/06-act/stage';
+import { plan } from './stages/06-plan/stage';
+import { act } from './stages/07-act/stage';
 
 /** The designation label: a ticket carrying it is groomed, and the run takes it off. */
 const LABEL = 'groom';
@@ -103,16 +107,18 @@ function heldCancel(context: Context): string | undefined {
 }
 
 /**
- * Splits the judge's actions into those to apply and those to report, and picks the label the ticket ends with. A
+ * Splits the judge's actions into those to apply and those to report, and picks the label the ticket ends with, before
+ * any plan: `groomed` once an action ends the ticket, `open-questions` while the judge confirmed any, and `planned`
+ * otherwise, which the planner's own questions can still turn into `open-questions`. A
  * `duplicate`, a `cancel` or a `merge` that absorbs this ticket ends it, and no other of them applies after that; a
  * ticket that survives a merge is never canceled. A `cancel` passes the worth check's numbers as `CANCEL` says, a `merge`
  * as `MERGE_CONFIDENCE` and `DUPLICATE_CONFIDENCE` say,
  * never for a kept ticket, and one `merge` and one `labels` apply per run. An `edit` that names nothing to change is reported. A relation of any kind is applied only to one of `others`,
  * never to `ticketKey` itself: the judge and the checks read the ticket's text, which can name any key.
  */
-function limit(decision: z.infer<typeof Decision>, context: Context): z.infer<typeof Plan> {
+function limit(decision: z.infer<typeof Decision>, context: Context): z.infer<typeof Verdict> {
   const { ticketKey, others, kept, findings } = context;
-  const apply: z.infer<typeof Plan>['apply'] = [];
+  const apply: z.infer<typeof Verdict>['apply'] = [];
   const reported: string[] = [];
   /** Why the ticket is gone once an action ends it. */
   let ended: string | undefined;
@@ -187,21 +193,22 @@ function limit(decision: z.infer<typeof Decision>, context: Context): z.infer<ty
     }
   }
   const questions = ended === undefined ? decision.questions : [];
-  return { apply, reported, questions, outcome: questions.length > 0 ? 'open-questions' : 'groomed' };
+  const outcome = ended !== undefined ? 'groomed' : questions.length > 0 ? 'open-questions' : 'planned';
+  return { apply, reported, questions, outcome, plan: null };
 }
 
 export default workflow(
   'groom',
   {
     intake: readTicket,
-    version: 1,
+    version: 2,
     watch: { every: '15m', label: LABEL },
     // One at a time, so two judgments of duplicates or merges never race each other.
     maxConcurrentRuns: 1,
     // A judgment of a ticket needs nothing its prerequisites would deliver, so a blocked ticket is groomed all the same.
     ignorePrerequisites: true,
     description:
-      'judge a ticket for worth, merges, duplicates, staleness, labels and open questions, then merge, cancel or label it',
+      'judge a ticket for worth, merges, duplicates, staleness, labels and open questions, merge, cancel or label it, then plan it for the factory',
   },
   async (run) => {
     const brief = run.intake.files['brief.md'];
@@ -227,19 +234,39 @@ export default workflow(
     };
     const decided = await run.stage(decide, { brief, others, findings });
     if (decided.outcome === 'blocked') return run.fail(`decide blocked: ${decided.reason}`);
-
-    const acted = await run.stage(act, {
+    const report = decided.files['report.md'];
+    const verdict = limit(decided.output, {
+      findings,
       ticketKey,
-      report: decided.files['report.md'],
-      actions: limit(decided.output, {
-        findings,
-        ticketKey,
-        others: run.input.others,
-        kept: run.input.kept,
-        fromReview: run.input.fromReview,
-      }),
-      label: LABEL,
+      others: run.input.others,
+      kept: run.input.kept,
+      fromReview: run.input.fromReview,
     });
+    if (verdict.outcome !== 'planned') {
+      const acted = await run.stage(act, { ticketKey, report, actions: verdict, label: LABEL, plan: undefined });
+      return acted.output;
+    }
+
+    // create-plan, for the ticket as the applied actions leave it. Its questions hold the plan back.
+    const planned = await run.stage(plan, { brief, report, actions: verdict.apply });
+    if (planned.outcome === 'blocked') return run.fail(`plan blocked: ${planned.reason}`);
+    const { questions: asked, ...written } = planned.output;
+    const acted =
+      asked.length > 0
+        ? await run.stage(act, {
+            ticketKey,
+            report,
+            actions: { ...verdict, questions: asked, outcome: 'open-questions' },
+            label: LABEL,
+            plan: undefined,
+          })
+        : await run.stage(act, {
+            ticketKey,
+            report,
+            actions: { ...verdict, plan: written },
+            label: LABEL,
+            plan: planned.files['plan.md'],
+          });
     return acted.output;
   },
 );
