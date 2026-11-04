@@ -479,6 +479,37 @@ test('a fix pass that lists no commit but leaves a different validation failure 
   });
 }, 120_000);
 
+test('a fix pass that commits nothing but leaves validation failing where it passed gets the next pass', async () => {
+  await withTempRepo(async (repo) => {
+    setUp(repo);
+    const seeds = idleSecondFix(repo);
+    seedHarness(join(repo.dir, '.sail'), 'check-fix#2', seeds['check-fix#1']);
+    seedHarness(join(repo.dir, '.sail'), 'check-fix#3', seeds['check-fix#1']);
+    seedValidate(repo, ['a zero total', null, 'a zero total']);
+    const { code, keys } = await review(repo);
+    expect(code).not.toBe(0);
+
+    expect(keys.filter((key) => key.startsWith('fix#'))).toEqual(['fix#1', 'fix#2', 'fix#3']);
+  });
+}, 120_000);
+
+test('a fix pass that commits nothing but meets a fresh medium finding gets the next pass', async () => {
+  await withTempRepo(async (repo) => {
+    setUp(repo);
+    const seeds = idleSecondFix(repo);
+    const regressed = structuredClone(seeds['check-fix#1']);
+    regressed[0].output.findings = [
+      { severity: 'medium', file: 'notes.txt', title: 'the fix broke the footer', detail: 'x' },
+    ];
+    seedHarness(join(repo.dir, '.sail'), 'check-fix#2', regressed);
+    seedHarness(join(repo.dir, '.sail'), 'check-fix#3', seeds['check-fix#1']);
+    const { code, keys } = await review(repo);
+    expect(code).not.toBe(0);
+
+    expect(keys.filter((key) => key.startsWith('fix#'))).toEqual(['fix#1', 'fix#2', 'fix#3']);
+  });
+}, 120_000);
+
 test('a low-severity finding the judge sends to a ticket is not filed, and a medium one is', async () => {
   await withTempRepo(async (repo) => {
     setUp(repo);
