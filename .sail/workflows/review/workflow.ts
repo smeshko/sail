@@ -2,7 +2,7 @@
 // banned-words check, the demonstration and six reviewers look at it at once; Jev triages clear findings, then a judge
 // decides what each finding becomes (fixed here, filed as a ticket, or dropped)
 // and which reviews are too thin to trust. Up to three fix passes follow, each checked by the agent, with Jev's answers as its hint, beside fresh
-// validation. Then
+// validation; a pass that commits nothing and leaves the same findings open ends them early. Then
 // the fixes are pushed, the tickets filed, the demonstration attached to the ticket, the review commented, and the pull
 // request merged once its checks pass. Landing it takes what fix passes are left: each merges the base in, an agent
 // resolving any conflict, and sends checks still red after a rerun to fix as findings; each is validated and pushed
@@ -62,7 +62,7 @@ export default workflow(
   'review',
   {
     intake: pr,
-    version: 7,
+    version: 8,
     watch: { every: '5m' },
     // Two pull requests at a time, though each merge moves the base the other is being reviewed against.
     maxConcurrentRuns: 2,
@@ -206,10 +206,12 @@ export default workflow(
 
     // Fix, then ask Jev about the targets as a hint, and check the fixes with the agent beside a fresh validation, up to
     // FIX_PASSES passes. Open targets, new agent findings at medium or above, and failed validation go to the next pass.
+    // A pass that commits nothing, rewrites no description and leaves the same findings open ends the loop.
     const rounds: z.infer<typeof ReviewRecord>['rounds'] = [];
     let open: z.infer<typeof ReviewRecord>['open'] = [];
     let resolved = targets.length === 0;
     let description: string = run.input.body;
+    let before = { ids: new Set(targets.map((target) => target.id)), failed: validated.outcome === 'failed' };
     if (!resolved) {
       for (const iteration of run.loop('fix', { max: FIX_PASSES, feedback: FixFeedback })) {
         const round = rounds.length + 1;
@@ -267,6 +269,16 @@ export default workflow(
           resolved = true;
           break;
         }
+        const changed = fixed.output.body !== null || fixed.output.fixes.some((each) => each.commit !== null);
+        const failed = again.outcome === 'failed';
+        const same =
+          fresh.length === 0 &&
+          failed === before.failed &&
+          unresolved.length === before.ids.size &&
+          unresolved.every((each) => before.ids.has(each.finding));
+        // Another pass would meet the same findings with nothing changed: report them as they are.
+        if (!changed && same) break;
+        before = { ids: new Set([...unresolved.map((each) => each.finding), ...fresh.map((each) => each.id)]), failed };
         // A failed last pass would fail the run with the loop exceeded: break instead, so the open findings are
         // pushed and reported below.
         if (round === FIX_PASSES) break;
