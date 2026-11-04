@@ -12,6 +12,9 @@ export const GATE_FILES = [
   'scripts/full-suite.ts',
   'scripts/bun-version.ts',
   'scripts/test-watchdog.ts',
+  // The config, whose adapters and workspace setup load code into the review run, and the script that setup runs.
+  '.sail/project.yaml',
+  'scripts/workspace-docs.ts',
 ];
 export const GATE_DIRS = ['.github/'];
 

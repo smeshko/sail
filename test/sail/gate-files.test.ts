@@ -110,6 +110,19 @@ test('the Bun version preflight script is a gate file', async () => {
   });
 });
 
+test('the config and the workspace setup script are gate files', async () => {
+  await withTempRepo((repo) => {
+    const base = setup(repo);
+    appendFileSync(join(repo.dir, '.sail/project.yaml'), '\n# a harmless change\n');
+    put(repo, 'scripts/workspace-docs.ts');
+    commit(repo, '.sail/project.yaml', 'scripts/workspace-docs.ts');
+    expect(stage(repo, base)).toEqual({
+      code: 0,
+      output: { base, touched: ['.sail/project.yaml', 'scripts/workspace-docs.ts'] },
+    });
+  });
+});
+
 test('the silence watchdog the test launcher runs is a gate file', async () => {
   await withTempRepo((repo) => {
     const base = setup(repo);
@@ -245,7 +258,6 @@ test('review prompts and files outside the graph merge on their own', () => {
   const paths = [
     '.sail/workflows/review/stages/06-review-architecture/prompt.md',
     '.sail/workflows/review/stages/18-merge-notes/x.md',
-    '.sail/project.yaml',
     '.sail/lib/demo.mjs',
     '.sail/lib/demo.sh',
     '.sail/workflows/factory/workflow.ts',
@@ -306,8 +318,37 @@ function reach(entries: string[]): string[] {
   return [...seen].map((file) => relative(ROOT, file)).sort();
 }
 
+function adapterModules(config: unknown): string[] {
+  const adapters = (config as { adapters?: Record<string, unknown> }).adapters ?? {};
+  const uses: unknown[] = [];
+  for (const [name, entry] of Object.entries(adapters)) {
+    if (name === 'harnesses') {
+      for (const named of Object.values((entry ?? {}) as Record<string, { use?: unknown }>)) uses.push(named?.use);
+    } else {
+      uses.push((entry as { use?: unknown } | null)?.use);
+    }
+  }
+  return uses
+    .filter((use): use is string => typeof use === 'string' && (use.startsWith('./') || use.startsWith('../')))
+    .map((use) => relative(ROOT, join(ROOT, '.sail', use)));
+}
+
+test('an adapter module the config names joins the derived graph', () => {
+  const config = {
+    adapters: {
+      codeHost: { use: './adapters/gh.ts' },
+      harness: { use: 'claude-code' },
+      harnesses: { pi: { use: '../x.ts' } },
+    },
+  };
+  expect(adapterModules(config)).toEqual(['.sail/adapters/gh.ts', 'x.ts']);
+  expect(lib.isGateFile('.sail/adapters/gh.ts')).toBe(false);
+});
+
 test('every module the review workflow and the guard reach is a gate file', () => {
-  const reached = reach(['.sail/workflows/review/workflow.ts', '.sail/lib/gate-files.mjs']);
+  const config = Bun.YAML.parse(readFileSync(join(ROOT, '.sail/project.yaml'), 'utf8'));
+  const reached = reach(['.sail/workflows/review/workflow.ts', '.sail/lib/gate-files.mjs', ...adapterModules(config)]);
+  expect(lib.isGateFile('.sail/project.yaml')).toBe(true);
   expect(reached).toEqual(
     expect.arrayContaining([
       '.sail/workflows/review/schemas.ts',
