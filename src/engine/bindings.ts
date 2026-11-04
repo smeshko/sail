@@ -4,8 +4,12 @@
 // run's workspace: it is written as `<name>.patch`. A fromStep binding is what an earlier step of the same stage left,
 // which only the engine supplies too: its output, or a field of it, written as a value is, or a file it produced,
 // copied under that file's name. The script finds each one through its `INPUT_<NAME>` variable.
-import { copyFileSync, statSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+//
+// A bound file brings the `attachments/` folder beside its source with it, when there is one: the ticket intake
+// downloads a ticket's files there, and the brief names each as `attachments/<file>`, so the paths resolve beside the
+// brief in `$STAGE_IN`, the one place outside the workspace a step may read.
+import { copyFileSync, cpSync, lstatSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { z } from 'zod';
 import type { Binding, Consumes } from '../sdk/bindings';
 import { isPlainName } from './call-dir';
@@ -65,6 +69,15 @@ function checkValue(binding: Binding & { kind: 'value' }, data: unknown): Checke
   return parsed.success ? { ok: true, data: parsed.data } : { ok: false, message: z.prettifyError(parsed.error) };
 }
 
+/** The folder a bound file brings from beside its source, copied into `$STAGE_IN` under the same name. */
+export const ATTACHMENTS = 'attachments';
+
+/** The `attachments/` folder beside a bound file's source, when there is one. */
+function attachmentsBeside(path: string): string | undefined {
+  const folder = join(dirname(path), ATTACHMENTS);
+  return statSync(folder, { throwIfNoEntry: false })?.isDirectory() ? folder : undefined;
+}
+
 /** One binding as it will be written: under `name` in `$STAGE_IN`, a copy of a file or some text. */
 interface Planned {
   key: string;
@@ -84,6 +97,8 @@ function plan(consumes: Consumes, supplied: Readonly<Record<string, Supplied>>) 
   const planned: Planned[] = [];
   // Entries, not assignment: `values['__proto__'] = …` would set the prototype.
   const values: [string, unknown][] = [];
+  /** The attachments folder the bound files bring, with the first binding that brought it. */
+  let folder: { key: string; from: string } | undefined;
   for (const key of Object.keys(supplied)) {
     if (!Object.hasOwn(consumes, key)) problems.push(`'${key}' is not a binding of this stage`);
   }
@@ -119,7 +134,14 @@ function plan(consumes: Consumes, supplied: Readonly<Record<string, Supplied>>) 
       const stat = statSync(given.path, { throwIfNoEntry: false });
       if (stat === undefined) problems.push(`'${key}': no file at ${given.path}`);
       else if (!stat.isFile()) problems.push(`'${key}': ${given.path} is not a regular file`);
-      else planned.push({ key, name: binding.name, write: { copy: given.path } });
+      else {
+        planned.push({ key, name: binding.name, write: { copy: given.path } });
+        const beside = attachmentsBeside(given.path);
+        if (beside !== undefined && folder === undefined) folder = { key, from: beside };
+        else if (beside !== undefined && folder !== undefined && folder.from !== beside) {
+          problems.push(`'${folder.key}' and '${key}' both bring an ${ATTACHMENTS}/ folder, from different places`);
+        }
+      }
     } else if (binding.kind === 'value' && given.kind === 'value') {
       const checked = checkValue(binding, given.value);
       if (!checked.ok) {
@@ -146,7 +168,12 @@ function plan(consumes: Consumes, supplied: Readonly<Record<string, Supplied>>) 
       problems.push(`'${first}' and '${key}' are both written to $STAGE_IN as '${name}'`);
     } else byName.set(name, key);
   }
-  return { problems, planned, values: Object.fromEntries(values) };
+  if (folder !== undefined && byName.has(ATTACHMENTS)) {
+    problems.push(
+      `'${byName.get(ATTACHMENTS)}' is written to $STAGE_IN as '${ATTACHMENTS}', where '${folder.key}' brings its ${ATTACHMENTS}/ folder`,
+    );
+  }
+  return { problems, planned, values: Object.fromEntries(values), folder: folder?.from };
 }
 
 /** Every problem with what was supplied for `consumes`, one message each. Nothing is written. */
@@ -162,6 +189,8 @@ export interface PreparedBindings {
   readonly values: Readonly<Record<string, unknown>>;
   /** What each supplied binding writes into `$STAGE_IN`. */
   readonly planned: readonly Planned[];
+  /** The `attachments/` folder a bound file brings, copied into `$STAGE_IN` beside it. */
+  readonly folder?: string | undefined;
 }
 
 /**
@@ -169,9 +198,9 @@ export interface PreparedBindings {
  * any problem throws here.
  */
 export function prepareBindings(consumes: Consumes, supplied: Readonly<Record<string, Supplied>>): PreparedBindings {
-  const { problems, planned, values } = plan(consumes, supplied);
+  const { problems, planned, values, folder } = plan(consumes, supplied);
   if (problems.length > 0) throw new Error(`bindings can't be materialised:\n${problems.join('\n')}`);
-  return { consumes, supplied, values, planned };
+  return { consumes, supplied, values, planned, folder };
 }
 
 /**
@@ -192,6 +221,16 @@ export function materialisePrepared(
     else writeFileSync(path, write.text);
     inputs[inputVar(key)] = path;
     consumed[key] = prepared.supplied[key]?.from ?? null;
+  }
+  // Only regular files and folders: a link could lead the step to something outside what it was given.
+  if (prepared.folder !== undefined) {
+    cpSync(prepared.folder, join(stageIn, ATTACHMENTS), {
+      recursive: true,
+      filter: (source) => {
+        const stat = lstatSync(source);
+        return stat.isFile() || stat.isDirectory();
+      },
+    });
   }
   return { inputs, consumed };
 }
