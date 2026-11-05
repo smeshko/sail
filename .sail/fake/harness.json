@@ -546,24 +546,9 @@
             "confidence": 0.6,
             "why": "FAKE-1 asks for the same footer line, with acceptance criteria."
           }
-        ]
-      },
-      "turns": 5,
-      "usage": {
-        "inputTokens": 0,
-        "cacheReadTokens": 0,
-        "cacheWriteTokens": 0,
-        "outputTokens": 0,
-        "costUsd": 0.1
-      }
-    }
-  ],
-  "staleness": [
-    {
-      "outcome": "done",
-      "output": {
+        ],
         "stale": false,
-        "evidence": "git grep 'total' src/cli/commands/show.ts finds no total: show.ts lists each call's cost and stops."
+        "staleEvidence": "git grep 'total' src/cli/commands/show.ts finds no total: show.ts lists each call's cost and stops."
       },
       "turns": 5,
       "usage": {

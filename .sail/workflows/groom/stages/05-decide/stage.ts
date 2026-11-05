@@ -1,4 +1,4 @@
-// decide: reads the four checks and writes the grooming report, and chooses what to do to the ticket from a fixed set:
+// decide: reads the three checks and writes the grooming report, and chooses what to do to the ticket from a fixed set:
 // merge it with other tickets, cancel it, mark a duplicate, set its labels, relate or block another ticket, or edit its
 // title or description; and lists the open questions it confirmed (at most two; it settles the rest as assumptions in the report). The workflow limits what it applies; the stage only
 // chooses.

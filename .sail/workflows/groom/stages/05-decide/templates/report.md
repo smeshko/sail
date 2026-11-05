@@ -16,7 +16,7 @@
 
 ## Staleness
 
-{{staleness: whether the repository already does what the ticket asks, with the evidence the check gave and what you verified}}
+{{staleness: whether the repository already does what the ticket asks, with the evidence the worth check gave and what you verified}}
 
 ## Labels
 

@@ -1,5 +1,5 @@
-// checker(): one of groom's four agent checks, each a stage of its own with its own prompt and output: what every one of them
-// reads, may run and may spend. A checker reads the ticket and the repository and never writes to either, so all four
+// checker(): one of groom's three agent checks, each a stage of its own with its own prompt and output: what every one of them
+// reads, may run and may spend. A checker reads the ticket and the repository and never writes to either, so all three
 // run beside each other. Each names the model alias it runs on: `default` unless it says otherwise.
 import { agent, file, type z } from 'sail';
 import { readonly } from '../../lib/permissions';

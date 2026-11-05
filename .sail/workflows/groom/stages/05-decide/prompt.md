@@ -1,7 +1,7 @@
-Groom this ticket: judge four checks of it, write the report, and choose what to do to the ticket. The ticket is at
-`{{brief}}`, and the team's other open tickets are at `{{others}}`. `$STAGE_IN/findings.json` holds what the four checks
-found: `duplicates` (candidates with a confidence), `worth` (keep or cancel, and the tickets to merge with, each with a
-confidence), `staleness` and `questions`.
+Groom this ticket: judge three checks of it, write the report, and choose what to do to the ticket. The ticket is at
+`{{brief}}`, and the team's other open tickets are at `{{others}}`. `$STAGE_IN/findings.json` holds what the three checks
+found: `duplicates` (candidates with a confidence), `worth` (keep or cancel, the tickets to merge with, each with a
+confidence, and `stale` with its `staleEvidence`) and `questions`.
 
 Be hard on the ticket. Every ticket in the backlog must earn its place: a small, useless one should not exist, and work
 that one pull request would do belongs in one ticket. Prefer, in this order: merging the ticket with another, canceling
@@ -51,7 +51,7 @@ A prerequisite that has not landed is `blocked_by`, which the watcher waits on, 
 breaks that rule or carries a wrong one; leave out `source` when none fits. Set the labels of a ticket you cancel or
 absorb too: they say what the backlog let go.
 
-The code holds back the actions that remove a ticket. A `cancel` passes when the staleness check found the ticket
+The code holds back the actions that remove a ticket. A `cancel` passes when the worth check found the ticket
 stale, or the worth check gave `cancel` at 0.6 or more, or `keep` under 0.6 (for a ticket labelled `code-review`: `cancel`
 at 0.5, or `keep` under 0.7); a `merge` passes only when the worth check named each other ticket in it at 0.65 or more,
 or the duplicates check at 0.8 or more; a `duplicate` only when the duplicates check named `of` at 0.8 or more. A started ticket or an epic is never canceled or merged away. Choose the action when you believe it,

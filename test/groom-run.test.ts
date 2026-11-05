@@ -28,8 +28,9 @@ test('a groom run on fakes reads FAKE-2 unclaimed, comments the report and swaps
     expect(readStatus(dir)).toEqual({ status: 'completed' });
     const keys = readJournal(dir).entries.map((entry) => entry.key);
     expect(keys[0]).toBe('intake#1');
-    expect(keys.slice(1, 5).sort()).toEqual(['duplicates#1', 'questions#1', 'staleness#1', 'worth#1']);
-    expect(keys.slice(5)).toEqual(['decide#1', 'act#1']);
+    expect(keys.slice(1, 4).sort()).toEqual(['duplicates#1', 'questions#1', 'worth#1']);
+    expect(keys.slice(4)).toEqual(['decide#1', 'act#1']);
+    expect(keys).not.toContain('staleness#1');
     expect(duplicatesCall(dir).output).toEqual({
       candidates: [{ ticketKey: 'FAKE-1', confidence: 0.6, why: expect.any(String) }],
     });
@@ -662,8 +663,8 @@ test('groom cancels a ticket the worth check gave cancel at the threshold, and l
 test('groom cancels a stale ticket whatever the worth check gave', async () => {
   await withTempRepo(async (repo) => {
     const sailDir = writeGroomRepo(repo);
-    reseed(sailDir, 'staleness', (output) => {
-      output.stale = true;
+    reseed(sailDir, 'worth', (output) => {
+      Object.assign(output, { verdict: 'keep', confidence: 0.9, stale: true });
     });
     reseed(sailDir, 'decide', (output) => {
       output.actions = [{ kind: 'cancel', reason: 'stale' }];
@@ -936,7 +937,7 @@ test('groom never cancels an epic', async () => {
     const sailDir = writeGroomRepo(repo);
     edit(sailDir, 'fake/tickets.json', '"labels": ["groom"]', '"labels": ["groom", "epic"]');
     repo.git('commit', '-am', 'FAKE-2 is an epic');
-    reseed(sailDir, 'staleness', (output) => {
+    reseed(sailDir, 'worth', (output) => {
       output.stale = true;
     });
     reseed(sailDir, 'decide', (output) => {
