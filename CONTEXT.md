@@ -323,7 +323,7 @@ The checkout a run works in, on its own branch. How it is made (a branch in the 
 _Avoid_: worktree (one mechanism), checkout, sandbox, working copy
 
 **Workspace setup**:
-The shell command the `git-worktree` adapter runs in each workspace it makes, before any stage runs: its `setup` option, such as `bun install --frozen-lockfile`. Every run gets it, a seeded run included, whose reused calls left nothing in its new workspace. A setup that fails refuses the run.
+The shell command the `git-worktree` adapter runs in each workspace it makes, before any stage runs: its `setup` option, such as `bun install --frozen-lockfile`. Every run gets it, a seeded run included, whose new workspace holds the commits it carried but none of what the setup installed. A setup that fails refuses the run.
 _Avoid_: bootstrap, install step, setup stage
 
 **Base**:
