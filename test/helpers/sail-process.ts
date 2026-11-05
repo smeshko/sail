@@ -51,11 +51,11 @@ export async function sail(
   return { code, ...(await child.output()) };
 }
 
-/** Waits until `ready` holds, looking every 200 ms, for at most `WAIT_MS`: `what`, or that it didn't happen. */
-export async function until(what: string, ready: () => boolean): Promise<string> {
-  const deadline = performance.now() + WAIT_MS;
+/** Waits until `ready` holds, looking every 200 ms, for at most `ms` (`WAIT_MS`): `what`, or that it didn't happen. */
+export async function until(what: string, ready: () => boolean, ms: number = WAIT_MS): Promise<string> {
+  const deadline = performance.now() + ms;
   while (!ready()) {
-    if (performance.now() > deadline) return `${what} did not happen within ${WAIT_MS / 1000} s`;
+    if (performance.now() > deadline) return `${what} did not happen within ${ms / 1000} s`;
     await Bun.sleep(200);
   }
   return what;

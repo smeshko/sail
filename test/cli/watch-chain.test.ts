@@ -34,7 +34,9 @@ import {
 } from '../helpers/sail-process';
 
 const WATCHED = ['ticket-to-pr', 'pr-to-main'];
-const TIMEOUT_MS = 300_000;
+const TIMEOUT_MS = 600_000;
+/** How long every run may take to settle once the hold is released: four runs' stages, slow on a loaded machine. */
+const SETTLE_MS = 240_000;
 
 /** The queue of workflow `workflow`, as `queue.json` holds it now. */
 function queueOf(runs: string, workflow: string): QueueFile | undefined {
@@ -127,8 +129,8 @@ async function run(): Promise<Watched> {
       async (chain) => {
         const { repo, env, runs } = chain;
         const waits: string[] = [];
-        const wait = async (what: string, ready: () => boolean) => {
-          const said = await until(what, ready);
+        const wait = async (what: string, ready: () => boolean, ms?: number) => {
+          const said = await until(what, ready, ms);
           if (said !== what) waits.push(said);
         };
         const poll = () => chain.run(['queue', 'poll', 'pr-to-main']);
@@ -172,10 +174,15 @@ async function run(): Promise<Watched> {
           const reader = dashboard.stdout.getReader();
           let said = '';
           const first = performance.now() + 30_000;
+          // A read the sleep outran is kept for the next turn: a fresh one would leave it to take the URL's chunk.
+          let pending: ReturnType<typeof reader.read> | undefined;
           while (!said.includes('\n') && performance.now() < first) {
-            const chunk = await Promise.race([reader.read(), Bun.sleep(1000).then(() => undefined)]);
-            if (chunk?.value !== undefined) said += new TextDecoder().decode(chunk.value);
-            if (chunk?.done) break;
+            pending ??= reader.read();
+            const chunk = await Promise.race([pending, Bun.sleep(1000).then(() => undefined)]);
+            if (chunk === undefined) continue;
+            pending = undefined;
+            if (chunk.value !== undefined) said += new TextDecoder().decode(chunk.value);
+            if (chunk.done) break;
           }
           const url = /^sail dashboard: (http:\/\/127\.0\.0\.1:\d+)/.exec(said)?.[1];
           const seen = url === undefined ? { repos: [], queues: [] } : await readDashboard(url);
@@ -188,15 +195,19 @@ async function run(): Promise<Watched> {
 
           // Release the ticket run's lease: PR 9 is dispatched.
           writeFileSync(hold, 'go\n');
-          await wait('every run settled', () => {
-            const all = runsIn(runs);
-            return (
-              runsOfPull(runs, 9).length === 1 &&
-              all.length >= 4 &&
-              all.every(ended) &&
-              (queueOf(runs, 'pr-to-main')?.items ?? []).every((item) => item.state !== 'dispatched')
-            );
-          });
+          await wait(
+            'every run settled',
+            () => {
+              const all = runsIn(runs);
+              return (
+                runsOfPull(runs, 9).length === 1 &&
+                all.length >= 4 &&
+                all.every(ended) &&
+                (queueOf(runs, 'pr-to-main')?.items ?? []).every((item) => item.state !== 'dispatched')
+              );
+            },
+            SETTLE_MS,
+          );
           // Pushes the runs made were queued as new heads: their dispatch drops them, never runs them.
           await wait('no pull request left queued', () => {
             const items = queueOf(runs, 'pr-to-main')?.items ?? [];
