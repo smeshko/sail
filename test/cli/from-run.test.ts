@@ -21,7 +21,7 @@ import { recordingKeepAwake } from '../../src/engine/keep-awake';
 import { readStatus } from '../../src/engine/run-dir';
 import { readEvents } from '../../src/events/consumers/ndjson';
 import { fakeCredentialTools } from '../helpers/fake-credentials';
-import { edit, patchTicket } from '../helpers/fixture';
+import { copyFixture, edit, patchTicket } from '../helpers/fixture';
 import { type CaptureOptions, fakeInterrupts, runCaptured } from '../helpers/run-captured';
 import { cutJournal, runIds, sharedSource } from '../helpers/seeded';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
@@ -349,8 +349,9 @@ test('sail run --from-run masks credentials from its own io.env in run.json and 
 const OAUTH = 'oauth-from-the-keychain-0123';
 
 /**
- * The repository's harness made one that requires a Claude credential, as claude-code does: it answers `spec` with the
- * first answer of the fake script, and leaves the token it was created with in `token.txt`.
+ * The repository's harness made one that requires a Claude credential, as claude-code does: it answers each call with
+ * the first answer of its stage in the fake script, echoes the token it was created with in its message and transcript,
+ * as a session that leaks it would, and leaves that token in `token.txt`.
  */
 function keyedHarness(repoDir: string): void {
   const sail = join(repoDir, '.sail');
@@ -367,14 +368,17 @@ export default {
     return {
       name: 'keyed',
       capabilities: () => ({ structuredOutput: true, permissions: true, usage: true, abort: true, budgets: [] }),
-      run: async (request: { env: Record<string, string> }) => {
-        for (const [name, text] of Object.entries(script.spec[0].files)) writeFileSync(join(request.env.STAGE_OUT, name), text as string);
+      run: async (request: { key: string; env: Record<string, string>; onEvent?: (event: unknown) => void }) => {
+        const token = context.env.CLAUDE_CODE_OAUTH_TOKEN ?? '';
+        const answer = (script[request.key] ?? script[request.key.replace(/#\\d+/, '')])[0];
+        for (const [name, text] of Object.entries(answer.files ?? {})) writeFileSync(join(request.env.STAGE_OUT, name), text as string);
+        request.onEvent?.({ type: 'agent:message', text: \`echo \${token}\` });
         return {
         outcome: 'done',
-        output: script.spec[0].output,
+        output: answer.output,
         sessionId: 'keyed-1',
         usage: { costUsd: 0 },
-        transcript: '',
+        transcript: \`assistant: echo \${token}\\n\`,
         raw: null,
         };
       },
@@ -412,6 +416,37 @@ test('sail run --from-run --stage spec starts from an environment with no Claude
       .filter((file) => file.isFile() && !relative(ran.dir, file.parentPath).startsWith('definition'))
       .filter((file) => readFileSync(join(file.parentPath, file.name), 'utf8').includes(OAUTH));
     expect(held.map((file) => file.name)).toEqual([]);
+    expect(readFileSync(join(ran.dir, '01-spec', 'call-1', 'session.log'), 'utf8')).toContain(
+      'assistant: echo [redacted]',
+    );
+  });
+}, 60_000);
+
+test('sail FAKE-1 and sail resume from an environment with no Claude credential mask the token read from the keychain in what the session echoes', async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    mkdirSync(join(repo.dir, '.sail', 'adapters'), { recursive: true });
+    keyedHarness(repo.dir);
+    const env = keychainEnv(repo, { 'claude-oauth-token': OAUTH });
+    const started = await runCaptured(['FAKE-1', '--until', 'spec'], repo.dir, { env });
+    expect({ code: started.code, stderr: started.stderr }).toEqual({ code: EXIT_SUSPENDED, stderr: '' });
+    const [runId = ''] = runIds(repo.dir);
+    const dir = join(repo.dir, '.sail-runs', runId);
+    const unmasked = () =>
+      readdirSync(dir, { recursive: true, withFileTypes: true })
+        .filter((file) => file.isFile() && !relative(dir, file.parentPath).startsWith('definition'))
+        .filter((file) => readFileSync(join(file.parentPath, file.name), 'utf8').includes(OAUTH))
+        .map((file) => relative(dir, join(file.parentPath, file.name)));
+    expect(started.stdout).not.toContain(OAUTH);
+    expect(unmasked()).toEqual([]);
+    expect(readFileSync(join(dir, '01-spec', 'call-1', 'session.log'), 'utf8')).toContain('assistant: echo [redacted]');
+    const resumed = await runCaptured(['resume', runId], repo.dir, { env });
+    expect({ code: resumed.code, stderr: resumed.stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    expect(resumed.stdout).not.toContain(OAUTH);
+    expect(unmasked()).toEqual([]);
+    expect(readFileSync(join(dir, '02-implement', 'call-1', 'session.log'), 'utf8')).toContain(
+      'assistant: echo [redacted]',
+    );
   });
 }, 60_000);
 
