@@ -31,25 +31,6 @@ const OUTWARD = [
   'killall *',
 ];
 
-/** The repository's own paths, which a stage that changes the branch writes. */
-const REPOSITORY = [
-  'src/**',
-  'test/**',
-  'types/**',
-  'schemas/**',
-  'bin/**',
-  'scripts/**',
-  '.sail/**',
-  '.githooks/**',
-  'package.json',
-  'bun.lock',
-  'bunfig.toml',
-  'tsconfig.json',
-  'biome.json',
-  'AGENTS.md',
-  'CONTEXT.md',
-];
-
 /**
  * A stage that reads the change and writes only its own files: it runs tests and any read it needs, and never commits,
  * moves files, installs or rewrites the branch.
@@ -88,13 +69,14 @@ export const readonly: Permissions = {
 };
 
 /**
- * A stage that changes the branch: it writes the repository's own paths, commits, adds a dependency and runs anything
- * else, but never pushes or reaches outside the run. Files go with `git rm` and
- * `git mv`, so a removal is always in a commit.
+ * A stage that changes the branch: it writes any path of the repository (never .git), commits, adds a dependency and
+ * runs anything else, but never pushes or reaches outside the run. Review's gate-file hand-off is the guard on what it
+ * changes; a repository that wants a deny list adds `!` globs to `write`. Files go with `git rm` and `git mv`, so a
+ * removal is always in a commit.
  */
 export const builder: Permissions = {
   read: ['**'],
-  write: [...REPOSITORY, '$STAGE_OUT/**'],
+  write: ['**', '$STAGE_OUT/**'],
   commands: ['*'],
   deny: [...OUTWARD, 'rm *'],
 };
