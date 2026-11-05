@@ -72,6 +72,8 @@ export interface WatchDeps {
   pollMs?: number;
   /** The pid a watcher this command starts records itself under. */
   pid?: number;
+  /** Where the re-read of the committed `.sail/` makes its scratch directory: the system's temp directory by default. */
+  tmp?: string;
 }
 
 /** The environment without its unset variables, for the runs the watcher spawns. */
@@ -239,37 +241,40 @@ export function watchCommand(deps: WatchDeps = {}): Command {
     const checkConfig = configChecker(io, sailDir);
     const problem = await checkConfig();
     if (problem !== undefined) return refuse(problem);
-    const committed = committedWatches({ workspace: project.adapters.ports.workspace });
-    const started = await startWatcher({
-      sailDir,
-      config,
-      adapters: project.adapters.ports,
-      entry,
-      registryDir: located.registryDir,
-      workflows: names,
-      env: definedEnv(io.env ?? process.env),
-      now: deps.now ?? (() => new Date()),
-      timers: deps.timers ?? systemTimers,
-      ...(deps.spawn === undefined ? {} : { spawn: deps.spawn }),
-      ...(deps.resume === undefined ? {} : { resume: deps.resume }),
-      isAlive,
-      ...(deps.tickMs === undefined ? {} : { tickMs: deps.tickMs }),
-      ...(deps.pid === undefined ? {} : { pid: deps.pid }),
-      write: (text) => io.stdout(text),
-      lines: io.tty === undefined ? {} : { tty: io.tty },
-      checkConfig,
-      rereadWatch: committed.read,
+    const committed = committedWatches({
+      workspace: project.adapters.ports.workspace,
+      ...(deps.tmp === undefined ? {} : { tmp: deps.tmp }),
     });
-    if ('refused' in started) {
+    try {
+      const started = await startWatcher({
+        sailDir,
+        config,
+        adapters: project.adapters.ports,
+        entry,
+        registryDir: located.registryDir,
+        workflows: names,
+        env: definedEnv(io.env ?? process.env),
+        now: deps.now ?? (() => new Date()),
+        timers: deps.timers ?? systemTimers,
+        ...(deps.spawn === undefined ? {} : { spawn: deps.spawn }),
+        ...(deps.resume === undefined ? {} : { resume: deps.resume }),
+        isAlive,
+        ...(deps.tickMs === undefined ? {} : { tickMs: deps.tickMs }),
+        ...(deps.pid === undefined ? {} : { pid: deps.pid }),
+        write: (text) => io.stdout(text),
+        lines: io.tty === undefined ? {} : { tty: io.tty },
+        checkConfig,
+        rereadWatch: committed.read,
+      });
+      if ('refused' in started) return refuse(started.refused);
+      const unregister = onInterrupt(() => {
+        void started.stop();
+      });
+      await started.done;
+      unregister();
+    } finally {
       committed.dispose();
-      return refuse(started.refused);
     }
-    const unregister = onInterrupt(() => {
-      void started.stop();
-    });
-    await started.done;
-    unregister();
-    committed.dispose();
     return EXIT_OK;
   };
 }
