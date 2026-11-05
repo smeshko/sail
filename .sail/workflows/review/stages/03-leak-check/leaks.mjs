@@ -1,5 +1,6 @@
 // Scans the lines the patch in $INPUT_DIFF adds, file by file with their line numbers, for two things committed text
-// must not name in a public repository: a tracker key (`ABC-123`) of any prefix but those ALLOWED, and each term of the
+// must not name in a public repository: a tracker key (`ABC-123`) of any prefix but those ALLOWED (and the PLACEHOLDERS
+// prefixes, in files under test/), and each term of the
 // denylist, one per line, matched whole-word and case-insensitively. The denylist lives outside git, at
 // `$SAIL_HOME/leak-denylist.txt` (`~/.sail/leak-denylist.txt` by default); without it, only keys are scanned for.
 // Jev also checks added comment, doc and commit-message lines. Prints the Leaks.
@@ -13,6 +14,8 @@ const { LEAK_YES, leakLines, commitLines, leakRequests, askNouls, yesses, git } 
 
 /** Prefixes that look like tracker keys but are sail's own, or no tracker's at all. */
 const ALLOWED = new Set(['ADW', 'FAKE', 'ADR', 'TASK', 'UTF', 'SHA', 'ISO', 'RFC']);
+/** Placeholder prefixes the test suite uses, let through only in files under test/. */
+const PLACEHOLDERS = new Set(['OPS', 'RUN', 'XYZ', 'OTHER']);
 const KEY = /\b([A-Z][A-Z]{1,9})-\d+\b/g;
 
 const home = process.env.SAIL_HOME || join(homedir(), '.sail');
@@ -44,7 +47,8 @@ for (const text of diff.split('\n')) {
   if (text.startsWith('+') && file !== '') {
     const added = text.slice(1);
     for (const [match, prefix] of added.matchAll(KEY)) {
-      if (!ALLOWED.has(prefix)) hits.push({ file, line, match, kind: 'key' });
+      if (!ALLOWED.has(prefix) && !(file.startsWith('test/') && PLACEHOLDERS.has(prefix)))
+        hits.push({ file, line, match, kind: 'key' });
     }
     for (const { term, pattern } of denied)
       if (pattern.test(added)) hits.push({ file, line, match: term, kind: 'denylist' });
