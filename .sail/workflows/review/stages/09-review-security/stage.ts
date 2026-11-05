@@ -3,4 +3,4 @@
 // decides what each finding becomes.
 import { reviewer } from '../../reviewer';
 
-export const reviewSecurity = reviewer('review-security', 'deep');
+export const reviewSecurity = reviewer('review-security', 'default');
