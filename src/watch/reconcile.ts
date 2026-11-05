@@ -10,7 +10,7 @@
 // | `completed` | done |
 // | `failed stopped` | parked at once: a person stopped it, and a stopped run is never retried |
 // | `failed` otherwise | a failed attempt, retried later or parked |
-// | `running` with its pid dead, `suspended interrupted`, `suspended unwatched`, `suspended crashed` | adopted under its lease's pid when a live process holds its lease, else resumed, once; a resume of a crashed run that crashed again is parked with the `error:crash` message it left, and with why when it left none |
+// | `running` with its pid dead, `suspended interrupted`, `suspended crashed` | adopted under its lease's pid when a live process holds its lease, else resumed, once; a resume of a crashed run that crashed again is parked with the `error:crash` message it left, and with why when it left none |
 // | `suspended usage_limit` | adopted when a live process holds its lease; else held, and with it the whole dispatch, while now is before its reset time (or the back-off after it hit the limit), then resumed, even when this dispatcher resumed it before, unless its resume hit no limit since: then parked with why |
 // | `suspended port_unavailable` | adopted when a live process holds its lease; else held, as its item alone, for the back-off its suspension's place in the run of them calls for (1, 2, 5, 10 then 30 minutes), then resumed; parked with why when its resume was not suspended again, and parked with the call, the count and the last port error once it has been suspended past the schedule |
 // | anything else, such as `suspended until` or `budget_exceeded` | left: a person resumes or stops it |
@@ -153,10 +153,7 @@ const callKeyOf = (key: string): string => key.split('/')[0] ?? key;
 function resumable(status: RunStatus): ResumedFrom | undefined {
   if (status.status === 'running') return { status: 'running' };
   const { stopReason } = status;
-  if (
-    status.status === 'suspended' &&
-    (stopReason === 'interrupted' || stopReason === 'unwatched' || stopReason === 'crashed')
-  ) {
+  if (status.status === 'suspended' && (stopReason === 'interrupted' || stopReason === 'crashed')) {
     return { status: 'suspended', stopReason };
   }
   return undefined;

@@ -39,7 +39,8 @@
 //   leave a moved item where it is, and its dispatch clears the mark. It emits `queue:moved`.
 // - `waiting()` records the open prerequisites that hold a queued item at dispatch in its `waitingOn`, and emits
 //   `queue:waiting` when the list changes; an empty list clears it silently. A dispatch and a requeue clear it too.
-// - `skippedLeased()`, `watched()` and `unwatched()` only emit their events: none of them changes `queue.json`.
+// - `relabel()` changes the label `queue.json` polls for, silently. `skippedLeased()`, `watched()` and `unwatched()` only
+//   emit their events: none of them changes `queue.json`.
 // - Every event the store emits is handed to `onEvent` once it is appended, in order: the watcher's terminal lines. A
 //   hook that throws is ignored, so the terminal never breaks the queue.
 import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
@@ -270,7 +271,9 @@ export interface QueueStore {
   waiting(key: string, on: readonly string[]): void;
   /** Emits `queue:skipped_leased`: the due item waits, since run `heldBy` holds `branch`. The queue is unchanged. */
   skippedLeased(key: string, branch: string, heldBy: string): void;
-  /** Emits `watch:added`: watcher `pid` watches the workflow now. The queue is unchanged. */
+  /** Changes the label the queue polls for, in `queue.json`'s `polling`. Emits nothing. */
+  relabel(label: string): void;
+  /** Emits `watch:added`: watcher `pid` watches the workflow now, with the queue's current label. The queue is unchanged. */
   watched(watch: { pid: number; everyMs: number; maxConcurrentRuns: number }): void;
   /** Emits `watch:removed`: watcher `pid` no longer watches the workflow. The queue is unchanged. */
   unwatched(pid: number): void;
@@ -664,6 +667,12 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
     },
     skippedLeased(key, branch, heldBy) {
       stream.emit({ type: 'queue:skipped_leased', workflow, dedupKey: key, branch, heldBy });
+    },
+    relabel(label) {
+      if (queue.polling.label === label) return;
+      change((next) => {
+        next.polling.label = label;
+      });
     },
     watched({ pid, everyMs, maxConcurrentRuns }) {
       stream.emit({ type: 'watch:added', workflow, pid, label: queue.polling.label, everyMs, maxConcurrentRuns });

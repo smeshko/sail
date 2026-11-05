@@ -1307,3 +1307,21 @@ test('dispatching a waiting item clears waitingOn, and a requeue does too', () =
   store.requeue('ticket:FAKE-2', 'again');
   expect(store.snapshot().items[0]?.waitingOn).toBeUndefined();
 });
+
+test('relabel writes polling.label and the next watch:added and queue:polled carry it', () => {
+  const runs = runsDir();
+  const store = open(runs);
+  store.relabel('sail-next');
+  expect(JSON.parse(readFileSync(join(runs, 'queue', 'ticket-to-pr', 'queue.json'), 'utf8')).polling.label).toBe(
+    'sail-next',
+  );
+  store.watched({ pid: 7, everyMs: 30_000, maxConcurrentRuns: 2 });
+  store.polled({ kind: 'ticket', found: 0, added: 0, durationMs: 1 });
+  const typed = queueEvents(queueDir(runs, 'ticket-to-pr')).filter(
+    (event) => event.type === 'watch:added' || event.type === 'queue:polled',
+  );
+  expect(typed).toMatchObject([
+    { type: 'watch:added', label: 'sail-next', everyMs: 30_000, maxConcurrentRuns: 2 },
+    { type: 'queue:polled', label: 'sail-next' },
+  ]);
+});

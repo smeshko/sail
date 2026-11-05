@@ -13,6 +13,8 @@
 // A watcher starts only when every model alias's harness can run its model, and pauses its dispatch while an edit of
 // project.yaml names one it can't: `configChecker()` answers both, asking each harness only when the file changed.
 // The watcher runs until its set empties, or until Ctrl-C or SIGTERM, and exits 0 either way. Its runs carry on.
+// Before each poll of a workflow it re-reads that workflow's `watch` and `maxConcurrentRuns` from the `.sail/` committed
+// at the default branch's tip (`committedWatches()`), and applies a change with no restart.
 //
 // A second command waits up to 15 s for the watcher to take its command. One it hasn't taken by then stays in the
 // inbox, which a watcher stopped meanwhile empties at its next start, and the command exits 0 saying so. The set it
@@ -31,7 +33,14 @@ import { runsDir as runsDirOf } from '../../engine/run-dir';
 import { formatIssue } from '../../engine/schemas';
 import { sameLabel } from '../../ports/labels';
 import { commandTaken, dropCommand, NOT_TAKEN } from '../../watch/inbox';
-import { readWatch, readWatches, systemTimers, type Timers, type WatchDeclaration } from '../../watch/poll';
+import {
+  committedWatches,
+  readWatch,
+  readWatches,
+  systemTimers,
+  type Timers,
+  type WatchDeclaration,
+} from '../../watch/poll';
 import {
   findHolder,
   type Holder,
@@ -63,6 +72,8 @@ export interface WatchDeps {
   pollMs?: number;
   /** The pid a watcher this command starts records itself under. */
   pid?: number;
+  /** Where the re-read of the committed `.sail/` makes its scratch directory: the system's temp directory by default. */
+  tmp?: string;
 }
 
 /** The environment without its unset variables, for the runs the watcher spawns. */
@@ -230,31 +241,40 @@ export function watchCommand(deps: WatchDeps = {}): Command {
     const checkConfig = configChecker(io, sailDir);
     const problem = await checkConfig();
     if (problem !== undefined) return refuse(problem);
-    const started = await startWatcher({
-      sailDir,
-      config,
-      adapters: project.adapters.ports,
-      entry,
-      registryDir: located.registryDir,
-      workflows: names,
-      env: definedEnv(io.env ?? process.env),
-      now: deps.now ?? (() => new Date()),
-      timers: deps.timers ?? systemTimers,
-      ...(deps.spawn === undefined ? {} : { spawn: deps.spawn }),
-      ...(deps.resume === undefined ? {} : { resume: deps.resume }),
-      isAlive,
-      ...(deps.tickMs === undefined ? {} : { tickMs: deps.tickMs }),
-      ...(deps.pid === undefined ? {} : { pid: deps.pid }),
-      write: (text) => io.stdout(text),
-      lines: io.tty === undefined ? {} : { tty: io.tty },
-      checkConfig,
+    const committed = committedWatches({
+      workspace: project.adapters.ports.workspace,
+      ...(deps.tmp === undefined ? {} : { tmp: deps.tmp }),
     });
-    if ('refused' in started) return refuse(started.refused);
-    const unregister = onInterrupt(() => {
-      void started.stop();
-    });
-    await started.done;
-    unregister();
+    try {
+      const started = await startWatcher({
+        sailDir,
+        config,
+        adapters: project.adapters.ports,
+        entry,
+        registryDir: located.registryDir,
+        workflows: names,
+        env: definedEnv(io.env ?? process.env),
+        now: deps.now ?? (() => new Date()),
+        timers: deps.timers ?? systemTimers,
+        ...(deps.spawn === undefined ? {} : { spawn: deps.spawn }),
+        ...(deps.resume === undefined ? {} : { resume: deps.resume }),
+        isAlive,
+        ...(deps.tickMs === undefined ? {} : { tickMs: deps.tickMs }),
+        ...(deps.pid === undefined ? {} : { pid: deps.pid }),
+        write: (text) => io.stdout(text),
+        lines: io.tty === undefined ? {} : { tty: io.tty },
+        checkConfig,
+        rereadWatch: committed.read,
+      });
+      if ('refused' in started) return refuse(started.refused);
+      const unregister = onInterrupt(() => {
+        void started.stop();
+      });
+      await started.done;
+      unregister();
+    } finally {
+      committed.dispose();
+    }
     return EXIT_OK;
   };
 }

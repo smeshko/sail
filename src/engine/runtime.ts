@@ -40,8 +40,8 @@
 // suspended `crashed` the same way, after its `error:crash`, unless the exception came out of this finish itself.
 //
 // A request from outside the run's process comes through its control file (`control.ts`), taken before the intake and
-// before each call, right after the abort check: `unwatched` suspends the run with that stop reason, keeping its
-// workspace and lease, and `stopped` fails it with that stop reason, releasing both. An abort seen at the same boundary
+// before each call, right after the abort check: `stopped` fails the run with that stop reason, releasing its
+// workspace and lease. An abort seen at the same boundary
 // goes first, and leaves the request for the next boundary that runs. A request goes ahead of `until`'s suspension.
 //
 // A multi-step call journals each step as it finishes, as `stage#call/step`, then the call itself once its last step
@@ -603,7 +603,7 @@ async function drive(
   };
   const failed = (stopReason: StopReason, message: string): Promise<RunEnd> =>
     finish({ runId, dir, status: 'failed', stopReason, message });
-  const suspended = (stopReason: 'interrupted' | 'until' | 'unwatched', message: string): Promise<RunEnd> =>
+  const suspended = (stopReason: 'interrupted' | 'until', message: string): Promise<RunEnd> =>
     finish({ runId, dir, status: 'suspended', stopReason, message });
   /** How the run ends at the boundary before `key` once it has used up its budget, or undefined to go on. */
   const overBudget = (key: string, when?: 'before' | 'during'): Promise<RunEnd> | undefined => {
@@ -695,7 +695,6 @@ async function drive(
   /** How the run ends at the boundary before `key`, when its control file asks it to, or undefined to go on. */
   const controlled = (key: string): Promise<RunEnd> | undefined => {
     const request = takeControl(dir);
-    if (request === 'unwatched') return suspended('unwatched', `its workflow was unwatched: stopped before ${key}`);
     if (request === 'stopped')
       return failed(
         'stopped',

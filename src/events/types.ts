@@ -508,7 +508,8 @@ export interface QueuePayloads {
   'run:adopted': { workflow: string; dedupKey: string; run: string; pid: number };
   /**
    * The watcher started `sail resume <run>` as process `pid`, for a run it found `running` with its process gone, or
-   * `suspended` with `interrupted`, `unwatched`, `usage_limit`, `port_unavailable` or `crashed`.
+   * `suspended` with `interrupted`, `usage_limit`, `port_unavailable` or `crashed`. `unwatched` is no longer given: it is
+   * kept so a queue event stream an older watcher wrote still reads.
    */
   'run:resumed': { workflow: string; dedupKey: string; run: string; pid: number; from: ResumedFrom };
   /** A parked or failed item put back in the queue by hand, with no attempts. */

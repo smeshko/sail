@@ -10,6 +10,7 @@ import { readConfig } from '../../src/engine/config';
 import { type Status, type StopReason, writeStatus } from '../../src/engine/run-dir';
 import { PortError } from '../../src/ports/errors';
 import { commandsDir, dropCommand } from '../../src/watch/inbox';
+import { committedWatches } from '../../src/watch/poll';
 import { queueDir } from '../../src/watch/queue-store';
 import { type RegistryEntry, readEntry, recordEntry } from '../../src/watch/registry';
 import { QUEUE_LEASE_DIR, startWatcher, type Watcher, type WatcherOptions } from '../../src/watch/watcher';
@@ -721,7 +722,7 @@ test("a watch command whose workflow's first poll never answers holds up neither
 // 13.3 (DECISIONS D2, D10, D11): an unwatch asks the workflow's runs to suspend, the watcher's own stop asks nothing,
 // and a starting watcher sweeps the worktrees of ended runs.
 
-test("unwatching b asks each live run of b, and none of a's, to suspend through its control file, keeps b's queue.json byte for byte and says so per run, and the watcher's own stop asks nothing", async () => {
+test("unwatching b leaves each live run of b, one still starting included, running: no control or hand-off file, no suspend line, and b's queue.json byte for byte", async () => {
   await withTempRepo(async (repo) => {
     const w = await watched(
       repo,
@@ -734,69 +735,27 @@ test("unwatching b asks each live run of b, and none of a's, to suspend through 
     const watcher = await w.start(['a', 'b']);
     await w.timers.advance(1000);
     expect([w.order('a'), w.order('b')]).toEqual([['FAKE-1'], ['FAKE-2', 'FAKE-3']]);
-    const [run1, run2, run3] = ['FAKE-1', 'FAKE-2', 'FAKE-3'].map((key) => join(w.runs, w.spawner.run(key).runId));
-    for (const dir of [run1, run2, run3]) mkdirSync(dir ?? '', { recursive: true });
+    const [run1, run2, run3] = ['FAKE-1', 'FAKE-2', 'FAKE-3'].map((key) => w.spawner.run(key).runId);
+    // FAKE-1 and FAKE-2 have run directories; FAKE-3 is still starting, with none.
+    for (const id of [run1, run2]) mkdirSync(join(w.runs, id ?? ''), { recursive: true });
     const queueOfB = () => readFileSync(join(queueDir(w.runs, 'b'), 'queue.json'), 'utf8');
     const before = queueOfB();
     dropCommand(w.runs, { op: 'unwatch', workflows: ['b'] });
     await w.timers.advance(1000);
-    const control = (dir = '') =>
-      existsSync(join(dir, 'CONTROL')) ? readFileSync(join(dir, 'CONTROL'), 'utf8') : 'none';
-    const afterUnwatch = [control(run1), control(run2), control(run3)];
+    const left = readdirSync(w.runs).filter((name) => name.endsWith('.control'));
+    const controls = [run1, run2].map((id) => existsSync(join(w.runs, id ?? '', 'CONTROL')));
     await watcher.stop();
     expect({
-      afterUnwatch,
-      afterStop: control(run1),
+      watching: [w.events('b').at(-1)?.type, run3 === undefined],
+      controls,
+      handOffs: left,
       queue: queueOfB() === before,
-      lines: w.out.filter((line) => line.includes('suspends')),
-      watching: watcher.watching(),
-    }).toEqual({
-      afterUnwatch: ['none', 'unwatched\n', 'unwatched\n'],
-      afterStop: 'none',
-      queue: true,
-      lines: [
-        `09:00:02 b  FAKE-2 suspends at its next call boundary: run ${w.spawner.run('FAKE-2').runId}\n`,
-        `09:00:02 b  FAKE-3 suspends at its next call boundary: run ${w.spawner.run('FAKE-3').runId}\n`,
-      ],
-      watching: [],
-    });
-  });
-});
-
-test('unwatching b while a run of b is still starting, with no run directory yet, writes unwatched to its hand-off file and says it suspends, as it does for the run that has a directory', async () => {
-  await withTempRepo(async (repo) => {
-    const w = await watched(
-      repo,
-      [
-        { name: 'a', label: 'sail-a', cap: 1 },
-        { name: 'b', label: 'sail-b', cap: 2 },
-      ],
-      tickets({ 'FAKE-1': 'sail-a', 'FAKE-2': 'sail-b', 'FAKE-3': 'sail-b' }),
-    );
-    const watcher = await w.start(['a', 'b']);
-    await w.timers.advance(1000);
-    expect(w.order('b')).toEqual(['FAKE-2', 'FAKE-3']);
-    const [started, starting] = ['FAKE-2', 'FAKE-3'].map((key) => w.spawner.run(key).runId);
-    mkdirSync(join(w.runs, started ?? ''), { recursive: true });
-    dropCommand(w.runs, { op: 'unwatch', workflows: ['b'] });
-    await w.timers.advance(1000);
-    await watcher.stop();
-    expect({
-      control: readFileSync(join(w.runs, started ?? '', 'CONTROL'), 'utf8'),
-      handOff: readFileSync(join(w.runs, `${starting}.control`), 'utf8'),
       lines: w.out.filter((line) => line.includes('suspend')),
-    }).toEqual({
-      control: 'unwatched\n',
-      handOff: 'unwatched\n',
-      lines: [
-        `09:00:02 b  FAKE-2 suspends at its next call boundary: run ${started}\n`,
-        `09:00:02 b  FAKE-3 suspends at its next call boundary: run ${starting}\n`,
-      ],
-    });
+    }).toEqual({ watching: ['watch:removed', false], controls: [false, false], handOffs: [], queue: true, lines: [] });
   });
 });
 
-test('unwatching b asks a run of b that a resume by hand keeps alive, its dispatched pid gone, to suspend (review R3-2)', async () => {
+test('unwatching b leaves a run of b that a resume by hand keeps alive, its dispatched pid gone, with no control file (review R3-2)', async () => {
   await withTempRepo(async (repo) => {
     const w = await watched(
       repo,
@@ -811,7 +770,6 @@ test('unwatching b asks a run of b that a resume by hand keeps alive, its dispat
     const { runId } = w.spawner.run('FAKE-2');
     const dir = join(w.runs, runId);
     await w.spawner.end('FAKE-2', { status: 'running' });
-    // `sail resume` by hand: this process holds the run's lease.
     const { workspace } = w.adapters.ports;
     const { url } = await workspace.repository();
     const branch = branchFor('sail/', 'FAKE-2', 'Ticket FAKE-2');
@@ -820,7 +778,7 @@ test('unwatching b asks a run of b that a resume by hand keeps alive, its dispat
     dropCommand(w.runs, { op: 'unwatch', workflows: ['b'] });
     await w.timers.advance(1000);
     await watcher.stop();
-    expect(existsSync(join(dir, 'CONTROL')) ? readFileSync(join(dir, 'CONTROL'), 'utf8') : 'none').toBe('unwatched\n');
+    expect(existsSync(join(dir, 'CONTROL'))).toBe(false);
   });
 });
 
@@ -1590,5 +1548,211 @@ test('a watcher starts a ticket whose prerequisite is open at once when its work
     expect(w.out.filter((line) => line.includes('waits on'))).toEqual([]);
     expect(queueEventIssues(queueDir(w.runs, 'a'))).toEqual([]);
     await watcher.stop();
+  });
+});
+
+// The watcher re-reads each workflow's watch declaration, as the default branch's tip commits it, before every poll.
+
+/** Commits `.sail/` of the repository: what `committedWatches()` reads. */
+function commitSail(repo: TempRepo, message: string): void {
+  repo.git('add', '.sail');
+  repo.git('commit', '-m', message);
+}
+
+const queueLabel = (runs: string, workflow: string): string =>
+  JSON.parse(readFileSync(join(queueDir(runs, workflow), 'queue.json'), 'utf8')).polling.label;
+
+test('a committed raise of maxConcurrentRuns takes effect on the next poll, and an uncommitted edit does not', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(
+      repo,
+      [{ name: 'a', label: 'sail-a', cap: 1 }],
+      tickets({ 'FAKE-1': 'sail-a', 'FAKE-2': 'sail-a', 'FAKE-3': 'sail-a' }),
+    );
+    commitSail(repo, 'watch a');
+    const reader = committedWatches({ workspace: w.adapters.ports.workspace });
+    const watcher = await w.start(['a'], { rereadWatch: reader.read });
+    try {
+      await w.timers.advance(1000);
+      expect(w.order('a')).toEqual(['FAKE-1']);
+
+      edit(w.sail, 'workflows/a/workflow.ts', 'maxConcurrentRuns: 1', 'maxConcurrentRuns: 2');
+      await w.timers.advance(31_000);
+      expect(w.order('a')).toEqual(['FAKE-1']);
+      expect(w.out.join('')).not.toContain('at most 2 at once');
+
+      commitSail(repo, 'raise a');
+      await w.timers.advance(31_000);
+      expect(w.out.join('')).toContain('a  watching: label sail-a, every 30.0s, at most 2 at once');
+      expect(w.order('a')).toEqual(['FAKE-1', 'FAKE-2']);
+      await w.timers.advance(61_000);
+      expect(w.order('a')).toEqual(['FAKE-1', 'FAKE-2']);
+    } finally {
+      await watcher.stop();
+      reader.dispose();
+    }
+  });
+});
+
+test("a committed label change is polled next, and one onto a watched workflow's label is refused once and the old label kept", async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(
+      repo,
+      [
+        { name: 'a', label: 'sail-a', cap: 1 },
+        { name: 'b', label: 'sail-b', cap: 1 },
+      ],
+      [],
+    );
+    commitSail(repo, 'watch a and b');
+    const reader = committedWatches({ workspace: w.adapters.ports.workspace });
+    const watcher = await w.start(['a', 'b'], { rereadWatch: reader.read });
+    try {
+      edit(w.sail, 'workflows/a/workflow.ts', "label: 'sail-a'", "label: 'sail-c'");
+      commitSail(repo, 'a polls sail-c');
+      await w.timers.advance(31_000);
+      expect(w.out.join('')).toContain('a  watching: label sail-c, every 30.0s, at most 1 at once');
+      expect(queueLabel(w.runs, 'a')).toBe('sail-c');
+      expect(w.events('a').findLast((event) => event.type === 'queue:polled')).toMatchObject({ label: 'sail-c' });
+      expect(readEntry(w.registryDir, 'stub')?.watcher?.labels).toEqual(['sail-c', 'sail-b']);
+
+      edit(w.sail, 'workflows/a/workflow.ts', "label: 'sail-c'", "label: 'sail-b'");
+      commitSail(repo, 'a polls sail-b');
+      await w.timers.advance(31_000);
+      await w.timers.advance(31_000);
+      const refusal = "workflow 'a' keeps its watch config: workflows 'a' and 'b' both poll the label 'sail-b'";
+      expect(w.out.join('').split(refusal).length - 1).toBe(1);
+      expect(queueLabel(w.runs, 'a')).toBe('sail-c');
+      expect(w.events('a').findLast((event) => event.type === 'queue:polled')).toMatchObject({ label: 'sail-c' });
+      expect(readEntry(w.registryDir, 'stub')?.watcher?.labels).toEqual(['sail-c', 'sail-b']);
+    } finally {
+      await watcher.stop();
+      reader.dispose();
+    }
+  });
+});
+
+test("a first poll's committed label onto a workflow started with it but not yet added is refused, and the old label kept (review R8)", async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(
+      repo,
+      [
+        { name: 'a', label: 'sail-a', cap: 1 },
+        { name: 'b', label: 'sail-b', cap: 1 },
+      ],
+      [],
+    );
+    edit(w.sail, 'workflows/a/workflow.ts', "label: 'sail-a'", "label: 'sail-b'");
+    commitSail(repo, 'a polls sail-b');
+    edit(w.sail, 'workflows/a/workflow.ts', "label: 'sail-b'", "label: 'sail-a'");
+    const reader = committedWatches({ workspace: w.adapters.ports.workspace });
+    const watcher = await w.start(['a', 'b'], { rereadWatch: reader.read });
+    try {
+      await w.timers.advance(1000);
+      expect(w.out.join('')).toContain(
+        "workflow 'a' keeps its watch config: workflows 'a' and 'b' both poll the label 'sail-b'",
+      );
+      expect(queueLabel(w.runs, 'a')).toBe('sail-a');
+      expect(readEntry(w.registryDir, 'stub')?.watcher?.labels).toEqual(['sail-a', 'sail-b']);
+    } finally {
+      await watcher.stop();
+      reader.dispose();
+    }
+  });
+});
+
+test("a first poll's committed label is claimed with the labels of the workflows started with it but not yet added (review R8)", async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(
+      repo,
+      [
+        { name: 'a', label: 'sail-a', cap: 1 },
+        { name: 'b', label: 'sail-b', cap: 1 },
+      ],
+      [],
+    );
+    edit(w.sail, 'workflows/a/workflow.ts', "label: 'sail-a'", "label: 'sail-c'");
+    commitSail(repo, 'a polls sail-c');
+    edit(w.sail, 'workflows/a/workflow.ts', "label: 'sail-c'", "label: 'sail-a'");
+    const reader = committedWatches({ workspace: w.adapters.ports.workspace });
+    const watcher = await w.start(['a', 'b'], { rereadWatch: reader.read });
+    try {
+      await w.timers.advance(1000);
+      expect(queueLabel(w.runs, 'a')).toBe('sail-c');
+      expect(readEntry(w.registryDir, 'stub')?.watcher?.labels).toEqual(['sail-c', 'sail-b']);
+    } finally {
+      await watcher.stop();
+      reader.dispose();
+    }
+  });
+});
+
+test('a committed label another live watcher polls is refused once and the old label kept (review R12)', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(repo, [{ name: 'a', label: 'sail-a', cap: 1 }], []);
+    commitSail(repo, 'watch a');
+    const reader = committedWatches({ workspace: w.adapters.ports.workspace });
+    const watcher = await w.start(['a'], { rereadWatch: reader.read });
+    try {
+      const mine = readEntry(w.registryDir, 'stub')?.watcher;
+      if (mine === undefined) throw new Error('the watcher recorded no field');
+      const otherSail = join(repo.home, 'other', '.sail');
+      recordEntry(w.registryDir, {
+        schema: 'sail.registry.v1' as const,
+        name: 'other',
+        remote: null,
+        clone: join(repo.home, 'other'),
+        sailDir: otherSail,
+        updatedAt: START,
+        watcher: { ...mine, pid: process.ppid, sailDir: otherSail, labels: ['sail-x'] },
+      });
+      edit(w.sail, 'workflows/a/workflow.ts', "label: 'sail-a'", "label: 'sail-x'");
+      commitSail(repo, 'a polls sail-x');
+      await w.timers.advance(31_000);
+      await w.timers.advance(31_000);
+      const refusal = `workflow 'a' keeps its watch config: the label 'sail-x' on the fake ticket source is polled by the watcher of 'other' in ${join(repo.home, 'other')} (pid ${process.ppid})`;
+      expect(w.out.join('').split(refusal).length - 1).toBe(1);
+      expect(queueLabel(w.runs, 'a')).toBe('sail-a');
+      expect(readEntry(w.registryDir, 'stub')?.watcher?.labels).toEqual(['sail-a']);
+      expect(watcher.watching()).toEqual(['a']);
+    } finally {
+      await watcher.stop();
+      reader.dispose();
+    }
+  });
+});
+
+test('a re-read the commit refuses keeps the last watch config and says why once', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(repo, [{ name: 'a', label: 'sail-a', cap: 3 }], tickets({ 'FAKE-1': 'sail-a' }));
+    commitSail(repo, 'watch a');
+    const reader = committedWatches({ workspace: w.adapters.ports.workspace });
+    const watcher = await w.start(['a'], { rereadWatch: reader.read });
+    const said = () =>
+      w.out
+        .join('')
+        .split('\n')
+        .filter((line) => line.includes('keeps its watch config'));
+    try {
+      edit(w.sail, 'workflows/a/workflow.ts', ", watch: { every: '30s', label: 'sail-a' }, maxConcurrentRuns: 3", '');
+      commitSail(repo, 'unwatch a');
+      await w.timers.advance(31_000);
+      await w.timers.advance(31_000);
+      expect(said()).toHaveLength(1);
+      expect(said()[0]).toContain("workflow 'a' isn't watched: it declares no watch (in the .sail/ committed at ");
+
+      repo.git('rm', '-r', '-q', '.sail/workflows/a');
+      repo.git('commit', '-m', 'delete a');
+      await w.timers.advance(31_000);
+      await w.timers.advance(31_000);
+      expect(said()).toHaveLength(2);
+      expect(said()[1]).toContain("workflow 'a' keeps its watch config:");
+      expect(watcher.watching()).toEqual(['a']);
+      expect(w.out.join('')).not.toContain('at most 1 at once');
+      expect(w.events('a').filter((event) => event.type === 'watch:added')).toHaveLength(1);
+    } finally {
+      await watcher.stop();
+      reader.dispose();
+    }
   });
 });

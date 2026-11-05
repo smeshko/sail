@@ -1088,26 +1088,27 @@ async function dispatchedWith(repoDir: string, request: string, run: Partial<Stu
   return { end, runs, runId };
 }
 
-test.each<['stopped' | 'unwatched', 'failed' | 'suspended', 'stopped' | 'unwatched', string | undefined]>([
-  ['stopped', 'failed', 'stopped', 'stopped by sail stop before intake#1'],
-  ['unwatched', 'suspended', 'unwatched', undefined],
-])(
-  'a dispatched run with a %s hand-off ends %s %s before intake#1, claims nothing and leaves no hand-off',
-  async (request, status, stopReason, message) => {
-    await withTempRepo(async (repo) => {
-      writeStub(repo.dir);
-      const { end, runs, runId } = await dispatchedWith(repo.dir, request);
-      expect({
-        status: end.status,
-        stopReason: end.stopReason,
-        message: message === undefined ? undefined : end.message,
-        journal: readJournal(end.dir).entries.length,
-        files: readdirSync(runs).filter((name) => name.startsWith(runId)),
-        ticket: (await ticketIn(repo.dir, 'FAKE-1')).state.name,
-      }).toEqual({ status, stopReason, message, journal: 0, files: [runId], ticket: 'Todo' });
+test('a dispatched run with a stopped hand-off ends failed stopped before intake#1, claims nothing and leaves no hand-off', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const { end, runs, runId } = await dispatchedWith(repo.dir, 'stopped');
+    expect({
+      status: end.status,
+      stopReason: end.stopReason,
+      message: end.message,
+      journal: readJournal(end.dir).entries.length,
+      files: readdirSync(runs).filter((name) => name.startsWith(runId)),
+      ticket: (await ticketIn(repo.dir, 'FAKE-1')).state.name,
+    }).toEqual({
+      status: 'failed',
+      stopReason: 'stopped',
+      message: 'stopped by sail stop before intake#1',
+      journal: 0,
+      files: [runId],
+      ticket: 'Todo',
     });
-  },
-);
+  });
+});
 
 test('a dispatched pull-request start with a stopped hand-off ends failed stopped before intake#1', async () => {
   await withTempRepo(async (repo) => {

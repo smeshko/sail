@@ -8,8 +8,8 @@
 //   dispatched item to `reconcile.ts`, which answers by its run directory, its dispatch log and its lease: a live run is
 //   in flight, and adopted with `run:adopted` on this dispatcher's first tick, its control file left to it;
 //   `completed` is done; `failed stopped` parks the item at once; any other `failed` is a failed attempt, retried later
-//   or parked; a dead `running`, or a `suspended interrupted`, `unwatched` or `crashed` run, is resumed once as a
-//   detached `sail resume`, with `run:resumed`, after any `unwatched` it never took is taken back, and counts while its
+//   or parked; a dead `running`, or a `suspended interrupted` or `crashed` run, is resumed once as a
+//   detached `sail resume`, with `run:resumed`, and counts while its
 //   resume lives, unless a live process holds its lease, which is adopted instead, or the cap is reached, when it waits
 //   for a slot; a resume that leaves the run unended parks the item with why, or with the `error:crash` message it left
 //   when it crashed; no `run.json` is a start that was refused, whose reason is the last line of its dispatch log.
@@ -62,7 +62,7 @@
 //   caller.
 import { join } from 'node:path';
 import { branchFor } from '../engine/branch';
-import { cancelUnwatch, dropHandOff, handOffStops } from '../engine/control';
+import { dropHandOff, handOffStops } from '../engine/control';
 import { getPullRequestDetails } from '../engine/pr-source';
 import { readStatus } from '../engine/run-dir';
 import { newRunId } from '../engine/run-id';
@@ -145,6 +145,16 @@ export interface Dispatcher {
   tick(): Promise<void>;
   /** How many of the workflow's dispatched runs are alive. The live manual runs, which also fill the cap, are not in it. */
   inFlight(): number;
+  /**
+   * Changes what the workflow's watch declares, from the next tick on. A cap lowered under the live runs stops none of
+   * them: nothing starts or resumes until the count is under it.
+   */
+  configure(next: {
+    label: string;
+    maxConcurrentRuns: number;
+    waitingRecheckMs: number;
+    ignorePrerequisites: boolean;
+  }): void;
 }
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
@@ -156,7 +166,10 @@ const sourceOf = (item: QueueItem): Pick<Settled, 'ticketKey' | 'pr'> =>
     : { pr: { number: item.source.number, headSha: item.source.headSha } };
 
 export function createDispatcher(options: DispatcherOptions): Dispatcher {
-  const { workflow, label, store, ticketSource, codeHost, workspace, isAlive, now } = options;
+  const { workflow, store, ticketSource, codeHost, workspace, isAlive, now } = options;
+  /** What the workflow's watch declares now: `configure()` changes them when its declaration is re-read. */
+  let label = options.label;
+  let maxConcurrentRuns = options.maxConcurrentRuns;
   /** The run that held each skipped item's branch when it was last reported. */
   const skipped = new Map<string, string>();
   /** The message reported for each dispatched item that could not be settled, until it settles again. */
@@ -175,7 +188,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
   const limitedAt = new Map<string, Date>();
   /** When each waiting item's ticket was last read, by dedup key: it is read again only after `waitingRecheckMs`. */
   const waitingReadAt = new Map<string, number>();
-  const waitingRecheckMs = options.waitingRecheckMs ?? 60_000;
+  let waitingRecheckMs = options.waitingRecheckMs ?? 60_000;
   /** Whether items skip the prerequisite check, until a start refuses for one. */
   let ignorePrerequisites = options.ignorePrerequisites === true;
   const sail = options.sail ?? sdkFingerprint;
@@ -198,7 +211,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
   let manual: number | undefined;
   /** The message reported for the live runs that could not be counted, until they are counted again. */
   let uncounted: string | undefined;
-  const full = () => manual === undefined || inFlight() + manual >= options.maxConcurrentRuns;
+  const full = () => manual === undefined || inFlight() + manual >= maxConcurrentRuns;
 
   const countManual = async () => {
     try {
@@ -313,11 +326,9 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
 
   const apply = (item: QueueItem, answer: Reconciled) => {
     const runId = item.runId ?? '';
-    const runDir = join(options.runsDir, runId);
     switch (answer.kind) {
       case 'in-flight':
-        // A live run's control file is left to the run: taking an `unwatched` back from under it could take a stop
-        // that replaced it meanwhile. One it never reached suspends it, and the next tick resumes it.
+        // A live run's control file is left to the run.
         if (answer.adopt && item.pid !== undefined) store.adopted(item.dedupKey, item.pid);
         break;
       case 'adopt':
@@ -368,9 +379,6 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
         if (holding() || options.paused?.() === true) break;
         // A resume takes a slot as a start does: over the cap, as after the cap was lowered, it waits a tick.
         if (full()) break;
-        // Watched again: an `unwatched` the dead run never took would suspend its resume at once. Nothing else writes
-        // to a dead run's control file: `sail stop` ends a run it finds dead itself.
-        cancelUnwatch(runDir);
         limitedAt.delete(runId);
         resume(item, runId, answer.from);
         break;
@@ -559,5 +567,9 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
       await dispatch();
     },
     inFlight,
+    configure(next) {
+      ({ label, maxConcurrentRuns, waitingRecheckMs } = next);
+      ignorePrerequisites = next.ignorePrerequisites;
+    },
   };
 }

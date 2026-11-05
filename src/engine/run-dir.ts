@@ -207,7 +207,10 @@ export function removeRunDir(dir: string): void {
 const STATUSES = ['running', 'suspended', 'completed', 'failed'] as const;
 export type Status = (typeof STATUSES)[number];
 
-/** Why a failed or suspended run ended without completing, in `sail.summary.v1`'s order. */
+/**
+ * Why a failed or suspended run ended without completing, in `sail.summary.v1`'s order. `unwatched` is no longer given:
+ * it is kept so a run an older sail suspended when its workflow was unwatched still reads.
+ */
 export const STOP_REASONS = [
   'workflow_failed',
   'stage_error',
