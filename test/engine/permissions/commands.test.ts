@@ -369,6 +369,48 @@ test('a loop variable shadows the environment, so a list that is not known leave
   ]).toEqual(['allow', ['write', "can't be resolved"]]);
 });
 
+const GIT_ONLY = { commands: ['git *'] };
+const words = (count: number) => Array.from({ length: count }, (_, i) => `w${i}`).join(' ');
+const loops = (levels: number) =>
+  `${Array.from({ length: levels }, (_, i) => `for v${i} in ${words(16)}; do`).join(' ')} echo x; ${'done; '.repeat(levels)}`;
+
+test.each([
+  ['for f in a b; do git log -1 -- "$f"; done', GIT_ONLY, 'allow'],
+  ['for f in a b; do rm "$f"; done', GIT_ONLY, NOT_LISTED('rm "$f"')],
+  ['for n in 1 2 3; do git show HEAD~$n; done', GIT_ONLY, 'allow'],
+  ['for n in 1 2 3; do git show HEAD~${n}; done', GIT_ONLY, 'allow'],
+  ['for f in a b; do for g in $f c; do git show $g; done; done', GIT_ONLY, 'allow'],
+  ['for f in a; do git show $f; done; git show $f', GIT_ONLY, ['commands', 'hold an expansion']],
+  ['for f in $(git ls-files); do git show $f; done', GIT_ONLY, ['commands', 'hold an expansion']],
+  ['for f in *.ts; do git show $f; done', GIT_ONLY, ['commands', 'hold an expansion']],
+  [`for f in ${words(16)}; do git show $f; done`, GIT_ONLY, 'allow'],
+  [`for f in ${words(17)}; do git show $f; done`, GIT_ONLY, ['commands', 'hold an expansion']],
+  ['for f; do git show $f; done', GIT_ONLY, ['commands', 'hold an expansion']],
+  ['for f in; do git show $f; done', GIT_ONLY, ['commands', 'hold an expansion']],
+  ['for f in a "b c"; do git show $f; done', GIT_ONLY, ['commands', 'hold an expansion']],
+  ['for f in src/a.ts src/b.ts; do echo x > $f; done', { commands: ['echo *'], write: ['src/**'] }, 'allow'],
+  [
+    'for f in src/a.ts lib/a.dart; do echo x > $f; done',
+    { commands: ['echo *'], write: ['src/**'] },
+    ['write', 'lib/a.dart'],
+  ],
+  [
+    'for f in src/a.ts lib/a.dart; do echo x; done > $f',
+    { commands: ['echo *'], write: ['src/**'] },
+    ['write', "can't be resolved"],
+  ],
+  ['for f in a; do echo x > $f.txt; done', { commands: ['echo *'], write: ['a.txt'] }, 'allow'],
+  ['for STAGE_OUT in src; do echo x > $STAGE_OUT/a.ts; done', { commands: ['echo *'], write: ['src/**'] }, 'allow'],
+  [
+    'for STAGE_OUT in src; do echo x > $STAGE_OUT/a.ts; done; echo x > $STAGE_OUT/a.ts',
+    { commands: ['echo *'], write: ['src/**'] },
+    ['write', "can't be resolved"],
+  ],
+  [loops(5), { commands: ['echo *'] }, 'allow'],
+] as [string, Partial<Permissions>, Want][])('for loop variables: %j under %j is %j', (command, open, want) => {
+  expect(verdict(run(command, open), want)).toEqual(want);
+});
+
 const DENIED = (text: string): Want => ['commands', `\`${text}\` is among the step's denied commands`];
 const PROFILE = { commands: ['*'], deny: ['git push *', 'gh *', 'curl *'] };
 

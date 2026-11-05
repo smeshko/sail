@@ -21,7 +21,6 @@ import {
   type Pipeline,
   parseCommand,
   type Redirection,
-  type SimpleCommand,
   type Word,
 } from './shell';
 import { allow, type DecideContext, type Decision, deny, type Permissions } from './types';
@@ -45,7 +44,10 @@ interface Run {
 }
 
 interface Target {
-  readonly word: Word | string;
+  /** Where it leads, resolved when it was collected, or undefined when that can't be known here. */
+  readonly path: string | undefined;
+  /** The target as written. */
+  readonly raw: string;
   readonly text: string;
   readonly cwd: string;
 }
@@ -62,6 +64,9 @@ interface Collected {
 
 /** What an argument the shell expands at run time could add: the flags the deny set looks for. */
 const WORST = ['-rf', '--force', '--hard', '-D', '-delete'];
+/** A `for` loop's list is walked word by word only up to this many words, and every walk spends from the budget. */
+const LOOP_WORDS = 16;
+const LOOP_WALKS = 64;
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh']);
 const VALUE_LETTERS: Record<string, string> = { sh: 'o', dash: 'o', zsh: 'o', bash: 'oO', ksh: 'oR' };
 const DECLARERS = new Set(['export', 'declare', 'typeset', 'local', 'readonly']);
@@ -167,6 +172,7 @@ class Collector {
 
   /** Loop variables in scope: a name bound to a value, or to undefined when the shell's value isn't known here. */
   private readonly bound = new Map<string, string | undefined>();
+  private walks = 0;
 
   constructor(private readonly ctx: DecideContext) {}
 
@@ -213,6 +219,27 @@ class Collector {
     return here;
   }
 
+  /**
+   * Walks a `for` loop's body once per word of a literal list, with the name bound to that word, or once with the name
+   * unknown when the list isn't literal, is longer than LOOP_WORDS, or would overspend the command's LOOP_WALKS. The
+   * name is left unknown afterwards: bash leaves it at the last word, and unknown is the cautious choice.
+   */
+  private loop(name: string, list: readonly Word[] | undefined, walk: () => void): void {
+    const values = list?.map((word) => this.known(word));
+    const literal = values !== undefined && values.length > 0 && values.length <= LOOP_WORDS;
+    if (literal && values.every((value) => value !== undefined) && this.walks + values.length <= LOOP_WALKS) {
+      this.walks += values.length;
+      for (const value of values) {
+        this.bound.set(name, value);
+        walk();
+      }
+    } else {
+      this.bound.set(name, undefined);
+      walk();
+    }
+    this.bound.set(name, undefined);
+  }
+
   /** The argv of every simple command a compound command holds, for the pipeline checks. */
   private flat(command: Command): string[][] {
     if (command.kind === 'simple') return [command.words.map((word) => this.known(word) ?? word.text)];
@@ -247,8 +274,13 @@ class Collector {
       const target = redirection.target;
       if (target === undefined || redirection.op === '<<<') continue;
       const into = redirection.op === '<' ? this.out.reads : this.out.writes;
-      into.push({ word: target, text, cwd: cwd.physical });
+      into.push(this.target(target, text, cwd.physical));
     }
+  }
+
+  private target(word: Word | string, text: string, cwd: string): Target {
+    if (typeof word === 'string') return { path: word, raw: word, text, cwd };
+    return { path: this.known(word), raw: word.raw, text, cwd };
   }
 
   private compound(command: Compound, cwd: Cwd, depth: number, inBody: boolean): Cwd | undefined {
@@ -264,8 +296,7 @@ class Collector {
         return undefined;
       case 'for':
         this.nested(command.words ?? [], cwd, depth);
-        this.bound.set(command.name, undefined);
-        body(command.body, true);
+        this.loop(command.name, command.words, () => body(command.body, true));
         return undefined;
       case 'while':
       case 'until':
@@ -323,7 +354,7 @@ class Collector {
         this.out.refusals.push(`${name}'s option ${skipped.unknown} isn't known: ${quote(text)}`);
         return undefined;
       }
-      for (const word of skipped.writes) this.out.writes.push({ word, text, cwd: cwd.physical });
+      for (const word of skipped.writes) this.out.writes.push(this.target(word, text, cwd.physical));
       let at = skipped.at;
       if (name === 'env') {
         for (; at < args.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test((args[at] as Word).text); at++) {
@@ -513,7 +544,7 @@ class Collector {
       const eq = arg.indexOf('=');
       const path = eq === -1 ? invocation.args[i + 1] : arg.slice(eq + 1);
       if (path === undefined) this.out.refusals.push(`git ${arg} without its file: ${quote(text)}`);
-      else this.out.writes.push({ word: path, text, cwd: here });
+      else this.out.writes.push(this.target(path, text, here));
     });
     const { subcommand, args } = invocation;
     const from = { logical: here, physical: here };
@@ -566,13 +597,11 @@ function checkTargets(
   targets: readonly Target[],
   check: typeof checkRead,
   rule: 'read' | 'write',
-  collector: Collector,
   permissions: Permissions,
   ctx: DecideContext,
 ): Decision {
   for (const target of targets) {
-    const path = typeof target.word === 'string' ? target.word : collector.known(target.word);
-    const raw = typeof target.word === 'string' ? target.word : target.word.raw;
+    const { path, raw } = target;
     if (path === undefined || path.includes('$') || path.startsWith('~')) {
       return deny(rule, `${rule} ${raw} in ${quote(target.text)}: the path can't be resolved before it runs`);
     }
@@ -623,7 +652,7 @@ export function decideCommand(command: string, permissions: Permissions, ctx: De
   }
   const problem = out.problems[0];
   if (problem !== undefined) return deny('commands', problem);
-  const reads = checkTargets(out.reads, checkRead, 'read', collector, permissions, ctx);
+  const reads = checkTargets(out.reads, checkRead, 'read', permissions, ctx);
   if (!reads.allow) return reads;
-  return checkTargets(out.writes, checkWrite, 'write', collector, permissions, ctx);
+  return checkTargets(out.writes, checkWrite, 'write', permissions, ctx);
 }
