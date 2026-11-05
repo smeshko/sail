@@ -59,7 +59,8 @@ Linear, team `ADW`. Issues are `ADW-<n>`. Apply every label that fits:
 - Source: `dogfooding`, `code-review`, `field-report`
 - `groom` goes on every ticket filed into the backlog, as sail's follow-up filing does. The groom workflow judges the
   ticket, then plans one worth doing: it attaches `plan.md` and puts `planned` and `factory` on, or puts
-  `open-questions` on. Once a person answers in the description's `## Rulings` section, `groom` goes back on.
+  `open-questions` on. A ticket that is real work but not the factory's (no code change, a measurement or walkthrough,
+  another repository) gets `manual`: it is never planned, and waits on a person. Once a person answers in the description's `## Rulings` section, `groom` goes back on.
 - `factory` starts the factory on the plan groom attached last. A ticket with no plan attached fails the run: put
   `groom` on it instead.
 

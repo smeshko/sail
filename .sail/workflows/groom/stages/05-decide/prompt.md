@@ -33,6 +33,8 @@ Choose from this set, and nothing else is available to you:
 | `labels` `set` | the ticket's labels are wrong or missing: `set` names its `type`, `platform` and, when one fits, `source` |
 | `related` `to` | another ticket is different work in the same code or toward the same goal, and a reader of either should know |
 | `blocks` `to` | this ticket must land before the ticket `to` can |
+| `blocked_by` `to` | the ticket `to` must land before this one can start: an unlanded prerequisite, never `related` |
+| `manual` `reason` | the ticket is real work but not the factory's: it needs no code change, needs a measurement or a person's walkthrough, or belongs in another repository |
 | `edit` `title` and/or `description` | the title misleads, or the description lacks what you verified, such as the files involved |
 
 **Merge.** This ticket is `into` or one of `absorb`. Make the survivor the broader ticket, or the older one when neither
@@ -42,6 +44,7 @@ lines. One `merge` per run, absorbing at most five tickets.
 
 **Related is not a weak merge.** When the worth check named a ticket at 0.6 or more, or you would put one pull request
 over both, choose `merge`, not `related`. Use `related` only for work that stays separate.
+A prerequisite that has not landed is `blocked_by`, which the watcher waits on, never `related`.
 
 **Labels.** Every ticket carries exactly one type (`feature`, `bug`, `refactoring`), exactly one platform (`core`, `cli`,
 `dashboard`), and at most one source (`dogfooding`, `code-review`, `field-report`). Choose `labels` whenever the ticket
@@ -70,7 +73,8 @@ choosing it `means` day to day, `recommend` (one option's text, exactly), `why`,
 A question that breaks the shape, or a third question, is rejected and you must submit again. The ticket is labelled
 `open-questions` while any remain. Otherwise a planner plans it next, from the ticket, your report and the actions the
 workflow applies, so the `## Assumptions` you write are choices it builds on. A ticket you cancel or merge away has
-none, and is never planned.
+none, and is never planned. A ticket you rule `manual` is labelled `manual`, never planned, and has no open questions:
+submit `questions` empty.
 
 A `## Rulings` section in the ticket's description holds a person's answers to questions an earlier grooming asked. A
 question a ruling answers is not open: never ask it again.

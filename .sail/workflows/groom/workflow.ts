@@ -110,12 +110,12 @@ function heldCancel(context: Context): string | undefined {
 
 /**
  * Splits the judge's actions into those to apply and those to report, and picks the label the ticket ends with, before
- * any plan: `groomed` once an action ends the ticket, `open-questions` while the judge confirmed any, and `planned`
- * otherwise, which the planner's own questions can still turn into `open-questions`. A
+ * any plan: `groomed` once an action ends the ticket, `manual` once the judge rules it a person's work, `open-questions` while the
+ * judge confirmed any, and `planned` otherwise, which the planner's own questions can still turn into `open-questions`. A
  * `duplicate`, a `cancel` or a `merge` that absorbs this ticket ends it, and no other of them applies after that; a
  * ticket that survives a merge is never canceled. A `cancel` passes the worth check's numbers as `CANCEL` says, a `merge`
  * as `MERGE_CONFIDENCE` and `DUPLICATE_CONFIDENCE` say,
- * never for a kept ticket, and one `merge` and one `labels` apply per run. An `edit` that names nothing to change is reported. A relation of any kind is applied only to one of `others`,
+ * never for a kept ticket, and one `merge` and one `labels` apply per run. An `edit` that names nothing to change is reported. A relation of any kind (`related`, `blocks`, `blocked_by`) is applied only to one of `others`,
  * never to `ticketKey` itself: the judge and the checks read the ticket's text, which can name any key.
  */
 function limit(decision: z.infer<typeof Decision>, context: Context): z.infer<typeof Verdict> {
@@ -135,6 +135,12 @@ function limit(decision: z.infer<typeof Decision>, context: Context): z.infer<ty
     }
     if (action.kind === 'labels') {
       if (apply.some((each) => each.kind === 'labels')) reported.push('labels (the labels are already set)');
+      else apply.push(action);
+      continue;
+    }
+    if (action.kind === 'manual') {
+      if (ended !== undefined) reported.push(`manual (${ended})`);
+      else if (apply.some((each) => each.kind === 'manual')) reported.push('manual (already ruled manual)');
       else apply.push(action);
       continue;
     }
@@ -194,8 +200,15 @@ function limit(decision: z.infer<typeof Decision>, context: Context): z.infer<ty
       ended = 'the ticket is already marked a duplicate';
     }
   }
-  const questions = ended === undefined ? decision.questions : [];
-  const outcome = ended !== undefined ? 'groomed' : questions.length > 0 ? 'open-questions' : 'planned';
+  // An ending action wins over a manual ruling applied before it.
+  const ruled = ended === undefined && apply.some((each) => each.kind === 'manual');
+  if (ended !== undefined && apply.some((each) => each.kind === 'manual')) {
+    reported.push(`manual (${ended})`);
+    for (let index = apply.length - 1; index >= 0; index--) if (apply[index]?.kind === 'manual') apply.splice(index, 1);
+  }
+  const questions = ended === undefined && !ruled ? decision.questions : [];
+  const outcome =
+    ended !== undefined ? 'groomed' : ruled ? 'manual' : questions.length > 0 ? 'open-questions' : 'planned';
   return { apply, reported, questions, outcome, plan: null };
 }
 

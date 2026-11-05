@@ -466,6 +466,8 @@ test('groom reports, never applies, a relation to its own ticket or to one the i
       { kind: 'duplicate', of: 'FAKE-9' },
       { kind: 'related', to: 'FAKE-2' },
       { kind: 'blocks', to: 'FAKE-9' },
+      { kind: 'blocked_by', to: 'FAKE-2' },
+      { kind: 'blocked_by', to: 'FAKE-9' },
     ];
     seedHarness(sailDir, 'decide', [answer]);
     const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
@@ -480,11 +482,34 @@ test('groom reports, never applies, a relation to its own ticket or to one the i
       '- reported, not marked: duplicate of FAKE-9 (not an open ticket the intake listed)',
       '- reported, not marked: related FAKE-2 (this ticket itself)',
       '- reported, not marked: blocks FAKE-9 (not an open ticket the intake listed)',
+      '- reported, not marked: blocked_by FAKE-2 (this ticket itself)',
+      '- reported, not marked: blocked_by FAKE-9 (not an open ticket the intake listed)',
     ]) {
       expect(comment).toContain(line);
     }
     expect(comment).not.toContain('- applied:');
     expect(comment).not.toContain('- failed:');
+  });
+}, 120_000);
+
+test('groom records a prerequisite the judge names as blocked_by: FAKE-2 is blocked by FAKE-1', async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeGroomRepo(repo);
+    reseed(sailDir, 'decide', (output) => {
+      output.actions = [{ kind: 'blocked_by', to: 'FAKE-1' }];
+    });
+    const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+
+    const ticket = fakeTicket(repo.dir, 'FAKE-2');
+    // The fake stores a ticket's prerequisites as bare keys.
+    expect(ticket.prerequisites as unknown).toEqual(['FAKE-1']);
+    expect(ticket.links.map((link) => link.title ?? '').some((title) => title.startsWith('blocked by FAKE-1'))).toBe(
+      true,
+    );
+    const related = readEvents(onlyRun(repo.dir)).filter((event) => event.type === 'ticket:related');
+    expect(related).toContainEqual(expect.objectContaining({ ticketKey: 'FAKE-1', kind: 'blocks', to: 'FAKE-2' }));
+    expect(lastComment(repo.dir)).toContain('- applied: blocked_by FAKE-1');
   });
 }, 120_000);
 
@@ -800,6 +825,109 @@ test("groom sets the ticket's labels: one of each group, taking off the group's 
     const comment = lastComment(repo.dir);
     expect(comment).toContain('- applied: labels feature, cli, dogfooding');
     expect(comment).toContain('- reported, not marked: labels (the labels are already set)');
+  });
+}, 120_000);
+
+test('groom rules a ticket manual: labels it manual, plans nothing, and still applies its relation', async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeGroomRepo(repo);
+    reseed(sailDir, 'decide', (output) => {
+      output.actions = [
+        { kind: 'manual', reason: 'needs a measurement, not a code change' },
+        { kind: 'related', to: 'FAKE-1' },
+      ];
+      output.questions = [];
+    });
+    const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+
+    const dir = onlyRun(repo.dir);
+    const keys = readJournal(dir).entries.map((entry) => entry.key);
+    expect(keys.slice(5)).toEqual(['decide#1', 'act#1']);
+    const ticket = fakeTicket(repo.dir, 'FAKE-2');
+    expect(ticket.labels).toEqual(['manual']);
+    expect(ticket.attachments).toEqual([]);
+    expect(ticket.links.map((link) => link.title?.split(':')[0])).toEqual(['related FAKE-1']);
+    const comment = lastComment(repo.dir);
+    expect(comment).toContain('- applied: manual (needs a measurement, not a code change)');
+    expect(comment).toContain('## Open questions\n\n- none\n\n## Actions');
+    expect(comment).toContain('Labelled `manual`.');
+    expect(labelEvents(repo.dir, 'ticket:labelled')).toEqual(['manual']);
+    const act = readJournal(dir).entries.find((entry) => entry.key === 'act#1');
+    expect(act?.output).toMatchObject({ labelled: ['manual'], attached: null });
+  });
+}, 120_000);
+
+test('groom drops the open questions of a ticket it rules manual', async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeGroomRepo(repo);
+    reseed(sailDir, 'decide', (output) => {
+      output.actions = [{ kind: 'manual', reason: 'a person walks through it' }];
+    });
+    const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+
+    const comment = lastComment(repo.dir);
+    expect(comment).toContain('## Open questions\n\n- none\n\n## Actions');
+    expect(comment).not.toContain('(recommended)');
+    expect(fakeTicket(repo.dir, 'FAKE-2').labels).toEqual(['manual']);
+  });
+}, 120_000);
+
+test('groom takes factory off a ticket it rules manual', async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeGroomRepo(repo);
+    edit(sailDir, 'fake/tickets.json', '"labels": ["groom"]', '"labels": ["groom", "factory"]');
+    repo.git('commit', '-am', 'FAKE-2 carries factory');
+    reseed(sailDir, 'decide', (output) => {
+      output.actions = [{ kind: 'manual', reason: 'belongs in another repository' }];
+    });
+    const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+
+    expect(fakeTicket(repo.dir, 'FAKE-2').labels).toEqual(['manual']);
+    expect(labelEvents(repo.dir, 'ticket:unlabelled').sort()).toEqual(['factory', 'groom']);
+  });
+}, 120_000);
+
+test('groom takes manual off a ticket ruled manual before that it now plans', async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeGroomRepo(repo);
+    edit(sailDir, 'fake/tickets.json', '"labels": ["groom"]', '"labels": ["groom", "manual"]');
+    repo.git('commit', '-am', 'FAKE-2 was ruled manual');
+    reseed(sailDir, 'decide', (output) => {
+      output.questions = [];
+    });
+    const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+
+    expect(fakeTicket(repo.dir, 'FAKE-2').labels).toEqual(['planned', 'factory']);
+    expect(labelEvents(repo.dir, 'ticket:unlabelled').sort()).toEqual(['groom', 'manual']);
+  });
+}, 120_000);
+
+test('groom reports a manual beside a cancel that ends the ticket, and labels it groomed', async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeGroomRepo(repo);
+    reseed(sailDir, 'worth', (output) => {
+      Object.assign(output, { verdict: 'cancel', confidence: 0.6 });
+    });
+    reseed(sailDir, 'decide', (output) => {
+      output.actions = [
+        { kind: 'manual', reason: 'no code change' },
+        { kind: 'cancel', reason: 'already done' },
+      ];
+    });
+    const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+
+    const ticket = fakeTicket(repo.dir, 'FAKE-2');
+    expect(ticket.state.type).toBe('canceled');
+    expect(ticket.labels).toEqual(['groomed']);
+    const comment = lastComment(repo.dir);
+    expect(comment).toContain('- applied: cancel (already done)');
+    expect(comment).toContain('- reported, not marked: manual (the ticket is already canceled)');
+    expect(comment).not.toContain('- applied: manual');
   });
 }, 120_000);
 

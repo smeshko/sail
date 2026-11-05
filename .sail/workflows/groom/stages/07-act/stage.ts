@@ -1,6 +1,6 @@
 // act: attaches the plan when there is one, then comments the judge's report on the ticket, the plan's risk and tasks,
 // the open questions it renders from the verdict (each with its options, the recommended one marked) and what was done
-// to it, then puts the outcome label on (`groomed`, `open-questions`, or `planned` with `factory`) and takes the
+// to it, then puts the outcome label on (`groomed`, `manual`, `open-questions`, or `planned` with `factory`) and takes the
 // designation label off last, so the watcher grooms a ticket once. It makes no claim, only the actions it is given (the
 // plan is attached and the report posted once per run, and the label swap is tried three times, a second apart): a
 // `cancel` moves the ticket to canceled, a `duplicate` relates it as one, which cancels it, and a `merge` rewrites the
