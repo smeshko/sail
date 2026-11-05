@@ -9,7 +9,7 @@
 // Each reading is shorter than the one before, so it ends. That reads some plain arguments as commands too, which
 // refuses more than it must: it fails closed.
 import { basename } from 'node:path';
-import { MAX_DEPTH, type Pipeline, parseCommand, type Word } from '../../engine/permissions/shell';
+import { type Command, MAX_DEPTH, type Pipeline, parseCommand, type Word } from '../../engine/permissions/shell';
 
 /** Why a command sending a job to the background is refused. */
 export const BACKGROUND = 'a command run in the background with & can outlive the session';
@@ -30,23 +30,58 @@ function inList(list: readonly Pipeline[], depth: number): string | undefined {
   if (depth > MAX_DEPTH) return `commands nested deeper than ${MAX_DEPTH} levels`;
   for (const pipeline of list) {
     if (pipeline.background) return BACKGROUND;
-    for (const command of pipeline.commands) {
-      const words = [
-        ...command.assignments.map((assignment) => assignment.value),
-        ...command.words,
-        ...command.redirections.flatMap((redirection) =>
-          redirection.target === undefined ? [] : [redirection.target],
-        ),
-      ];
-      const nested = command.redirections.flatMap((redirection) => redirection.heredoc?.nested ?? []);
-      const found =
-        firstOf(words, (word) => inWord(word, depth)) ??
-        outsideDiffOperand(command.words) ??
-        firstOf(nested, (inner) => inList(inner, depth + 1));
-      if (found !== undefined) return found;
-    }
+    const found = firstOf(pipeline.commands, (command) => inCommand(command, depth));
+    if (found !== undefined) return found;
   }
   return undefined;
+}
+
+function inCommand(command: Command, depth: number): string | undefined {
+  const words = [
+    ...(command.kind === 'simple' ? command.assignments.map((assignment) => assignment.value) : []),
+    ...compoundWords(command),
+    ...command.redirections.flatMap((redirection) => (redirection.target === undefined ? [] : [redirection.target])),
+  ];
+  const nested = command.redirections.flatMap((redirection) => redirection.heredoc?.nested ?? []);
+  return (
+    firstOf(words, (word) => inWord(word, depth)) ??
+    (command.kind === 'simple' ? outsideDiffOperand(command.words) : undefined) ??
+    firstOf(nested, (inner) => inList(inner, depth + 1)) ??
+    firstOf(bodies(command), (body) => inList(body, depth + 1))
+  );
+}
+
+/** The words a command holds itself, not in its bodies: argv, a `for` list, a `case` word and its patterns. */
+function compoundWords(command: Command): readonly Word[] {
+  switch (command.kind) {
+    case 'simple':
+      return command.words;
+    case 'for':
+      return command.words ?? [];
+    case 'case':
+      return [command.word, ...command.arms.flatMap((arm) => arm.patterns)];
+    default:
+      return [];
+  }
+}
+
+/** The lists a compound command runs. */
+function bodies(command: Command): readonly (readonly Pipeline[])[] {
+  switch (command.kind) {
+    case 'simple':
+      return [];
+    case 'group':
+    case 'subshell':
+    case 'for':
+      return [command.body];
+    case 'while':
+    case 'until':
+      return [command.condition, command.body];
+    case 'if':
+      return [...command.clauses.flatMap((clause) => [clause.condition, clause.body]), command.otherwise ?? []];
+    case 'case':
+      return command.arms.map((arm) => arm.body);
+  }
 }
 
 function inWord(word: Word, depth: number): string | undefined {

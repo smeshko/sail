@@ -50,6 +50,16 @@ interface Collected {
   readonly writes: Target[];
 }
 
+const REFUSED_FOR = {
+  group: 'a brace group',
+  subshell: 'a subshell ( … )',
+  for: 'a for loop',
+  while: 'a while loop',
+  until: 'an until loop',
+  if: 'an if',
+  case: 'a case',
+} as const;
+
 /** What an argument the shell expands at run time could add: the flags the deny set looks for. */
 const WORST = ['-rf', '--force', '--hard', '-D', '-delete'];
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh']);
@@ -177,6 +187,11 @@ class Collector {
       const argvs: string[][] = [];
       let moved: Cwd | undefined;
       for (const command of pipeline.commands) {
+        if (command.kind !== 'simple') {
+          this.out.refusals.push(`${REFUSED_FOR[command.kind]}: ${quote(command.text)}`);
+          moved = undefined;
+          continue;
+        }
         argvs.push(command.words.map((word) => this.known(word) ?? word.text));
         moved = this.command(command, here, depth);
       }

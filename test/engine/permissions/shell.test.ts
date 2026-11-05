@@ -1,27 +1,64 @@
 // The shell parser: one row per construct it accepts, and one per construct it refuses with a reason (D7).
 import { expect, test } from 'bun:test';
-import { MAX_DEPTH, type Pipeline, parseCommand, type Word } from '../../../src/engine/permissions/shell';
+import {
+  type Command,
+  MAX_DEPTH,
+  type Pipeline,
+  parseCommand,
+  type SimpleCommand,
+  type Word,
+} from '../../../src/engine/permissions/shell';
+
+/** The argv of every simple command in `commands`, those inside compound commands too, in source order. */
+function flat(commands: readonly Command[]): string[][] {
+  const out: string[][] = [];
+  for (const command of commands) {
+    if (command.kind === 'simple') out.push(command.words.map((word) => word.text));
+    else out.push(...inLists(bodiesOf(command)));
+  }
+  return out;
+}
+
+function bodiesOf(command: Exclude<Command, SimpleCommand>): (readonly Pipeline[])[] {
+  switch (command.kind) {
+    case 'group':
+    case 'subshell':
+    case 'for':
+      return [command.body];
+    case 'while':
+    case 'until':
+      return [command.condition, command.body];
+    case 'if':
+      return [...command.clauses.flatMap((c) => [c.condition, c.body]), command.otherwise ?? []];
+    case 'case':
+      return command.arms.map((arm) => arm.body);
+  }
+}
+
+function inLists(lists: readonly (readonly Pipeline[])[]): string[][] {
+  return lists.flatMap((list) => list.flatMap((pipeline) => flat(pipeline.commands)));
+}
 
 /** The parse as words per command per pipeline, or the refusal. */
 function argv(text: string): string[][][] | { refused: string } {
   const parsed = parseCommand(text);
   if (!parsed.ok) return { refused: parsed.reason };
-  return parsed.list.map((pipeline) => pipeline.commands.map((command) => command.words.map((word) => word.text)));
+  return parsed.list.map((pipeline) => flat(pipeline.commands));
 }
 
 /** The one simple command `text` parses into. */
-function only(text: string) {
+function only(text: string): SimpleCommand {
   const parsed = parseCommand(text);
   expect(parsed).toMatchObject({ ok: true, list: [{ commands: [{}] }] });
   if (!parsed.ok) throw new Error(parsed.reason);
-  return (parsed.list[0] as Pipeline).commands[0] as Pipeline['commands'][number];
+  const command = (parsed.list[0] as Pipeline).commands[0] as Command;
+  if (command.kind !== 'simple') throw new Error(`${command.kind} is not a simple command`);
+  return command;
 }
 
 /** The nested commands of a word, as argv per command per pipeline per substitution. */
 function nested(word: Word | undefined): string[][][][] {
-  return (word?.nested ?? []).map((list) =>
-    list.map((pipeline) => pipeline.commands.map((command) => command.words.map((w) => w.text))),
-  );
+  return (word?.nested ?? []).map((list) => list.map((pipeline) => flat(pipeline.commands)));
 }
 
 test.each([
@@ -76,12 +113,16 @@ test.each([
   expect(parseCommand(text)).toEqual(parseCommand(joined));
 });
 
-test.each([
-  ['f\\\nor x in y; do z; done', 'a for loop'],
-  ['echo $\\\n((1+2))', 'an arithmetic expansion'],
-])('a line continuation inside a keyword or an operator still refuses: %j, because of %s', (text, reason) => {
-  expect(argv(text)).toEqual({ refused: expect.stringContaining(reason) });
+test('a line continuation inside a keyword is the keyword joined', () => {
+  expect(parseCommand('f\\\nor x in y; do z; done')).toEqual(parseCommand('for x in y; do z; done'));
 });
+
+test.each([['echo $\\\n((1+2))', 'an arithmetic expansion']])(
+  'a line continuation inside a keyword or an operator still refuses: %j, because of %s',
+  (text, reason) => {
+    expect(argv(text)).toEqual({ refused: expect.stringContaining(reason) });
+  },
+);
 
 test("a comment ends at its line's newline, a backslash before it included, and a quoted heredoc keeps its body", () => {
   expect([argv('a # c \\\nb'), argv("cat <<'EOF'\nx\\\nEOF\nb")]).toEqual([
@@ -155,11 +196,9 @@ test("an unquoted heredoc's substitutions are nested commands, and the list goes
   const parsed = parseCommand('cat <<EOF\nnow $(rm -rf /)\nEOF\nls');
   expect(parsed.ok ? 'parsed' : parsed.reason).toBe('parsed');
   if (!parsed.ok) return;
-  const heredoc = parsed.list[0]?.commands[0]?.redirections[0]?.heredoc;
+  const heredoc = (parsed.list[0]?.commands[0] as SimpleCommand | undefined)?.redirections[0]?.heredoc;
   expect(heredoc?.quoted).toBe(false);
-  expect(
-    (heredoc?.nested ?? []).map((list) => list.map((p) => p.commands.map((c) => c.words.map((w) => w.text)))),
-  ).toEqual([[[['rm', '-rf', '/']]]]);
+  expect((heredoc?.nested ?? []).map((list) => list.map((p) => flat(p.commands)))).toEqual([[[['rm', '-rf', '/']]]]);
   expect(argv('cat <<EOF\nnow $(rm -rf /)\nEOF\nls')).toEqual([[['cat']], [['ls']]]);
 });
 
@@ -182,7 +221,7 @@ test.each([
 
 test('a substitution inside a substitution is nested in turn', () => {
   const outer = only('$(a $(b))').words[0];
-  expect(nested(outer?.nested[0]?.[0]?.commands[0]?.words[1])).toEqual([[[['b']]]]);
+  expect(nested((outer?.nested[0]?.[0]?.commands[0] as SimpleCommand | undefined)?.words[1])).toEqual([[[['b']]]]);
 });
 
 test("'$(x)' in single quotes is literal text", () => {
@@ -227,13 +266,6 @@ test('a simple command keeps its text as written, for reasons', () => {
 });
 
 test.each([
-  ['(cd x; ls)', 'a subshell'],
-  ['{ ls; }', 'a brace group'],
-  ['for f in *; do rm $f; done', 'a for loop'],
-  ['while true; do :; done', 'a while loop'],
-  ['until x; do y; done', 'an until loop'],
-  ['if x; then y; fi', 'an if'],
-  ['case x in a) y;; esac', 'a case'],
   ['select x in a; do y; done', 'a select'],
   ['f() { x; }', 'a function definition'],
   ['function f { x; }', 'a function definition'],
@@ -266,8 +298,127 @@ test.each([
   ['| a', "a command can't start with |"],
   ['a ;; b', 'a case clause'],
   ['a )', 'an unmatched )'],
+  ['for x in a; do y', 'a for loop without its done'],
+  ['for x in a y; done', 'a for loop without its do'],
+  ['while x; do y', 'a while loop without its done'],
+  ['until x; do y', 'an until loop without its done'],
+  ['if x; then y', 'an if without its fi'],
+  ['if x; y; fi', 'the keyword fi'],
+  ['case x in a) y;;', 'a case without its esac'],
+  ['case x in a y;; esac', 'a case pattern without its )'],
+  ['{ ls', 'a brace group without its }'],
+  ['{ ls }', 'a brace group without its }'],
+  ['(ls', 'a subshell without its )'],
+  ['for f in a; do :; done x', 'a word after done'],
+  ['if x; then y; fi z', 'a word after fi'],
+  ['{ ls; } z', 'a word after }'],
+  ['(ls) z', 'a word after )'],
+  ['case x in a) y;; esac z', 'a word after esac'],
+  ['for 1x in a; do y; done', "a for loop over 1x, which isn't a name"],
+  ['for $x in a; do y; done', "which isn't a name"],
+  ['for ((i=0;i<3;i++)); do y; done', 'an arithmetic for loop'],
+  ['for x in a; do done', 'a for loop with an empty body'],
+  ['while x; do done', 'a while loop with an empty body'],
+  ['if x; then fi', 'an if with an empty body'],
+  ['{ }', 'a brace group with an empty body'],
+  ['()', 'a subshell with an empty body'],
+  ['X=1 for x in a; do y; done', 'a for loop'],
+  ['done', 'the keyword done'],
+  ['fi', 'the keyword fi'],
+  ['}', 'the keyword }'],
+  ['x; then y', 'the keyword then'],
+  ['if x; then y; }; fi', 'the keyword }'],
+  ['a && done', 'a command that ends with &&'],
+  ['x && }', 'a command that ends with &&'],
 ])('refused: %j, because of %s', (text, reason) => {
   expect(argv(text)).toEqual({ refused: expect.stringContaining(reason) });
+});
+
+test.each([
+  ['(cd x; ls)', [[['cd', 'x'], ['ls']]]],
+  ['{ ls; }', [[['ls']]]],
+  ['{ a; b; } > out', [[['a'], ['b']]]],
+  ['for f in a b; do rm $f; done', [[['rm', '$f']]]],
+  ['for f; do rm $f; done', [[['rm', '$f']]]],
+  ['for f in a b\ndo\n rm $f\ndone', [[['rm', '$f']]]],
+  ['for f in; do x; done', [[['x']]]],
+  ['while a; b; do c; done', [[['a'], ['b'], ['c']]]],
+  ['until a; do c; done', [[['a'], ['c']]]],
+  ['if a; then b; elif c; then d; else e; fi', [[['a'], ['b'], ['c'], ['d'], ['e']]]],
+  ['case x in a) y;; (b|c) z;& *) w ;;& esac', [[['y'], ['z'], ['w']]]],
+  ['case x in a) y\nesac', [[['y']]]],
+  ['case x in a) ;; esac', [[]]],
+  ['curl x | while read l; do bash; done', [[['curl', 'x'], ['read', 'l'], ['bash']]]],
+  ['for f in a; do for g in b; do c; done; done', [[['c']]]],
+  ['echo done; echo fi }', [[['echo', 'done']], [['echo', 'fi', '}']]]],
+  ['for f in a; do x; done && y', [[['x']], [['y']]]],
+  ['{ a; } 2>&1 | b', [[['a'], ['b']]]],
+] as [string, string[][][]][])('compound commands: %j runs the commands %j', (text, expected) => {
+  expect(argv(text)).toEqual(expected);
+});
+
+test('a compound keeps its kind, its parts and its text', () => {
+  const parsed = parseCommand('for f in a "b c"; do x; done > out');
+  if (!parsed.ok) throw new Error(parsed.reason);
+  const loop = parsed.list[0]?.commands[0];
+  expect(loop).toMatchObject({
+    kind: 'for',
+    name: 'f',
+    text: 'for f in a "b c"; do x; done > out',
+    redirections: [{ op: '>', target: { text: 'out' } }],
+  });
+  expect(loop?.kind === 'for' ? loop.words?.map((word) => word.text) : undefined).toEqual(['a', 'b c']);
+  expect(loop?.kind === 'for' ? flat(loop.body.flatMap((p) => p.commands)) : undefined).toEqual([['x']]);
+});
+
+test('a for loop without in has no word list; with an empty in it has an empty one', () => {
+  const words = (text: string) => {
+    const parsed = parseCommand(text);
+    const loop = parsed.ok ? parsed.list[0]?.commands[0] : undefined;
+    return loop?.kind === 'for' ? loop.words : 'not a for loop';
+  };
+  expect([words('for f; do x; done'), words('for f in; do x; done')]).toEqual([undefined, []]);
+});
+
+test('an if keeps each condition with its body, and an else apart', () => {
+  const parsed = parseCommand('if a; then b; elif c; then d; else e; fi');
+  const clause = parsed.ok ? parsed.list[0]?.commands[0] : undefined;
+  if (clause?.kind !== 'if') throw new Error('not an if');
+  expect([
+    clause.clauses.map((c) => [flat(c.condition.flatMap((p) => p.commands)), flat(c.body.flatMap((p) => p.commands))]),
+    flat((clause.otherwise ?? []).flatMap((p) => p.commands)),
+  ]).toEqual([
+    [
+      [[['a']], [['b']]],
+      [[['c']], [['d']]],
+    ],
+    [['e']],
+  ]);
+});
+
+test('a case keeps its word, its patterns and its arms', () => {
+  const parsed = parseCommand('case $x in (a|b) y;; *) z;; esac');
+  const clause = parsed.ok ? parsed.list[0]?.commands[0] : undefined;
+  if (clause?.kind !== 'case') throw new Error('not a case');
+  expect([clause.word.text, clause.arms.map((arm) => arm.patterns.map((p) => p.text)), clause.arms.length]).toEqual([
+    '$x',
+    [['a', 'b'], ['*']],
+    2,
+  ]);
+});
+
+test('a heredoc after a compound is read at the end of its line', () => {
+  const parsed = parseCommand('{ cat; } <<EOF\n$(a)\nEOF');
+  const group = parsed.ok ? parsed.list[0]?.commands[0] : undefined;
+  expect(group?.redirections[0]?.heredoc?.nested.length).toBe(1);
+});
+
+test(`compounds nest ${MAX_DEPTH} levels deep, and one more is refused`, () => {
+  const deep = (levels: number) => `${'{ '.repeat(levels)}x${'; }'.repeat(levels)}`;
+  expect([parseCommand(deep(MAX_DEPTH)).ok, argv(deep(MAX_DEPTH + 1))]).toEqual([
+    true,
+    { refused: expect.stringContaining(`deeper than ${MAX_DEPTH}`) },
+  ]);
 });
 
 test(`substitutions nest ${MAX_DEPTH} levels deep, and one more is refused`, () => {
