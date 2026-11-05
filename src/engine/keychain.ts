@@ -9,13 +9,15 @@ export interface SecurityEnd {
   readonly stderr: string;
 }
 
-/** Runs macOS's `security` with `args`. */
-export type Security = (args: readonly string[]) => Promise<SecurityEnd>;
+/** Runs macOS's `security` with `args`, ending it when `signal` aborts. */
+export type Security = (args: readonly string[], signal?: AbortSignal) => Promise<SecurityEnd>;
 
 /** The `security` on `env`'s PATH. */
 export function systemSecurity(env: Env): Security {
-  return async (args) => {
-    const child = Bun.spawn(['security', ...args], {
+  return async (args, signal) => {
+    const program = Bun.which('security', { PATH: env.PATH ?? '' }) ?? 'security';
+    const child = Bun.spawn([program, ...args], {
+      ...(signal === undefined ? {} : { signal }),
       env: Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined)),
       stdin: 'ignore',
       stdout: 'pipe',

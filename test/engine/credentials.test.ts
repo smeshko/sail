@@ -1,8 +1,11 @@
 // The credential sources: an unset variable an adapter requires is read from a fixed keychain item or from `gh auth
 // token`, through injected stand-ins for `security` and `gh`, so nothing here reaches the real keychain.
 import { expect, test } from 'bun:test';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { type CommandEnd, fillCredentials, systemCredentials } from '../../src/engine/credentials';
-import type { Security, SecurityEnd } from '../../src/engine/keychain';
+import { type Security, type SecurityEnd, systemSecurity } from '../../src/engine/keychain';
 
 const end = (stdout: string, exitCode = 0, stderr = ''): SecurityEnd => ({ exitCode, stdout, stderr });
 
@@ -145,4 +148,31 @@ test('a name is asked once however often it is looked up', async () => {
   await lookup('LINEAR_API_KEY');
   await lookup('LINEAR_API_KEY');
   expect(calls.length).toBe(1);
+});
+
+test('a keychain that does not answer within the timeout is sent the abort', async () => {
+  let signal: AbortSignal | undefined;
+  const security: Security = (_args, given) => {
+    signal = given;
+    return new Promise(() => {});
+  };
+  const lookup = systemCredentials(ON, { security, timeoutMs: 20 });
+  expect(await lookup('LINEAR_API_KEY')).toEqual({
+    error: 'the keychain did not answer within 0.02 s for its linear-api-key item',
+  });
+  expect(signal?.aborted).toBe(true);
+});
+
+test("the system security on the environment's PATH is ended by its abort", async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sail-hung-security-'));
+  const pidFile = join(dir, 'pid');
+  writeFileSync(join(dir, 'security'), `#!/bin/sh\necho $$ > ${pidFile}\nexec sleep 30\n`);
+  chmodSync(join(dir, 'security'), 0o755);
+  const controller = new AbortController();
+  const ended = systemSecurity({ PATH: `${dir}:/usr/bin:/bin` })(['find-generic-password'], controller.signal);
+  while (!existsSync(pidFile) || readFileSync(pidFile, 'utf8').trim() === '') await Bun.sleep(20);
+  const pid = Number(readFileSync(pidFile, 'utf8'));
+  controller.abort();
+  expect((await ended).exitCode).not.toBe(0);
+  expect(() => process.kill(pid, 0)).toThrow();
 });

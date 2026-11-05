@@ -68,9 +68,9 @@ export function systemCredentials(env: Env, deps: LookupDeps = {}): CredentialLo
   const seconds = `${timeoutMs / 1000} s`;
   const security =
     deps.security ??
-    ((args: readonly string[]) => {
+    ((args: readonly string[], signal?: AbortSignal) => {
       if (Bun.which('security', { PATH: env.PATH ?? '' }) === null) return Promise.reject(missingProgram('security'));
-      return systemSecurity(env)(args);
+      return systemSecurity(env)(args, signal);
     });
   const run = deps.run ?? runCommand;
   const answers = new Map<string, Promise<CredentialAnswer>>();
@@ -89,7 +89,7 @@ export function systemCredentials(env: Env, deps: LookupDeps = {}): CredentialLo
     try {
       const attempt =
         'keychain' in source
-          ? security(['find-generic-password', '-s', source.keychain, '-w'])
+          ? security(['find-generic-password', '-s', source.keychain, '-w'], controller.signal)
           : run(source.command, env, controller.signal);
       const end = await Promise.race([attempt, clock]);
       if (end === TIMED_OUT) {
