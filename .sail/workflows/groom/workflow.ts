@@ -1,6 +1,7 @@
 // groom: a groom-labelled ticket in, one comment out, and for a ticket worth doing, its plan. The ticket is read without
 // a claim, so it stays where it is unless groom cancels it, merges it into another, or marks it a duplicate. Three agent
-// checks look at it at once (duplicates, worth, which also asks whether it is stale, and open questions); a judge writes the report, chooses actions
+// checks look at it (duplicates and worth at once, worth also asking whether it is stale; then open questions, only when
+// worth keeps the ticket); a judge writes the report, chooses actions
 // from a fixed set and confirms the open questions. A ticket that survives them with none open is planned, as the
 // factory's plan stage did, and a plan that leaves no question open is attached to the ticket. The act step applies what
 // the workflow lets through, attaches the plan, comments the report, takes the `groom` label off and puts `groomed` (an
@@ -233,19 +234,25 @@ export default workflow(
       return run.fail(reason);
     };
 
-    const [dup, earned, open] = await run.all([
+    const [dup, earned] = await run.all([
       [duplicates, { brief, others }],
       [worth, { brief, others }],
-      [questions, { brief, others }],
     ]);
     if (dup.outcome === 'blocked') return handOff(`duplicates blocked: ${dup.reason}`);
     if (earned.outcome === 'blocked') return handOff(`worth blocked: ${earned.reason}`);
-    if (open.outcome === 'blocked') return handOff(`questions blocked: ${open.reason}`);
+
+    // A ticket worth would cancel needs no questions asked of it: decide sees none.
+    let open: z.infer<typeof Findings>['questions'] = { questions: [] };
+    if (earned.output.verdict === 'keep') {
+      const asked = await run.stage(questions, { brief, others });
+      if (asked.outcome === 'blocked') return handOff(`questions blocked: ${asked.reason}`);
+      open = asked.output;
+    }
 
     const findings = {
       duplicates: dup.output,
       worth: earned.output,
-      questions: open.output,
+      questions: open,
     };
     const decided = await run.stage(decide, { brief, others, findings });
     if (decided.outcome === 'blocked') return handOff(`decide blocked: ${decided.reason}`);

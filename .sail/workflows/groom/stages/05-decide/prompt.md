@@ -1,7 +1,8 @@
 Groom this ticket: judge three checks of it, write the report, and choose what to do to the ticket. The ticket is at
 `{{brief}}`, and the team's other open tickets are at `{{others}}`. `$STAGE_IN/findings.json` holds what the three checks
 found: `duplicates` (candidates with a confidence), `worth` (keep or cancel, the tickets to merge with, each with a
-confidence, and `stale` with its `staleEvidence`) and `questions`.
+confidence, and `stale` with its `staleEvidence`) and `questions`. `questions` is empty when the worth check said cancel, since the questions check
+didn't run.
 
 Be hard on the ticket. Every ticket in the backlog must earn its place: a small, useless one should not exist, and work
 that one pull request would do belongs in one ticket. Prefer, in this order: merging the ticket with another, canceling

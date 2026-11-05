@@ -1,7 +1,7 @@
 // sail's own `groom` workflow, end to end through the CLI on the fakes: `sail FAKE-2 --workflow groom` in a temporary
 // repository that holds a copy of the repository's own `.sail/`, its ports all fake (.sail/fake/*.json).
 import { expect, test } from 'bun:test';
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { createFakeCodeHost } from '../src/adapters/fake/code-host';
 import { createFakeTicketSource } from '../src/adapters/fake/ticket-source';
@@ -28,8 +28,8 @@ test('a groom run on fakes reads FAKE-2 unclaimed, comments the report and swaps
     expect(readStatus(dir)).toEqual({ status: 'completed' });
     const keys = readJournal(dir).entries.map((entry) => entry.key);
     expect(keys[0]).toBe('intake#1');
-    expect(keys.slice(1, 4).sort()).toEqual(['duplicates#1', 'questions#1', 'worth#1']);
-    expect(keys.slice(4)).toEqual(['decide#1', 'act#1']);
+    expect(keys.slice(1, 3).sort()).toEqual(['duplicates#1', 'worth#1']);
+    expect(keys.slice(3)).toEqual(['questions#1', 'decide#1', 'act#1']);
     expect(keys).not.toContain('staleness#1');
     expect(duplicatesCall(dir).output).toEqual({
       candidates: [{ ticketKey: 'FAKE-1', confidence: 0.6, why: expect.any(String) }],
@@ -635,7 +635,7 @@ test("groom attaches no plan while the planner asks: it labels the ticket open-q
   });
 }, 120_000);
 
-test('groom cancels a ticket the worth check gave cancel at the threshold, and labels it groomed despite its questions', async () => {
+test('groom cancels a ticket the worth check gave cancel at the threshold, and labels it groomed and runs no questions check', async () => {
   await withTempRepo(async (repo) => {
     const sailDir = writeGroomRepo(repo);
     reseed(sailDir, 'worth', (output) => {
@@ -651,7 +651,13 @@ test('groom cancels a ticket the worth check gave cancel at the threshold, and l
     expect(ticket.state).toEqual({ type: 'canceled', name: 'Canceled' });
     expect(ticket.labels).toEqual(['groomed']);
     // A ticket an action ended is never planned.
-    expect(readJournal(onlyRun(repo.dir)).entries.map((entry) => entry.key)).not.toContain('plan#1');
+    const keys = readJournal(onlyRun(repo.dir)).entries.map((entry) => entry.key);
+    expect(keys).not.toContain('plan#1');
+    expect(keys).not.toContain('questions#1');
+    const [findings] = readdirSync(onlyRun(repo.dir))
+      .filter((name) => name.includes('decide'))
+      .map((name) => JSON.parse(readFileSync(join(onlyRun(repo.dir), name, 'call-1', 'in', 'findings.json'), 'utf8')));
+    expect(findings.questions).toEqual({ questions: [] });
     expect(ticket.attachments).toEqual([]);
     const comment = lastComment(repo.dir);
     expect(comment).toContain('- applied: cancel (a tidy-up nobody would notice)');
@@ -673,6 +679,19 @@ test('groom cancels a stale ticket whatever the worth check gave', async () => {
     expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
 
     expect(fakeTicket(repo.dir, 'FAKE-2').state.type).toBe('canceled');
+  });
+}, 120_000);
+
+test('groom runs the questions check on a keep that worth found stale', async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeGroomRepo(repo);
+    reseed(sailDir, 'worth', (output) => {
+      Object.assign(output, { verdict: 'keep', confidence: 0.9, stale: true });
+    });
+    const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+
+    expect(readJournal(onlyRun(repo.dir)).entries.map((entry) => entry.key)).toContain('questions#1');
   });
 }, 120_000);
 
