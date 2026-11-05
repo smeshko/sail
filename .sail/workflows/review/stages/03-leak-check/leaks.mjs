@@ -7,7 +7,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-const { LEAK_YES, leakLines, commitLines, leakState, leakQuestions, askNouls, yesses, git } = await import(
+const { LEAK_YES, leakLines, commitLines, leakRequests, askNouls, yesses, git } = await import(
   join(dirname(process.env.SAIL_CONFIG), 'lib', 'jev-check.mjs')
 );
 
@@ -53,9 +53,21 @@ for (const text of diff.split('\n')) {
 }
 const base = readFileSync(process.env.INPUT_BASE, 'utf8').trim();
 const lines = [...leakLines(diff), ...commitLines(git(['log', '--format=%h%x00%B%x1e', `${base}..HEAD`]))];
-const answer = lines.length
-  ? askNouls(leakQuestions(lines), leakState(lines), process.env.STAGE_OUT)
-  : { asked: false, note: 'no comment, doc or commit-message line added' };
+// Each request fits Jev's byte limit, so a large change is asked about in several; the answers of those asked are kept.
+const requests = leakRequests(lines);
+const results = requests.map(({ state, questions }, i) =>
+  askNouls(questions, state, process.env.STAGE_OUT, i === 0 ? 'jev-request.json' : `jev-request-${i + 1}.json`),
+);
+const refused = results.filter((result) => !result.asked);
+const answer = !lines.length
+  ? { asked: false, note: 'no comment, doc or commit-message line added' }
+  : refused.length === results.length
+    ? { asked: false, note: refused[0].note }
+    : {
+        asked: true,
+        answers: Object.assign({}, ...results.map((result) => result.answers ?? {})),
+        note: refused.length ? `${refused.length} of ${results.length} requests not asked: ${refused[0].note}` : '',
+      };
 let count = 0;
 if (answer.asked) {
   for (const { id, yes } of yesses(
@@ -68,9 +80,9 @@ if (answer.asked) {
     count++;
   }
 }
-const note = answer.asked ? '' : answer.note;
+const note = answer.note;
 const jev = { asked: answer.asked, note, threshold: LEAK_YES, lines: lines.length };
 process.stderr.write(
-  `${hits.length} hit${hits.length === 1 ? '' : 's'}; denylist: ${terms.length > 0 ? listed : 'none'}; jev: ${answer.asked ? `${lines.length} asked, ${count} over ${LEAK_YES}` : `not asked (${note})`}\n`,
+  `${hits.length} hit${hits.length === 1 ? '' : 's'}; denylist: ${terms.length > 0 ? listed : 'none'}; jev: ${answer.asked ? `${lines.length} lines in ${requests.length} request${requests.length === 1 ? '' : 's'}, ${count} over ${LEAK_YES}${note ? `; ${note}` : ''}` : `not asked (${note})`}\n`,
 );
 console.log(JSON.stringify({ hits, denylist: terms.length > 0 ? listed : null, jev }));

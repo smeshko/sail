@@ -14,8 +14,10 @@ interface Lib {
   SAIL_NOTE: string;
   leakLines(diff: string): Line[];
   commitLines(log: string): Line[];
-  leakState(lines: Line[]): unknown;
-  leakQuestions(lines: Line[]): Record<string, { type: string; instructions: string }>;
+  leakQuestions(lines: Line[], start?: number): Record<string, { type: string; instructions: string }>;
+  leakState(lines: Line[], start?: number): unknown;
+  leakRequests(lines: Line[]): { state: unknown; questions: Record<string, unknown> }[];
+  MAX_REQUEST_BYTES: number;
 }
 const lib = (await import(join(import.meta.dir, '../../.sail/lib/jev-check.mjs'))) as Lib;
 const lines = [
@@ -111,7 +113,8 @@ test('the stage asks about every added doc line beyond 400', async () => {
     writeOwnSail(repo, { jev: nouls({ 'leak-401': 0.97 }) });
     const diff = `+++ b/note.md\n@@ -0,0 +1,401 @@\n${Array.from({ length: 401 }, () => '+Some project').join('\n')}\n`;
     const result = stage(repo, diff);
-    expect(result.output.jev.lines).toBe(401);
+    expect(result.output.jev).toMatchObject({ asked: true, note: '', lines: 401 });
+    expect(existsSync(join(repo.home, 'out', 'jev-request-2.json'))).toBe(true);
     expect(result.output.hits).toContainEqual({
       file: 'note.md',
       line: 401,
@@ -143,4 +146,50 @@ test('leakQuestions asks one noul per line named leak-<n>', () => {
   expect(questions['leak-1']?.type).toBe('noul');
   expect(questions['leak-2']?.instructions).toContain('lines.leak-2');
   expect(lib.LEAK_YES).toBe(0.8);
+});
+test('leakRequests splits the lines into requests under the byte limit, each as full as it can be, numbered across them', () => {
+  const many = Array.from({ length: 900 }, (_, i) => ({
+    file: 'note.md',
+    line: i + 1,
+    text: `Line ${i} ${'x'.repeat(i % 97)}`,
+  }));
+  const requests = lib.leakRequests(many);
+  const size = (state: unknown, questions: unknown) => Buffer.byteLength(JSON.stringify({ state, questions }));
+  expect(requests.length).toBeGreaterThan(1);
+  expect(requests.flatMap((request) => Object.keys(request.questions))).toEqual(many.map((_, i) => `leak-${i + 1}`));
+  let start = 0;
+  for (const [index, request] of requests.entries()) {
+    const count = Object.keys(request.questions).length;
+    expect(request.state).toEqual(lib.leakState(many.slice(start, start + count), start));
+    expect(request.questions).toEqual(lib.leakQuestions(many.slice(start, start + count), start));
+    expect(size(request.state, request.questions)).toBeLessThanOrEqual(lib.MAX_REQUEST_BYTES);
+    if (index < requests.length - 1) {
+      const more = many.slice(start, start + count + 1);
+      expect(size(lib.leakState(more, start), lib.leakQuestions(more, start))).toBeGreaterThan(lib.MAX_REQUEST_BYTES);
+    }
+    start += count;
+  }
+});
+test('leakRequests keeps a few lines in one request, and a line over the limit alone in its own', () => {
+  expect(lib.leakRequests(lines)).toEqual([{ state: lib.leakState(lines), questions: lib.leakQuestions(lines) }]);
+  const huge = { file: 'a.md', line: 3, text: 'y'.repeat(lib.MAX_REQUEST_BYTES) };
+  expect(lib.leakRequests([...lines, huge, lines[0] as Line]).map((request) => Object.keys(request.questions))).toEqual(
+    [['leak-1', 'leak-2'], ['leak-3'], ['leak-4']],
+  );
+});
+test('the stage keeps the answers of the requests Jev answered and notes the one it could not ask', async () => {
+  await withTempRepo((repo) => {
+    writeOwnSail(repo, { jev: nouls({ 'leak-1': 0.97 }) });
+    const diff = `+++ b/note.md\n@@ -0,0 +1,2 @@\n+Some project\n+${'y'.repeat(70_000)}\n`;
+    const result = stage(repo, diff);
+    expect(result.output.hits).toContainEqual({
+      file: 'note.md',
+      line: 1,
+      match: 'Some project',
+      kind: 'jev',
+      yes: 0.97,
+    });
+    expect(result.output.jev.asked).toBe(true);
+    expect(result.output.jev.note).toStartWith('1 of 2 requests not asked: the request is ');
+  });
 });

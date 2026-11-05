@@ -1,7 +1,7 @@
 // `.sail/lib/jev-check.mjs`'s own helpers, in this process: cutting a diff, running git, and asking Jev through a
 // `sail` found on the PATH, here a stub that answers, fails or prints no JSON.
 import { afterEach, expect, test } from 'bun:test';
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -13,6 +13,7 @@ interface Asked {
 }
 interface Lib {
   MAX_DIFF: number;
+  MAX_REQUEST_BYTES: number;
   cut(text: string): string;
   git(args: string[]): string;
   askNouls(questions: Record<string, unknown>, state: Record<string, unknown>, out: string): Asked;
@@ -59,6 +60,23 @@ test("askNouls writes the request beside the answers and reads the model and ans
   expect({ asked, request: JSON.parse(readFileSync(join(out, 'jev-request.json'), 'utf8')) }).toEqual({
     asked: { asked: true, model: 'jev-1', answers: { 'TASK-001': { type: 'noul', noul: 0.97 } } },
     request: { state: { commits: 'abc' }, questions: { 'TASK-001': { type: 'noul' } } },
+  });
+});
+
+test('askNouls does not send a request over MAX_REQUEST_BYTES, and notes its size', () => {
+  const marker = join(tmpdir(), `sail-test-jev-check-marker-${process.pid}`);
+  const out = stubSail(`touch ${marker}\necho '{"model":"jev-1","answers":{}}'`);
+  dirs.push(marker);
+  const state = { text: 'x'.repeat(lib.MAX_REQUEST_BYTES) };
+  const bytes = Buffer.byteLength(JSON.stringify({ state, questions: {} }));
+  const asked = lib.askNouls({}, state, out);
+  expect({ asked, written: existsSync(join(out, 'jev-request.json')), sent: existsSync(marker) }).toEqual({
+    asked: {
+      asked: false,
+      note: `the request is ${bytes} bytes, over the ${lib.MAX_REQUEST_BYTES}-byte limit Jev accepts`,
+    },
+    written: true,
+    sent: false,
   });
 });
 
