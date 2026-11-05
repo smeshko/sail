@@ -54,7 +54,11 @@ export const DEFAULT_TIMEOUT_SECONDS = 600;
 
 const LISTS = ['passed', 'failed', 'error'] as const;
 
-const SCRIPT_PORTS: Record<ScriptPort, Port> = { 'ticket-source': 'ticketSource', codehost: 'codeHost', jev: 'jev' };
+export const SCRIPT_PORTS: Record<ScriptPort, Port> = {
+  'ticket-source': 'ticketSource',
+  codehost: 'codeHost',
+  jev: 'jev',
+};
 
 // Signals a kill from outside sail sends. A script that kills itself with one on purpose to fail should exit non-zero instead.
 const OUTSIDE_SIGNALS = new Set<string>(['SIGTERM', 'SIGKILL', 'SIGHUP', 'SIGINT']);

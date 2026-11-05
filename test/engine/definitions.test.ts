@@ -59,7 +59,7 @@ test("a copy of the fixture .sail/ outside sail's tree loads its workflow, priva
       ],
       intakes: [],
       stages: [
-        { name: 'implement', kind: 'agent', steps: [], workflow: null, file: shared('implement') },
+        { name: 'implement', kind: 'agent', steps: [], workflow: null, file: shared('implement'), scripts: [] },
         {
           name: 'publish',
           kind: 'stage',
@@ -69,10 +69,31 @@ test("a copy of the fixture .sail/ outside sail's tree loads its workflow, priva
           ],
           workflow: 'ticket-to-pr',
           file: owned('publish'),
+          scripts: [
+            {
+              step: 'open',
+              run: ticketToPr(sail, 'stages', 'publish', 'open.sh'),
+              ports: ['ticket-source', 'codehost'],
+            },
+          ],
         },
-        { name: 'self-review', kind: 'agent', steps: [], workflow: 'ticket-to-pr', file: owned('self-review') },
-        { name: 'spec', kind: 'agent', steps: [], workflow: 'ticket-to-pr', file: owned('spec') },
-        { name: 'tests', kind: 'script', steps: [], workflow: null, file: shared('tests') },
+        {
+          name: 'self-review',
+          kind: 'agent',
+          steps: [],
+          workflow: 'ticket-to-pr',
+          file: owned('self-review'),
+          scripts: [],
+        },
+        { name: 'spec', kind: 'agent', steps: [], workflow: 'ticket-to-pr', file: owned('spec'), scripts: [] },
+        {
+          name: 'tests',
+          kind: 'script',
+          steps: [],
+          workflow: null,
+          file: shared('tests'),
+          scripts: [{ step: 'tests', run: join(sail, 'stages', 'tests', 'run.sh'), ports: [] }],
+        },
       ],
       problems: [],
     });
@@ -111,8 +132,18 @@ test('a private and a shared intake are found with their owners, and an intake.t
 
     const { intakes, problems } = await loadDefinitions(sail);
     expect(intakes).toEqual([
-      { name: 'jira', workflow: null, file: shared },
-      { name: 'ticket-plus', workflow: 'ticket-to-pr', file: owned },
+      {
+        name: 'jira',
+        workflow: null,
+        file: shared,
+        scripts: [{ step: 'fetch', run: join(sail, 'intakes', 'jira', 'fetch.sh'), ports: [] }],
+      },
+      {
+        name: 'ticket-plus',
+        workflow: 'ticket-to-pr',
+        file: owned,
+        scripts: [{ step: 'fetch', run: ticketToPr(sail, 'fetch.sh'), ports: [] }],
+      },
     ]);
     expect(problems).toEqual([{ file: none, message: 'exports no intake' }]);
   });
