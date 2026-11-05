@@ -17,6 +17,7 @@ import type { TicketSource } from '../../src/ports/ticket-source';
 import type { PullRequestDetails } from '../../src/ports/types';
 import type { WorkspacePort } from '../../src/ports/workspace';
 import { createDispatcher, type Settled } from '../../src/watch/dispatch';
+import { readHold, releaseHold } from '../../src/watch/holds';
 import { openQueue, type QueueStore, queueDir } from '../../src/watch/queue-store';
 import { dispatchLog, spawnResume, spawnRun } from '../../src/watch/spawn';
 import { fakeAdapters } from '../helpers/adapters';
@@ -2135,6 +2136,28 @@ test('the hold ends at its reset', async () => {
     await t.b.tick();
     expect(t.bEvents('queue:released').length).toBe(1);
     expect(spawnedKeys(t.w.spawner)).toEqual(['FAKE-1', 'FAKE-2', 'FAKE-3']);
+    t.cleanup();
+  });
+});
+
+test('a release resumes the held runs in both entries on the next tick, and the hold is not put back', async () => {
+  await withTempRepo(async (repo) => {
+    const t = await twoEntries(repo, ['claude-code']);
+    await t.a.tick();
+    await t.b.tick();
+    expect(t.w.spawner.resumes).toEqual([]);
+    expect(readHold(t.machine, 'claude-code')).toBeDefined();
+    t.w.clock.advance(60_000);
+    expect(releaseHold(t.machine, 'claude-code', t.w.clock())).toBe(true);
+    await t.a.tick();
+    await t.b.tick();
+    expect(t.w.spawner.resumes.length).toBe(1);
+    expect(t.bEvents('queue:released').length).toBe(1);
+    expect(spawnedKeys(t.w.spawner)).toEqual(['FAKE-1', 'FAKE-2', 'FAKE-3']);
+    await t.a.tick();
+    await t.b.tick();
+    expect(readHold(t.machine, 'claude-code')).toBeUndefined();
+    expect(t.bEvents('queue:held').length).toBe(1);
     t.cleanup();
   });
 });

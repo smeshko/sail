@@ -78,7 +78,7 @@ import { holdsLabel } from '../ports/labels';
 import { getTicket, openPrerequisites, type TicketSource, waitingOnText } from '../ports/ticket-source';
 import type { Ticket } from '../ports/types';
 import type { WorkspacePort } from '../ports/workspace';
-import { activeHolds, writeHold } from './holds';
+import { activeHolds, releasedAt, writeHold } from './holds';
 import type { QueueItem, QueueStore } from './queue-store';
 import { type Reconciled, reconcileItem } from './reconcile';
 import type { SpawnedRun, SpawnResumeOptions, SpawnRunOptions } from './spawn';
@@ -310,6 +310,9 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
         isAlive,
         workspace,
         now: now(),
+        ...(options.machineDir === undefined
+          ? {}
+          : { releasedAt: (key: string) => releasedAt(options.machineDir as string, key) }),
         backoffMs: options.usageLimitBackoffMs,
         portBackoffMs: options.portUnavailableBackoffMs,
         ...(limitedAt.has(runId) ? { limitedAt: limitedAt.get(runId) as Date } : {}),
@@ -584,8 +587,17 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
     }
   };
 
+  /** Whether a release of a key the workflow reaches came after the local usage-limit hold was set. */
+  const releasedSinceHold = (): boolean => {
+    const { held } = store.snapshot();
+    if (held === undefined || held.sail !== undefined || options.machineDir === undefined) return false;
+    const at = Date.parse(held.at);
+    return (options.harnessKeys?.() ?? []).some((key) => (releasedAt(options.machineDir as string, key) ?? 0) > at);
+  };
+
   return {
     async tick() {
+      if (releasedSinceHold()) store.release();
       mirrorHolds();
       if (store.snapshot().held !== undefined && !holding()) store.release();
       for (const item of store.snapshot().items) {
