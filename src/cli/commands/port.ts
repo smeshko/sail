@@ -639,7 +639,25 @@ export async function port(args: Parsed, io: Io): Promise<ExitCode> {
     ports: [table.port],
     ...emitting,
   });
-  if (typeof project === 'number') return project;
+  if (typeof project === 'number') {
+    // Under a script step whose ports omit this one, the step got none of the port's credentials: say how to fix it.
+    const stepPorts = (io.env ?? process.env).SAIL_PORTS;
+    if (stepPorts !== undefined && !stepPorts.split(',').includes(name)) {
+      const message = `${name} isn't in this step's ports, so the step has none of its credentials: add '${name}' to the step's ports`;
+      const reported = table.port;
+      if (eventsFile !== undefined && (reported === 'ticketSource' || reported === 'codeHost' || reported === 'jev')) {
+        appendPortEvent(eventsFile, {
+          type: 'error:port',
+          port: reported,
+          op: operation,
+          code: 'unauthorized',
+          message,
+        });
+      }
+      io.stderr(`${COMMAND}: ${message}\n`);
+    }
+    return project;
+  }
   const adapter = project.adapters.ports[table.port];
   // The body is read when the operation asks for it, once it has refused what only its adapter can read. An empty one
   // is no body: a script step's stdin is there and holds nothing, so a script that left --body-file out would
