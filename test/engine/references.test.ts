@@ -81,3 +81,18 @@ test('a missing lib file is a problem on the referencing file, not a throw', () 
     { file: join(dir, 'a/x.sh'), message: `references ${join(dir, 'lib/gone.sh')}, which resolves to no file` },
   ]);
 });
+
+test('a shell reference into a subfolder, up a folder or to a directory resolves to files and never throws', () => {
+  const dir = sailDir({
+    'a/x.sh':
+      '"$(dirname "$0")/helpers/near.sh"\n"$(dirname "$0")/../up.sh"\ncd "$(dirname "$0")/.."\n"$sail_dir/lib/sub/one.sh"\n',
+    'a/helpers/near.sh': '',
+    'up.sh': '',
+    'lib/sub/one.sh': '',
+  });
+  const found = reachFiles([join(dir, 'a/x.sh')], dir);
+  expect(found.problems).toEqual([]);
+  expect(found.files.sort()).toEqual(
+    [join(dir, 'a/x.sh'), join(dir, 'a/helpers/near.sh'), join(dir, 'up.sh'), join(dir, 'lib/sub/one.sh')].sort(),
+  );
+});

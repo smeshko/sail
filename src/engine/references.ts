@@ -6,8 +6,10 @@
 //                 `join(dirname(process.env.SAIL_CONFIG), 'lib', 'x')` and `…, 'lib/x')` (under `<sailDir>/lib`)
 //   .sh           `$(dirname "$0")/x` (relative to the file),
 //                 `…SAIL_CONFIG…)/lib/x` and `$sail_dir/lib/x` (under `<sailDir>/lib`)
-// A reference that resolves to no file is a problem on the referencing file, never a throw.
-import { existsSync, readFileSync } from 'node:fs';
+//                 where `x` may hold `/` and `..`, as in `$(dirname "$0")/../helpers/x.sh`
+// A reference that resolves to no file is a problem on the referencing file, never a throw. One that resolves to a
+// directory, as `cd "$(dirname "$0")/.."` does, references no file and is skipped.
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { DefinitionProblem } from './definitions';
 
@@ -31,7 +33,10 @@ export function references(file: string, sailDir: string): References {
   const files: string[] = [];
   const problems: DefinitionProblem[] = [];
   const missing = (what: string) => problems.push({ file, message: `references ${what}, which resolves to no file` });
-  const add = (path: string) => (existsSync(path) ? files.push(path) : missing(path));
+  const add = (path: string) => {
+    if (!existsSync(path)) missing(path);
+    else if (statSync(path).isFile()) files.push(path);
+  };
   const lib = (name: string) => add(join(sailDir, 'lib', name));
   if (SOURCE_FILE.test(file)) {
     for (const m of text.matchAll(/(?:\bfrom\s*|\bimport\s*\(\s*|^import\s+)['"](\.[^'"]*)['"]/gm)) {
@@ -48,8 +53,8 @@ export function references(file: string, sailDir: string): References {
     }
   }
   if (file.endsWith('.sh')) {
-    for (const m of text.matchAll(/\$\(dirname "\$0"\)\/([\w.-]+)/g)) add(join(dirname(file), m[1] as string));
-    for (const m of text.matchAll(/(?:SAIL_CONFIG[^\n]*\)|\$sail_dir)\/lib\/([\w.-]+)/g)) lib(m[1] as string);
+    for (const m of text.matchAll(/\$\(dirname "\$0"\)\/([\w./-]+)/g)) add(join(dirname(file), m[1] as string));
+    for (const m of text.matchAll(/(?:SAIL_CONFIG[^\n]*\)|\$sail_dir)\/lib\/([\w./-]+)/g)) lib(m[1] as string);
   }
   return { files, problems };
 }
