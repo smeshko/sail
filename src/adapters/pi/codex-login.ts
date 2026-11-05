@@ -9,6 +9,7 @@ import { homedir, userInfo } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { Credential, CredentialStore } from '@earendil-works/pi-ai';
 import { z } from 'zod';
+import { NOT_FOUND, type Security, type SecurityEnd, systemSecurity } from '../../engine/keychain';
 import { isAlive } from '../../engine/process';
 import type { Env } from '../../ports/adapter';
 
@@ -21,6 +22,8 @@ export const KEYCHAIN_SERVICE = 'sail-openai-codex';
 const LOCK_WAIT_MS = 30_000;
 const LOCK_POLL_MS = 100;
 
+export { type Security, type SecurityEnd, systemSecurity };
+
 export const NO_LOGIN = 'no Codex login in the keychain: run sail login codex';
 
 /** pi's OAuth credential, as the keychain item holds it. */
@@ -30,36 +33,6 @@ const OAuthCredential = z.looseObject({
   refresh: z.string().min(1),
   expires: z.number(),
 });
-
-export interface SecurityEnd {
-  readonly exitCode: number;
-  readonly stdout: string;
-  readonly stderr: string;
-}
-
-/** Runs macOS's `security` with `args`. */
-export type Security = (args: readonly string[]) => Promise<SecurityEnd>;
-
-/** The `security` on `env`'s PATH. */
-export function systemSecurity(env: Env): Security {
-  return async (args) => {
-    const child = Bun.spawn(['security', ...args], {
-      env: Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined)),
-      stdin: 'ignore',
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
-    const [stdout, stderr, exitCode] = await Promise.all([
-      new Response(child.stdout).text(),
-      new Response(child.stderr).text(),
-      child.exited,
-    ]);
-    return { exitCode, stdout, stderr };
-  };
-}
-
-/** `security`'s exit code for an item the keychain doesn't hold. */
-const NOT_FOUND = 44;
 
 export interface LockOptions {
   readonly waitMs?: number;

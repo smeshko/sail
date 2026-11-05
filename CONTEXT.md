@@ -432,7 +432,7 @@ A file `bun run verify` reads: the toolchain configs, the test launcher and prel
 _Avoid_: protected file, CI file
 
 **Redaction**:
-Masking credential-named values of at least eight characters from the run's environment, their parts and URL userinfo, raw, URL-encoded and in base64, as `[redacted]` in the run header, events, summary, journal, results, completed script logs, port events and transcripts, and the terminal view. Produced files, prompts and bindings are not masked, nor are live script logs before the process ends.
+Masking credential-named values of at least eight characters from the run's environment and those sail filled from a credential source, their parts and URL userinfo, raw, URL-encoded and in base64, as `[redacted]` in the run header, events, summary, journal, results, completed script logs, port events and transcripts, and the terminal view. Produced files, prompts and bindings are not masked, nor are live script logs before the process ends.
 _Avoid_: scrubbing, censoring, sanitising
 
 **Script environment**:
@@ -538,8 +538,12 @@ What makes an adapter: the environment variables it requires, the versions it ru
 _Avoid_: factory, plugin, provider
 
 **Preflight**:
-The checks before a run starts that need no run directory: the config, the adapters and their credentials. A failed one is a refusal.
+The checks before a run starts that need no run directory: the config, the adapters and their credentials, a credential filled from its credential source counting as set. A failed one is a refusal.
 _Avoid_: startup check, validation, health check
+
+**Credential source**:
+Where sail reads a credential variable an adapter requires when the environment leaves it unset or empty: the keychain items `linear-api-key` (`LINEAR_API_KEY`), `claude-oauth-token` (`CLAUDE_CODE_OAUTH_TOKEN`) and `typesafe-api-key` (`TYPESAFE_API_KEY`), or `gh auth token` (`GITHUB_TOKEN`). The sources are fixed, a variable that is set is never looked up, and `SAIL_CREDENTIAL_LOOKUP=off` turns the lookup off. A value so filled is masked like any credential.
+_Avoid_: credential provider, secret store
 
 **Port suite**:
 The tests every adapter of a port must pass, shared by the fake and the real one. A real adapter runs them against its provider on demand.

@@ -3,14 +3,25 @@
 // its own: a process opens one run per `.sail/`. The fake harness answers by call key, not by prompt, so a changed
 // answer in `.sail/fake/harness.json` stands in for the different output an edited prompt would get (DECISIONS D10).
 import { afterAll, expect, test } from 'bun:test';
-import { chmodSync, existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { EXIT_OK, EXIT_REFUSED, EXIT_SUSPENDED } from '../../src/cli/exit-codes';
 import { readJournal } from '../../src/engine/journal';
 import { recordingKeepAwake } from '../../src/engine/keep-awake';
 import { readStatus } from '../../src/engine/run-dir';
 import { readEvents } from '../../src/events/consumers/ndjson';
-import { edit, patchTicket } from '../helpers/fixture';
+import { fakeCredentialTools } from '../helpers/fake-credentials';
+import { copyFixture, edit, patchTicket } from '../helpers/fixture';
 import { type CaptureOptions, fakeInterrupts, runCaptured } from '../helpers/run-captured';
 import { cutJournal, runIds, sharedSource } from '../helpers/seeded';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
@@ -334,3 +345,123 @@ test('sail run --from-run masks credentials from its own io.env in run.json and 
     ).toEqual([]);
   });
 });
+
+const OAUTH = 'oauth-from-the-keychain-0123';
+
+/**
+ * The repository's harness made one that requires a Claude credential, as claude-code does: it answers each call with
+ * the first answer of its stage in the fake script, echoes the token it was created with in its message and transcript,
+ * as a session that leaks it would, and leaves that token in `token.txt`.
+ */
+function keyedHarness(repoDir: string): void {
+  const sail = join(repoDir, '.sail');
+  writeFileSync(
+    join(sail, 'adapters', 'keyed-harness.ts'),
+    `import { readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+export default {
+  requires: () => [['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN']],
+  create: (_options: unknown, context: { root: string; sailDir: string; env: Record<string, string | undefined> }) => {
+    writeFileSync(join(context.root, 'token.txt'), context.env.CLAUDE_CODE_OAUTH_TOKEN ?? '');
+    const script = JSON.parse(readFileSync(join(context.sailDir, 'fake', 'harness.json'), 'utf8'));
+    return {
+      name: 'keyed',
+      capabilities: () => ({ structuredOutput: true, permissions: true, usage: true, abort: true, budgets: [] }),
+      run: async (request: { key: string; env: Record<string, string>; onEvent?: (event: unknown) => void }) => {
+        const token = context.env.CLAUDE_CODE_OAUTH_TOKEN ?? '';
+        const answer = (script[request.key] ?? script[request.key.replace(/#\\d+/, '')])[0];
+        for (const [name, text] of Object.entries(answer.files ?? {})) writeFileSync(join(request.env.STAGE_OUT, name), text as string);
+        request.onEvent?.({ type: 'agent:message', text: \`echo \${token}\` });
+        return {
+        outcome: 'done',
+        output: answer.output,
+        sessionId: 'keyed-1',
+        usage: { costUsd: 0 },
+        transcript: \`assistant: echo \${token}\\n\`,
+        raw: null,
+        };
+      },
+    };
+  },
+};
+`,
+  );
+  edit(sail, 'project.yaml', 'harness: { use: fake }', 'harness: { use: ./adapters/keyed-harness.ts }');
+}
+
+/** An environment with no Claude credential, the lookup on, and fake tools whose keychain holds `items`. */
+function keychainEnv(repo: TempRepo, items: Record<string, string>): Record<string, string> {
+  const { ANTHROPIC_API_KEY: _key, CLAUDE_CODE_OAUTH_TOKEN: _token, ...env } = repo.env;
+  const dir = mkdtempSync(join(tmpdir(), 'sail-test-tools-'));
+  toolDirs.push(dir);
+  return { ...env, SAIL_CREDENTIAL_LOOKUP: 'on', PATH: fakeCredentialTools(dir, { items }, env.PATH) };
+}
+
+const toolDirs: string[] = [];
+afterAll(() => {
+  for (const dir of toolDirs) rmSync(dir, { recursive: true, force: true });
+});
+
+test('sail run --from-run --stage spec starts from an environment with no Claude credential, reading claude-oauth-token from the keychain, and the token is in no file of the run', async () => {
+  await withTempRepo(async (repo) => {
+    const from = await source.copyInto(repo.dir);
+    mkdirSync(join(repo.dir, '.sail', 'adapters'), { recursive: true });
+    keyedHarness(repo.dir);
+    const env = keychainEnv(repo, { 'claude-oauth-token': OAUTH });
+    const ran = await sailRun(repo, from.runId, ['--from-run', from.runId, '--stage', 'spec'], { env });
+    expect({ code: ran.code, stderr: ran.stderr }).toEqual({ code: EXIT_SUSPENDED, stderr: '' });
+    expect(readFileSync(join(repo.dir, 'token.txt'), 'utf8')).toBe(OAUTH);
+    const held = readdirSync(ran.dir, { recursive: true, withFileTypes: true })
+      .filter((file) => file.isFile() && !relative(ran.dir, file.parentPath).startsWith('definition'))
+      .filter((file) => readFileSync(join(file.parentPath, file.name), 'utf8').includes(OAUTH));
+    expect(held.map((file) => file.name)).toEqual([]);
+    expect(readFileSync(join(ran.dir, '01-spec', 'call-1', 'session.log'), 'utf8')).toContain(
+      'assistant: echo [redacted]',
+    );
+  });
+}, 60_000);
+
+test('sail FAKE-1 and sail resume from an environment with no Claude credential mask the token read from the keychain in what the session echoes', async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    mkdirSync(join(repo.dir, '.sail', 'adapters'), { recursive: true });
+    keyedHarness(repo.dir);
+    const env = keychainEnv(repo, { 'claude-oauth-token': OAUTH });
+    const started = await runCaptured(['FAKE-1', '--until', 'spec'], repo.dir, { env });
+    expect({ code: started.code, stderr: started.stderr }).toEqual({ code: EXIT_SUSPENDED, stderr: '' });
+    const [runId = ''] = runIds(repo.dir);
+    const dir = join(repo.dir, '.sail-runs', runId);
+    const unmasked = () =>
+      readdirSync(dir, { recursive: true, withFileTypes: true })
+        .filter((file) => file.isFile() && !relative(dir, file.parentPath).startsWith('definition'))
+        .filter((file) => readFileSync(join(file.parentPath, file.name), 'utf8').includes(OAUTH))
+        .map((file) => relative(dir, join(file.parentPath, file.name)));
+    expect(started.stdout).not.toContain(OAUTH);
+    expect(unmasked()).toEqual([]);
+    expect(readFileSync(join(dir, '01-spec', 'call-1', 'session.log'), 'utf8')).toContain('assistant: echo [redacted]');
+    const resumed = await runCaptured(['resume', runId], repo.dir, { env });
+    expect({ code: resumed.code, stderr: resumed.stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    expect(resumed.stdout).not.toContain(OAUTH);
+    expect(unmasked()).toEqual([]);
+    expect(readFileSync(join(dir, '02-implement', 'call-1', 'session.log'), 'utf8')).toContain(
+      'assistant: echo [redacted]',
+    );
+  });
+}, 60_000);
+
+test('sail run --from-run with no Claude credential and no claude-oauth-token item is refused with exit 3 naming the item, and starts no run', async () => {
+  await withTempRepo(async (repo) => {
+    const from = await source.copyInto(repo.dir);
+    mkdirSync(join(repo.dir, '.sail', 'adapters'), { recursive: true });
+    keyedHarness(repo.dir);
+    const env = keychainEnv(repo, {});
+    const ran = await sailRun(repo, from.runId, ['--from-run', from.runId, '--stage', 'spec'], { env });
+    expect({ code: ran.code, run: ran.runId, stderr: ran.stderr }).toEqual({
+      code: EXIT_REFUSED,
+      run: '',
+      stderr:
+        '.sail/project.yaml  /adapters/harness needs one of ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN, none of which is set, and the keychain holds no claude-oauth-token item\n',
+    });
+  });
+}, 60_000);

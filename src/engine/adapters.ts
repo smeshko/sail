@@ -15,6 +15,7 @@ import {
 } from '../ports/adapter';
 import type { Harness } from '../ports/harness';
 import { type AdapterConfig, aliasOf, PORTS, type Port, type ProjectConfig, type RunPort } from './config';
+import { type CredentialLookup, fillCredentials, systemCredentials } from './credentials';
 import { registerSail } from './definitions';
 import { origin } from './roster';
 import { RUNS_DIR } from './run-dir';
@@ -32,6 +33,8 @@ export interface ResolveOptions<P extends Port = RunPort> {
   now?: () => Date;
   /** The ports to resolve: all four unless given. A stage run in isolation needs only its harness. */
   ports?: readonly P[];
+  /** Reads a credential the environment leaves unset: the fixed sources unless given. */
+  credentials?: CredentialLookup;
 }
 
 /**
@@ -53,6 +56,8 @@ export interface ResolvedAdapters<P extends Port = RunPort> {
   harnesses(names: readonly string[]): Promise<NamedHarnesses | { issues: SchemaIssue[] }>;
   /** The environment names the adapter `port` names requires, resolved once from the same options, or why not. */
   portVariables(port: Port): ReturnType<typeof portVariables>;
+  /** The credentials filled from their sources, by variable name: the ports' and those of the named harnesses reached. */
+  credentials: Record<string, string>;
 }
 
 /** The named harnesses a run reached, each created, with its entry for the run header. */
@@ -208,14 +213,27 @@ function requiredNames(
 }
 
 /** Pass 2: the issues for each environment variable `found` needs and `env` lacks, or none of the alternatives it lists. */
-function preflight(use: string, found: Found, options: AdapterOptions, env: Env, models: readonly string[]): string[] {
-  const names = requiredNames(use, found, options, env, models);
+function preflight(
+  names: ReturnType<typeof requiredNames>,
+  env: Env,
+  tried: Readonly<Record<string, string>>,
+): string[] {
   if ('problem' in names) return [names.problem];
   const unset = (name: string): boolean => env[name] === undefined || env[name] === '';
+  const after = (entry: string | string[]): string => {
+    const what = tried[typeof entry === 'string' ? entry : entry.join(',')];
+    return what === undefined ? '' : `, and ${what}`;
+  };
   return (names as (string | string[])[]).flatMap((entry) => {
-    if (typeof entry === 'string') return unset(entry) ? [`needs ${entry}, which is not set`] : [];
-    return entry.every(unset) ? [`needs one of ${entry.join(', ')}, none of which is set`] : [];
+    if (typeof entry === 'string') return unset(entry) ? [`needs ${entry}, which is not set${after(entry)}`] : [];
+    return entry.every(unset) ? [`needs one of ${entry.join(', ')}, none of which is set${after(entry)}`] : [];
   });
+}
+
+/** Fills what the sources hold of the `names` an adapter requires and `env` leaves unset. */
+async function fillRequired(names: ReturnType<typeof requiredNames>, env: Env, lookup: CredentialLookup) {
+  if ('problem' in names) return { filled: {}, tried: {}, errors: [] };
+  return fillCredentials(names, env, lookup);
 }
 
 /** An object written as `{ … }`: not an array, a promise or any other class's instance. */
@@ -320,10 +338,24 @@ export async function resolveAdapters<P extends Port = RunPort>(
   }
   if (issues.length > 0) return { issues };
 
+  const lookup = options.credentials ?? systemCredentials(options.env);
+  const credentials: Record<string, string> = {};
+  const required = {} as Record<Port, ReturnType<typeof requiredNames>>;
+  const tried = {} as Record<Port, Record<string, string>>;
   for (const port of wanted) {
-    const { use } = configs[port];
     const models = port === 'harness' ? modelsOf(options.config, undefined) : [];
-    for (const text of preflight(use, found[port], optionsOf(configs[port]), options.env, models)) issue(port, text);
+    required[port] = requiredNames(configs[port].use, found[port], optionsOf(configs[port]), options.env, models);
+    const read = await fillRequired(required[port], options.env, lookup);
+    Object.assign(credentials, read.filled);
+    tried[port] = read.tried;
+    for (const text of read.errors) issue(port, text);
+  }
+  if (issues.length > 0) return { issues };
+
+  const env = Object.keys(credentials).length === 0 ? options.env : { ...options.env, ...credentials };
+  const resolved: ResolveOptions<Port> = { ...options, env, credentials: lookup };
+  for (const port of wanted) {
+    for (const text of preflight(required[port], env, tried[port])) issue(port, text);
   }
   if (issues.length > 0) return { issues };
 
@@ -337,7 +369,7 @@ export async function resolveAdapters<P extends Port = RunPort>(
       continue;
     }
     const { versions } = read;
-    const built = await build(port, use, found[port], optionsOf(configs[port]), options, emit);
+    const built = await build(port, use, found[port], optionsOf(configs[port]), resolved, emit);
     if ('issue' in built) {
       issue(port, built.issue);
       continue;
@@ -350,13 +382,14 @@ export async function resolveAdapters<P extends Port = RunPort>(
     };
   }
   if (issues.length > 0) return { issues };
-  const harnesses = (names: readonly string[]) => resolveHarnesses(options, names, emit);
+  const harnesses = (names: readonly string[]) => resolveHarnesses(resolved, names, emit, credentials);
   return {
     ports: ports as unknown as Pick<PortAdapters, P>,
     entries,
     relay,
     harnesses,
-    portVariables: portVariableResolver(options),
+    portVariables: portVariableResolver(resolved),
+    credentials,
   };
 }
 
@@ -369,6 +402,7 @@ async function resolveHarnesses(
   options: ResolveOptions<Port>,
   names: readonly string[],
   emit: ProviderEmit,
+  credentials: Record<string, string>,
 ): Promise<NamedHarnesses | { issues: SchemaIssue[] }> {
   const issues: SchemaIssue[] = [];
   const issue = (name: string, text: string) => issues.push({ path: `/adapters/harnesses/${name}`, message: text });
@@ -386,9 +420,23 @@ async function resolveHarnesses(
   }
   if (issues.length > 0) return { issues };
 
+  const lookup = options.credentials ?? systemCredentials(options.env);
+  const filled: Record<string, string> = {};
+  const required: Record<string, ReturnType<typeof requiredNames>> = {};
+  const tried: Record<string, Record<string, string>> = {};
   for (const name of names) {
     const models = modelsOf(options.config, name);
-    for (const text of preflight(configOf(name).use, found[name] as Found, optionsOf(name), options.env, models))
+    required[name] = requiredNames(configOf(name).use, found[name] as Found, optionsOf(name), options.env, models);
+    const read = await fillRequired(required[name], options.env, lookup);
+    Object.assign(filled, read.filled);
+    tried[name] = read.tried;
+    for (const text of read.errors) issue(name, text);
+  }
+  if (issues.length > 0) return { issues };
+  const env = Object.keys(filled).length === 0 ? options.env : { ...options.env, ...filled };
+
+  for (const name of names) {
+    for (const text of preflight(required[name] as ReturnType<typeof requiredNames>, env, tried[name] ?? {}))
       issue(name, text);
   }
   if (issues.length > 0) return { issues };
@@ -403,7 +451,7 @@ async function resolveHarnesses(
       issue(name, read.issue);
       continue;
     }
-    const built = await build('harness', use, at, optionsOf(name), options, emit);
+    const built = await build('harness', use, at, optionsOf(name), { ...options, env }, emit);
     if ('issue' in built) {
       issue(name, built.issue);
       continue;
@@ -416,6 +464,7 @@ async function resolveHarnesses(
     };
   }
   if (issues.length > 0) return { issues };
+  Object.assign(credentials, filled);
   return { ports, entries };
 }
 

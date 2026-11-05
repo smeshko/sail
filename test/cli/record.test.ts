@@ -22,6 +22,7 @@ import {
   writeScriptedClaudeCode,
   writeScriptedStreams,
 } from '../helpers/claude-code';
+import { fakeCredentialTools } from '../helpers/fake-credentials';
 import { copyFixture, edit, FIXTURE_SAIL } from '../helpers/fixture';
 import { runCaptured } from '../helpers/run-captured';
 import { copyRun } from '../helpers/stub-workflow';
@@ -212,6 +213,21 @@ test('no form of the token and no temp path is left in any recorded byte', async
   expect(bytes).not.toContain(record.realDir);
   expect(bytes).toContain('$REPO');
 });
+
+test('a token sail filled from the keychain is masked in every recorded byte too', async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    writeScriptedClaudeCode(repo.dir, streamsFor(repo.dir));
+    const PATH = fakeCredentialTools(repo.home, { items: { 'claude-oauth-token': TOKEN } }, repo.env.PATH);
+    const ended = await runCaptured(['FAKE-1', '-q', '--record', 'rec'], repo.dir, {
+      env: { ...repo.env, SAIL_CREDENTIAL_LOOKUP: 'on', PATH },
+    });
+    expect({ code: ended.code, stderr: ended.stderr }).toEqual({ code: 0, stderr: '' });
+    const bytes = Object.values(filesOf(join(repo.dir, 'rec'))).join('\n');
+    expect(bytes).not.toContain(TOKEN);
+    expect(bytes).toContain('[redacted]');
+  });
+}, 60_000);
 
 test('recording changes no run file: the recorded run has the unrecorded run keys, outcomes, outputs and files', async () => {
   const { recordedRun, plain } = await scenario();
