@@ -71,6 +71,19 @@ test('a plan whose paths all lie inside the write globs passes', () => {
   expect(problemsOf(lib.implementWrites(NARROW), plan('`test/a.test.ts` (new), `src/b.ts:10-20`'))).toEqual([]);
 });
 
+test('a task naming a root file with no slash or listed extension outside the write globs fails (review R6)', () => {
+  const problems = problemsOf(
+    lib.implementWrites(NARROW),
+    plan('`.python-version`, `Dockerfile` and `pyproject.toml`'),
+  );
+  expect(problems).toHaveLength(3);
+  expect(problems.map((problem) => problem.match(/`([^`]+)`/)?.[1])).toEqual([
+    '.python-version',
+    'Dockerfile',
+    'pyproject.toml',
+  ]);
+});
+
 test('the evals plan passes under the globs sail gives implement', () => {
   expect(problemsOf(lib.implementWrites(builderWrite), plan('`evals/run.py` (new)'))).toEqual([]);
 });

@@ -1,17 +1,21 @@
 // The plan check: every path a task's Files block names must lie inside the write globs implement runs with, so a plan
-// that needs another path fails at plan rather than blocking implement. It reads the Files block as `jev-check.mjs`
-// does (`test/sail/plan-paths.test.ts` runs both on one plan), but is TypeScript because `sail check` refuses a `.ts`
-// import of an untyped `.mjs`. A copy in a field repository imports only `sail`, as this does.
+// that needs another path fails at plan rather than blocking implement. It finds the Files block as `jev-check.mjs`
+// does (`test/sail/plan-paths.test.ts` runs both on one plan), and checks every backticked token in it. It is
+// TypeScript because `sail check` refuses a `.ts` import of an untyped `.mjs`. A copy in a field repository imports
+// only `sail`, as this does.
 import { matchesGlob, type Validator } from 'sail';
 
 const KNOWN_EXTENSION = /\.(ts|tsx|js|mjs|json|md|yaml|yml|sh|css|html)$/;
 
-/** The paths a Files block names: backticked tokens with a `/` or a known extension; others (`.python-version`) are not checked. */
-function pathsOf(block: string): string[] {
+/**
+ * The paths a Files block names: its backticked tokens, without a `:line` suffix. As `jev-check.mjs` reads them, only
+ * those with a `/` or a known extension; with `every`, all of them, so a root file such as `.python-version` counts.
+ */
+function pathsOf(block: string, every = false): string[] {
   const paths: string[] = [];
   for (const [, token] of block.matchAll(/`([^`\s]+)`/g)) {
     const path = (token as string).replace(/:\d+(-\d+)?$/, '');
-    if ((path.includes('/') || KNOWN_EXTENSION.test(path)) && !paths.includes(path)) paths.push(path);
+    if ((every || path.includes('/') || KNOWN_EXTENSION.test(path)) && !paths.includes(path)) paths.push(path);
   }
   return paths;
 }
@@ -31,8 +35,8 @@ function filesBlock(lines: readonly string[]): string {
   return block.join('\n');
 }
 
-/** Each `### TASK-nnn:` of the plan's Task details, with the paths its Files block names. */
-export function taskPaths(text: string): { id: string; paths: string[] }[] {
+/** Each `### TASK-nnn:` of the plan's Task details, with the paths its Files block names (every token, with `every`). */
+export function taskPaths(text: string, every = false): { id: string; paths: string[] }[] {
   const start = text.search(/^## Task details\s*$/m);
   if (start === -1) return [];
   const rest = text.slice(start).replace(/^## Task details\s*\n/, '');
@@ -41,18 +45,18 @@ export function taskPaths(text: string): { id: string; paths: string[] }[] {
   const tasks: { id: string; paths: string[] }[] = [];
   for (const part of section.split(/^(?=### TASK-\d{3}\b)/m)) {
     const id = part.match(/^### (TASK-\d{3}): /m)?.[1];
-    if (id !== undefined) tasks.push({ id, paths: pathsOf(filesBlock(part.split('\n'))) });
+    if (id !== undefined) tasks.push({ id, paths: pathsOf(filesBlock(part.split('\n')), every) });
   }
   return tasks;
 }
 
-/** Fails a plan whose task names a path `globs` (implement's write globs) don't cover. */
+/** Fails a plan whose task names a path `globs` (implement's write globs) don't cover: any backticked token of Files. */
 export function implementWrites(globs: readonly string[]): Validator {
   return {
     check: 'implement-writes',
     derives: [],
     validate(document) {
-      const problems = taskPaths(document.text).flatMap(({ id, paths }) =>
+      const problems = taskPaths(document.text, true).flatMap(({ id, paths }) =>
         paths
           .filter((path) => !matchesGlob(path, globs))
           .map(
