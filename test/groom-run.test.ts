@@ -554,10 +554,10 @@ test('groom plans a ticket with no open question: attaches plan.md with its trai
     expect(
       readJournal(dir)
         .entries.map((entry) => entry.key)
-        .slice(5),
+        .slice(4),
     ).toEqual(['decide#1', 'plan#1', 'act#1']);
     // The planner plans the ticket as the applied actions leave it: here, the judge's title edit.
-    const actions = JSON.parse(readFileSync(join(dir, '06-plan', 'call-1', 'in', 'actions.json'), 'utf8'));
+    const actions = JSON.parse(readFileSync(join(dir, '05-plan', 'call-1', 'in', 'actions.json'), 'utf8'));
     expect(actions).toEqual([{ kind: 'edit', title: NEW_TITLE }]);
 
     const ticket = fakeTicket(repo.dir, 'FAKE-2');
@@ -888,7 +888,7 @@ test('groom rules a ticket manual: labels it manual, plans nothing, and still ap
 
     const dir = onlyRun(repo.dir);
     const keys = readJournal(dir).entries.map((entry) => entry.key);
-    expect(keys.slice(5)).toEqual(['decide#1', 'act#1']);
+    expect(keys.slice(4)).toEqual(['decide#1', 'act#1']);
     const ticket = fakeTicket(repo.dir, 'FAKE-2');
     expect(ticket.labels).toEqual(['manual']);
     expect(ticket.attachments).toEqual([]);
