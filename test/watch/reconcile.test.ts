@@ -504,3 +504,25 @@ test('a port_unavailable run this dispatcher resumed that was not suspended agai
   expect(first).toEqual({ kind: 'park', reason: 'its resume failed: sail resume: LINEAR_API_KEY is not set' });
   expect(second).toMatchObject({ kind: 'held', stopReason: 'port_unavailable', until: '2026-10-28T10:01:30.000Z' });
 });
+
+test('a held usage_limit answer carries the harness key of the call that hit the limit, from the run header', async () => {
+  const w = world();
+  const adapter = (use: string) => ({ use, origin: 'builtin' });
+  const dir = runDir(w.runsDir, 1, 'suspended', 'usage_limit');
+  writeFileSync(
+    join(dir, 'run.json'),
+    JSON.stringify({
+      adapters: { harness: adapter('claude-code'), harnesses: { codex: adapter('pi') } },
+      intake: { name: 'ticket', origin: 'builtin' },
+      stages: { spec: { kind: 'agent', origin: 'repo:spec', model: 'openai-codex/gpt-5', harness: 'codex' } },
+    }),
+  );
+  limitedAt(w.runsDir, 1, '2026-10-28T09:50:00.000Z', '2026-10-28T14:20:00.000Z');
+  expect(await reconcileItem(item(1, DEAD), w.context())).toEqual({
+    kind: 'held',
+    stopReason: 'usage_limit',
+    until: '2026-10-28T14:20:00.000Z',
+    reason: 'spec#1 hit the usage limit',
+    harnessKey: 'pi:openai-codex',
+  });
+});

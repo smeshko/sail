@@ -480,8 +480,12 @@ An agent step's budget also names its idle limit, which warns rather than ends i
 _Avoid_: limit, quota, cap, allowance
 
 **Usage limit**:
-The provider refusing more sessions until a reset time. A harness reports it as the error reason `usage_limit`, with `resetsAt` when the provider says when. It is a limit on the account, not a budget of the run.
+The provider refusing more sessions until a reset time. A harness reports it as the error reason `usage_limit`, with `resetsAt` when the provider says when. It is a limit on the account, not a budget of the run. A watcher that finds one holds every watched workflow on the machine that reaches the same harness key, in `holds/` in the machine directory, not only the workflow whose run hit it.
 _Avoid_: rate limit, quota, session limit
+
+**Harness key**:
+The account a usage limit counts against, named by the adapter a call's harness ran on, and for pi by its provider too: `claude-code`, `pi:openai-codex`. A suspended call's key comes from its run header and roster, and a workflow reaches the keys of its agent steps' model aliases. A call the roster can't place has the default harness's key.
+_Avoid_: harness name, account id
 
 ### Ports
 
@@ -594,7 +598,7 @@ A run's exclusive hold on its git branch, from workspace creation to release, ke
 _Avoid_: lock, branch lock, reservation
 
 **Adoption**:
-A restarted watcher taking charge again of a run that is still alive, counting it against its cap. A run whose process died is resumed from its journal instead, once, as a detached `sail resume` of its own; a resume that leaves the run unended parks its item with the reason. A run suspended on the usage limit is the exception: it is held until the limit resets, then resumed, and again each time a resume hits the limit anew; only a resume that leaves it on the same limit parks its item. So is a run suspended on an unavailable port: its item is held for a growing back-off, then resumed, and parked only after a bounded run of resumes that all hit an unavailable port again. A stopped run's item is parked too.
+A restarted watcher taking charge again of a run that is still alive, counting it against its cap. A run whose process died is resumed from its journal instead, once, as a detached `sail resume` of its own; a resume that leaves the run unended parks its item with the reason. A run suspended on the usage limit is the exception: it is held until the limit resets, which holds the dispatch of every watched workflow on the machine that reaches its harness key, then resumed, and again each time a resume hits the limit anew; only a resume that leaves it on the same limit parks its item. So is a run suspended on an unavailable port: its item is held for a growing back-off, then resumed, and parked only after a bounded run of resumes that all hit an unavailable port again. A stopped run's item is parked too.
 _Avoid_: reattach, recovery, takeover
 
 **Poll**:
@@ -618,7 +622,7 @@ The key a queue item is known by, minted from its source: `ticket:<ticket key>`,
 _Avoid_: item id, queue key
 
 **Held dispatch**:
-A watched workflow's dispatch stopped until a time, because one of its runs hit the usage limit, or because two or more of its items are held on an unavailable port at the same time, which is an outage of the provider. It is kept in `queue.json`, and the queue is not changed: nothing starts or resumes until the reset, or a back-off when the provider gave none, or, for an outage, the later of the items' holds, and no item's attempt is counted. A start refused because the `.sail/` committed at the default branch needs a newer sail holds it too, with no time: until the running sail's SDK changes, which the watcher's next tick finds.
+A watched workflow's dispatch stopped until a time, because one of its runs, or a run of any watched workflow on the machine that reaches the same harness key, hit the usage limit, or because two or more of its items are held on an unavailable port at the same time, which is an outage of the provider. It is kept in `queue.json`, and the queue is not changed: nothing starts or resumes until the reset, or a back-off when the provider gave none, or, for an outage, the later of the items' holds, and no item's attempt is counted. A start refused because the `.sail/` committed at the default branch needs a newer sail holds it too, with no time: until the running sail's SDK changes, which the watcher's next tick finds.
 _Avoid_: paused (the poll's word), throttled, frozen
 
 **Held item**:

@@ -67,7 +67,7 @@ export function harnessKeyOf(
 }
 
 /** The harness keys the agent steps of `loaded` reach: sorted, each once. */
-export function harnessKeysOf(loaded: LoadedWorkflow, config: ProjectConfig): string[] {
+export function harnessKeysOf(loaded: LoadedWorkflow, config: Pick<ProjectConfig, 'models' | 'adapters'>): string[] {
   const definitions = [loaded.intake.definition, ...loaded.stages.map((stage) => stage.definition)];
   const keys = definitions.flatMap((definition) => {
     const steps: readonly Step[] =
