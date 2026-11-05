@@ -99,6 +99,8 @@ export interface Pipeline {
   readonly background: boolean;
   /** Runs only on the exit status of the pipeline before it: it follows `&&` or `||`. */
   readonly conditional: boolean;
+  /** Followed by `||`: what follows runs only when it fails. */
+  readonly orElse?: boolean;
 }
 
 export type Parsed =
@@ -331,7 +333,7 @@ class Parser {
         this.pos += 2;
         this.blank();
         this.followed(op);
-        list.push({ commands, background: false, conditional: follows });
+        list.push({ commands, background: false, conditional: follows, ...(op === '||' && { orElse: true }) });
         conditional = true;
       } else if (stops.arm && this.armEnd()) {
         list.push({ commands, background: false, conditional: follows });

@@ -363,6 +363,12 @@ test.each([
   ['x=$(cd lib); echo x > $PWD/a.ts', ['a.ts'], 'allow'],
   ["bash -c 'cd lib'; echo x > $PWD/a.ts", ['a.ts'], 'allow'],
   ['{ cd lib; }; echo x > $PWD/a.ts', ['a.ts'], ['write', 'lib/a.ts']],
+  ['echo && cd lib; echo x > $PWD/a.ts', ['lib/**'], NOT_RESOLVED],
+  ['echo || cd lib; echo x > $OLDPWD/a.ts', ['a.ts', 'lib/**'], NOT_RESOLVED],
+  ['cd lib || echo x > $PWD/a.ts', ['lib/**'], NOT_RESOLVED],
+  ['cd lib || echo; echo x > $PWD/a.ts', ['lib/**'], NOT_RESOLVED],
+  ['echo || cd lib && echo x > $PWD/a.ts', ['a.ts', 'lib/**'], NOT_RESOLVED],
+  ['echo && cd lib && echo && echo x > $PWD/a.ts', ['src/**'], ['write', 'lib/a.ts']],
 ] as [string, string[], Want][])('cd and $PWD: %j under %j is %j', (command, write, want) => {
   const ctx = { ...layout.ctx, env: { ...layout.ctx.env, PWD: layout.worktree } };
   const decision = decideCommand(placed(command), perms({ commands: OPEN_ECHO, write }), ctx);

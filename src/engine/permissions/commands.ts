@@ -273,7 +273,20 @@ class Collector {
       return cwd;
     }
     let here = cwd;
-    for (const pipeline of list) {
+    // A cd's `PWD` holds for what its `&&` chain runs after it. After a `||` on either side of the cd, or past the chain
+    // when the cd ran only on the status before it, the cd may not have run, so both names are unknown.
+    let cdInList = false;
+    let cdConditional = false;
+    for (const [index, pipeline] of list.entries()) {
+      const unsure = pipeline.conditional ? cdInList && list[index - 1]?.orElse === true : cdConditional;
+      if (unsure) {
+        this.bound.set('OLDPWD', undefined);
+        this.bound.set('PWD', undefined);
+      }
+      if (!pipeline.conditional) {
+        cdInList = false;
+        cdConditional = false;
+      }
       const argvs: string[][] = [];
       const surely = sure && pipeline.commands.length === 1 && !pipeline.background && !pipeline.conditional;
       let moved: Cwd | undefined;
@@ -296,8 +309,11 @@ class Collector {
       } else {
         here = moved;
         if ((pipeline.commands[0] as Command).kind === 'simple') {
-          this.bound.set('OLDPWD', this.value('PWD'));
-          this.bound.set('PWD', moved.logical);
+          const skippable = pipeline.conditional && list[index - 1]?.orElse === true;
+          this.bound.set('OLDPWD', skippable ? undefined : this.value('PWD'));
+          this.bound.set('PWD', skippable ? undefined : moved.logical);
+          cdInList = true;
+          cdConditional ||= pipeline.conditional;
         }
       }
     }
