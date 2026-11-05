@@ -390,7 +390,7 @@ interface Payloads {
   /** `took` is the stale run whose lease this one replaced. */
   'workspace:leased': { remote: string; branch: string; took?: string };
   'workspace:lease_released': { remote: string; branch: string };
-  'workspace:created': { path: string; branch: string; baseSha: string; durationMs: number };
+  'workspace:created': { path: string; branch: string; baseSha: string; startSha?: string; durationMs: number };
   /** `ref` is where a removed workspace's commits are kept, at `head`, when its `HEAD` had moved past its base. */
   'workspace:released': { path: string; kept: boolean; ref?: string; head?: string };
 }

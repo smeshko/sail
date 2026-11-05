@@ -39,6 +39,11 @@ export interface WorkspacePort {
    * A detached checkout of `base`, recording `branch` for the later push. Left out, `base` is `branch`'s tip on the remote
    * when the remote has it, else `fallback`, else the default branch's tip. `signal` stops whatever the adapter fetches
    * first. Emits `workspace:created`.
+   *
+   * `carry` is the run whose commits the checkout starts from: its workspace's `HEAD` while that workspace exists, else
+   * its run ref. It applies only when that commit differs from the base and descends from it; one that does not descend
+   * is `invalid`. `baseSha` stays the base, and `startSha` (on the workspace and on `workspace:created`) names the
+   * commit checked out, only when it was carried.
    */
   create(
     run: RunRef,
@@ -46,6 +51,7 @@ export interface WorkspacePort {
       readonly branch: string;
       readonly base?: string;
       readonly fallback?: string;
+      readonly carry?: RunRef;
       readonly signal?: AbortSignal;
     },
   ): Promise<Workspace>;
