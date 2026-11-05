@@ -40,9 +40,19 @@ Be calibrated, because the numbers act. A `cancel` at 0.6 or more lets the judge
 `cancel` at 0.5 and a `keep` under 0.7. A merge at 0.65 or more lets the judge merge the tickets. Give each number as
 you would act on it yourself. List no ticket you would put under 0.3.
 
+## Stale
+
+Check whether the ticket is stale: whether the repository already does what it asks. Look with `git grep` for the names
+and behaviours it mentions, `git log` for a commit that did it, and at the files it points at. A ticket is stale when
+everything it asks for is already there, or when what it describes no longer exists. A ticket that is partly done is not
+stale: say which part in the evidence.
+
+Quote what you found (a file and line, or a commit subject), never a guess. When you find nothing, the ticket is not
+stale, and the evidence says what you looked for. A stale ticket lets the judge cancel it whatever the verdict.
+
 You only read. Don't change any file.
 
 ## Submit
 
-Submit the `verdict` (`keep` or `cancel`), its `confidence` and `why`, and the `merges`: each with its `ticketKey`,
-`confidence` and `why`. An empty `merges` list is a fine answer.
+Submit the `verdict` (`keep` or `cancel`), its `confidence` and `why`, the `merges`: each with its `ticketKey`,
+`confidence` and `why` (an empty `merges` list is a fine answer), and `stale` (true or false) with its `staleEvidence`.

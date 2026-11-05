@@ -4,12 +4,14 @@ import { expect, test } from 'bun:test';
 import { chmodSync, existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createGitWorktreeWorkspace } from '../../src/adapters/workspace/git-worktree';
-import { type Cleaned, checkClean, cleanedMessage, cleanRun } from '../../src/engine/clean';
+import { type Cleaned, checkClean, cleanedMessage, cleanRun, resetTicket } from '../../src/engine/clean';
 import { writeOpening, writeStatus } from '../../src/engine/run-dir';
 import { readRunHeader } from '../../src/engine/run-header';
 import { type RunEnd, runWorkflow } from '../../src/engine/runtime';
 import { stopRun } from '../../src/engine/stop';
 import type { CodeHost } from '../../src/ports/code-host';
+import { PortError } from '../../src/ports/errors';
+import type { TicketSource } from '../../src/ports/ticket-source';
 import type { WorkspacePort } from '../../src/ports/workspace';
 import { queueItemsNaming } from '../../src/watch/queue-store';
 import { fakeAdapters } from '../helpers/adapters';
@@ -328,7 +330,12 @@ test('worktree, local branch, remote branch and run ref are each removed and lis
     const cleaned = await clean(repo, end.runId, { workspace });
     const archived = join(sailHome(repo), 'failed-runs', DAY, end.runId);
     expect(cleaned).toEqual({
-      cleaned: { runId: end.runId, removed: ['worktree', `branch ${branch}`, 'remote branch', 'run ref'], archived },
+      cleaned: {
+        runId: end.runId,
+        removed: ['worktree', `branch ${branch}`, 'remote branch', 'run ref'],
+        archived,
+        source: { kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: [] },
+      },
     });
     expect(ref(repo, `refs/heads/${branch}`)).toBe(false);
     expect(ref(repo, `refs/sail/runs/${end.runId}`)).toBe(false);
@@ -378,6 +385,7 @@ test("a run started from a pull request keeps the pull request's head branch, lo
         runId: end.runId,
         removed: ['worktree', 'run ref'],
         archived: join(sailHome(repo), 'failed-runs', DAY, end.runId),
+        source: { kind: 'pr', number: 7, headSha, via: 'cli', forced: [] },
       },
     });
     expect(ref(repo, `refs/heads/${branch}`)).toBe(true);
@@ -401,6 +409,7 @@ test('what is already gone is skipped and not listed: a stopped run, whose workt
         runId: end.runId,
         removed: ['run ref'],
         archived: join(sailHome(repo), 'failed-runs', DAY, end.runId),
+        source: { kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: [] },
       },
     });
   });
@@ -413,7 +422,14 @@ test('a clean with nothing left to remove still archives the run directory, with
     const calls = readdirSync(end.dir).filter((name) => /^\d\d-/.test(name));
     const cleaned = await clean(repo, end.runId);
     const archived = join(sailHome(repo), 'failed-runs', DAY, end.runId);
-    expect(cleaned).toEqual({ cleaned: { runId: end.runId, removed: [], archived } });
+    expect(cleaned).toEqual({
+      cleaned: {
+        runId: end.runId,
+        removed: [],
+        archived,
+        source: { kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: [] },
+      },
+    });
     expect(calls.length).toBeGreaterThan(0);
     expect(readdirSync(archived)).toEqual(expect.arrayContaining(['events.ndjson', ...calls]));
     expect(readdirSync(join(repo.dir, '.sail-runs'))).not.toContain(end.runId);
@@ -455,6 +471,7 @@ test('a removal that fails still lets the rest run, is reported and keeps the ru
         runId: end.runId,
         removed: [`branch ${branch}`],
         archived: join(sailHome(repo), 'failed-runs', DAY, end.runId),
+        source: { kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: [] },
       },
     });
     expect(existsSync(end.dir)).toBe(false);
@@ -565,4 +582,82 @@ test('cleanedMessage gives the line sail clean prints, with the home shown as ~'
   expect(cleanedMessage('R-1', { removed: [], archived: '/elsewhere/R-1' }, '/home/me')).toBe(
     'cleaned R-1: nothing left to remove; run directory -> /elsewhere/R-1',
   );
+});
+
+/** `resetTicket()` for the run `end` made, over the fake ticket source of `repo`. */
+async function reset(repo: TempRepo, end: RunEnd, wrap?: (ts: TicketSource) => TicketSource) {
+  const adapters = await fakeAdapters(repo.dir);
+  const ticketSource = wrap?.(adapters.ports.ticketSource) ?? adapters.ports.ticketSource;
+  const result = await resetTicket({
+    ticketSource,
+    source: readRunHeader(end.dir).source,
+    runId: end.runId,
+    runsDir: join(repo.dir, '.sail-runs'),
+  });
+  return { result, state: (await adapters.ports.ticketSource.get('FAKE-1')).state };
+}
+
+test('resetTicket moves the started ticket of a run back to unstarted and names its new state', async () => {
+  await withTempRepo(async (repo) => {
+    const { end } = await failedRun(repo);
+    const adapters = await fakeAdapters(repo.dir);
+    expect((await adapters.ports.ticketSource.get('FAKE-1')).state.type).toBe('started');
+    const { result, state } = await reset(repo, end);
+    expect(result).toEqual({ reset: { ticketKey: 'FAKE-1', state: { type: 'unstarted', name: 'Todo' } } });
+    expect(state.type).toBe('unstarted');
+  });
+});
+
+test('resetTicket leaves a ticket that is no longer started where it is', async () => {
+  await withTempRepo(async (repo) => {
+    const { end } = await failedRun(repo);
+    await (await fakeAdapters(repo.dir)).ports.ticketSource.update('FAKE-1', { state: 'done' });
+    const { result, state } = await reset(repo, end);
+    expect('left' in result).toBe(true);
+    expect(state.type).toBe('completed');
+  });
+});
+
+test('resetTicket leaves a ticket whose latest claim names a run that is still running or suspended', async () => {
+  await withTempRepo(async (repo) => {
+    const { end } = await failedRun(repo);
+    const other = join(repo.dir, '.sail-runs', 'FAKE-1-OTHER');
+    mkdirSync(other, { recursive: true });
+    writeStatus(other, 'suspended', 'until');
+    await (await fakeAdapters(repo.dir)).ports.ticketSource.comment('FAKE-1', 'sail run FAKE-1-OTHER started');
+    const { result, state } = await reset(repo, end);
+    expect('left' in result).toBe(true);
+    expect(state.type).toBe('started');
+    writeStatus(other, 'failed', 'workflow_failed');
+    expect('reset' in (await reset(repo, end)).result).toBe(true);
+  });
+});
+
+test('resetTicket does nothing for a pull-request run', async () => {
+  await withTempRepo(async (repo) => {
+    const { end } = await failedRun(repo);
+    const adapters = await fakeAdapters(repo.dir);
+    const result = await resetTicket({
+      ticketSource: adapters.ports.ticketSource,
+      source: { kind: 'pr', number: 7, headSha: 'a'.repeat(40), via: 'cli', forced: [] },
+      runId: end.runId,
+      runsDir: join(repo.dir, '.sail-runs'),
+    });
+    expect('left' in result).toBe(true);
+    expect((await adapters.ports.ticketSource.get('FAKE-1')).state.type).toBe('started');
+  });
+});
+
+test('resetTicket reports a provider that refuses the move as failed, with its message', async () => {
+  await withTempRepo(async (repo) => {
+    const { end } = await failedRun(repo);
+    const { result, state } = await reset(repo, end, (ts) => ({
+      ...ts,
+      update: async () => {
+        throw new PortError('ticketSource', 'update', 'unavailable', 'linear is down');
+      },
+    }));
+    expect(result).toEqual({ failed: expect.stringContaining('linear is down') });
+    expect(state.type).toBe('started');
+  });
 });

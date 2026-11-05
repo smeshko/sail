@@ -18,7 +18,7 @@ import { basename, join, relative } from 'node:path';
 import type { ScriptedAnswer } from '../../src/adapters/fake/harness';
 import { BUILTINS } from '../../src/adapters/index';
 import { readConfig } from '../../src/engine/config';
-import { CONTROL_FILE, requestStop, requestStopNow, requestUnwatch } from '../../src/engine/control';
+import { CONTROL_FILE, requestStop, requestStopNow } from '../../src/engine/control';
 import * as durable from '../../src/engine/durable';
 import { fingerprintBindings } from '../../src/engine/fingerprint';
 import * as journalModule from '../../src/engine/journal';
@@ -1460,49 +1460,17 @@ const leaseFiles = (repoDir: string): string[] => {
   return existsSync(dir) ? readdirSync(dir).filter((name) => name.endsWith('.json')) : [];
 };
 
-test('a CONTROL that says unwatched before a call suspends the run with unwatched: the call never runs, its workspace and lease stay, and a resume completes it without running a journaled call again', async () => {
+test('a CONTROL that says unwatched is removed and ignored: the run goes on to its end', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir, { testsPassAt: 1 });
     const end = await ran(repo.dir, {
       onCall: (entry) => {
-        if (entry.key === 'implement#1') requestUnwatch(onlyRun(repo.dir));
+        if (entry.key === 'implement#1') writeFileSync(join(onlyRun(repo.dir), CONTROL_FILE), 'unwatched\n');
       },
     });
-    expect(end).toMatchObject({
-      status: 'suspended',
-      stopReason: 'unwatched',
-      message: 'its workflow was unwatched: stopped before tests#1',
-    });
-    const last = events(end.dir).at(-1);
-    expect({
-      status: readFileSync(join(end.dir, 'STATUS'), 'utf8'),
-      journaled: keys(end.dir),
-      ran: stubExecutions(repo.dir),
-      end: [last?.type, last?.type === 'run:end' ? last.stopReason : undefined],
-      workspace: existsSync(join(end.dir, 'workspace')),
-      leases: leaseFiles(repo.dir).length,
-      control: existsSync(join(end.dir, CONTROL_FILE)),
-      summary: summaryOf(end.dir)?.stopReason,
-      issues: validateRunDir(end.dir).issues,
-    }).toEqual({
-      status: 'suspended unwatched\n',
-      journaled: ['intake#1', 'spec#1', 'implement#1'],
-      ran: ['spec#1', 'implement#1'],
-      end: ['run:end', 'unwatched'],
-      workspace: true,
-      leases: 1,
-      control: false,
-      summary: 'unwatched',
-      issues: [],
-    });
-    await withTempRepo(async (copy) => {
-      copyRun(repo.dir, copy.dir);
-      const resumed = await resumeWorkflow({ cwd: copy.dir, adapters: await fakeAdapters(copy.dir), runId: end.runId });
-      expect([resumed, stubExecutions(copy.dir)]).toMatchObject([
-        { status: 'completed' },
-        ['spec#1', 'implement#1', 'tests#1', 'self-review#1', 'publish#1'],
-      ]);
-    });
+    expect([end.status, stubExecutions(repo.dir).includes('tests#1'), existsSync(join(end.dir, CONTROL_FILE))]).toEqual(
+      ['completed', true, false],
+    );
   });
 }, 30_000);
 
@@ -1564,29 +1532,6 @@ test('a CONTROL written as the run starts stops it before intake#1', async () =>
     ]);
   });
 });
-
-test('an abort seen at the same boundary as a CONTROL goes first, suspending the run interrupted, and the request waits for the resume, which it suspends before spec#1', async () => {
-  await withTempRepo(async (repo) => {
-    writeStub(repo.dir);
-    const controller = new AbortController();
-    const end = await ran(repo.dir, {
-      signal: controller.signal,
-      onCall: () => {
-        requestUnwatch(onlyRun(repo.dir));
-        controller.abort();
-      },
-    });
-    expect(end).toMatchObject({ status: 'suspended', stopReason: 'interrupted', message: 'stopped before spec#1' });
-    await withTempRepo(async (copy) => {
-      copyRun(repo.dir, copy.dir);
-      const resumed = await resumeWorkflow({ cwd: copy.dir, adapters: await fakeAdapters(copy.dir), runId: end.runId });
-      expect([resumed, stubExecutions(copy.dir)]).toMatchObject([
-        { status: 'suspended', stopReason: 'unwatched', message: 'its workflow was unwatched: stopped before spec#1' },
-        [],
-      ]);
-    });
-  });
-}, 30_000);
 
 test('a stop asked during the call --until names goes ahead of the until suspension: the run fails stopped and releases its workspace and lease (review R1-6)', async () => {
   await withTempRepo(async (repo) => {

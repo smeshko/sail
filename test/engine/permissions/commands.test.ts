@@ -197,6 +197,10 @@ test.each([
   ['GIT_CONFIG_PARAMETERS="\'core.pager=sh\'" git log', { commands: ['git *'] }, DENY('environment override')],
   ['export PATH=/tmp', { commands: ['export *'] }, DENY('environment override')],
   ['env LD_PRELOAD=x.so ls', { commands: ['ls *'] }, DENY('environment override')],
+  ['for PATH in ./bin; do git status; done', { commands: ['git *'] }, DENY('environment override')],
+  ['for IFS in x; do git status; done', { commands: ['git *'] }, DENY('environment override')],
+  ['for GIT_EXEC_PATH in $(x); do git status; done', { commands: ['git *', 'x'] }, DENY('environment override')],
+  ['for f in a; do git status; done', { commands: ['git *'] }, 'allow'],
   ['CI=1 NODE_ENV=test npm test', { commands: ['npm test *'] }, 'allow'],
 ] as [string, Partial<Permissions>, Want][])('assignments: %j under %j is %j', (command, open, want) => {
   expect(verdict(run(command, open), want)).toEqual(want);
@@ -268,12 +272,171 @@ test.each([
 test.each([
   ['', {}, ['commands', "can't be checked: an empty command"]],
   ['  \n ', {}, ['commands', "can't be checked: an empty command"]],
-  ['(cd x; ls)', { commands: ['ls *'] }, ['commands', "can't be checked: a subshell"]],
-  ['for f in *; do rm $f; done', { commands: ['rm *'] }, ['commands', "can't be checked: a for loop"]],
   ['{rm,-rf,x}', {}, ['commands', "can't be checked: a brace expansion"]],
   ["$'rm' -rf x", {}, ['commands', "can't be checked: an ANSI-C quote"]],
   ['a |', { commands: ['a *'] }, ['commands', "can't be checked: a command that ends with |"]],
 ] as [string, Partial<Permissions>, Want][])('refusals: %j under %j is %j', (command, open, want) => {
+  expect(verdict(run(command, open), want)).toEqual(want);
+});
+
+const LS = { commands: ['ls', 'ls *', 'cat *', 'echo *', 'git *', 'true', 'test *', 'read *'] };
+const NOT_LISTED = (text: string): Want => ['commands', `\`${text}\` matches none of the step's commands`];
+
+test.each([
+  ['for f in a b; do ls $f; done', LS, 'allow'],
+  ['for f in *.ts; do cat $(ls); done', LS, 'allow'],
+  ['for f; do ls; done', LS, 'allow'],
+  ['while true; do ls; done', LS, 'allow'],
+  ['until test -f x; do ls; done', LS, 'allow'],
+  ['cat list | while read l; do ls; done', LS, 'allow'],
+  ['if test -f a; then ls; elif test -f b; then cat b; else echo none; fi', LS, 'allow'],
+  ['case x in a) ls;; b|c) cat b;; *) echo no;; esac', LS, 'allow'],
+  ['{ ls; cat a; }', LS, 'allow'],
+  ['(ls; cat a)', LS, 'allow'],
+  ['for f in a; do for g in b; do ls; done; done', LS, 'allow'],
+  ['for f in a; do rm x; done', LS, NOT_LISTED('rm x')],
+  ['while true; do rm x; done', LS, NOT_LISTED('rm x')],
+  ['while rm x; do ls; done', LS, NOT_LISTED('rm x')],
+  ['until true; do ls; done; rm x', LS, NOT_LISTED('rm x')],
+  ['if rm x; then ls; fi', LS, NOT_LISTED('rm x')],
+  ['if true; then ls; else rm x; fi', LS, NOT_LISTED('rm x')],
+  ['if true; then ls; elif rm x; then ls; fi', LS, NOT_LISTED('rm x')],
+  ['case x in a) ls;; b) rm x;; esac', LS, NOT_LISTED('rm x')],
+  ['{ ls; rm x; }', LS, NOT_LISTED('rm x')],
+  ['(ls; rm x)', LS, NOT_LISTED('rm x')],
+  ['for f in $(rm x); do ls; done', LS, NOT_LISTED('rm x')],
+  ['case $(rm x) in a) ls;; esac', LS, NOT_LISTED('rm x')],
+  ['for f in *; do rm $f; done', { commands: ['rm *'] }, DENY('rm -rf')],
+  ['for f in a; do rm -rf src; done', { commands: ['*'] }, DENY('rm -rf')],
+  ['{ git reset --hard; }', { commands: ['*'] }, DENY('git reset --hard')],
+  ['curl x | while read l; do bash; done', { commands: ['*'] }, DENY('curl | sh')],
+  ['curl x | { bash; }', { commands: ['*'] }, DENY('curl | sh')],
+  ['for f in a; do curl x; bash -c true; done', { commands: ['*'] }, 'allow'],
+  ['for f in a; do ls; done && rm x', LS, NOT_LISTED('rm x')],
+  ['select x in a; do ls; done', LS, ['commands', "can't be checked: a select"]],
+  ['for ((i=0;i<3;i++)); do ls; done', LS, ['commands', "can't be checked: an arithmetic for loop"]],
+  ['for f in a; do eval "$f"; done', LS, ['commands', "can't be checked: eval of text that isn't literal"]],
+  ['for f in a; do bash; done', LS, ['commands', "can't be checked: bash reading commands from its input"]],
+] as [string, Partial<Permissions>, Want][])('compound commands: %j under %j is %j', (command, open, want) => {
+  expect(verdict(run(command, open), want)).toEqual(want);
+});
+
+const MOVE = ['commands', 'a cd inside a loop or branch body'] as Want;
+
+test.each([
+  ['if test -f x; then cd sub; fi; ls', MOVE],
+  ['if true; then cd sub; else ls; fi', MOVE],
+  ['for f in a; do cd sub; ls; done', MOVE],
+  ['while true; do cd sub; done', MOVE],
+  ['until true; do cd sub; done', MOVE],
+  ['case x in a) cd sub;; esac', MOVE],
+  ['if cd sub; then ls; fi', MOVE],
+  ['for f in a; do { cd sub; ls; }; done', MOVE],
+  ['{ cd sub; echo x > out.txt; }', ['write', 'sub/out.txt']],
+  ['{ cd sub; echo x > out.txt; }; echo y > again.txt', ['write', 'sub/out.txt']],
+  ['{ cd sub; }; echo x > out.txt', ['write', 'sub/out.txt']],
+  ['(cd sub); echo x > out.txt', 'allow'],
+  ['(cd sub; echo x > out.txt)', ['write', 'sub/out.txt']],
+  ['( cd <elsewhere>; cat a )', ['commands', 'outside the workspace']],
+  ['{ cd <elsewhere>; }', ['commands', 'outside the workspace']],
+  ['for f in a; do (cd sub; echo x > out.txt); done', ['write', 'sub/out.txt']],
+] as [string, Want][])('cd in compound commands: %j is %j', (command, want) => {
+  expect(
+    verdict(run(command, { commands: ['echo *', 'ls', 'ls *', 'cat *', 'test *', 'true'], write: ['out.txt'] }), want),
+  ).toEqual(want);
+});
+
+test.each([
+  ['for f in a; do ls; done > out.txt', { write: ['out.txt'] }, 'allow'],
+  ['for f in a; do ls; done > lib/a.dart', { write: ['src/**'] }, ['write', 'lib/a.dart']],
+  ['{ ls; } > lib/a.dart', { write: ['src/**'] }, ['write', 'lib/a.dart']],
+  ['(ls) 2> lib/a.dart', { write: ['src/**'] }, ['write', 'lib/a.dart']],
+  ['while read l; do ls; done < lib/a.dart', { read: ['src/**'] }, ['read', 'lib/a.dart']],
+  ['if true; then ls; fi > $(rm x)', { write: ['**'] }, NOT_LISTED('rm x')],
+  ['case x in a) ls;; esac > $UNSET', { write: ['**'] }, ['write', "can't be resolved"]],
+  ['{ ls; } <<EOF\n$(rm x)\nEOF', {}, NOT_LISTED('rm x')],
+  ['for f in a; do ls; done > out.txt', { write: ['src/**'] }, ['write', 'out.txt']],
+] as [string, Partial<Permissions>, Want][])(
+  'redirections on compound commands: %j under %j is %j',
+  (command, open, want) => {
+    expect(verdict(run(command, { commands: ['ls', 'ls *', 'echo *', 'read *', 'true'], ...open }), want)).toEqual(
+      want,
+    );
+  },
+);
+
+test('a loop variable shadows the environment, so a list that is not known leaves it unknown', () => {
+  const open = { commands: ['echo *', 'x *'], write: ['$STAGE_OUT/**'] };
+  expect([
+    verdict(run('echo hi > $STAGE_OUT/r.md', open), 'allow'),
+    verdict(run('for STAGE_OUT in $(x); do echo hi > $STAGE_OUT/r.md; done', open), ['write', "can't be resolved"]),
+  ]).toEqual(['allow', ['write', "can't be resolved"]]);
+});
+
+const GIT_ONLY = { commands: ['git *'] };
+const words = (count: number) => Array.from({ length: count }, (_, i) => `w${i}`).join(' ');
+/** A loop of `outer` words around one of `inner` words that uses its variable: `outer + outer * inner` walks. */
+const nested = (outer: number, inner: number) =>
+  `for v in ${words(outer)}; do for w in ${words(inner)}; do git show $w; done; done`;
+const loops = (levels: number) =>
+  `${Array.from({ length: levels }, (_, i) => `for v${i} in ${words(16)}; do`).join(' ')} echo x; ${'done; '.repeat(levels)}`;
+
+test.each([
+  ['for f in a b; do git log -1 -- "$f"; done', GIT_ONLY, 'allow'],
+  ['for f in a b; do rm "$f"; done', GIT_ONLY, NOT_LISTED('rm "$f"')],
+  ['for n in 1 2 3; do git show HEAD~$n; done', GIT_ONLY, 'allow'],
+  ['for n in 1 2 3; do git show HEAD~${n}; done', GIT_ONLY, 'allow'],
+  ['for f in a b; do for g in $f c; do git show $g; done; done', GIT_ONLY, 'allow'],
+  ['for f in a; do git show $f; done; git show $f', GIT_ONLY, ['commands', 'hold an expansion']],
+  ['for f in $(git ls-files); do git show $f; done', GIT_ONLY, ['commands', 'hold an expansion']],
+  ['for f in *.ts; do git show $f; done', GIT_ONLY, ['commands', 'hold an expansion']],
+  [`for f in ${words(16)}; do git show $f; done`, GIT_ONLY, 'allow'],
+  [`for f in ${words(17)}; do git show $f; done`, GIT_ONLY, ['commands', 'hold an expansion']],
+  ['for f; do git show $f; done', GIT_ONLY, ['commands', 'hold an expansion']],
+  ['for f in; do git show $f; done', GIT_ONLY, ['commands', 'hold an expansion']],
+  ['for f in a "b c"; do git show $f; done', GIT_ONLY, ['commands', 'hold an expansion']],
+  ['for f in src/a.ts src/b.ts; do echo x > $f; done', { commands: ['echo *'], write: ['src/**'] }, 'allow'],
+  [
+    'for f in src/a.ts lib/a.dart; do echo x > $f; done',
+    { commands: ['echo *'], write: ['src/**'] },
+    ['write', 'lib/a.dart'],
+  ],
+  [
+    'for f in src/a.ts lib/a.dart; do echo x; done > $f',
+    { commands: ['echo *'], write: ['src/**'] },
+    ['write', "can't be resolved"],
+  ],
+  ['for f in a; do echo x > $f.txt; done', { commands: ['echo *'], write: ['a.txt'] }, 'allow'],
+  ['for STAGE_OUT in src; do echo x > $STAGE_OUT/a.ts; done', { commands: ['echo *'], write: ['src/**'] }, 'allow'],
+  [
+    'for STAGE_OUT in src; do echo x > $STAGE_OUT/a.ts; done; echo x > $STAGE_OUT/a.ts',
+    { commands: ['echo *'], write: ['src/**'] },
+    ['write', "can't be resolved"],
+  ],
+  [loops(5), { commands: ['echo *'] }, 'allow'],
+  [nested(4, 15), GIT_ONLY, 'allow'],
+  [nested(4, 16), GIT_ONLY, ['commands', 'hold an expansion']],
+] as [string, Partial<Permissions>, Want][])('for loop variables: %j under %j is %j', (command, open, want) => {
+  expect(verdict(run(command, open), want)).toEqual(want);
+});
+
+const ANY = {
+  commands: ['echo *', 'cat', 'true', 'read *', 'export *', 'declare *', 'git *'],
+  read: ['**'],
+  write: ['**'],
+};
+const UNRESOLVED = (rule: string): Want => [rule, "can't be resolved"];
+
+test.each([
+  ['for f in a.txt; do f=/etc/x; echo hi > $f; done', ANY, UNRESOLVED('write')],
+  ['for f in a.txt; do export f=/etc/x; echo hi > $f; done', ANY, UNRESOLVED('write')],
+  ['for f in a.txt; do declare f=/etc/x; cat < $f; done', ANY, UNRESOLVED('read')],
+  ['for f in a.txt; do read f; cat < $f; done', ANY, UNRESOLVED('read')],
+  ['for f in a.txt; do read -r f; git -C $f status; done', ANY, ['commands', 'hold an expansion']],
+  ['for f in a.txt; do for g in 1 2; do echo hi > $f; f=/etc/x; done; done', ANY, UNRESOLVED('write')],
+  ['for f in a.txt; do while true; do echo hi > $f; f=/etc/x; done; done', ANY, UNRESOLVED('write')],
+  ['for f in a.txt; do echo hi > $f; done', ANY, 'allow'],
+] as [string, Partial<Permissions>, Want][])('a loop variable the body assigns: %j is %j', (command, open, want) => {
   expect(verdict(run(command, open), want)).toEqual(want);
 });
 
@@ -334,7 +497,7 @@ test.each([
   ['git rebase -x "$CMD" main', GIT, GIT_OPEN],
   ['git rebase -x', GIT, CANT],
   ['git rebase --exec="" main', GIT, CANT],
-  ['git rebase -x "for x in y; do ls; done" main', GIT, CANT],
+  ['git rebase -x "for x in y; do ls; done" main', GIT, ['commands', "`ls` matches none of the step's commands"]],
   ['git -C sub rebase -x "echo x > a.txt" main', { commands: ['git *', 'echo *'], write: ['sub/**'] }, 'allow'],
   [
     'git -C sub rebase -x "echo x > a.txt" main',

@@ -1,5 +1,5 @@
 // `sail check [--list]`: finds `.sail/`, validates its config, refreshes the editor declarations, type-checks it,
-// loads its definitions and applies the layout's rules, then asks each harness whether it can run the models the
+// loads its definitions and applies the layout's rules and the script steps' port rules, then asks each harness whether it can run the models the
 // aliases route to it, in that order. The first step with a problem refuses, with
 // every problem it found located relative to where the user ran it.
 //
@@ -15,6 +15,7 @@ import { byFile, type Definitions, loadDefinitions, type StageEntry } from '../.
 import { EditorWriteError, writeEditorDeclarations } from '../../engine/editor';
 import { type ImportGraph, importGraph } from '../../engine/imports';
 import { layoutProblems, reach } from '../../engine/layout';
+import { portCallProblems } from '../../engine/port-calls';
 import { findSailDir } from '../../engine/sail-dir';
 import { formatIssue } from '../../engine/schemas';
 import { typecheck } from '../../engine/typecheck';
@@ -137,7 +138,11 @@ export async function check(args: Parsed, io: Io): Promise<ExitCode> {
     io.stderr(`sail check: could not read the import graph\n${imports.internal}\n`);
     return EXIT_INTERNAL;
   }
-  const problems = [...definitions.problems, ...layoutProblems(found.dir, definitions, imports.graph)].sort(byFile);
+  const problems = [
+    ...definitions.problems,
+    ...layoutProblems(found.dir, definitions, imports.graph),
+    ...portCallProblems(found.dir, definitions),
+  ].sort(byFile);
   const { workflows, stages } = definitions;
   if (problems.length > 0) {
     for (const problem of problems) io.stderr(`${at(problem.file)}  ${problem.message}\n`);

@@ -1,18 +1,20 @@
 // groom: a groom-labelled ticket in, one comment out, and for a ticket worth doing, its plan. The ticket is read without
-// a claim, so it stays where it is unless groom cancels it, merges it into another, or marks it a duplicate. Four agent
-// checks look at it at once (duplicates, worth, staleness and open questions); a judge writes the report, chooses actions
+// a claim, so it stays where it is unless groom cancels it, merges it into another, or marks it a duplicate. Three agent
+// checks look at it (duplicates and worth at once, worth also asking whether it is stale; then open questions, only when
+// worth keeps the ticket); a judge writes the report, chooses actions
 // from a fixed set and confirms the open questions. A ticket that survives them with none open is planned, as the
 // factory's plan stage did, and a plan that leaves no question open is attached to the ticket. The act step applies what
 // the workflow lets through, attaches the plan, comments the report, takes the `groom` label off and puts `groomed` (an
 // action ended the ticket), `open-questions` (a person must answer, then put `groom` back) or `planned` and `factory` on,
-// so the watcher grooms each ticket once and the factory implements the plan. Composition only: every contract lives on
-// its stage.
+// so the watcher grooms each ticket once and the factory implements the plan. A stage that ends blocked hands the ticket
+// to a person instead (the hand-over-ticket stage): the `groom` label comes off and `needs-human` goes on, with the
+// state left alone. Composition only: every contract lives on its stage.
 import { workflow, type z } from 'sail';
+import { handOverTicket } from '../../stages/hand-over-ticket/stage';
 import { readTicket } from './intake';
 import type { Decision, Findings, Verdict } from './schemas';
 import { duplicates } from './stages/01-duplicates/stage';
 import { worth } from './stages/02-worth/stage';
-import { staleness } from './stages/03-staleness/stage';
 import { questions } from './stages/04-questions/stage';
 import { decide } from './stages/05-decide/stage';
 import { plan } from './stages/06-plan/stage';
@@ -96,9 +98,9 @@ function heldMerge(action: Extract<Action, { kind: 'merge' }>, context: Context)
 
 /** Why the workflow holds back the cancel, or undefined when it lets it through. */
 function heldCancel(context: Context): string | undefined {
-  const { worth: judged, staleness: stale } = context.findings;
+  const { worth: judged } = context.findings;
   if (context.kept.includes(context.ticketKey)) return 'started or an epic';
-  if (stale.stale) return undefined;
+  if (judged.stale) return undefined;
   const bar = context.fromReview ? REVIEW_CANCEL : CANCEL;
   if (judged.verdict === 'cancel' && judged.confidence >= bar.cancel) return undefined;
   if (judged.verdict === 'keep' && judged.confidence < bar.keep) return undefined;
@@ -108,12 +110,12 @@ function heldCancel(context: Context): string | undefined {
 
 /**
  * Splits the judge's actions into those to apply and those to report, and picks the label the ticket ends with, before
- * any plan: `groomed` once an action ends the ticket, `open-questions` while the judge confirmed any, and `planned`
- * otherwise, which the planner's own questions can still turn into `open-questions`. A
+ * any plan: `groomed` once an action ends the ticket, `manual` once the judge rules it a person's work, `open-questions` while the
+ * judge confirmed any, and `planned` otherwise, which the planner's own questions can still turn into `open-questions`. A
  * `duplicate`, a `cancel` or a `merge` that absorbs this ticket ends it, and no other of them applies after that; a
  * ticket that survives a merge is never canceled. A `cancel` passes the worth check's numbers as `CANCEL` says, a `merge`
  * as `MERGE_CONFIDENCE` and `DUPLICATE_CONFIDENCE` say,
- * never for a kept ticket, and one `merge` and one `labels` apply per run. An `edit` that names nothing to change is reported. A relation of any kind is applied only to one of `others`,
+ * never for a kept ticket, and one `merge` and one `labels` apply per run. An `edit` that names nothing to change is reported. A relation of any kind (`related`, `blocks`, `blocked_by`) is applied only to one of `others`,
  * never to `ticketKey` itself: the judge and the checks read the ticket's text, which can name any key.
  */
 function limit(decision: z.infer<typeof Decision>, context: Context): z.infer<typeof Verdict> {
@@ -133,6 +135,12 @@ function limit(decision: z.infer<typeof Decision>, context: Context): z.infer<ty
     }
     if (action.kind === 'labels') {
       if (apply.some((each) => each.kind === 'labels')) reported.push('labels (the labels are already set)');
+      else apply.push(action);
+      continue;
+    }
+    if (action.kind === 'manual') {
+      if (ended !== undefined) reported.push(`manual (${ended})`);
+      else if (apply.some((each) => each.kind === 'manual')) reported.push('manual (already ruled manual)');
       else apply.push(action);
       continue;
     }
@@ -192,8 +200,15 @@ function limit(decision: z.infer<typeof Decision>, context: Context): z.infer<ty
       ended = 'the ticket is already marked a duplicate';
     }
   }
-  const questions = ended === undefined ? decision.questions : [];
-  const outcome = ended !== undefined ? 'groomed' : questions.length > 0 ? 'open-questions' : 'planned';
+  // An ending action wins over a manual ruling applied before it.
+  const ruled = ended === undefined && apply.some((each) => each.kind === 'manual');
+  if (ended !== undefined && apply.some((each) => each.kind === 'manual')) {
+    reported.push(`manual (${ended})`);
+    for (let index = apply.length - 1; index >= 0; index--) if (apply[index]?.kind === 'manual') apply.splice(index, 1);
+  }
+  const questions = ended === undefined && !ruled ? decision.questions : [];
+  const outcome =
+    ended !== undefined ? 'groomed' : ruled ? 'manual' : questions.length > 0 ? 'open-questions' : 'planned';
   return { apply, reported, questions, outcome, plan: null };
 }
 
@@ -201,39 +216,46 @@ export default workflow(
   'groom',
   {
     intake: readTicket,
-    version: 2,
+    version: 3,
     watch: { every: '15m', label: LABEL },
     // One at a time, so two judgments of duplicates or merges never race each other.
     maxConcurrentRuns: 1,
     // A judgment of a ticket needs nothing its prerequisites would deliver, so a blocked ticket is groomed all the same.
     ignorePrerequisites: true,
     description:
-      'judge a ticket for worth, merges, duplicates, staleness, labels and open questions, merge, cancel or label it, then plan it for the factory',
+      'judge a ticket for worth, staleness, merges, duplicates, labels and open questions, merge, cancel or label it, then plan it for the factory',
   },
   async (run) => {
     const brief = run.intake.files['brief.md'];
     const others = run.intake.files['others.md'];
     const { ticketKey } = run.input;
+    const handOff = async (reason: string) => {
+      await run.stage(handOverTicket, { ticketKey, label: LABEL, reason, workflow: 'groom', unstart: false });
+      return run.fail(reason);
+    };
 
-    const [dup, earned, stale, open] = await run.all([
+    const [dup, earned] = await run.all([
       [duplicates, { brief, others }],
       [worth, { brief, others }],
-      [staleness, { brief, others }],
-      [questions, { brief, others }],
     ]);
-    if (dup.outcome === 'blocked') return run.fail(`duplicates blocked: ${dup.reason}`);
-    if (earned.outcome === 'blocked') return run.fail(`worth blocked: ${earned.reason}`);
-    if (stale.outcome === 'blocked') return run.fail(`staleness blocked: ${stale.reason}`);
-    if (open.outcome === 'blocked') return run.fail(`questions blocked: ${open.reason}`);
+    if (dup.outcome === 'blocked') return handOff(`duplicates blocked: ${dup.reason}`);
+    if (earned.outcome === 'blocked') return handOff(`worth blocked: ${earned.reason}`);
+
+    // A ticket worth would cancel needs no questions asked of it: decide sees none.
+    let open: z.infer<typeof Findings>['questions'] = { questions: [] };
+    if (earned.output.verdict === 'keep') {
+      const asked = await run.stage(questions, { brief, others });
+      if (asked.outcome === 'blocked') return handOff(`questions blocked: ${asked.reason}`);
+      open = asked.output;
+    }
 
     const findings = {
       duplicates: dup.output,
       worth: earned.output,
-      staleness: stale.output,
-      questions: open.output,
+      questions: open,
     };
     const decided = await run.stage(decide, { brief, others, findings });
-    if (decided.outcome === 'blocked') return run.fail(`decide blocked: ${decided.reason}`);
+    if (decided.outcome === 'blocked') return handOff(`decide blocked: ${decided.reason}`);
     const report = decided.files['report.md'];
     const verdict = limit(decided.output, {
       findings,
@@ -249,7 +271,7 @@ export default workflow(
 
     // create-plan, for the ticket as the applied actions leave it. Its questions hold the plan back.
     const planned = await run.stage(plan, { brief, report, actions: verdict.apply });
-    if (planned.outcome === 'blocked') return run.fail(`plan blocked: ${planned.reason}`);
+    if (planned.outcome === 'blocked') return handOff(`plan blocked: ${planned.reason}`);
     const { questions: asked, ...written } = planned.output;
     const acted =
       asked.length > 0

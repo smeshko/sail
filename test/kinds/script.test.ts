@@ -1388,3 +1388,47 @@ test('a port call that fails not_found and a script that exits 1 keep the exit c
   const run = await scriptKind.run(tests(), s.context);
   expect([run.outcome, run.errors]).toEqual(['failed', []]);
 });
+
+const UNDECLARED_HINT =
+  "ticket-source isn't in this step's ports, so the step has none of its credentials: add 'ticket-source' to the step's ports";
+const undeclared = (code: string, message = UNDECLARED_HINT) =>
+  `cat >> "$SAIL_EVENTS" <<'JSON'\n${JSON.stringify({ type: 'error:port', port: 'ticketSource', op: 'get', code, message })}\nJSON`;
+
+test("a failed sail port call for a port the step's ports omit ends the step in error, port, with the hint instead of the unmapped exit code", async () => {
+  const s = setup();
+  s.run(`${undeclared('unauthorized')}\nexit 3`);
+  const run = await scriptKind.run(tests(), s.context);
+  expect([run.outcome, run.output, run.errors]).toEqual([
+    'error',
+    null,
+    [{ reason: 'port', message: UNDECLARED_HINT }],
+  ]);
+});
+
+test('the same failed call under a step that declares the port keeps the unmapped exit code error', async () => {
+  const s = setup();
+  s.context.portVariables = async () => [];
+  s.run(`${undeclared('unauthorized')}\nexit 3`);
+  const step = script('tests', { run: './run.sh', output: TestReport, ports: ['ticket-source'] });
+  const run = await scriptKind.run(step, s.context);
+  expect(run.errors).toEqual([{ reason: 'exit_code', message: 'exit code 3 is not mapped to passed or failed' }]);
+});
+
+test('a failed call of an undeclared port for another reason than missing credentials keeps the exit code as the verdict', async () => {
+  const s = setup();
+  s.run(`${undeclared('not_found', 'ticketSource.get: no such ticket')}\nexit 3`);
+  const run = await scriptKind.run(tests(), s.context);
+  expect(run.errors).toEqual([{ reason: 'exit_code', message: 'exit code 3 is not mapped to passed or failed' }]);
+});
+
+test("SAIL_PORTS holds the step's ports comma-joined, and is empty for a step with none", async () => {
+  const Ports = z.object({ ports: z.string() });
+  const read = async (ports: ('ticket-source' | 'codehost')[]) => {
+    const s = setup();
+    s.context.portVariables = async () => [];
+    s.run(`printf '{"ports":"%s"}\\n' "$SAIL_PORTS"`);
+    return scriptKind.run(script('tests', { run: './run.sh', output: Ports, ports }), s.context);
+  };
+  expect((await read([])).output).toEqual({ ports: '' });
+  expect((await read(['ticket-source', 'codehost'])).output).toEqual({ ports: 'ticket-source,codehost' });
+});

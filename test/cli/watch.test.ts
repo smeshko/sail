@@ -410,6 +410,29 @@ test('Ctrl-C ends the watcher with exit 0 and clears its registry field, and its
   });
 }, 30_000);
 
+test("a watcher whose start throws after its first poll's re-read leaves no scratch copy of .sail/ (review R10)", async () => {
+  await withTempRepo(async (repo) => {
+    const world = repository(repo);
+    repo.git('add', '.sail');
+    repo.git('commit', '-m', 'watch a');
+    const tmp = join(repo.home, 'scratch');
+    mkdirSync(tmp);
+    const timers = fakeTimers(START);
+    const spawner = fakeSpawner(join(repo.dir, '.sail-runs'));
+    const deps: WatchDeps = { timers, now: timers.now, spawn: spawner.spawn, isAlive: spawner.isAlive, tmp };
+    const watcher = io(repo.dir, world.env, fakeInterrupts().onInterrupt);
+    const write = watcher.io.stdout;
+    watcher.io.stdout = (text) => {
+      if (text.includes('watch set:')) throw new Error('the terminal went away');
+      write(text);
+    };
+    const started = Promise.resolve(watchCommand(deps)({ values: {}, positionals: ['a'] }, watcher.io));
+    await expect(started).rejects.toThrow('the terminal went away');
+    expect(watcher.printed.stdout).toContain('a  watching: label sail-a');
+    expect(readdirSync(tmp)).toEqual([]);
+  });
+}, 30_000);
+
 test('a sail watch with no terminal to stop it is refused, and writes nothing', async () => {
   await withTempRepo(async (repo) => {
     const { env } = repository(repo);

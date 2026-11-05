@@ -5,11 +5,11 @@
 import { expect, test } from 'bun:test';
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { EXIT_FAILED, EXIT_OK } from '../src/cli/exit-codes';
+import { EXIT_FAILED, EXIT_OK, EXIT_REFUSED } from '../src/cli/exit-codes';
 import { readJournal } from '../src/engine/journal';
 import { readStatus } from '../src/engine/run-dir';
 import { readEvents } from '../src/events/consumers/ndjson';
-import { onlyRun } from './helpers/groom-fixture';
+import { fakeTicket, onlyRun } from './helpers/groom-fixture';
 import { nouls, writeOwnSail } from './helpers/own-sail';
 import { runCaptured } from './helpers/run-captured';
 import { sail } from './helpers/sail-process';
@@ -67,7 +67,7 @@ test('a ticket with no plan attached fails at load-plan, before implement, sayin
     attachToFake1(repo, [{ name: 'Figma', url: 'https://www.figma.com/file/abc' }]);
     const { code, keys, dir } = await factory(repo);
     expect(code).toBe(EXIT_FAILED);
-    expect(keys).toEqual(['intake#1', 'load-plan#1']);
+    expect(keys).toEqual(['intake#1', 'load-plan#1', 'hand-over-ticket#1']);
     expect(readStatus(dir)).toMatchObject({ status: 'failed' });
     const loaded = readJournal(dir).entries.find((entry) => entry.key === 'load-plan#1');
     expect(loaded?.outcome).toBe('failed');
@@ -77,6 +77,11 @@ test('a ticket with no plan attached fails at load-plan, before implement, sayin
     });
     const ended = readEvents(dir).find((event) => event.type === 'run:end') as { message?: string } | undefined;
     expect(JSON.stringify(ended)).toContain('no plan: FAKE-1 has no plan attached');
+    const ticket = fakeTicket(repo.dir, 'FAKE-1');
+    expect(ticket.labels).toContain('needs-human');
+    expect(ticket.labels).not.toContain('factory');
+    expect(ticket.state.type).toBe('unstarted');
+    expect(ticket.comments.at(-1)?.body).toContain('no plan: FAKE-1 has no plan attached');
   });
 }, 120_000);
 
@@ -223,5 +228,37 @@ test('a ticket comment Linear refuses after the pull request is open still compl
       (event) => event.type === 'error:port' && (event as { key?: string }).key === 'open#1',
     );
     expect(refused.map((event) => (event as { op?: string }).op)).toEqual(['comment', 'comment', 'comment']);
+  });
+}, 120_000);
+
+test('a blocked implement hands the ticket over: commented, needs-human on, factory off, back in Todo, and not started again', async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeOwnSail(repo);
+    const harness = join(sailDir, 'fake', 'harness.json');
+    const seeds = JSON.parse(readFileSync(harness, 'utf8'));
+    seeds.implement = [{ outcome: 'blocked', reason: 'the prerequisite has not landed', messages: [], turns: 1 }];
+    writeFileSync(harness, JSON.stringify(seeds));
+    repo.git('add', '.sail/fake/harness.json');
+    repo.git('commit', '-q', '-m', 'block implement');
+
+    const { code, keys, dir } = await factory(repo);
+    expect(code).toBe(EXIT_FAILED);
+    expect(keys.at(-1)).toBe('hand-over-ticket#1');
+    const handed = readJournal(dir).entries.find((entry) => entry.key === 'hand-over-ticket#1');
+    expect(handed?.output).toEqual({ handedOver: true });
+
+    const ticket = fakeTicket(repo.dir, 'FAKE-1');
+    expect(ticket.state.type).toBe('unstarted');
+    expect(ticket.labels).toContain('needs-human');
+    expect(ticket.labels).not.toContain('factory');
+    expect(ticket.comments.at(-1)?.body).toContain('implement blocked: the prerequisite has not landed');
+    const moved = readEvents(dir).filter((event) => event.type === 'ticket:updated') as {
+      change?: { state?: string };
+    }[];
+    expect(moved.map((event) => event.change?.state)).toContain('unstarted');
+
+    const again = await sail(repo.dir, repo.env, RUN);
+    expect(again.code).toBe(EXIT_REFUSED);
+    expect(again.stderr).toContain("carries no 'factory' label");
   });
 }, 120_000);

@@ -275,7 +275,7 @@ Where a run is in its life: `running`, `suspended`, `completed` or `failed`. It 
 _Avoid_: outcome, state, phase
 
 **Stop reason**:
-The named reason a run ended without completing, such as `workflow_failed`, `stage_error`, `budget_exceeded`, `determinism_violation`, `until`, `unwatched`, `stopped`, `interrupted`, `usage_limit`, `port_unavailable` or `crashed`. Every failed or suspended run carries exactly one.
+The named reason a run ended without completing, such as `workflow_failed`, `stage_error`, `budget_exceeded`, `determinism_violation`, `until`, `stopped`, `interrupted`, `usage_limit`, `port_unavailable` or `crashed`. Every failed or suspended run carries exactly one. `unwatched` is no longer given: the schemas keep it so a run an older sail suspended when its workflow was unwatched still reads, and a person resumes or stops such a run, as the watcher no longer does.
 _Avoid_: error message, cause, exit reason
 
 **Refusal**:
@@ -291,11 +291,11 @@ The hold a run's process takes against the machine's sleep, from its start or re
 _Avoid_: wake lock, caffeinate, sleep assertion
 
 **Suspended**:
-The status of a run that has exited with nothing running and a resume expected, for example because the run budget was exceeded, its workflow was unwatched, it hit the provider's usage limit, a step of it ended on a provider that was unavailable, a script step of it was ended by a signal sail didn't send (SIGTERM, SIGKILL, SIGHUP or SIGINT), it crashed on an exception inside sail, or it was interrupted by Ctrl-C or SIGTERM. It keeps its workspace and its branch lease.
+The status of a run that has exited with nothing running and a resume expected, for example because the run budget was exceeded, it hit the provider's usage limit, a step of it ended on a provider that was unavailable, a script step of it was ended by a signal sail didn't send (SIGTERM, SIGKILL, SIGHUP or SIGINT), it crashed on an exception inside sail, or it was interrupted by Ctrl-C or SIGTERM. It keeps its workspace and its branch lease.
 _Avoid_: paused, waiting, blocked, pending
 
 **Control file**:
-A run's `CONTROL` file in its run directory, a request to stop at its next call boundary: `unwatched`, which the watcher writes when the run's workflow is unwatched and which suspends the run, or `stopped`, which `sail stop` writes and which fails it. `sail stop --now` writes `stopped now`, ending the running call through its abort signal rather than waiting for the boundary. The run takes the request before its intake and before each call. A dispatched run with no run directory yet gets its request as a hand-off file, which it moves in as `CONTROL` once its run directory exists.
+A run's `CONTROL` file in its run directory, a request to stop at its next call boundary: `stopped`, which `sail stop` writes and which fails it. `sail stop --now` writes `stopped now`, ending the running call through its abort signal rather than waiting for the boundary. The run takes the request before its intake and before each call. A dispatched run with no run directory yet gets its request as a hand-off file, which it moves in as `CONTROL` once its run directory exists.
 _Avoid_: signal file, kill file, flag
 
 **Hand-off file**:
@@ -335,7 +335,7 @@ _Avoid_: start point, fork point
 _Avoid_: backup branch, rescue ref
 
 **Clean**:
-Removing what a failed run left behind (its worktree, its local and remote branch, its run ref) and moving its run directory to `failed-runs/<YYYY-MM-DD>/<run id>/` in sail's machine directory. `sail clean` does it. A run still used (leased by another run, named by a queue item, or whose branch has an open pull request) is refused.
+Removing what a failed run left behind (its worktree, its local and remote branch, its run ref) and moving its run directory to `failed-runs/<YYYY-MM-DD>/<run id>/` in sail's machine directory. `sail clean` does it. A run still used (leased by another run, named by a queue item, or whose branch has an open pull request) is refused. `sail clean` also moves the run's ticket back from started to unstarted, and settles a queue item that names the run when told to: `--requeue` or `--drop` reach the repository's live watcher as a command file, as `sail queue` does. `--failed --all-repos` cleans the failed runs of every registered repository, from any directory. The dashboard's Clean does neither: it leaves the ticket where it is and refuses a run a queue item names.
 _Avoid_: delete, purge, prune
 
 **Branch**:
@@ -574,15 +574,15 @@ _Avoid_: output, result, verdict
 ### Watching
 
 **Watched workflow**:
-A workflow that declares `watch: { every, label? }` and `maxConcurrentRuns`, which makes it watchable. Once named to a watcher, the watcher polls for its sources, queues them and dispatches its runs. Several can run at once, each with its own queue and cap (ADR-0017, ADR-0019).
+A workflow that declares `watch: { every, label? }` and `maxConcurrentRuns`, which makes it watchable. Once named to a watcher, the watcher polls for its sources, queues them and dispatches its runs. Before each poll the watcher re-reads that `watch` and `maxConcurrentRuns` from the `.sail/` committed at the fetched default branch's tip, and applies a change to the cap, label or interval with no restart; a label another watched workflow or watcher polls is refused, and a re-read that fails keeps the last declaration. Several can run at once, each with its own queue and cap (ADR-0017, ADR-0019).
 _Avoid_: loop, line, daemon, pipeline
 
 **Watcher**:
-The resident process that automates one repository's watch set: it polls and it dispatches. `sail watch <workflow…>` starts it in the clone where it is run, or adds to the live one; `sail watch` with no names does so for every workflow that declares a watch. There is one per repository. Each run it dispatches fetches before it makes its worktree, and runs start from `origin/<default>` in detached worktrees. A dispatched run, and every resume of it, reads its `.sail/` and conventions from the commit it fetched, never the clone's working tree, and records that commit as `definitionsSha`; a workflow missing or broken there is refused, naming the commit; one whose definitions need a newer sail holds the dispatch rather than failing or parking its item. Before it dispatches it fast-forwards a clean clone of the default branch that has no local commits, and never touches one in any other state, saying why it didn't. It is sail's home in v1. Without one running, nothing starts on its own.
+The resident process that automates one repository's watch set: it polls and it dispatches. `sail watch <workflow…>` starts it in the clone where it is run, or adds to the live one; `sail watch` with no names does so for every workflow that declares a watch. There is one per repository. Each run it dispatches fetches before it makes its worktree, and runs start from `origin/<default>` in detached worktrees. A dispatched run, and every resume of it, reads its `.sail/` and conventions from the commit it fetched, never the clone's working tree, and records that commit as `definitionsSha`; a workflow missing or broken there is refused, naming the commit; one whose definitions need a newer sail holds the dispatch rather than failing or parking its item. Before it dispatches it fast-forwards a clean clone of the default branch that has no local commits, and never touches one in any other state, saying why it didn't. It re-reads each watched workflow's `watch` and `maxConcurrentRuns` from the committed `.sail/` before every poll and applies a change without a restart, a clashing label refused. It is sail's home in v1. Without one running, nothing starts on its own.
 _Avoid_: daemon, monitor, poller, scheduler
 
 **Watch set**:
-The watched workflows a watcher is watching now: exactly those named with `sail watch` (every workflow that declares a watch, when it names none), minus those removed with `sail unwatch` (the whole set, when it names none). It is never remembered across restarts, and the watcher exits when it becomes empty. Each change is a `watch:added` or `watch:removed` event in that workflow's queue event stream, naming the watcher's pid. Unwatching a workflow suspends its runs; stopping the watcher does not (ADR-0019).
+The watched workflows a watcher is watching now: exactly those named with `sail watch` (every workflow that declares a watch, when it names none), minus those removed with `sail unwatch` (the whole set, when it names none). It is never remembered across restarts, and the watcher exits when it becomes empty. Each change is a `watch:added` or `watch:removed` event in that workflow's queue event stream, naming the watcher's pid. Neither unwatching a workflow nor stopping the watcher touches its runs, which go on running; `sail stop` stops one (ADR-0019).
 _Avoid_: enabled workflows, active loops, subscriptions
 
 **Watcher registry**:

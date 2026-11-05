@@ -19,12 +19,15 @@ import { cpSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync } from '
 import { dirname, join, relative } from 'node:path';
 import type { CodeHost } from '../ports/code-host';
 import { PortError } from '../ports/errors';
+import type { TicketSource } from '../ports/ticket-source';
+import type { TicketState } from '../ports/types';
 import type { WorkspacePort } from '../ports/workspace';
 import { isPlainName } from './call-dir';
 import { type Clock, systemClock } from './clock';
 import { machineDir } from './machine-dir';
 import { readOpening, readStatus, runsDir } from './run-dir';
-import { RUN_HEADER_FILE, readRunHeader } from './run-header';
+import { RUN_HEADER_FILE, type RunHeader, readRunHeader } from './run-header';
+import { claimedBy } from './source';
 
 export interface CleanRunOptions {
   /** The `.sail/` the run belongs to: the run is found beside it. */
@@ -50,7 +53,7 @@ export interface QueueNaming {
 /** How a clean went: the run was cleaned and archived, a removal failed and the run directory stays, or it was refused. */
 export type Cleaned =
   | { refused: string }
-  | { cleaned: { runId: string; removed: string[]; archived: string } }
+  | { cleaned: { runId: string; removed: string[]; archived: string; source: RunHeader['source'] } }
   | { failed: { runId: string; removed: string[]; failures: string[]; dir: string } };
 
 const pad = (value: number): string => String(value).padStart(2, '0');
@@ -239,7 +242,7 @@ export async function cleanRun(options: CleanRunOptions): Promise<Cleaned> {
     }
   }
   if (failures.length > 0) return { failed: { runId, removed, failures, dir } };
-  return { cleaned: { runId, removed, archived } };
+  return { cleaned: { runId, removed, archived, source: header.source } };
 }
 
 /** What a clean would remove, in removal order, and where the run directory would go. */
@@ -271,4 +274,48 @@ export async function checkClean(options: CleanRunOptions): Promise<{ refused: s
 export function cleanedMessage(runId: string, cleaned: { removed: string[]; archived: string }, home: string): string {
   const shown = cleaned.archived.startsWith(`${home}/`) ? `~${cleaned.archived.slice(home.length)}` : cleaned.archived;
   return `cleaned ${runId}: ${cleaned.removed.length > 0 ? cleaned.removed.join(', ') : 'nothing left to remove'}; run directory -> ${shown}`;
+}
+
+export interface ResetTicketOptions {
+  ticketSource: TicketSource;
+  source: RunHeader['source'];
+  runId: string;
+  /** The `.sail-runs/` the claiming run, if another, is looked up in. */
+  runsDir: string;
+}
+
+/** How a ticket reset went: moved, left where it is (and why), or the provider refused. */
+export type TicketReset = { reset: { ticketKey: string; state: TicketState } } | { left: string } | { failed: string };
+
+/**
+ * Moves the ticket of a cleaned ticket run from started back to unstarted, so dispatch can pick it up again. A ticket in
+ * any other state, or whose latest claim names another run that is still running or suspended, is left alone.
+ */
+export async function resetTicket(options: ResetTicketOptions): Promise<TicketReset> {
+  const { ticketSource, source, runId } = options;
+  if (source.kind !== 'ticket') return { left: 'the run was not started from a ticket' };
+  const { ticketKey } = source;
+  try {
+    const ticket = await ticketSource.get(ticketKey);
+    if (ticket.state.type !== 'started') return { left: `the ticket is ${ticket.state.name}` };
+    const owner = claimedBy(ticket);
+    if (owner !== undefined && owner !== runId && isPlainName(owner)) {
+      const dir = join(options.runsDir, owner);
+      if (existsSync(join(dir, 'STATUS'))) {
+        let live = true;
+        try {
+          const { status } = readStatus(dir);
+          live = status === 'running' || status === 'suspended';
+        } catch {
+          // A STATUS that can't be read is no proof the run ended.
+        }
+        if (live) return { left: `run ${owner} claimed the ticket and is still live` };
+      }
+    }
+    const moved = await ticketSource.update(ticketKey, { state: 'unstarted' });
+    return { reset: { ticketKey, state: moved.state } };
+  } catch (error) {
+    if (!(error instanceof PortError)) throw error;
+    return { failed: error.message };
+  }
 }

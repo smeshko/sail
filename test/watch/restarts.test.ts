@@ -232,7 +232,7 @@ test(
 );
 
 test(
-  "sail unwatch b suspends b's held run at its next call boundary with unwatched and keeps b's queue; sail watch b resumes the run to its end, then dispatches b's next ticket",
+  "sail unwatch b leaves b's held run running and keeps b's queue; sail watch b adopts the run, which ends, then b's next ticket is dispatched",
   async () => {
     await withTempRepo(async (repo) => {
       const { env, runs } = repository(repo, { a: 1, b: 1 }, [
@@ -246,11 +246,10 @@ test(
         const runDir = join(runs, held?.runId ?? '');
         const unwatched = await sail(repo.dir, env, ['unwatch', 'b']);
         const control = existsSync(join(runDir, 'CONTROL')) ? readFileSync(join(runDir, 'CONTROL'), 'utf8') : 'none';
-        releaseHeld(repo.dir);
-        const suspended = () => runsIn(runs).find((run) => run.runId === held?.runId)?.status === 'suspended unwatched';
-        expect(await until('the run suspended', suspended)).toBe('the run suspended');
+        const status = runsIn(runs).find((run) => run.runId === held?.runId)?.status;
         const kept = queueOf(runs, 'b').items.map((item) => `${sourceKey(item)} ${item.state}`);
         const watched = await sail(repo.dir, env, ['watch', 'b']);
+        releaseHeld(repo.dir);
         expect(await until("both of b's runs completed", () => completed(runs) === 2)).toBe(
           "both of b's runs completed",
         );
@@ -260,18 +259,22 @@ test(
         const resumedEnd = resumedRun?.events.filter((event) => event.type === 'run:end').at(-1)?.ts ?? '';
         expect({
           unwatched: [unwatched.code, unwatched.stdout],
+          status,
           control,
           kept,
           watched: watched.code,
-          resumed: eventsOf(runs, 'b', 'run:resumed').map(({ run, from }) => ({ run, from })),
+          adopted: eventsOf(runs, 'b', 'run:adopted').map(({ run }) => run),
+          resumed: eventsOf(runs, 'b', 'run:resumed').length,
           order: [resumedRun?.runId, next?.ticketKey, resumedEnd !== '' && (next?.startedAt ?? '') >= resumedEnd],
           issues: issues(runs, ['a', 'b']),
         }).toEqual({
           unwatched: [0, `sail unwatch: the watcher of 'stub' (pid ${watcher.pid}) watches a\n`],
-          control: 'unwatched\n',
+          status: 'running',
+          control: 'none',
           kept: ['FAKE-1 dispatched', 'FAKE-2 queued'],
           watched: 0,
-          resumed: [{ run: held?.runId, from: { status: 'suspended', stopReason: 'unwatched' } }],
+          adopted: [held?.runId],
+          resumed: 0,
           order: [held?.runId, 'FAKE-2', true],
           issues: [],
         });

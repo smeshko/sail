@@ -283,17 +283,7 @@
         "durationMs": { "type": "number", "minimum": 0 },
         "derived": { "$ref": "#/$defs/derived" },
         "harness": { "$ref": "#/$defs/harness" },
-        "usage": { "$ref": "#/$defs/usage" },
-        "workspace": {
-          "type": "object",
-          "properties": {
-            "headSha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
-            "commitsAdded": { "type": "integer", "minimum": 0 },
-            "diffStat": { "type": "string" }
-          },
-          "required": ["headSha", "commitsAdded", "diffStat"],
-          "additionalProperties": false
-        }
+        "usage": { "$ref": "#/$defs/usage" }
       },
       "required": [
         "schema",

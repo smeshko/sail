@@ -1,7 +1,7 @@
 // Loads a repository's `.sail/` definitions: imports each workflow and stage, and reads what the engine would run.
 import { existsSync, readdirSync } from 'node:fs';
-import { basename, dirname, join, relative, sep } from 'node:path';
-import type { Intake, StageDefinition, Workflow } from '../sdk/index';
+import { basename, dirname, join, relative, resolve, sep } from 'node:path';
+import type { Intake, StageDefinition, Step, Workflow } from '../sdk/index';
 import * as sdk from '../sdk/index';
 import * as intakes from '../sdk/intakes';
 import { intakeProblems } from './intake';
@@ -44,6 +44,7 @@ export interface StageEntry {
   /** The folder name of the workflow that owns it, or `null` when shared. */
   workflow: string | null;
   file: string;
+  scripts: ScriptRef[];
 }
 
 export interface IntakeEntry {
@@ -51,6 +52,20 @@ export interface IntakeEntry {
   /** The folder name of the workflow that owns it, or `null` when shared. */
   workflow: string | null;
   file: string;
+  scripts: ScriptRef[];
+}
+
+/** A script step's `run` file, absolute, and the ports it names. */
+export interface ScriptRef {
+  step: string;
+  run: string;
+  ports: readonly string[];
+}
+
+function scriptRefs(file: string, steps: readonly (Step | StageDefinition)[]): ScriptRef[] {
+  return steps.flatMap((step) =>
+    step.kind === 'script' ? [{ step: step.name, run: resolve(dirname(file), step.run), ports: step.ports ?? [] }] : [],
+  );
 }
 
 /** A file that can't load, or holds no definition. `file` is absolute. */
@@ -192,7 +207,8 @@ export async function loadDefinitions(dir: string): Promise<Definitions> {
     } else {
       const unrunnable = intakeProblems(intake);
       for (const message of unrunnable) found.problems.push({ file, message });
-      if (unrunnable.length === 0) found.intakes.push({ name: intake.name, workflow, file });
+      if (unrunnable.length === 0)
+        found.intakes.push({ name: intake.name, workflow, file, scripts: scriptRefs(file, intake.steps ?? []) });
     }
   };
   await load('workflows/*/intake.ts', readIntakes);
@@ -213,7 +229,8 @@ export async function loadDefinitions(dir: string): Promise<Definitions> {
         continue;
       }
       const steps = definition.kind === 'stage' ? definition.steps.map(({ name, kind }) => ({ name, kind })) : [];
-      found.stages.push({ name: definition.name, kind: definition.kind, steps, workflow, file });
+      const scripts = scriptRefs(file, definition.kind === 'stage' ? definition.steps : [definition]);
+      found.stages.push({ name: definition.name, kind: definition.kind, steps, workflow, file, scripts });
     }
   };
   await load('workflows/*/stages/*/stage.ts', readStages);

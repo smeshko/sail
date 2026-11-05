@@ -119,7 +119,7 @@ test('a refused start whose log ends with the newer-sail line is outdated, namin
   ]);
 });
 
-test('suspended until and budget_exceeded wait; a dead running, a suspended interrupted and a suspended unwatched run are resumed from where they were, and parked with why once this dispatcher has resumed them', async () => {
+test('suspended until, budget_exceeded and unwatched wait; a dead running and a suspended interrupted run are resumed from where they were, and parked with why once this dispatcher has resumed them', async () => {
   const w = world();
   runDir(w.runsDir, 1, 'suspended', 'until');
   runDir(w.runsDir, 2, 'suspended', 'budget_exceeded');
@@ -138,18 +138,16 @@ test('suspended until and budget_exceeded wait; a dead running, a suspended inte
     await reconcileItem(item(4, DEAD), w.context()),
     await reconcileItem(item(5, DEAD), w.context()),
     await reconcileItem(item(4, DEAD), w.context({ resumed: true, exited: 3 })),
-    await reconcileItem(item(5, DEAD), w.context({ resumed: true, exited: 1 })),
   ]).toEqual([
     { kind: 'wait' },
     { kind: 'wait' },
     { kind: 'resume', from: { status: 'running' } },
     { kind: 'resume', from: { status: 'suspended', stopReason: 'interrupted' } },
-    { kind: 'resume', from: { status: 'suspended', stopReason: 'unwatched' } },
+    { kind: 'wait' },
     {
       kind: 'park',
       reason: `its resume failed: sail resume: run ${runIdOf(4)}'s workspace can't be reopened: the workspace is gone (invalid)`,
     },
-    { kind: 'park', reason: 'its resume failed: it exited 1' },
   ]);
 });
 

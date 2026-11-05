@@ -114,11 +114,6 @@ export function errorLine(workflow: string | undefined, error: unknown, at: Date
   return { at, ...(workflow === undefined ? {} : { workflow }), text: `error: ${message}`, alert: true };
 }
 
-/** The line of an unwatched workflow's run asked to suspend at its next call boundary. */
-export function suspendLine(workflow: string, dedupKey: string, runId: string, at: Date): WatchLine {
-  return { at, workflow, text: `${keyOf(dedupKey)} suspends at its next call boundary: run ${runId}` };
-}
-
 /** The line of the worktrees of ended runs a starting watcher swept. */
 export function sweptLine(count: number, at: Date): WatchLine {
   return { at, text: `swept ${plural(count, 'worktree')} of ended runs` };
