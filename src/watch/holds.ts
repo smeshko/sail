@@ -115,13 +115,18 @@ export function readHold(machine: string, key: string): MachineHold | undefined 
   return data as unknown as MachineHold;
 }
 
-/** Holds `key` until `hold.until`, or until the later `until` a hold already there names. */
+/**
+ * Holds `key` until `hold.until`, or until the later `until` a hold already there names. A hold read at `since` (epoch
+ * ms), when the key was released after it, writes nothing, so a release is never put back.
+ */
 export function writeHold(
   machine: string,
   key: string,
   hold: Pick<MachineHold, 'until' | 'reason' | 'runId' | 'repository'>,
   now: Date = new Date(),
+  since?: number,
 ): void {
+  if (since !== undefined && (releasedAt(machine, key) ?? Number.NEGATIVE_INFINITY) > since) return;
   const existing = readHold(machine, key);
   if (existing !== undefined && Date.parse(existing.until) >= Date.parse(hold.until)) return;
   writeAtomic(holdPath(machine, key), { ...hold, at: now.toISOString() });
@@ -135,11 +140,11 @@ export function activeHolds(machine: string, keys: readonly string[], now: Date)
   });
 }
 
-/** Removes the hold on `key` and records the release at `now`. True when a hold was there. */
+/** Records the release at `now`, then removes the hold on `key`. True when a hold was there. */
 export function releaseHold(machine: string, key: string, now: Date): boolean {
   const held = existsSync(holdPath(machine, key));
-  rmSync(holdPath(machine, key), { force: true });
   writeAtomic(releasePath(machine, key), { at: now.toISOString() });
+  rmSync(holdPath(machine, key), { force: true });
   return held;
 }
 

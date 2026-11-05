@@ -195,6 +195,8 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
   const resumeStartedAt = new Map<string, Date>();
   /** When this dispatcher first saw each run on its usage limit or an unavailable port, until it resumes the run. */
   const limitedAt = new Map<string, Date>();
+  /** When each item was last reconciled, by dedup key: a hold its answer asks for is not written over a later release. */
+  const reconciledAt = new Map<string, number>();
   /** When each waiting item's ticket was last read, by dedup key: it is read again only after `waitingRecheckMs`. */
   const waitingReadAt = new Map<string, number>();
   let waitingRecheckMs = options.waitingRecheckMs ?? 60_000;
@@ -304,12 +306,14 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
     const exited = exits.get(item.dedupKey);
     const logFrom = logFroms.get(item.dedupKey);
     try {
+      const at = now();
+      reconciledAt.set(item.dedupKey, at.getTime());
       const answer = await reconcileItem(item, {
         runsDir: options.runsDir,
         workflow,
         isAlive,
         workspace,
-        now: now(),
+        now: at,
         ...(options.machineDir === undefined
           ? {}
           : { releasedAt: (key: string) => releasedAt(options.machineDir as string, key) }),
@@ -391,6 +395,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
               answer.harnessKey,
               { until: answer.until, reason: answer.reason, runId, repository: options.repository ?? workflow },
               now(),
+              reconciledAt.get(item.dedupKey),
             );
           }
           store.hold(answer.until, runId, answer.reason, answer.harnessKey);

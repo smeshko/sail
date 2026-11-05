@@ -174,3 +174,12 @@ test('releaseHold removes the hold, records the release, and answers whether a h
   expect(releaseHold(home, 'claude-code', later)).toBe(false);
   expect(releasedAt(home, 'claude-code')).toBe(later.getTime());
 });
+
+test('a hold read before the key was last released is not written back (review R4)', () => {
+  const home = tempHome();
+  releaseHold(home, 'claude-code', NOW);
+  writeHold(home, 'claude-code', hold, NOW, NOW.getTime() - 60_000);
+  expect(readHold(home, 'claude-code')).toBeUndefined();
+  writeHold(home, 'claude-code', hold, NOW, NOW.getTime() + 60_000);
+  expect(readHold(home, 'claude-code')?.runId).toBe('run-a');
+});
