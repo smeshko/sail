@@ -55,8 +55,8 @@ export interface RunHeader {
   definitionsSha?: string;
   /** The run's branch, named once at its start. A run from before workspaces has none. */
   branch?: string;
-  /** The repository the workspace was made from, and the base it started at. */
-  repository?: { url: string; defaultBranch: string; baseSha: string };
+  /** The repository the workspace was made from, and the base it started at. `startSha` is the commit a seeded run carried. */
+  repository?: { url: string; defaultBranch: string; baseSha: string; startSha?: string };
   /** The workspace, relative to the run directory. */
   workspace?: string;
 }
@@ -66,6 +66,7 @@ export interface HeaderWorkspace {
   branch: string;
   repository: { url: string; defaultBranch: string };
   baseSha: string;
+  startSha?: string;
 }
 
 const sha256 = (data: string | Uint8Array) => new Bun.CryptoHasher('sha256').update(data).digest('hex');
@@ -121,10 +122,15 @@ export interface HeaderFields {
 export function workspaceFields(
   workspace: HeaderWorkspace,
 ): Required<Pick<RunHeader, 'branch' | 'repository' | 'workspace'>> {
-  const { branch, repository, baseSha } = workspace;
+  const { branch, repository, baseSha, startSha } = workspace;
   return {
     branch,
-    repository: { url: repository.url, defaultBranch: repository.defaultBranch, baseSha },
+    repository: {
+      url: repository.url,
+      defaultBranch: repository.defaultBranch,
+      baseSha,
+      ...(startSha === undefined ? {} : { startSha }),
+    },
     workspace: 'workspace',
   };
 }

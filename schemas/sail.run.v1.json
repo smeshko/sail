@@ -57,7 +57,12 @@
       "properties": {
         "url": { "type": "string" },
         "defaultBranch": { "type": "string" },
-        "baseSha": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
+        "baseSha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "startSha": {
+          "description": "the commit a seeded run's workspace started from, carrying its source run's commits, when that is not baseSha",
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        }
       },
       "required": ["url", "defaultBranch", "baseSha"],
       "additionalProperties": false

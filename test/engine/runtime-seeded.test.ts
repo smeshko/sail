@@ -36,7 +36,12 @@ const journaled = (dir: string) => readJournal(dir).entries.map((entry) => `${en
 const issuesOf = (dir: string) => validateRunDir(dir).issues.map(formatIssue);
 
 /** A seeded run of the copied source in `repo`, seeded for `stage`. */
-async function seeded(repo: TempRepo, fromRun: string, stage: string, more: { continue?: boolean } = {}) {
+async function seeded(
+  repo: TempRepo,
+  fromRun: string,
+  stage: string,
+  more: { continue?: boolean; fromBase?: boolean } = {},
+) {
   return runSeededWorkflow({ cwd: repo.dir, fromRun, stage, ...more, adapters: await fakeAdapters(repo.dir) });
 }
 
@@ -119,6 +124,122 @@ test("a seeded run starts from its source run's baseSha even when the source bra
     expect(tip).not.toBe(sourceBase);
   });
 }, 60_000);
+
+/** Runs git in `cwd` with `repo`'s environment, plus `more`. Returns trimmed stdout. */
+function git(repo: TempRepo, cwd: string, args: string[], more: Record<string, string> = {}, stdin?: string): string {
+  const ran = Bun.spawnSync(['git', ...args], {
+    cwd,
+    env: { ...repo.env, ...more },
+    ...(stdin === undefined ? {} : { stdin: Buffer.from(stdin) }),
+  });
+  if (ran.exitCode !== 0) throw new Error(`git ${args.join(' ')}: ${ran.stderr.toString().trim()}`);
+  return ran.stdout.toString().trim();
+}
+
+/** Commits `task 1` … `task <n>` one on another past `base`, each adding `task-<i>.txt`, and returns the last one. */
+function commitTasks(repo: TempRepo, base: string, n: number): string {
+  const index = join(repo.home, 'tasks.index');
+  let parent = base;
+  for (let i = 1; i <= n; i++) {
+    const env = { GIT_INDEX_FILE: index };
+    git(repo, repo.dir, ['read-tree', parent], env);
+    const blob = git(repo, repo.dir, ['hash-object', '-w', '--stdin'], {}, `task ${i}\n`);
+    git(repo, repo.dir, ['update-index', '--add', '--cacheinfo', `100644,${blob},task-${i}.txt`], env);
+    const tree = git(repo, repo.dir, ['write-tree'], env);
+    parent = git(repo, repo.dir, ['commit-tree', tree, '-p', parent, '-m', `task ${i}`]);
+  }
+  return parent;
+}
+
+/** A source copied into `repo` that left 5 task commits at its run ref: its id, base and the ref's tip. */
+async function sourceWithFiveTasks(repo: TempRepo) {
+  const from = await source.copyInto(repo.dir);
+  const base: string = JSON.parse(readFileSync(join(from.dir, 'run.json'), 'utf8')).repository.baseSha;
+  const tip = commitTasks(repo, base, 5);
+  repo.git('update-ref', `refs/sail/runs/${from.runId}`, tip);
+  return { ...from, base, tip };
+}
+
+const headerOf = (dir: string) => JSON.parse(readFileSync(join(dir, 'run.json'), 'utf8'));
+
+test("a seeded run of a source that committed 5 of 6 tasks starts a workspace holding those 5 commits, keeping the source's base", async () => {
+  await withTempRepo(async (repo) => {
+    const from = await sourceWithFiveTasks(repo);
+    const end = await seeded(repo, from.runId, 'spec');
+    expect(endOf(end)).toEqual({ status: 'suspended', stopReason: 'until' });
+    const dir = dirOf(end);
+    const workspace = join(dir, 'workspace');
+    const created = readEvents(dir).filter((event) => event.type === 'workspace:created');
+    expect({
+      log: git(repo, workspace, ['log', '--format=%s', `${from.base}..HEAD`]).split('\n'),
+      head: git(repo, workspace, ['rev-parse', 'HEAD']),
+      repository: {
+        baseSha: headerOf(dir).repository.baseSha,
+        startSha: headerOf(dir).repository.startSha,
+      },
+      created: created.map((event) => ({
+        baseSha: 'baseSha' in event ? event.baseSha : undefined,
+        startSha: 'startSha' in event ? event.startSha : undefined,
+      })),
+      issues: issuesOf(dir),
+    }).toEqual({
+      log: ['task 5', 'task 4', 'task 3', 'task 2', 'task 1'],
+      head: from.tip,
+      repository: { baseSha: from.base, startSha: from.tip },
+      created: [{ baseSha: from.base, startSha: from.tip }],
+      issues: [],
+    });
+  });
+}, 60_000);
+
+test("with fromBase a seeded run starts at the source's base and records no startSha", async () => {
+  await withTempRepo(async (repo) => {
+    const from = await sourceWithFiveTasks(repo);
+    const end = await seeded(repo, from.runId, 'spec', { fromBase: true });
+    expect(endOf(end)).toEqual({ status: 'suspended', stopReason: 'until' });
+    const dir = dirOf(end);
+    const created = readEvents(dir).filter((event) => event.type === 'workspace:created');
+    expect({
+      head: git(repo, join(dir, 'workspace'), ['rev-parse', 'HEAD']),
+      startSha: headerOf(dir).repository.startSha,
+      created: created.map((event) => 'startSha' in event),
+      issues: issuesOf(dir),
+    }).toEqual({ head: from.base, startSha: undefined, created: [false], issues: [] });
+  });
+}, 60_000);
+
+test('a carried seeded run resumes in its workspace and its gitDiff includes the carried commits', async () => {
+  await withTempRepo(async (first) => {
+    const from = await sourceWithFiveTasks(first);
+    edit(
+      join(first.dir, '.sail'),
+      'workflows/ticket-to-pr/stages/self-review/stage.ts',
+      "import { agent, file, z } from 'sail';",
+      "import { agent, file, gitDiff, z } from 'sail';",
+    );
+    edit(
+      join(first.dir, '.sail'),
+      'workflows/ticket-to-pr/stages/self-review/stage.ts',
+      "consumes: { spec: file('spec.md') },",
+      `consumes: { spec: file('spec.md'), diff: gitDiff('${from.base}...HEAD') },`,
+    );
+    const stopped = await seeded(first, from.runId, 'spec');
+    expect(endOf(stopped)).toEqual({ status: 'suspended', stopReason: 'until' });
+    const runId = 'refused' in stopped ? '' : stopped.runId;
+    await withTempRepo(async (second) => {
+      copyRun(first.dir, second.dir);
+      const end = await resumeWorkflow({ cwd: second.dir, runId, adapters: await fakeAdapters(second.dir) });
+      const dir = dirOf(end);
+      const patch = readFileSync(join(dir, '04-self-review', 'call-1', 'in', 'diff.patch'), 'utf8');
+      const files = [...patch.matchAll(/^\+\+\+ b\/(.+)$/gm)].map((match) => match[1]);
+      expect({ end: endOf(end), files, issues: issuesOf(dir) }).toEqual({
+        end: { status: 'completed', stopReason: undefined },
+        files: ['task-1.txt', 'task-2.txt', 'task-3.txt', 'task-4.txt', 'task-5.txt'],
+        issues: [],
+      });
+    });
+  });
+}, 90_000);
 
 test('a run seeded from a seeded run names the same ticket in its summary, though neither fetched it', async () => {
   await withTempRepo(async (first) => {

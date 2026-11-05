@@ -404,11 +404,13 @@ export async function startWorkspace(options: {
   branch: string;
   base?: string;
   fallback?: string;
+  /** The run whose commits the workspace starts from: see `WorkspacePort.create()`. */
+  carry?: RunRef;
   signal: AbortSignal | undefined;
   /** Fills the new run directory before the workspace is made. A throw undoes the start and is rethrown. */
   copy?: (runDir: string) => void;
 }): Promise<{ made: Made } | { refused: string }> {
-  const { port, run, sailDir, workflow, branch, base, fallback, signal, copy } = options;
+  const { port, run, sailDir, workflow, branch, base, fallback, carry, signal, copy } = options;
   let repository: Repository;
   try {
     repository = await port.repository();
@@ -440,6 +442,7 @@ export async function startWorkspace(options: {
       branch,
       ...(base === undefined ? {} : { base }),
       ...(fallback === undefined ? {} : { fallback }),
+      ...(carry === undefined ? {} : { carry }),
       ...(signal === undefined ? {} : { signal }),
     });
   } catch (error) {
