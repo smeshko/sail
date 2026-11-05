@@ -219,6 +219,17 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
     ...new Set(targets.filter((target) => target.kind === 'ticket').map((target) => target.label)),
   ];
   const watchedTargets = () => [...set.values()].map((watched) => watched.target);
+  /** The targets a start or a `watch` has claimed but not added yet, which a first poll's re-read must count. */
+  let joining: readonly WatchTarget[] = [];
+  /** Adds `targets` one by one, each counting the others while its first poll re-reads its declaration. */
+  const addAll = async (targets: readonly WatchTarget[]) => {
+    joining = targets;
+    try {
+      for (const target of targets) await add(target);
+    } finally {
+      joining = [];
+    }
+  };
 
   /**
    * Why two of `all` poll one label, or undefined. One label per kind: a ticket workflow and a pull-request workflow may
@@ -422,7 +433,9 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
       return;
     }
     if (labelChanged) {
-      const moved = watchedTargets().map((each) => (each === target ? { ...each, label: next.label } : each));
+      const moved = [...watchedTargets(), ...joining.filter((each) => !set.has(each.workflow))].map((each) =>
+        each === target ? { ...each, label: next.label } : each,
+      );
       const clash = labelClash(moved);
       if (clash !== undefined) return keep(clash);
       const refused = claim(labelsOf(moved));
@@ -592,7 +605,7 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
       if (targets.length === 0) return;
       const refused = claim(labelsOf([...watchedTargets(), ...targets]));
       if (refused !== undefined) throw new Error(refused);
-      for (const target of targets) await add(target);
+      await addAll(targets);
       print(setLine(watching(), now()));
       return;
     }
@@ -683,7 +696,7 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
     clearCommands(runs);
     const refused = claim(labelsOf(targets));
     if (refused !== undefined) return refuse({ refused });
-    for (const target of targets) await add(target);
+    await addAll(targets);
     print(setLine(watching(), now()));
     try {
       const swept = await workspace.sweep(runs);

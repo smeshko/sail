@@ -1632,6 +1632,61 @@ test("a committed label change is polled next, and one onto a watched workflow's
   });
 });
 
+test("a first poll's committed label onto a workflow started with it but not yet added is refused, and the old label kept (review R8)", async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(
+      repo,
+      [
+        { name: 'a', label: 'sail-a', cap: 1 },
+        { name: 'b', label: 'sail-b', cap: 1 },
+      ],
+      [],
+    );
+    edit(w.sail, 'workflows/a/workflow.ts', "label: 'sail-a'", "label: 'sail-b'");
+    commitSail(repo, 'a polls sail-b');
+    edit(w.sail, 'workflows/a/workflow.ts', "label: 'sail-b'", "label: 'sail-a'");
+    const reader = committedWatches({ workspace: w.adapters.ports.workspace });
+    const watcher = await w.start(['a', 'b'], { rereadWatch: reader.read });
+    try {
+      await w.timers.advance(1000);
+      expect(w.out.join('')).toContain(
+        "workflow 'a' keeps its watch config: workflows 'a' and 'b' both poll the label 'sail-b'",
+      );
+      expect(queueLabel(w.runs, 'a')).toBe('sail-a');
+      expect(readEntry(w.registryDir, 'stub')?.watcher?.labels).toEqual(['sail-a', 'sail-b']);
+    } finally {
+      await watcher.stop();
+      reader.dispose();
+    }
+  });
+});
+
+test("a first poll's committed label is claimed with the labels of the workflows started with it but not yet added (review R8)", async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(
+      repo,
+      [
+        { name: 'a', label: 'sail-a', cap: 1 },
+        { name: 'b', label: 'sail-b', cap: 1 },
+      ],
+      [],
+    );
+    edit(w.sail, 'workflows/a/workflow.ts', "label: 'sail-a'", "label: 'sail-c'");
+    commitSail(repo, 'a polls sail-c');
+    edit(w.sail, 'workflows/a/workflow.ts', "label: 'sail-c'", "label: 'sail-a'");
+    const reader = committedWatches({ workspace: w.adapters.ports.workspace });
+    const watcher = await w.start(['a', 'b'], { rereadWatch: reader.read });
+    try {
+      await w.timers.advance(1000);
+      expect(queueLabel(w.runs, 'a')).toBe('sail-c');
+      expect(readEntry(w.registryDir, 'stub')?.watcher?.labels).toEqual(['sail-c', 'sail-b']);
+    } finally {
+      await watcher.stop();
+      reader.dispose();
+    }
+  });
+});
+
 test('a re-read the commit refuses keeps the last watch config and says why once', async () => {
   await withTempRepo(async (repo) => {
     const w = await watched(repo, [{ name: 'a', label: 'sail-a', cap: 3 }], tickets({ 'FAKE-1': 'sail-a' }));
