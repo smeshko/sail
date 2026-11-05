@@ -72,6 +72,13 @@ const VALUE_LETTERS: Record<string, string> = { sh: 'o', dash: 'o', zsh: 'o', ba
 const DECLARERS = new Set(['export', 'declare', 'typeset', 'local', 'readonly']);
 /** Builtins that assign the names among their arguments, other than by `NAME=value`. */
 const ASSIGNERS = new Set(['read', 'mapfile', 'readarray', 'getopts', 'printf', 'let', 'unset', ...DECLARERS]);
+/** The names a builtin sets without being given them. */
+const SET_BY_DEFAULT: Record<string, string[]> = {
+  read: ['REPLY'],
+  mapfile: ['MAPFILE'],
+  readarray: ['MAPFILE'],
+  getopts: ['OPTARG', 'OPTIND'],
+};
 const GIT_PATHS = new Set(['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE']);
 const OUTPUT = /^--o(?:u(?:t(?:p(?:u(?:t)?)?)?)?)?(?:=|$)/;
 
@@ -161,6 +168,42 @@ function skipOptions(args: readonly Word[], grammar: Grammar): { at: number; wri
   return { at: Math.min(i + (grammar.positional ?? 0), args.length), writes };
 }
 
+/** The names a builtin among `name` and `args` sets: every argument that starts like a name, and its defaults. */
+function setNames(name: string, args: readonly Word[]): string[] {
+  const names = [...(SET_BY_DEFAULT[name] ?? [])];
+  for (const arg of args) {
+    const assigned = /^[A-Za-z_][A-Za-z0-9_]*/.exec(arg.text);
+    if (assigned !== null) names.push(assigned[0]);
+  }
+  return names;
+}
+
+/** Every name a static scan finds `lists` set, inside compound bodies and `eval` text too, but not in substitutions. */
+function assignedIn(lists: readonly (readonly Pipeline[])[]): Set<string> {
+  const names = new Set<string>();
+  const scan = (list: readonly Pipeline[]): void => {
+    for (const pipeline of list) for (const command of pipeline.commands) visit(command);
+  };
+  const visit = (command: Command): void => {
+    if (command.kind !== 'simple') {
+      if (command.kind === 'for') names.add(command.name);
+      for (const body of bodies(command)) scan(body);
+      return;
+    }
+    for (const assignment of command.assignments) names.add(assignment.name);
+    const at = command.words.findIndex((word) => ASSIGNERS.has(commandName(word.text)) || word.text === 'eval');
+    if (at === -1) return;
+    const rest = command.words.slice(at + 1);
+    const head = commandName((command.words[at] as Word).text);
+    if (head === 'eval') {
+      const parsed = parseCommand(rest.map((word) => word.text).join(' '));
+      if (parsed.ok) scan(parsed.list);
+    } else for (const name of setNames(head, rest)) names.add(name);
+  };
+  for (const list of lists) scan(list);
+  return names;
+}
+
 class Collector {
   readonly out: Collected = {
     runs: [],
@@ -185,9 +228,12 @@ class Collector {
 
   /** A command assigns `name`: a loop variable of that name no longer holds its word. */
   private assigned(name: string): void {
-    if (!this.bound.has(name)) return;
-    this.reassigned.add(name);
+    if (this.bound.get(name) !== undefined) this.reassigned.add(name);
     this.bound.set(name, undefined);
+  }
+
+  private unbind(names: Iterable<string>): void {
+    for (const name of names) this.assigned(name);
   }
 
   private value(name: string): string | undefined {
@@ -273,8 +319,9 @@ class Collector {
     this.nested([...command.assignments.map((a) => a.value), ...command.words], cwd, depth);
     this.redirections(command.redirections, command.text, cwd, depth);
     for (const assignment of command.assignments) this.assign(assignment.name, assignment.value, command.text, cwd);
-    if (command.words.length === 0) return undefined;
-    return this.unwrap(command.words, command.text, cwd, depth, false);
+    const moved = command.words.length === 0 ? undefined : this.unwrap(command.words, command.text, cwd, depth, false);
+    this.unbind(command.assignments.map((assignment) => assignment.name));
+    return moved;
   }
 
   /** The substitutions, heredocs and targets of redirections, whether on a simple or a compound command. */
@@ -312,10 +359,12 @@ class Collector {
       case 'for':
         this.out.assignments.push({ name: command.name, text: command.text });
         this.nested(command.words ?? [], cwd, depth);
+        this.unbind(assignedIn(bodies(command)));
         this.loop(command.name, command.words, () => body(command.body, true));
         return undefined;
       case 'while':
       case 'until':
+        this.unbind(assignedIn(bodies(command)));
         body(command.condition, true);
         body(command.body, true);
         return undefined;
@@ -335,7 +384,6 @@ class Collector {
 
   private assign(name: string, value: Word, text: string, cwd: Cwd): void {
     this.out.assignments.push({ name, text });
-    this.assigned(name);
     if (GIT_PATHS.has(name)) this.inside(value, `${name}=${value.raw}`, cwd.physical);
   }
 
@@ -400,12 +448,7 @@ class Collector {
         if (assigned !== null) this.out.assignments.push({ name: assigned[1] as string, text });
       }
     }
-    if (ASSIGNERS.has(name)) {
-      for (const arg of args) {
-        const assigned = /^[A-Za-z_][A-Za-z0-9_]*/.exec(arg.text);
-        if (assigned !== null) this.assigned(assigned[0]);
-      }
-    }
+    if (ASSIGNERS.has(name)) this.unbind(setNames(name, args));
     if (name === 'find') this.find(args, text, cwd, depth);
     if (name === 'git') this.git(argv, fed ? undefined : words, open, text, cwd, depth);
     return undefined;

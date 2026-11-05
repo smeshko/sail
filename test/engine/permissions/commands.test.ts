@@ -537,3 +537,35 @@ test('a reason quotes the refused command as written, cut at 200 characters', ()
   const decision = run(long, {});
   expect(decision.allow ? '' : decision.reason).toBe(`\`${long.slice(0, 200)}…\` matches none of the step's commands`);
 });
+
+const SET_OPEN = {
+  commands: ['echo *', 'read *', 'true', 'unset *', 'mapfile *', 'export *', 'printf *', 'getopts *'],
+  write: ['$STAGE_OUT/**'],
+};
+
+test.each([
+  ['STAGE_OUT=lib; echo x > $STAGE_OUT/a.dart', SET_OPEN, UNRESOLVED('write')],
+  ['read STAGE_OUT; echo x > $STAGE_OUT/r.md', SET_OPEN, UNRESOLVED('write')],
+  ['read -r A STAGE_OUT; echo x > $STAGE_OUT/r.md', SET_OPEN, UNRESOLVED('write')],
+  ['unset STAGE_OUT; echo x > $STAGE_OUT/r.md', SET_OPEN, UNRESOLVED('write')],
+  ['mapfile STAGE_OUT; echo x > $STAGE_OUT/r.md', SET_OPEN, UNRESOLVED('write')],
+  ['export STAGE_OUT=lib; echo x > $STAGE_OUT/r.md', SET_OPEN, UNRESOLVED('write')],
+  ['printf -v STAGE_OUT x; echo x > $STAGE_OUT/r.md', SET_OPEN, UNRESOLVED('write')],
+  ['getopts ab STAGE_OUT; echo x > $STAGE_OUT/r.md', SET_OPEN, UNRESOLVED('write')],
+  ['STAGE_OUT=lib echo x > $STAGE_OUT/r.md', SET_OPEN, 'allow'],
+  ['STAGE_OUT=lib true; echo x > $STAGE_OUT/r.md', SET_OPEN, UNRESOLVED('write')],
+  ['while true; do echo x > $STAGE_OUT/r.md; STAGE_OUT=lib; done', SET_OPEN, UNRESOLVED('write')],
+  ['for f in a; do echo x > $STAGE_OUT/r.md; read STAGE_OUT; done', SET_OPEN, UNRESOLVED('write')],
+  [
+    "while true; do echo x > $STAGE_OUT/r.md; eval 'STAGE_OUT=lib'; done",
+    { ...SET_OPEN, commands: ['*'] },
+    UNRESOLVED('write'),
+  ],
+  ['echo x > $STAGE_OUT/r.md; read STAGE_OUT', SET_OPEN, 'allow'],
+  ['git ls-files | while read -r f; do git show "$f"; done', GIT_ONLY, ['commands', 'hold an expansion']],
+] as [string, Partial<Permissions>, Want][])(
+  'names a command sets shadow the environment: %j under %j is %j',
+  (command, open, want) => {
+    expect(verdict(run(command, open), want)).toEqual(want);
+  },
+);
