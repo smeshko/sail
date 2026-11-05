@@ -54,7 +54,11 @@ export const DEFAULT_TIMEOUT_SECONDS = 600;
 
 const LISTS = ['passed', 'failed', 'error'] as const;
 
-const SCRIPT_PORTS: Record<ScriptPort, Port> = { 'ticket-source': 'ticketSource', codehost: 'codeHost', jev: 'jev' };
+export const SCRIPT_PORTS: Record<ScriptPort, Port> = {
+  'ticket-source': 'ticketSource',
+  codehost: 'codeHost',
+  jev: 'jev',
+};
 
 // Signals a kill from outside sail sends. A script that kills itself with one on purpose to fail should exit non-zero instead.
 const OUTSIDE_SIGNALS = new Set<string>(['SIGTERM', 'SIGKILL', 'SIGHUP', 'SIGINT']);
@@ -311,6 +315,7 @@ async function runScript(step: ScriptStep, context: StepContext): Promise<StepRu
       ...inherited,
       PATH: `${BIN_DIR}${delimiter}${inherited.PATH ?? SYSTEM_PATH}`,
       SAIL_BUN: process.execPath,
+      SAIL_PORTS: (step.ports ?? []).join(','),
       ...Object.fromEntries(variables.map(({ name, value }) => [name, value])),
     },
     stdout: context.paths.stdout,
@@ -391,6 +396,15 @@ async function runScript(step: ScriptStep, context: StepContext): Promise<StepRu
   );
   if (mapped !== 'passed' && outage !== undefined) {
     return ended({ reason: 'port', code: 'unavailable', message: outage.message }, record);
+  }
+  // A port call that found no credentials because the step's ports omit the port: say how to fix it, not the exit code.
+  const declaredPorts = (step.ports ?? []).map((name) => SCRIPT_PORTS[name]);
+  const omitted = ported.events.find(
+    (event): event is Extract<typeof event, { type: 'error:port' }> =>
+      event.type === 'error:port' && event.code === 'unauthorized' && !declaredPorts.includes(event.port),
+  );
+  if (mapped !== 'passed' && omitted !== undefined) {
+    return ended({ reason: 'port', message: omitted.message }, record);
   }
   if (mapped !== 'passed' && mapped !== 'failed') {
     return ended({ reason: 'exit_code', message: `exit code ${end.code} is not mapped to passed or failed` }, record);

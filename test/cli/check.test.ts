@@ -219,6 +219,27 @@ test('a wrongly wired binding is refused with its location relative to the worki
   });
 });
 
+test('a script step calling a port its ports omit is refused naming the stage, the call and the port to add; declared, it passes', async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    const checked = await runCaptured(['check'], repo.dir);
+    expect(checked.code).toBe(EXIT_OK);
+    expect(checked.stdout).toStartWith('.sail/ checked:');
+  });
+  // A second repository: the process caches an imported stage.ts by path, so an edited copy needs its own.
+  await withTempRepo(async (repo) => {
+    const sail = copyFixture(repo.dir);
+    const stage = join(sail, 'workflows', 'ticket-to-pr', 'stages', 'publish', 'stage.ts');
+    writeFileSync(stage, readFileSync(stage, 'utf8').replace("['ticket-source', 'codehost']", "['ticket-source']"));
+    const { code, stdout, stderr } = await runCaptured(['check'], repo.dir);
+    expect(code).toBe(EXIT_REFUSED);
+    expect(stdout).toBe('');
+    expect(stderr).toBe(
+      ".sail/workflows/ticket-to-pr/stages/publish/stage.ts  step open calls sail port codehost at workflows/ticket-to-pr/stages/publish/open.sh:18, and its ports don't name it: add 'codehost' to its ports\n",
+    );
+  });
+});
+
 test.each([
   ['a missing project.yaml', () => '', '/ is missing'],
   ['an unknown key', (text: string) => `${text}bogus: 1\n`, '/bogus is not allowed'],

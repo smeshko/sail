@@ -1,8 +1,9 @@
 // The review's gate-files script reports only the head's gate changes against the current base, on fake ports.
 import { expect, test } from 'bun:test';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { EVERYTHING } from '../../scripts/affected-tests';
+import { reachFiles } from '../../src/engine/references';
 import { writeOwnSail } from '../helpers/own-sail';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
 
@@ -254,60 +255,13 @@ test('review prompts and files outside the graph merge on their own', () => {
   expect(paths.filter((path) => lib.isGateFile(path))).toEqual([]);
 });
 
-const SOURCE_FILE = /\.(?:ts|mjs|js)$/;
-
-function resolveImport(from: string, spec: string): string {
-  const base = join(dirname(from), spec);
-  const found = ['', '.ts', '.mjs', '.js', '/index.ts']
-    .map((ext) => base + ext)
-    .find((path) => SOURCE_FILE.test(path) && existsSync(path));
-  if (!found) throw new Error(`${relative(ROOT, from)} references ${spec}, which resolves to no file`);
-  return found;
-}
-
-function references(file: string): string[] {
-  const text = readFileSync(file, 'utf8');
-  const refs: string[] = [];
-  const add = (path: string) => {
-    if (!existsSync(path)) {
-      throw new Error(`${relative(ROOT, file)} references ${relative(ROOT, path)}, which does not exist`);
-    }
-    refs.push(path);
-  };
-  if (SOURCE_FILE.test(file)) {
-    for (const m of text.matchAll(/(?:\bfrom\s*|\bimport\s*\(\s*|^import\s+)['"](\.[^'"]*)['"]/gm)) {
-      refs.push(resolveImport(file, m[1] as string));
-    }
-    for (const m of text.matchAll(/\brun:\s*'(\.\/[^']+)'/g)) add(join(dirname(file), m[1] as string));
-    for (const m of text.matchAll(/join\(dirname\(process\.env\.SAIL_CONFIG\),\s*'lib',\s*'([\w.-]+)'\)/g)) {
-      add(join(ROOT, '.sail/lib', m[1] as string));
-    }
-    for (const m of text.matchAll(/join\(dirname\(process\.env\.SAIL_CONFIG\),\s*'lib\/([\w.-]+)'\)/g)) {
-      add(join(ROOT, '.sail/lib', m[1] as string));
-    }
-  }
-  if (file.endsWith('.sh')) {
-    for (const m of text.matchAll(/\$\(dirname "\$0"\)\/([\w.-]+)/g)) add(join(dirname(file), m[1] as string));
-    for (const m of text.matchAll(/(?:SAIL_CONFIG[^\n]*\)|\$sail_dir)\/lib\/([\w.-]+)/g)) {
-      add(join(ROOT, '.sail/lib', m[1] as string));
-    }
-  }
-  return refs;
-}
-
-function reach(entries: string[]): string[] {
-  const seen = new Set<string>();
-  const queue = entries.map((entry) => join(ROOT, entry));
-  for (let file = queue.pop(); file !== undefined; file = queue.pop()) {
-    if (seen.has(file)) continue;
-    seen.add(file);
-    queue.push(...references(file));
-  }
-  return [...seen].map((file) => relative(ROOT, file)).sort();
-}
-
 test('every module the review workflow and the guard reach is a gate file', () => {
-  const reached = reach(['.sail/workflows/review/workflow.ts', '.sail/lib/gate-files.mjs']);
+  const { files, problems } = reachFiles(
+    [join(ROOT, '.sail/workflows/review/workflow.ts'), join(ROOT, '.sail/lib/gate-files.mjs')],
+    join(ROOT, '.sail'),
+  );
+  expect(problems).toEqual([]);
+  const reached = files.map((file) => relative(ROOT, file)).sort();
   expect(reached).toEqual(
     expect.arrayContaining([
       '.sail/workflows/review/schemas.ts',

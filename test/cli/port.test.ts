@@ -1410,3 +1410,40 @@ export default {
     });
   });
 });
+
+const NOT_LISTED =
+  "ticket-source isn't in this step's ports, so the step has none of its credentials: add 'ticket-source' to the step's ports";
+
+test('under a step whose ports omit ticket-source, a call that finds no credentials exits 3 saying to add it and leaves one error:port', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = copyFixture(repo.dir);
+    edit(
+      sail,
+      'project.yaml',
+      'ticketSource: { use: fake, seed: ./fake/tickets.json }',
+      'ticketSource: { use: linear, team: ADW }',
+    );
+    const file = join(repo.dir, 'port-events.ndjson');
+    const get = ['port', 'ticket-source', 'get', 'ADW-1'];
+    const omitted = await runCaptured(get, repo.dir, { env: { SAIL_EVENTS: file, SAIL_PORTS: 'codehost' } });
+    expect(omitted.code).toBe(EXIT_REFUSED);
+    expect(omitted.stdout).toBe('');
+    expect(omitted.stderr).toEndWith(`sail port: ${NOT_LISTED}\n`);
+    expect(
+      readFileSync(file, 'utf8')
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => JSON.parse(l)),
+    ).toEqual([{ type: 'error:port', port: 'ticketSource', op: 'get', code: 'unauthorized', message: NOT_LISTED }]);
+
+    const other = join(repo.dir, 'other.ndjson');
+    const listed = await runCaptured(get, repo.dir, { env: { SAIL_EVENTS: other, SAIL_PORTS: 'ticket-source' } });
+    expect(listed.code).toBe(EXIT_REFUSED);
+    expect(listed.stderr).not.toContain('add');
+    expect(existsSync(other)).toBe(false);
+
+    const unset = await runCaptured(get, repo.dir, { env: { SAIL_EVENTS: other } });
+    expect(unset).toEqual(listed);
+    expect(existsSync(other)).toBe(false);
+  });
+});
