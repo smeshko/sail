@@ -133,9 +133,10 @@ test('a check still red after its rerun is handed back as a checks retry with it
   });
 }, 60_000);
 
-/** A recorded CI log of a red `verify`: Actions' timestamps on every line, Bun's banner unless `banner` is false, one failing test, then 25 000 characters of passing tests. */
-function ciLog(banner = true): string {
-  const stamp = (line: string) => `2026-11-04T21:00:00.1234567Z ${line}`;
+/** A recorded CI log of a red `verify`: Actions' timestamps on every line, Bun's banner unless `banner` is false, ANSI colour on every line when `colour`, one failing test, then 25 000 characters of passing tests. */
+function ciLog(banner = true, colour = false): string {
+  const paint = (line: string) => (colour ? `\u001b[0m\u001b[31m${line}\u001b[0m` : line);
+  const stamp = (line: string) => `2026-11-04T21:00:00.1234567Z ${paint(line)}`;
   const filler = Array.from({ length: 500 }, (_, at) => `(pass) later test ${at} ${'x'.repeat(40)} [1.00ms]`);
   return [
     ...(banner ? ['bun test v1.4.2 (744846f84) 10x PARALLEL'] : []),
@@ -171,6 +172,21 @@ test('a red check whose failing assertion sits before the 20 000-character cut i
     expect(handed).toContain('  Received: 3');
     expect(handed.endsWith(log.slice(-20_000))).toBe(true);
     expect(readFileSync(join(out, 'check-logs', 'CI-verify.log'), 'utf8')).toBe(log);
+  });
+}, 60_000);
+
+test('a red check whose CI log is coloured is handed back with the same test, file and assertion as a plain one', async () => {
+  await withTempRepo(async (repo) => {
+    writeOwnSail(repo);
+    seedPullRequest(repo, [{ name: 'verify', statuses: ['failed'], log: ciLog(true, true) }]);
+    const { output } = runMerge(repo);
+    const handed = output.failed[0]?.log ?? '';
+    expect(
+      handed.startsWith(
+        'CI ran Bun 1.4.2 (from the log).\n\nFailing tests:\ntest/file-follow-ups-run.test.ts: file-follow-ups files each follow-up once\n',
+      ),
+    ).toBe(true);
+    expect(handed).toContain('\n  Expected: 2\n');
   });
 }, 60_000);
 
