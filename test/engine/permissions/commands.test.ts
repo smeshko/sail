@@ -375,6 +375,9 @@ test('a loop variable shadows the environment, so a list that is not known leave
 
 const GIT_ONLY = { commands: ['git *'] };
 const words = (count: number) => Array.from({ length: count }, (_, i) => `w${i}`).join(' ');
+/** A loop of `outer` words around one of `inner` words that uses its variable: `outer + outer * inner` walks. */
+const nested = (outer: number, inner: number) =>
+  `for v in ${words(outer)}; do for w in ${words(inner)}; do git show $w; done; done`;
 const loops = (levels: number) =>
   `${Array.from({ length: levels }, (_, i) => `for v${i} in ${words(16)}; do`).join(' ')} echo x; ${'done; '.repeat(levels)}`;
 
@@ -411,6 +414,8 @@ test.each([
     ['write', "can't be resolved"],
   ],
   [loops(5), { commands: ['echo *'] }, 'allow'],
+  [nested(4, 15), GIT_ONLY, 'allow'],
+  [nested(4, 16), GIT_ONLY, ['commands', 'hold an expansion']],
 ] as [string, Partial<Permissions>, Want][])('for loop variables: %j under %j is %j', (command, open, want) => {
   expect(verdict(run(command, open), want)).toEqual(want);
 });
