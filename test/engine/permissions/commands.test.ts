@@ -594,6 +594,8 @@ test.each([
   ["sh -c 'STAGE_OUT=src'; echo x > $STAGE_OUT/a.ts", BARE, ['write', 'a.ts']],
   ["X=src; eval 'echo x > $X/a.ts'", BARE, 'allow'],
   ['f=a; git show $f', GIT_ONLY, 'allow'],
+  ['X=/tmp/; X+=src; echo x > $X/a.ts', BARE, STAGE_UNKNOWN],
+  ['X+=src; echo x > $X/a.ts', BARE, STAGE_UNKNOWN],
 ] as [string, Partial<Permissions>, Want][])(
   'a bare assignment shadows the environment where it surely runs: %j under %j is %j',
   (command, open, want) => {

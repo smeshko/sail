@@ -333,7 +333,7 @@ class Collector {
     const bare = command.words.length === 0;
     for (const assignment of command.assignments) {
       this.assign(assignment.name, assignment.value, command.text, cwd);
-      if (bare && surely && !this.looping.has(assignment.name)) {
+      if (bare && surely && !this.looping.has(assignment.name) && assignment.append !== true) {
         this.bound.set(assignment.name, this.known(assignment.value));
       } else this.unbind([assignment.name]);
     }

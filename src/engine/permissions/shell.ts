@@ -37,6 +37,8 @@ export interface Redirection {
 export interface Assignment {
   readonly name: string;
   readonly value: Word;
+  /** Written `NAME+=value`: the value is appended to what the name held. */
+  readonly append?: true;
 }
 
 export interface SimpleCommand {
@@ -584,9 +586,10 @@ class Parser {
       }
       if (words.length === 0 && this.assignmentAhead()) {
         const name = (NAME.exec(this.src.slice(this.pos)) as RegExpExecArray)[0];
+        const append = this.src[this.src.indexOf('=', this.pos) - 1] === '+';
         this.pos = this.src.indexOf('=', this.pos) + 1;
         if (this.peek() === '(') throw new Refusal(`an array assignment to ${name}`);
-        assignments.push({ name, value: this.word() });
+        assignments.push(append ? { name, value: this.word(), append } : { name, value: this.word() });
         continue;
       }
       const word = this.word();
