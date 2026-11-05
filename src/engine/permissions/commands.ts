@@ -13,7 +13,17 @@ import {
 } from './deny';
 import { matchesCommand } from './glob';
 import { checkRead, checkWrite, expand, insideRoots, logical, resolvePhysical } from './paths';
-import { MAX_DEPTH, type Pipeline, parseCommand, type SimpleCommand, type Word } from './shell';
+import {
+  bodies,
+  type Command,
+  type Compound,
+  MAX_DEPTH,
+  type Pipeline,
+  parseCommand,
+  type Redirection,
+  type SimpleCommand,
+  type Word,
+} from './shell';
 import { allow, type DecideContext, type Decision, deny, type Permissions } from './types';
 
 /** Where a command runs: the directory `cd` reports, and the one the kernel resolves paths from. */
@@ -49,16 +59,6 @@ interface Collected {
   readonly reads: Target[];
   readonly writes: Target[];
 }
-
-const REFUSED_FOR = {
-  group: 'a brace group',
-  subshell: 'a subshell ( … )',
-  for: 'a for loop',
-  while: 'a while loop',
-  until: 'an until loop',
-  if: 'an if',
-  case: 'a case',
-} as const;
 
 /** What an argument the shell expands at run time could add: the flags the deny set looks for. */
 const WORST = ['-rf', '--force', '--hard', '-D', '-delete'];
@@ -165,62 +165,125 @@ class Collector {
     writes: [],
   };
 
+  /** Loop variables in scope: a name bound to a value, or to undefined when the shell's value isn't known here. */
+  private readonly bound = new Map<string, string | undefined>();
+
   constructor(private readonly ctx: DecideContext) {}
+
+  private value(name: string): string | undefined {
+    return this.bound.has(name) ? this.bound.get(name) : this.ctx.env[name];
+  }
 
   /** The value a word has when the shell runs it, if that can be known here. */
   known(word: Word): string | undefined {
     if (word.literal) return word.text;
     if (word.nested.length > 0 || word.glob || /['\\]/.test(word.raw)) return undefined;
-    if (word.vars.some((name) => this.ctx.env[name] === undefined)) return undefined;
-    const expanded = expand(word.text, this.ctx.env);
+    if (word.vars.some((name) => this.value(name) === undefined)) return undefined;
+    const env: Record<string, string> = { ...this.ctx.env };
+    for (const [name, value] of this.bound) if (value !== undefined) env[name] = value;
+    const expanded = expand(word.text, env);
     if (!expanded.ok || /[\s*?[]/.test(expanded.path)) return undefined;
     return expanded.path;
   }
 
-  list(list: readonly Pipeline[], cwd: Cwd, depth: number): void {
+  /** Collects `list` run from `cwd`; returns where its commands leave the working directory. */
+  list(list: readonly Pipeline[], cwd: Cwd, depth: number, inBody = false): Cwd {
     if (depth > MAX_DEPTH) {
       this.out.refusals.push(`commands nested deeper than ${MAX_DEPTH} levels`);
-      return;
+      return cwd;
     }
     let here = cwd;
     for (const pipeline of list) {
       const argvs: string[][] = [];
       let moved: Cwd | undefined;
       for (const command of pipeline.commands) {
-        if (command.kind !== 'simple') {
-          this.out.refusals.push(`${REFUSED_FOR[command.kind]}: ${quote(command.text)}`);
-          moved = undefined;
-          continue;
-        }
-        argvs.push(command.words.map((word) => this.known(word) ?? word.text));
-        moved = this.command(command, here, depth);
+        if (command.kind === 'simple') argvs.push(command.words.map((word) => this.known(word) ?? word.text));
+        else if (pipeline.commands.length > 1) argvs.push(...this.flat(command));
+        moved = this.command(command, here, depth, inBody);
       }
-      this.out.pipelines.push(argvs);
-      if (moved !== undefined && pipeline.commands.length === 1 && !pipeline.background) here = moved;
+      if (argvs.length > 0) this.out.pipelines.push(argvs);
+      if (moved === undefined || pipeline.commands.length !== 1 || pipeline.background) continue;
+      if (inBody) {
+        const text = (pipeline.commands[0] as Command).text;
+        this.out.refusals.push(
+          `a cd inside a loop or branch body: ${quote(text)}; put it before the construct, or inside ( … )`,
+        );
+      } else here = moved;
     }
+    return here;
+  }
+
+  /** The argv of every simple command a compound command holds, for the pipeline checks. */
+  private flat(command: Command): string[][] {
+    if (command.kind === 'simple') return [command.words.map((word) => this.known(word) ?? word.text)];
+    return bodies(command).flatMap((body) =>
+      body.flatMap((pipeline) => pipeline.commands.flatMap((c) => this.flat(c))),
+    );
   }
 
   private nested(words: readonly (Word | undefined)[], cwd: Cwd, depth: number): void {
     for (const word of words) for (const list of word?.nested ?? []) this.list(list, cwd, depth + 1);
   }
 
-  /** Collects one simple command; returns where a `cd` moves the list. */
-  private command(command: SimpleCommand, cwd: Cwd, depth: number): Cwd | undefined {
-    this.nested(
-      [...command.assignments.map((a) => a.value), ...command.words, ...command.redirections.map((r) => r.target)],
-      cwd,
-      depth,
-    );
-    for (const redirection of command.redirections) {
-      for (const list of redirection.heredoc?.nested ?? []) this.list(list, cwd, depth + 1);
-      const target = redirection.target;
-      if (target === undefined || redirection.op === '<<<') continue;
-      const into = redirection.op === '<' ? this.out.reads : this.out.writes;
-      into.push({ word: target, text: command.text, cwd: cwd.physical });
-    }
+  /** Collects one command; returns where it moves the working directory, if it does. */
+  private command(command: Command, cwd: Cwd, depth: number, inBody: boolean): Cwd | undefined {
+    if (command.kind !== 'simple') return this.compound(command, cwd, depth, inBody);
+    this.nested([...command.assignments.map((a) => a.value), ...command.words], cwd, depth);
+    this.redirections(command.redirections, command.text, cwd, depth);
     for (const assignment of command.assignments) this.assign(assignment.name, assignment.value, command.text, cwd);
     if (command.words.length === 0) return undefined;
     return this.unwrap(command.words, command.text, cwd, depth, false);
+  }
+
+  /** The substitutions, heredocs and targets of redirections, whether on a simple or a compound command. */
+  private redirections(list: readonly Redirection[], text: string, cwd: Cwd, depth: number): void {
+    this.nested(
+      list.map((redirection) => redirection.target),
+      cwd,
+      depth,
+    );
+    for (const redirection of list) {
+      for (const inner of redirection.heredoc?.nested ?? []) this.list(inner, cwd, depth + 1);
+      const target = redirection.target;
+      if (target === undefined || redirection.op === '<<<') continue;
+      const into = redirection.op === '<' ? this.out.reads : this.out.writes;
+      into.push({ word: target, text, cwd: cwd.physical });
+    }
+  }
+
+  private compound(command: Compound, cwd: Cwd, depth: number, inBody: boolean): Cwd | undefined {
+    this.redirections(command.redirections, command.text, cwd, depth);
+    const body = (list: readonly Pipeline[], branch: boolean) => this.list(list, cwd, depth + 1, branch);
+    switch (command.kind) {
+      case 'group': {
+        const end = body(command.body, inBody);
+        return end === cwd ? undefined : end;
+      }
+      case 'subshell':
+        body(command.body, false);
+        return undefined;
+      case 'for':
+        this.nested(command.words ?? [], cwd, depth);
+        this.bound.set(command.name, undefined);
+        body(command.body, true);
+        return undefined;
+      case 'while':
+      case 'until':
+        body(command.condition, true);
+        body(command.body, true);
+        return undefined;
+      case 'if':
+        for (const clause of command.clauses) {
+          body(clause.condition, true);
+          body(clause.body, true);
+        }
+        if (command.otherwise !== undefined) body(command.otherwise, true);
+        return undefined;
+      case 'case':
+        this.nested([command.word, ...command.arms.flatMap((arm) => arm.patterns)], cwd, depth);
+        for (const arm of command.arms) body(arm.body, true);
+        return undefined;
+    }
   }
 
   private assign(name: string, value: Word, text: string, cwd: Cwd): void {

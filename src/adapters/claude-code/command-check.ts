@@ -9,7 +9,14 @@
 // Each reading is shorter than the one before, so it ends. That reads some plain arguments as commands too, which
 // refuses more than it must: it fails closed.
 import { basename } from 'node:path';
-import { type Command, MAX_DEPTH, type Pipeline, parseCommand, type Word } from '../../engine/permissions/shell';
+import {
+  bodies,
+  type Command,
+  MAX_DEPTH,
+  type Pipeline,
+  parseCommand,
+  type Word,
+} from '../../engine/permissions/shell';
 
 /** Why a command sending a job to the background is refused. */
 export const BACKGROUND = 'a command run in the background with & can outlive the session';
@@ -62,25 +69,6 @@ function compoundWords(command: Command): readonly Word[] {
       return [command.word, ...command.arms.flatMap((arm) => arm.patterns)];
     default:
       return [];
-  }
-}
-
-/** The lists a compound command runs. */
-function bodies(command: Command): readonly (readonly Pipeline[])[] {
-  switch (command.kind) {
-    case 'simple':
-      return [];
-    case 'group':
-    case 'subshell':
-    case 'for':
-      return [command.body];
-    case 'while':
-    case 'until':
-      return [command.condition, command.body];
-    case 'if':
-      return [...command.clauses.flatMap((clause) => [clause.condition, clause.body]), command.otherwise ?? []];
-    case 'case':
-      return command.arms.map((arm) => arm.body);
   }
 }
 

@@ -101,6 +101,25 @@ export type Parsed =
   | { readonly ok: true; readonly list: readonly Pipeline[] }
   | { readonly ok: false; readonly reason: string };
 
+/** The lists a compound command runs, in source order: none for a simple command. */
+export function bodies(command: Command): readonly (readonly Pipeline[])[] {
+  switch (command.kind) {
+    case 'simple':
+      return [];
+    case 'group':
+    case 'subshell':
+    case 'for':
+      return [command.body];
+    case 'while':
+    case 'until':
+      return [command.condition, command.body];
+    case 'if':
+      return [...command.clauses.flatMap((clause) => [clause.condition, clause.body]), command.otherwise ?? []];
+    case 'case':
+      return command.arms.map((arm) => arm.body);
+  }
+}
+
 /** How deep substitutions may nest before a parse refuses. */
 export const MAX_DEPTH = 32;
 
