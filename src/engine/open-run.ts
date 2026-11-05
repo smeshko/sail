@@ -133,6 +133,8 @@ export interface OpenedRun {
   relay: ProviderRelay;
   /** The environment names each port's adapter requires: what a script step that declares the port is given. */
   portVariables: ResolvedAdapters['portVariables'];
+  /** The credentials sail filled from their sources: given to a script step's environment and masked from the run's files. */
+  credentials: ResolvedAdapters['credentials'];
   /** `project.yaml` as it reads now. What the run froze of it, such as each stage's model, is in `header`. */
   config: ProjectConfig;
   /** The workflow, with the stages it reaches: what the run replays. */
@@ -741,7 +743,10 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | Refu
   });
   if ('refused' in opened) return opened;
   const { made } = opened;
-  const redact = redactor(options.secrets ?? credentialValues(process.env));
+  const redact = redactor([
+    ...(options.secrets ?? credentialValues(process.env)),
+    ...credentialValues(options.adapters.credentials),
+  ]);
   const header: RunHeader = redact.value({
     ...preflighted,
     ...workspaceFields({ branch, repository: made.repository, baseSha: made.workspace.baseSha }),
@@ -770,6 +775,7 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | Refu
     root,
     adapters: options.adapters.ports,
     portVariables: options.adapters.portVariables,
+    credentials: options.adapters.credentials,
     harnesses,
     relay,
     config,
@@ -984,11 +990,15 @@ export async function reopenRun(options: ReopenRunOptions): Promise<OpenedRun | 
     runId,
     dir: run.dir,
     header: run.header,
-    redact: redactor(options.secrets ?? credentialValues(process.env)),
+    redact: redactor([
+      ...(options.secrets ?? credentialValues(process.env)),
+      ...credentialValues(options.adapters.credentials),
+    ]),
     sailDir: found.dir,
     root,
     adapters: options.adapters.ports,
     portVariables: options.adapters.portVariables,
+    credentials: options.adapters.credentials,
     harnesses: named.ports,
     relay,
     config: found.config,

@@ -339,7 +339,10 @@ export async function openSeededRun(options: SeededRunOptions): Promise<OpenedRu
   });
   if ('refused' in opened) return opened;
   const { made } = opened;
-  const redact = redactor(options.secrets ?? credentialValues(process.env));
+  const redact = redactor([
+    ...(options.secrets ?? credentialValues(process.env)),
+    ...credentialValues(options.adapters.credentials),
+  ]);
   const header: RunHeader = redact.value({
     ...unopened,
     ...workspaceFields({ branch, repository: made.repository, baseSha: made.workspace.baseSha }),
@@ -375,6 +378,7 @@ export async function openSeededRun(options: SeededRunOptions): Promise<OpenedRu
     root,
     adapters: options.adapters.ports,
     portVariables: options.adapters.portVariables,
+    credentials: options.adapters.credentials,
     harnesses: harnesses.ports,
     relay,
     config,

@@ -404,6 +404,9 @@ test('without LINEAR_API_KEY, sail ADW-1 --until spec reads the key from the key
   expect(run.followed?.stderr).toBe('');
   expect(run.followed?.code).toBe(EXIT_OK);
   expect(run.followed?.stdout).toContain('completed');
+  expect(run.files).not.toBe('');
+  expect(run.files).not.toContain(KEY);
+  expect(run.stdout + run.stderr + (run.followed?.stdout ?? '') + (run.followed?.stderr ?? '')).not.toContain(KEY);
 });
 
 test('without LINEAR_API_KEY and with the keychain lacking linear-api-key, sail ADW-1 is refused with exit 3 naming the item', async () => {

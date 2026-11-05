@@ -50,6 +50,8 @@ export interface StepContext {
   inClone?: boolean;
   /** The environment the step's own is picked from; process.env when left out. */
   env?: Env;
+  /** The credentials sail filled from their sources: a script step is given those it requires, over `env`. */
+  credentials?: Readonly<Record<string, string>>;
   portVariables?: (port: Port) => Promise<readonly string[] | { problem: string }>;
   /** The directory that holds `.sail/`: every path a result or an event records is relative to it. */
   root: string;

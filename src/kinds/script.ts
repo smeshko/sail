@@ -276,7 +276,7 @@ async function runScript(step: ScriptStep, context: StepContext): Promise<StepRu
   const at = (path: string) => relative(context.root, path) || '.';
   const env = Object.fromEntries(variables.map(({ name, value, path }) => [name, path ? at(value) : value]));
   const recorded = { command: checkoutPath(context.root, context.runDir, command), env };
-  const source = context.env ?? process.env;
+  const source = { ...(context.env ?? process.env), ...context.credentials };
   const declared = [...(step.env ?? [])];
   for (const port of step.ports ?? []) {
     const names = context.portVariables

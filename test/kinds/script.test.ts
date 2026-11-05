@@ -99,8 +99,14 @@ const secrets = {
   CLAUDE_CODE_OAUTH_TOKEN: 'claude-secret',
 };
 
-async function environmentRun(declared: readonly string[] = [], inClone = false, ports?: readonly 'codehost'[]) {
+async function environmentRun(
+  declared: readonly string[] = [],
+  inClone = false,
+  ports?: readonly 'codehost'[],
+  credentials?: Record<string, string>,
+) {
   const s = setup();
+  if (credentials) s.context.credentials = credentials;
   const events: CallEvent[] = [];
   s.context.env = {
     ...secrets,
@@ -169,6 +175,20 @@ test('in the clone git repository variables are kept and credentials are not', a
     expect(environment.GIT_INDEX_FILE).toBe('/test/index');
     expect(environment.GITHUB_TOKEN).toBeUndefined();
   });
+});
+
+test('a port step gets a credential sail filled, and its exec event names but does not carry it', async () => {
+  const filled = { SAIL_GITHUB_TOKEN: 'filled-marker-token' };
+  const { environment, events } = await environmentRun([], false, ['codehost'], filled);
+  expect(environment.SAIL_GITHUB_TOKEN).toBe('filled-marker-token');
+  const exec = events.find((e) => e.type === 'script:exec');
+  expect(exec?.type === 'script:exec' ? exec.envKeys : []).toContain('SAIL_GITHUB_TOKEN');
+  expect(JSON.stringify(events)).not.toContain('filled-marker-token');
+});
+
+test('a step without the port does not get a credential sail filled', async () => {
+  const { environment } = await environmentRun([], false, undefined, { SAIL_GITHUB_TOKEN: 'filled-marker-token' });
+  expect(environment.SAIL_GITHUB_TOKEN).toBeUndefined();
 });
 
 for (const [env, message] of [

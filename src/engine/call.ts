@@ -66,6 +66,7 @@ export interface CallRequest {
   inClone?: boolean;
   env?: StepContext['env'];
   portVariables?: StepContext['portVariables'];
+  credentials?: StepContext['credentials'];
   /** The directory that holds `.sail/`: what the call records paths relative to. */
   root: string;
   /** The run's branch. Empty for a stage run in isolation. */
@@ -232,6 +233,7 @@ export async function runScriptTry(
     ...(request.inClone ? { inClone: true } : {}),
     ...(request.env === undefined ? {} : { env: request.env }),
     ...(request.portVariables === undefined ? {} : { portVariables: request.portVariables }),
+    ...(request.credentials === undefined ? {} : { credentials: request.credentials }),
     root: request.root,
     branch: request.branch,
     config: request.config,
