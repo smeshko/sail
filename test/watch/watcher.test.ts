@@ -722,7 +722,7 @@ test("a watch command whose workflow's first poll never answers holds up neither
 // 13.3 (DECISIONS D2, D10, D11): an unwatch asks the workflow's runs to suspend, the watcher's own stop asks nothing,
 // and a starting watcher sweeps the worktrees of ended runs.
 
-test("unwatching b asks each live run of b, and none of a's, to suspend through its control file, keeps b's queue.json byte for byte and says so per run, and the watcher's own stop asks nothing", async () => {
+test("unwatching b leaves each live run of b, one still starting included, running: no control or hand-off file, no suspend line, and b's queue.json byte for byte", async () => {
   await withTempRepo(async (repo) => {
     const w = await watched(
       repo,
@@ -735,69 +735,27 @@ test("unwatching b asks each live run of b, and none of a's, to suspend through 
     const watcher = await w.start(['a', 'b']);
     await w.timers.advance(1000);
     expect([w.order('a'), w.order('b')]).toEqual([['FAKE-1'], ['FAKE-2', 'FAKE-3']]);
-    const [run1, run2, run3] = ['FAKE-1', 'FAKE-2', 'FAKE-3'].map((key) => join(w.runs, w.spawner.run(key).runId));
-    for (const dir of [run1, run2, run3]) mkdirSync(dir ?? '', { recursive: true });
+    const [run1, run2, run3] = ['FAKE-1', 'FAKE-2', 'FAKE-3'].map((key) => w.spawner.run(key).runId);
+    // FAKE-1 and FAKE-2 have run directories; FAKE-3 is still starting, with none.
+    for (const id of [run1, run2]) mkdirSync(join(w.runs, id ?? ''), { recursive: true });
     const queueOfB = () => readFileSync(join(queueDir(w.runs, 'b'), 'queue.json'), 'utf8');
     const before = queueOfB();
     dropCommand(w.runs, { op: 'unwatch', workflows: ['b'] });
     await w.timers.advance(1000);
-    const control = (dir = '') =>
-      existsSync(join(dir, 'CONTROL')) ? readFileSync(join(dir, 'CONTROL'), 'utf8') : 'none';
-    const afterUnwatch = [control(run1), control(run2), control(run3)];
+    const left = readdirSync(w.runs).filter((name) => name.endsWith('.control'));
+    const controls = [run1, run2].map((id) => existsSync(join(w.runs, id ?? '', 'CONTROL')));
     await watcher.stop();
     expect({
-      afterUnwatch,
-      afterStop: control(run1),
+      watching: [w.events('b').at(-1)?.type, run3 === undefined],
+      controls,
+      handOffs: left,
       queue: queueOfB() === before,
-      lines: w.out.filter((line) => line.includes('suspends')),
-      watching: watcher.watching(),
-    }).toEqual({
-      afterUnwatch: ['none', 'unwatched\n', 'unwatched\n'],
-      afterStop: 'none',
-      queue: true,
-      lines: [
-        `09:00:02 b  FAKE-2 suspends at its next call boundary: run ${w.spawner.run('FAKE-2').runId}\n`,
-        `09:00:02 b  FAKE-3 suspends at its next call boundary: run ${w.spawner.run('FAKE-3').runId}\n`,
-      ],
-      watching: [],
-    });
-  });
-});
-
-test('unwatching b while a run of b is still starting, with no run directory yet, writes unwatched to its hand-off file and says it suspends, as it does for the run that has a directory', async () => {
-  await withTempRepo(async (repo) => {
-    const w = await watched(
-      repo,
-      [
-        { name: 'a', label: 'sail-a', cap: 1 },
-        { name: 'b', label: 'sail-b', cap: 2 },
-      ],
-      tickets({ 'FAKE-1': 'sail-a', 'FAKE-2': 'sail-b', 'FAKE-3': 'sail-b' }),
-    );
-    const watcher = await w.start(['a', 'b']);
-    await w.timers.advance(1000);
-    expect(w.order('b')).toEqual(['FAKE-2', 'FAKE-3']);
-    const [started, starting] = ['FAKE-2', 'FAKE-3'].map((key) => w.spawner.run(key).runId);
-    mkdirSync(join(w.runs, started ?? ''), { recursive: true });
-    dropCommand(w.runs, { op: 'unwatch', workflows: ['b'] });
-    await w.timers.advance(1000);
-    await watcher.stop();
-    expect({
-      control: readFileSync(join(w.runs, started ?? '', 'CONTROL'), 'utf8'),
-      handOff: readFileSync(join(w.runs, `${starting}.control`), 'utf8'),
       lines: w.out.filter((line) => line.includes('suspend')),
-    }).toEqual({
-      control: 'unwatched\n',
-      handOff: 'unwatched\n',
-      lines: [
-        `09:00:02 b  FAKE-2 suspends at its next call boundary: run ${started}\n`,
-        `09:00:02 b  FAKE-3 suspends at its next call boundary: run ${starting}\n`,
-      ],
-    });
+    }).toEqual({ watching: ['watch:removed', false], controls: [false, false], handOffs: [], queue: true, lines: [] });
   });
 });
 
-test('unwatching b asks a run of b that a resume by hand keeps alive, its dispatched pid gone, to suspend (review R3-2)', async () => {
+test('unwatching b leaves a run of b that a resume by hand keeps alive, its dispatched pid gone, with no control file (review R3-2)', async () => {
   await withTempRepo(async (repo) => {
     const w = await watched(
       repo,
@@ -812,7 +770,6 @@ test('unwatching b asks a run of b that a resume by hand keeps alive, its dispat
     const { runId } = w.spawner.run('FAKE-2');
     const dir = join(w.runs, runId);
     await w.spawner.end('FAKE-2', { status: 'running' });
-    // `sail resume` by hand: this process holds the run's lease.
     const { workspace } = w.adapters.ports;
     const { url } = await workspace.repository();
     const branch = branchFor('sail/', 'FAKE-2', 'Ticket FAKE-2');
@@ -821,7 +778,7 @@ test('unwatching b asks a run of b that a resume by hand keeps alive, its dispat
     dropCommand(w.runs, { op: 'unwatch', workflows: ['b'] });
     await w.timers.advance(1000);
     await watcher.stop();
-    expect(existsSync(join(dir, 'CONTROL')) ? readFileSync(join(dir, 'CONTROL'), 'utf8') : 'none').toBe('unwatched\n');
+    expect(existsSync(join(dir, 'CONTROL'))).toBe(false);
   });
 });
 

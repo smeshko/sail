@@ -8,8 +8,8 @@
 //   dispatched item to `reconcile.ts`, which answers by its run directory, its dispatch log and its lease: a live run is
 //   in flight, and adopted with `run:adopted` on this dispatcher's first tick, its control file left to it;
 //   `completed` is done; `failed stopped` parks the item at once; any other `failed` is a failed attempt, retried later
-//   or parked; a dead `running`, or a `suspended interrupted`, `unwatched` or `crashed` run, is resumed once as a
-//   detached `sail resume`, with `run:resumed`, after any `unwatched` it never took is taken back, and counts while its
+//   or parked; a dead `running`, or a `suspended interrupted` or `crashed` run, is resumed once as a
+//   detached `sail resume`, with `run:resumed`, and counts while its
 //   resume lives, unless a live process holds its lease, which is adopted instead, or the cap is reached, when it waits
 //   for a slot; a resume that leaves the run unended parks the item with why, or with the `error:crash` message it left
 //   when it crashed; no `run.json` is a start that was refused, whose reason is the last line of its dispatch log.
@@ -62,7 +62,7 @@
 //   caller.
 import { join } from 'node:path';
 import { branchFor } from '../engine/branch';
-import { cancelUnwatch, dropHandOff, handOffStops } from '../engine/control';
+import { dropHandOff, handOffStops } from '../engine/control';
 import { getPullRequestDetails } from '../engine/pr-source';
 import { readStatus } from '../engine/run-dir';
 import { newRunId } from '../engine/run-id';
@@ -326,11 +326,9 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
 
   const apply = (item: QueueItem, answer: Reconciled) => {
     const runId = item.runId ?? '';
-    const runDir = join(options.runsDir, runId);
     switch (answer.kind) {
       case 'in-flight':
-        // A live run's control file is left to the run: taking an `unwatched` back from under it could take a stop
-        // that replaced it meanwhile. One it never reached suspends it, and the next tick resumes it.
+        // A live run's control file is left to the run.
         if (answer.adopt && item.pid !== undefined) store.adopted(item.dedupKey, item.pid);
         break;
       case 'adopt':
@@ -381,9 +379,6 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
         if (holding() || options.paused?.() === true) break;
         // A resume takes a slot as a start does: over the cap, as after the cap was lowered, it waits a tick.
         if (full()) break;
-        // Watched again: an `unwatched` the dead run never took would suspend its resume at once. Nothing else writes
-        // to a dead run's control file: `sail stop` ends a run it finds dead itself.
-        cancelUnwatch(runDir);
         limitedAt.delete(runId);
         resume(item, runId, answer.from);
         break;

@@ -6,7 +6,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { dirname, join } from 'node:path';
 import { createFakeTicketSource } from '../../src/adapters/fake/ticket-source';
 import { branchFor } from '../../src/engine/branch';
-import { handOffFile, requestStop, requestUnwatch } from '../../src/engine/control';
+import { handOffFile, requestStop } from '../../src/engine/control';
 import { writeStatus } from '../../src/engine/run-dir';
 import { claimComment } from '../../src/engine/source';
 import { readEvents } from '../../src/events/consumers/ndjson';
@@ -710,14 +710,13 @@ test("a resume that dies without logging parks the item with its exit, not with 
   });
 });
 
-test("a new dispatcher's first tick adopts each live run once with run:adopted, leaves a live run's control file to the run, an unwatched as a stopped one, adopts a dead pid whose lease a live process holds under that pid, and starts nothing over the cap", async () => {
+test("a new dispatcher's first tick adopts each live run once with run:adopted, leaves a live run's control file to the run, adopts a dead pid whose lease a live process holds under that pid, and starts nothing over the cap", async () => {
   await withTempRepo(async (repo) => {
     const w = await world(repo, 4, 3);
     await w.dispatcher().tick();
     const [run1, run2, run3] = ['FAKE-1', 'FAKE-2', 'FAKE-3'].map((key) => w.spawner.run(key).runId);
     const dirOf = (runId = '') => join(w.runs, runId);
     for (const runId of [run1, run2]) mkdirSync(dirOf(runId), { recursive: true });
-    requestUnwatch(dirOf(run1));
     requestStop(dirOf(run2));
     // FAKE-3's process is gone, and a resume another process started holds its lease.
     await w.spawner.end('FAKE-3', { status: 'running' });
@@ -747,7 +746,7 @@ test("a new dispatcher's first tick adopts each live run once with run:adopted, 
         { dedupKey: 'ticket:FAKE-2', run: run2, pid: FAKE_PID + 1 },
         { dedupKey: 'ticket:FAKE-3', run: run3, pid: process.pid },
       ],
-      control: ['unwatched\n', 'stopped\n'],
+      control: ['none', 'stopped\n'],
       spawned: ['FAKE-1', 'FAKE-2', 'FAKE-3'],
       resumes: 0,
       inFlight: 3,
@@ -925,7 +924,7 @@ test('settling an item deletes the hand-off its run never took: a refused start,
     const ids = ['FAKE-1', 'FAKE-2', 'FAKE-3'].map((key) => w.spawner.run(key).runId);
     const handOffs = () => ids.map((id) => existsSync(handOffFile(w.runs, id)));
     for (const [index, id] of ids.entries())
-      writeFileSync(handOffFile(w.runs, id), index === 0 ? 'unwatched\n' : 'stopped\n');
+      writeFileSync(handOffFile(w.runs, id), index === 2 ? 'stopped\n' : 'pause\n');
     const before = handOffs();
     await w.spawner.end('FAKE-1', { refused: 'sail FAKE-1: refused' });
     await w.spawner.end('FAKE-2');
@@ -970,34 +969,13 @@ test('a run left to resume keeps its hand-off: only a settled item has it delete
     const dispatcher = w.dispatcher();
     await dispatcher.tick();
     const { runId } = w.spawner.run('FAKE-1');
-    writeFileSync(handOffFile(w.runs, runId), 'unwatched\n');
+    writeFileSync(handOffFile(w.runs, runId), 'stopped\n');
     await w.spawner.end('FAKE-1', { status: 'suspended', stopReason: 'interrupted' });
     await dispatcher.tick();
     expect({
       resumes: w.spawner.resumes.map((resume) => resume.runId),
       handOff: readFileSync(handOffFile(w.runs, runId), 'utf8'),
-    }).toEqual({ resumes: [runId], handOff: 'unwatched\n' });
-  });
-});
-
-test('a dead run that never took the unwatched it was sent is resumed with the request taken back, and one sent a stop keeps it (review R1-3)', async () => {
-  await withTempRepo(async (repo) => {
-    const w = await world(repo, 2, 2);
-    const dispatcher = w.dispatcher();
-    await dispatcher.tick();
-    const [run1, run2] = ['FAKE-1', 'FAKE-2'].map((key) => w.spawner.run(key).runId);
-    const dirOf = (runId = '') => join(w.runs, runId);
-    await w.spawner.end('FAKE-1', { status: 'suspended', stopReason: 'interrupted' });
-    await w.spawner.end('FAKE-2', { status: 'running' });
-    requestUnwatch(dirOf(run1));
-    requestStop(dirOf(run2));
-    await dispatcher.tick();
-    const control = (runId = '') =>
-      existsSync(join(dirOf(runId), 'CONTROL')) ? readFileSync(join(dirOf(runId), 'CONTROL'), 'utf8') : 'none';
-    expect({
-      resumes: w.spawner.resumes.map((resume) => resume.runId),
-      control: [control(run1), control(run2)],
-    }).toEqual({ resumes: [run1 ?? '', run2 ?? ''], control: ['none', 'stopped\n'] });
+    }).toEqual({ resumes: [runId], handOff: 'stopped\n' });
   });
 });
 

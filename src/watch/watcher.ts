@@ -17,9 +17,9 @@
 // what ended but starts and resumes nothing. A run's process ending asks for a tick at once. The commands:
 // - `watch`: opens the workflows not watched yet, refuses a label the set or another watcher already polls, records
 //   the new labels, and adds them. Watched already, it changes nothing.
-// - `unwatch`: asks each live run of the workflow to suspend at its next call boundary, through its control file, then
-//   stops the workflow's poller and dispatch and emits its `watch:removed`. Its queue is kept, and a later `watch` of it
-//   resumes those runs, then dispatches from the queue. An empty set stops the watcher.
+// - `unwatch`: stops the workflow's poller and dispatch and emits its `watch:removed`. Its queue is kept and its live
+//   runs are left running: a later `watch` of it adopts them, then dispatches from the queue. `sail stop` is how to end a
+//   run. An empty set stops the watcher.
 // - `poll`: polls a watched workflow now. One outside the set is rejected.
 // - `add`, `requeue` and `drop`: a change to a watched workflow's queue by hand, each safe to apply twice. `add` checks
 //   the ticket as a start does, designated and in a pick-up state unless forced, and queues it, forced when it was. `requeue`
@@ -28,8 +28,8 @@
 // A rejected command prints its reason, and the set stays as it was.
 //
 // Stopping, on an empty set or on Ctrl-C, stops every poller and the tick, emits `watch:removed` for what is left,
-// clears the registry field and resolves `done`. Runs in flight carry on: they are detached, and the watcher's own
-// stop asks nothing of them. Only an `unwatch` command does.
+// clears the registry field and resolves `done`. Runs in flight carry on: they are detached, and neither the watcher's
+// stop nor an `unwatch` asks anything of them.
 //
 // Before its dispatchers run, a tick starts a fast-forward of the clone when the workspace can (`workspace.fastForward()`):
 // only when some workflow has an item due or a dispatch held for definitions that need a newer sail, none is in flight,
@@ -46,7 +46,6 @@ import { dirname, join } from 'node:path';
 import { isAlive as processIsAlive, releaseLease, takeLease } from '../adapters/leases';
 import { DEFAULT_BRANCH_PREFIX } from '../engine/branch';
 import type { ProjectConfig } from '../engine/config';
-import { askToSuspend } from '../engine/control';
 import { readStatus, runsDir as runsDirOf } from '../engine/run-dir';
 import { resolveSource } from '../engine/source';
 import type { QueueEvent } from '../events/types';
@@ -63,7 +62,6 @@ import {
   queueLine,
   setLine,
   settledLine,
-  suspendLine,
   sweptLine,
   type WatchLine,
 } from './lines';
@@ -76,7 +74,6 @@ import {
   type WatchTarget,
 } from './poll';
 import { DEFAULT_QUEUE_POLICY, dedupKey, type QueueItem, type QueuePolicy } from './queue-store';
-import { liveHolder } from './reconcile';
 import {
   claimWatcher,
   clearWatcher,
@@ -505,26 +502,6 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
     watched.target.store.unwatched(pid);
   };
 
-  /**
-   * Asks each live run of `workflow` to suspend at its next call boundary, saying so for each request written. A run
-   * still starting has no directory yet, so its request waits in its hand-off file, which the run moves in as `CONTROL`
-   * as soon as its directory exists.
-   */
-  const suspendRuns = async (workflow: string) => {
-    const watched = set.get(workflow);
-    if (watched === undefined) return;
-    for (const item of watched.target.store.snapshot().items) {
-      if (item.state !== 'dispatched' || item.runId === undefined) continue;
-      // Alive as the process the item records, or as a live holder of its lease, such as a resume started by hand
-      // since: commands are applied before the tick that would adopt it.
-      const alive =
-        (item.pid !== undefined && isAlive(item.pid)) ||
-        (await liveHolder(join(runs, item.runId), item.runId, { workspace, isAlive })) !== undefined;
-      if (!alive) continue;
-      if (askToSuspend(runs, item.runId)) print(suspendLine(workflow, item.dedupKey, item.runId, now()));
-    }
-  };
-
   const finish = () => {
     if (stopped) return;
     stopped = true;
@@ -628,7 +605,6 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
     const leaving = command.workflows.filter((workflow) => set.has(workflow));
     if (leaving.length === 0) return;
     for (const workflow of leaving) {
-      await suspendRuns(workflow);
       remove(workflow);
     }
     // An empty set stops the watcher once the whole drain is applied, so a `watch` dropped after this command still
