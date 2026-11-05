@@ -14,6 +14,7 @@ import type { WorkspacePort } from '../../ports/workspace';
 import { defaultLeasesDir, heldLease, releaseLease, takeLease } from '../leases';
 import {
   addDetached,
+  carriedHead,
   copyTree,
   deleteLocalBranch,
   deleteRunRef,
@@ -69,16 +70,25 @@ export function createFakeWorkspace(options: FakeWorkspaceOptions): WorkspacePor
     async holder(remote, branch) {
       return heldLease(leasesDir(), remote, branch);
     },
-    async create(run, { base, branch, fallback }) {
+    async create(run, { base, branch, fallback, carry }) {
       const started = now().getTime();
       // A branch already in the repository, which stands in for the remote, is continued rather than restarted.
       base ??= resolveCommit(repo, `refs/heads/${branch}`, env) ? `refs/heads/${branch}` : (fallback ?? defaultBranch);
       const baseSha = resolveCommit(repo, base, env);
       if (baseSha === undefined) throw new PortError('workspace', 'create', 'invalid', `${base} names no commit`);
       const path = join(run.runDir, WORKSPACE_DIR);
-      const added = addDetached(repo, path, baseSha, env);
-      emit({ type: 'workspace:created', path, branch, baseSha, durationMs: Math.max(0, now().getTime() - started) });
-      return { path, branch, baseSha, raw: added };
+      const startSha = carry === undefined ? undefined : carriedHead(repo, carry, baseSha, env);
+      const added = addDetached(repo, path, startSha ?? baseSha, env);
+      const carried = startSha === undefined ? {} : { startSha };
+      emit({
+        type: 'workspace:created',
+        path,
+        branch,
+        baseSha,
+        ...carried,
+        durationMs: Math.max(0, now().getTime() - started),
+      });
+      return { path, branch, baseSha, ...carried, raw: added };
     },
     async readTree(into, { paths, base = defaultBranch }) {
       const sha = resolveCommit(repo, base, env);

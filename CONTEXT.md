@@ -311,7 +311,7 @@ What is added to a suspended run's budget, in dollars or minutes, given to `sail
 _Avoid_: top-up, extension, bump
 
 **Seeded run**:
-A new run whose journal starts with another run's calls, those before a named stage, so they aren't paid for again. `sail run --from-run <run> --stage <stage>` starts one. It runs that stage and stops, suspended with `until`, unless `--continue`. Its run header records the run it came from as `fromRun` and how many journal lines it reused as `reused`, and a resume restores the reports of reused calls its events lost. It claims nothing, and works on a branch of its own. Its copy of `.sail/` is the clone's as it reads at its start.
+A new run whose journal starts with another run's calls, those before a named stage, so they aren't paid for again. `sail run --from-run <run> --stage <stage>` starts one. It runs that stage and stops, suspended with `until`, unless `--continue`. Its run header records the run it came from as `fromRun` and how many journal lines it reused as `reused`, and a resume restores the reports of reused calls its events lost. It claims nothing, and works on a branch of its own. Its workspace starts from the commits the source made, its workspace's `HEAD` while that exists, else its run ref, recorded as `repository.startSha`; with `--from-base`, or when the source made none, it starts at the source's base. Its copy of `.sail/` is the clone's as it reads at its start.
 _Avoid_: rerun, fork, clone, replay
 
 **Reused call**:
@@ -323,11 +323,11 @@ The checkout a run works in, on its own branch. How it is made (a branch in the 
 _Avoid_: worktree (one mechanism), checkout, sandbox, working copy
 
 **Workspace setup**:
-The shell command the `git-worktree` adapter runs in each workspace it makes, before any stage runs: its `setup` option, such as `bun install --frozen-lockfile`. Every run gets it, a seeded run included, whose reused calls left nothing in its new workspace. A setup that fails refuses the run.
+The shell command the `git-worktree` adapter runs in each workspace it makes, before any stage runs: its `setup` option, such as `bun install --frozen-lockfile`. Every run gets it, a seeded run included, whose new workspace holds the commits it carried but none of what the setup installed. A setup that fails refuses the run.
 _Avoid_: bootstrap, install step, setup stage
 
 **Base**:
-The commit a run's workspace starts from: the default branch's tip on the remote after a fetch, or, when the run's branch is already on the remote, that branch's tip, recorded as `baseSha`. For a pull-request source it is the pull request's head.
+The commit a run's workspace starts from: the default branch's tip on the remote after a fetch, or, when the run's branch is already on the remote, that branch's tip, recorded as `baseSha`. For a pull-request source it is the pull request's head. A seeded run keeps its source's base, so the commits it carries count as its own work.
 _Avoid_: start point, fork point
 
 **Run ref**:

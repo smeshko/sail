@@ -31,9 +31,10 @@
 // The seeded run keeps its own copy of the clone's `.sail/` and conventions in `definition/`, as the clone reads them now,
 // not its source's, and runs and resumes from it.
 //
-// The workspace starts at the source's base: the source's code changes are not carried. A reused call's commits are not
-// in the seeded workspace, so a later stage that consumes a gitDiff sees only what the seeded run changed. Its workspace
-// setup runs as any run's does, so what the setup installed in the source's workspace is there again.
+// The workspace starts from the source's commits: its workspace's `HEAD` while it has one, else its run ref, and at the
+// source's base when there are none or with `fromBase`. The base stays the source's, so a later stage that consumes a
+// gitDiff sees the carried commits as the run's own. Its workspace setup runs as any run's does, so what the setup
+// installed in the source's workspace is there again.
 import { cpSync, existsSync, lstatSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { createEventsFile, readEvents } from '../events/consumers/ndjson';
@@ -87,6 +88,8 @@ export interface SeededRunOptions {
   fromRun: string;
   /** The stage that runs: every call the source made before its first call is reused. */
   stage: string;
+  /** Starts the workspace at the source's base, not from the commits it made. */
+  fromBase?: boolean;
   /** Runs the rest of the workflow after the stage. Left out, the run stops after the stage's first call. */
   continue?: boolean;
   /** The four adapters, resolved from the config before anything else. */
@@ -332,6 +335,7 @@ export async function openSeededRun(options: SeededRunOptions): Promise<OpenedRu
       workflow: loaded.name,
       branch,
       base: repository.baseSha,
+      ...(options.fromBase === true ? {} : { carry: { runId: fromRun, runDir: source.dir } }),
       signal: options.signal,
       // A fresh copy, not the source run's: the seeded run is a new run of the workflow as it reads now.
       copy: (runDir) => copyDefinitions(runDir, root, found.dir, conventionPaths(config, unopened)),
@@ -345,7 +349,12 @@ export async function openSeededRun(options: SeededRunOptions): Promise<OpenedRu
   ]);
   const header: RunHeader = redact.value({
     ...unopened,
-    ...workspaceFields({ branch, repository: made.repository, baseSha: made.workspace.baseSha }),
+    ...workspaceFields({
+      branch,
+      repository: made.repository,
+      baseSha: made.workspace.baseSha,
+      ...(made.workspace.startSha === undefined ? {} : { startSha: made.workspace.startSha }),
+    }),
   });
   const dir = run.runDir;
   let journaled: JournalEntry[];

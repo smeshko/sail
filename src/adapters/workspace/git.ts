@@ -276,6 +276,41 @@ function recordedBase(runDir: string): string | undefined {
   }
 }
 
+/** The `HEAD` of the worktree at `path`, or undefined when `path` is no worktree of its own (a link's is another checkout's). */
+function workspaceHead(path: string, env?: Readonly<Record<string, string>>): string | undefined {
+  const shown = gitSync(path, ['rev-parse', '--show-toplevel', 'HEAD'], env);
+  const [top, head] = shown.stdout.trim().split('\n');
+  if (shown.code !== 0 || top !== realpathSync(path) || head === undefined) return undefined;
+  return head;
+}
+
+/**
+ * The commit a workspace carrying `run`'s commits starts from: the `HEAD` of the run's workspace while it exists, else
+ * its run ref. Undefined when there is none or it is `baseSha`; a commit that does not descend from `baseSha` is
+ * `invalid`.
+ */
+export function carriedHead(
+  repo: string,
+  run: { runId: string; runDir: string },
+  baseSha: string,
+  env?: Readonly<Record<string, string>>,
+): string | undefined {
+  const path = resolve(run.runDir, WORKSPACE_DIR);
+  const head =
+    (isLink(run.runDir) || isLink(path) ? undefined : workspaceHead(path, env)) ??
+    resolveCommit(repo, runRef(run.runId), env);
+  if (head === undefined || head === baseSha) return undefined;
+  if (gitSync(repo, ['merge-base', '--is-ancestor', baseSha, head], env).code !== 0) {
+    throw new PortError(
+      'workspace',
+      'create',
+      'invalid',
+      `run ${run.runId}'s commit ${head} does not descend from ${baseSha}`,
+    );
+  }
+  return head;
+}
+
 /**
  * Points `runRef(runId)` in `repo` at the `HEAD` of the run's workspace, when that is a commit other than the base
  * `run.json` records and no remote-tracking ref reaches: a run that never pushed its branch has nothing else reaching its commits once the worktree goes,
@@ -292,9 +327,8 @@ function keepHead(
   const path = resolve(run.runDir, WORKSPACE_DIR);
   const base = recordedBase(run.runDir);
   if (base === undefined || isLink(run.runDir) || isLink(path)) return undefined;
-  const shown = gitSync(path, ['rev-parse', '--show-toplevel', 'HEAD'], env);
-  const [top, head] = shown.stdout.trim().split('\n');
-  if (shown.code !== 0 || top !== realpathSync(path) || head === undefined || head === base) return undefined;
+  const head = workspaceHead(path, env);
+  if (head === undefined || head === base) return undefined;
   // A head a remote-tracking ref reaches was pushed, as a pull request's head is: the remote keeps it already.
   const pushed = gitSync(
     path,

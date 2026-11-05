@@ -53,7 +53,7 @@ Usage:
                                                              Remove a failed run's worktree, branches and run ref, archive its run
                                                              directory, reset its ticket, and settle its queue item; --all-repos
                                                              does so for every registered repository
-  sail run --from-run <run> --stage <stage> [--continue] [--run-id <id>]
+  sail run --from-run <run> --stage <stage> [--continue] [--from-base] [--run-id <id>]
                                                              Rerun one stage on another run's earlier calls: a seeded run
   sail runs                                                  List the runs in .sail-runs/
   sail show <run> [--events|--follow|--rebuild] [-q|-v|-vv]  Show a run's calls, loops, routes and totals
@@ -104,6 +104,7 @@ Resuming a run:
 
 A seeded run:
   --continue  Runs the rest of the workflow after the stage, not just the stage
+  --from-base Starts the workspace at the source run's base, not from the commits it made
   --run-id    Names the new run, ready to be told before it exists: <ticket key>-<26 Crockford characters>, of no existing run
 
 Output of a run and a resume:
@@ -222,6 +223,7 @@ const commands = new Map<string, CommandSpec>([
         'run-id': { type: 'string' },
         stage: { type: 'string' },
         continue: { type: 'boolean' },
+        'from-base': { type: 'boolean' },
         ...VERBOSITY_OPTIONS,
       },
       positionals: 0,

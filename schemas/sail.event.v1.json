@@ -1468,6 +1468,7 @@
         "path": { "type": "string" },
         "branch": { "type": "string" },
         "baseSha": { "$ref": "#/$defs/sha" },
+        "startSha": { "$ref": "#/$defs/sha" },
         "durationMs": { "type": "number", "minimum": 0 }
       },
       "required": ["path", "branch", "baseSha", "durationMs"],
