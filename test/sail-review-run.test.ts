@@ -783,3 +783,38 @@ test("the pull request's description reaches fix and check-fix wrapped as untrus
     );
   });
 }, 120_000);
+
+test('review-tests is asked for medium and high findings only', async () => {
+  await withTempRepo(async (repo) => {
+    setUp(repo);
+    const { code, stderr, dir } = await review(repo);
+    expect({ code, stderr: code === 0 ? '' : stderr }).toEqual({ code: 0, stderr: '' });
+    const folder = readdirSync(dir).find((name) => name.replace(/^\d+-/, '') === 'review-tests');
+    const prompt = readFileSync(join(dir, folder ?? '', 'call-1', 'prompt.md'), 'utf8');
+    expect(prompt).toContain('`medium` for one with a\nnarrow trigger or that will cost the next change');
+    expect(prompt).toContain('Report only `high` and `medium` findings');
+    expect(prompt).not.toContain('`low` for the rest');
+  });
+}, 120_000);
+
+test('each reviewer runs on its model: architecture and bugs on Opus, requirements, tests and security on Sonnet, conventions on Haiku', async () => {
+  await withTempRepo(async (repo) => {
+    setUp(repo);
+    const { code, stderr, dir } = await review(repo);
+    expect({ code, stderr: code === 0 ? '' : stderr }).toEqual({ code: 0, stderr: '' });
+    const models: Record<string, string | undefined> = {};
+    for (const event of readEvents(dir)) {
+      if (event.type !== 'stage:start') continue;
+      const { stage, model } = event as unknown as { stage: string; model?: string };
+      if (stage.startsWith('review-')) models[stage] = model;
+    }
+    expect(models).toEqual({
+      'review-requirements': 'claude-sonnet-5-5',
+      'review-architecture': 'claude-opus-5-5',
+      'review-bugs': 'claude-opus-5-5',
+      'review-tests': 'claude-sonnet-5-5',
+      'review-security': 'claude-sonnet-5-5',
+      'review-conventions': 'claude-haiku-5-5',
+    });
+  });
+}, 120_000);
