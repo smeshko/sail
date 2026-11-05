@@ -12,10 +12,12 @@
 // - A poll that throws, as a queue write on a full disk does, is retried at the backoff all the same. `pollNow` rejects
 //   with it, and a poll nobody awaits (a timer's, a command's, the start's) hands it to `onError`, never to an unhandled
 //   rejection, which would end the watcher.
-import { existsSync, readdirSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
-import type { ProjectConfig } from '../engine/config';
+import { type ProjectConfig, readConfig } from '../engine/config';
 import { type LoadedWorkflow, loadWorkflow } from '../engine/load-workflow';
 import { runsDir } from '../engine/run-dir';
 import { parseEvery, pollKind, watchLabel, watchProblem } from '../engine/watchable';
@@ -25,6 +27,7 @@ import { PortError } from '../ports/errors';
 import { holdsLabel } from '../ports/labels';
 import type { TicketSource } from '../ports/ticket-source';
 import { PullRequest, Ticket } from '../ports/types';
+import type { WorkspacePort } from '../ports/workspace';
 import type { SourceKind } from '../sdk/intake';
 import type { Command } from './inbox';
 import { DEFAULT_QUEUE_POLICY, openQueue, type QueuePolicy, type QueueStore } from './queue-store';
@@ -116,6 +119,112 @@ export async function readWatches(options: {
     watches.push(watch);
   }
   return { watches };
+}
+
+export interface CommittedWatches {
+  /** The workflow's watch declaration as the default branch's tip commits it, or why it can't be read. */
+  read(name: string): Promise<WatchDeclaration | { refused: string }>;
+  /** Removes the scratch directory the last read kept. */
+  dispose(): void;
+}
+
+/** A hash of every file under `dir`: its relative path and bytes, in path order. */
+function hashTree(dir: string): string {
+  const hash = createHash('sha256');
+  const walk = (path: string) => {
+    const entries = readdirSync(join(dir, path), { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1));
+    for (const entry of entries) {
+      const relative = join(path, entry.name);
+      if (entry.isDirectory()) walk(relative);
+      else if (entry.isFile())
+        hash
+          .update(`${relative}\0`)
+          .update(readFileSync(join(dir, relative)))
+          .update('\0');
+    }
+  };
+  walk('.');
+  return hash.digest('hex');
+}
+
+/**
+ * Reads workflows' watch declarations from the `.sail/` committed at the default branch's tip, through the Workspace
+ * port's `readTree`. The `.sail/` is loaded from a scratch directory of its own whenever its content changed, since a
+ * module can't be imported afresh from a path already loaded; an unchanged one answers from the last load. Reads that
+ * ask while one is in flight join it.
+ */
+export function committedWatches(options: {
+  workspace: Pick<WorkspacePort, 'readTree'>;
+  tmp?: string;
+}): CommittedWatches {
+  const { workspace } = options;
+  type Loaded = {
+    hash: string;
+    scratch: string;
+    where: string;
+    sailDir: string;
+    config: ProjectConfig;
+    watches: Map<string, WatchDeclaration | { refused: string }>;
+  };
+  type Tree = Loaded | { refused: string };
+  let loaded: Loaded | undefined;
+  let reading: Promise<Tree> | undefined;
+  const remove = (scratch: string) => rmSync(scratch, { recursive: true, force: true });
+
+  const readTree = async (): Promise<Tree> => {
+    const scratch = mkdtempSync(join(options.tmp ?? tmpdir(), 'sail-watch-'));
+    try {
+      const { sha } = await workspace.readTree(scratch, { paths: ['.sail'] });
+      const where = `(in the .sail/ committed at ${sha.slice(0, 7)})`;
+      const sailDir = join(scratch, '.sail');
+      if (!existsSync(join(sailDir, 'project.yaml'))) {
+        remove(scratch);
+        return { refused: `the commit holds no .sail/project.yaml ${where}` };
+      }
+      const hash = hashTree(sailDir);
+      if (loaded !== undefined && loaded.hash === hash) {
+        remove(scratch);
+        loaded.where = where;
+        return loaded;
+      }
+      const config = readConfig(sailDir);
+      if ('issues' in config) {
+        remove(scratch);
+        const [issue] = config.issues;
+        return {
+          refused: `${sha.slice(0, 7)}:.sail/project.yaml is invalid: ${issue?.message ?? 'see sail check'} ${where}`,
+        };
+      }
+      const previous = loaded;
+      loaded = { hash, scratch, where, sailDir, config, watches: new Map() };
+      if (previous !== undefined) remove(previous.scratch);
+      return loaded;
+    } catch (error) {
+      remove(scratch);
+      return { refused: messageOf(error) };
+    }
+  };
+
+  return {
+    async read(name) {
+      reading ??= readTree().finally(() => {
+        reading = undefined;
+      });
+      const tree = await reading;
+      if ('refused' in tree) return tree;
+      let watch = tree.watches.get(name);
+      if (watch === undefined) {
+        const read = await readWatch({ sailDir: tree.sailDir, config: tree.config, name });
+        watch = 'refused' in read ? { refused: `${read.refused} ${tree.where}` } : read;
+        tree.watches.set(name, watch);
+      }
+      return watch;
+    },
+    dispose() {
+      if (loaded !== undefined) remove(loaded.scratch);
+      loaded = undefined;
+    },
+  };
 }
 
 export interface OpenWatchTargetOptions extends ReadWatchOptions {

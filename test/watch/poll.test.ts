@@ -6,12 +6,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createFakeCodeHost } from '../../src/adapters/fake/code-host';
 import { createFakeTicketSource } from '../../src/adapters/fake/ticket-source';
+import { createFakeWorkspace } from '../../src/adapters/fake/workspace';
 import type { CodeHost } from '../../src/ports/code-host';
 import { PortError } from '../../src/ports/errors';
 import type { TicketSource } from '../../src/ports/ticket-source';
 import type { PullRequest, Ticket } from '../../src/ports/types';
 import { drainCommands, dropCommand } from '../../src/watch/inbox';
 import {
+  committedWatches,
   createPoller,
   openWatchTarget,
   pollOnce,
@@ -25,7 +27,9 @@ import { stubAdapter } from '../helpers/adapters';
 import { fakeTimers } from '../helpers/fake-timers';
 import { copyFixture, edit, write } from '../helpers/fixture';
 import { manualClock, queueEventIssues, queueEvents, ticket } from '../helpers/queue';
-import { withTempRepo } from '../helpers/temp-repo';
+import { writeStub } from '../helpers/stub-workflow';
+import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
+import { writeWatched } from '../helpers/watched';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -818,4 +822,98 @@ test('a second poll that finds a queued ticket at a higher priority updates its 
     [2, 2],
     [2, 0],
   ]);
+});
+
+// committedWatches(): a workflow's watch declaration as the default branch's tip commits it.
+
+/** A repository with the stub's watched workflow `a` committed on `main`, and a reader over its fake workspace. */
+async function committedA(repo: TempRepo, every = '30s') {
+  const sail = writeStub(repo.dir);
+  writeWatched(sail, 'a', { label: 'sail-a', cap: 1, every });
+  repo.git('add', '.sail');
+  repo.git('commit', '-m', 'watch a');
+  const workspace = createFakeWorkspace({ repo: repo.dir, env: repo.env });
+  return {
+    sail,
+    workspace,
+    commit: (message: string) => {
+      repo.git('add', '.sail');
+      repo.git('commit', '-m', message);
+    },
+  };
+}
+
+test("committedWatches reads the declaration committed at the default branch, not the clone's working tree, and sees a new commit", async () => {
+  await withTempRepo(async (repo) => {
+    const { sail, workspace, commit } = await committedA(repo);
+    const reader = committedWatches({ workspace });
+    try {
+      expect(await reader.read('a')).toEqual({
+        workflow: 'a',
+        kind: 'ticket',
+        label: 'sail-a',
+        everyMs: 30_000,
+        maxConcurrentRuns: 1,
+      });
+      edit(sail, 'workflows/a/workflow.ts', 'maxConcurrentRuns: 1', 'maxConcurrentRuns: 4');
+      expect(await reader.read('a')).toMatchObject({ maxConcurrentRuns: 1 });
+      commit('raise a');
+      expect(await reader.read('a')).toMatchObject({ maxConcurrentRuns: 4, label: 'sail-a', everyMs: 30_000 });
+    } finally {
+      reader.dispose();
+    }
+  });
+});
+
+test('committedWatches loads an unchanged .sail/ once', async () => {
+  await withTempRepo(async (repo) => {
+    const { workspace } = await committedA(repo);
+    let trees = 0;
+    const counting = {
+      readTree: (...args: Parameters<typeof workspace.readTree>) => {
+        trees += 1;
+        return workspace.readTree(...args);
+      },
+    };
+    const reader = committedWatches({ workspace: counting });
+    try {
+      const first = await reader.read('a');
+      const second = await reader.read('a');
+      expect(trees).toBe(2);
+      // The same object: the second answer came from the cache, not from another import of the workflow.
+      expect(second).toBe(first);
+    } finally {
+      reader.dispose();
+    }
+  });
+});
+
+test("committedWatches refuses a workflow the commit lacks or doesn't watch, naming the commit", async () => {
+  await withTempRepo(async (repo) => {
+    const { sail, workspace, commit } = await committedA(repo);
+    const sha7 = repo.git('rev-parse', 'HEAD').slice(0, 7);
+    const reader = committedWatches({ workspace });
+    try {
+      const missing = await reader.read('nope');
+      expect(missing).toEqual({ refused: expect.stringContaining(`(in the .sail/ committed at ${sha7})`) });
+      edit(sail, 'workflows/a/workflow.ts', ", watch: { every: '30s', label: 'sail-a' }, maxConcurrentRuns: 1", '');
+      commit('unwatch a');
+      const unwatched = await reader.read('a');
+      const sha8 = repo.git('rev-parse', 'HEAD').slice(0, 7);
+      expect(unwatched).toEqual({
+        refused: `workflow 'a' isn't watched: it declares no watch (in the .sail/ committed at ${sha8})`,
+      });
+    } finally {
+      reader.dispose();
+    }
+    const broken = committedWatches({
+      workspace: {
+        readTree: async () => {
+          throw new Error('fetch failed: offline');
+        },
+      },
+    });
+    expect(await broken.read('a')).toEqual({ refused: 'fetch failed: offline' });
+    broken.dispose();
+  });
 });
