@@ -94,6 +94,34 @@ test('the stage, with no adapters.jev, exits 0 with the exact scan’s hits', as
     expect(typeof result.output.jev.note).toBe('string');
   });
 });
+test('the stage passes placeholder keys under test/ and still flags other keys there', async () => {
+  await withTempRepo((repo) => {
+    writeOwnSail(repo);
+    const result = stage(
+      repo,
+      '+++ b/test/x.test.ts\n@@ -0,0 +1,2 @@\n+const a = "OTHER-1";\n+const b = "OPS-4 ACME-7";\n',
+    );
+    expect(result.output.hits).toEqual([{ file: 'test/x.test.ts', line: 2, match: 'ACME-7', kind: 'key' }]);
+  });
+});
+test('the stage flags placeholder keys outside test/', async () => {
+  await withTempRepo((repo) => {
+    writeOwnSail(repo);
+    const result = stage(repo, '+++ b/src/x.ts\n@@ -0,0 +1 @@\n+const a = "OTHER-1";\n');
+    expect(result.output.hits).toEqual([{ file: 'src/x.ts', line: 1, match: 'OTHER-1', kind: 'key' }]);
+  });
+});
+test('the stage flags a denylist term beside a placeholder key under test/', async () => {
+  await withTempRepo((repo) => {
+    writeOwnSail(repo);
+    writeFileSync(join(repo.home, 'leak-denylist.txt'), 'Secretname\n');
+    const result = stage(
+      repo,
+      '+++ b/test/x.test.ts\n@@ -0,0 +1,2 @@\n+const a = "OTHER-1";\n+const b = Secretname;\n',
+    );
+    expect(result.output.hits).toEqual([{ file: 'test/x.test.ts', line: 2, match: 'Secretname', kind: 'denylist' }]);
+  });
+});
 
 test('the stage reads the base binding file before listing commit messages', async () => {
   await withTempRepo((repo) => {
