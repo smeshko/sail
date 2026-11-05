@@ -272,7 +272,7 @@ export async function readChecks(
 }
 
 /**
- * The log of `sha`'s latest check run named `name`, cut to its last `CHECK_LOG_TAIL` characters. A check run's id is the
+ * The log of `sha`'s latest check run named `name`, cut to its last `CHECK_LOG_TAIL` characters, or whole with `whole`. A check run's id is the
  * id of its Actions job; a commit status, an unknown name and a run with no job log (another app's) are `not_found`.
  */
 export async function readCheckLog(
@@ -280,6 +280,7 @@ export async function readCheckLog(
   op: string,
   sha: string,
   name: string,
+  whole = false,
 ): Promise<{ log: string; url?: string }> {
   const { latest } = await readRuns(client, op, sha);
   const run = latest.find((each) => each.name === name);
@@ -288,5 +289,5 @@ export async function readCheckLog(
   }
   const text = await client.requestText(op, client.repoPath('actions', 'jobs', run.id as number, 'logs'));
   const url = run.html_url ?? undefined;
-  return { log: text.slice(-CHECK_LOG_TAIL), ...(url === undefined ? {} : { url }) };
+  return { log: whole ? text : text.slice(-CHECK_LOG_TAIL), ...(url === undefined ? {} : { url }) };
 }
