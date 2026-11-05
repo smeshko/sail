@@ -5,6 +5,10 @@
 // | `sail watch` | starts the watcher in the foreground, watching the workflows named, or with none named every workflow that declares a watch | hands it a `watch` command, waits for it, and prints the set |
 // | `sail unwatch` | refused: nothing to unwatch | hands it an `unwatch` command, with no names for every workflow it watches, waits for it, and prints the set, or that the watcher stops |
 //
+// `sail watch --release-hold <harness key>` is a separate action: it takes no workflow, needs no watcher, and removes
+// the machine-wide usage-limit hold on that key (`watch/holds.ts`) and records the release, which every watcher finds on
+// its next tick. It prints whether a hold was there and exits 0.
+//
 // A live watcher is one the registry records for this repository's `name` with a pid that is alive. One recorded for
 // the same `name` in another clone refuses both commands. Every refusal is exit code 3: no `.sail/project.yaml`, no
 // workflow that declares a watch (`sail watch` with no names), a name or a workflow that isn't a watched workflow or won't load, two workflows on one label (the live set's included), a live watcher
@@ -32,6 +36,7 @@ import { type ProjectConfig, type RunPort, readConfig } from '../../engine/confi
 import { runsDir as runsDirOf } from '../../engine/run-dir';
 import { formatIssue } from '../../engine/schemas';
 import { sameLabel } from '../../ports/labels';
+import { releaseHold } from '../../watch/holds';
 import { commandTaken, dropCommand, NOT_TAKEN } from '../../watch/inbox';
 import {
   committedWatches,
@@ -180,6 +185,19 @@ export function watchCommand(deps: WatchDeps = {}): Command {
     const command = 'sail watch';
     const refuse = refuseAs(io, command);
     const isAlive = deps.isAlive ?? processIsAlive;
+    const key = args.values['release-hold'];
+    if (typeof key === 'string') {
+      if (args.positionals.length > 0) return refuse('--release-hold takes no workflow');
+      const project = await findProject(io, command);
+      if (typeof project === 'number') return project;
+      const held = releaseHold(machineDir(io.env ?? process.env), key, new Date());
+      io.stdout(
+        held
+          ? `${command}: released the usage-limit hold on ${key}\n`
+          : `${command}: no usage-limit hold on ${key}; its held runs resume on the next tick\n`,
+      );
+      return EXIT_OK;
+    }
     const located = await locate(io, command, args, isAlive, async ({ sailDir, config }) => {
       const read = await readWatches({ sailDir, config });
       if ('refused' in read) return read;

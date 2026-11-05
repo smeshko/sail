@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { configChecker, unwatchCommand, type WatchDeps, watchCommand } from '../../src/cli/commands/watch';
 import { EXIT_OK, EXIT_REFUSED } from '../../src/cli/exit-codes';
 import type { Io } from '../../src/cli/index';
+import { readHold, releasedAt, writeHold } from '../../src/watch/holds';
 import { commandsDir } from '../../src/watch/inbox';
 import { readEntry } from '../../src/watch/registry';
 import { addCatalog, setModels } from '../helpers/catalog-harness';
@@ -469,5 +470,44 @@ test("the set sail watch prints is the live watcher's, whatever a watcher that l
       stderr: '',
     });
     expect(existsSync(commandsDir(join(repo.dir, '.sail-runs')))).toBe(false);
+  });
+});
+
+test('sail watch --release-hold <key> says whether it released a usage-limit hold, removes the hold and records the release, and exits 0 either way', async () => {
+  await withTempRepo(async (repo) => {
+    const { env, sailHome } = repository(repo);
+    const sail = (argv: string[]) => runCaptured(argv, repo.dir, { env });
+    const none = await sail(['watch', '--release-hold', 'claude-code']);
+    writeHold(sailHome, 'pi:openai-codex', {
+      until: '2099-01-01T00:00:00.000Z',
+      reason: 'spec#1 hit the usage limit',
+      runId: 'r',
+      repository: 'alpha',
+    });
+    const held = await sail(['watch', '--release-hold', 'pi:openai-codex']);
+    expect([none, held]).toEqual([
+      {
+        code: EXIT_OK,
+        stdout: 'sail watch: no usage-limit hold on claude-code; its held runs resume on the next tick\n',
+        stderr: '',
+      },
+      { code: EXIT_OK, stdout: 'sail watch: released the usage-limit hold on pi:openai-codex\n', stderr: '' },
+    ]);
+    expect(readHold(sailHome, 'pi:openai-codex')).toBeUndefined();
+    expect(releasedAt(sailHome, 'pi:openai-codex')).toBeGreaterThan(Date.now() - 60_000);
+    expect(releasedAt(sailHome, 'claude-code')).toBeGreaterThan(Date.now() - 60_000);
+  });
+});
+
+test('sail watch --release-hold with workflow names as well exits 3 saying it takes no workflow', async () => {
+  await withTempRepo(async (repo) => {
+    const { env, sailHome } = repository(repo);
+    const refused = await runCaptured(['watch', 'a', '--release-hold', 'claude-code'], repo.dir, { env });
+    expect(refused).toEqual({
+      code: EXIT_REFUSED,
+      stdout: '',
+      stderr: 'sail watch: --release-hold takes no workflow\n',
+    });
+    expect(releasedAt(sailHome, 'claude-code')).toBeUndefined();
   });
 });

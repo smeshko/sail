@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { createFakeCodeHost } from '../../src/adapters/fake/code-host';
 import { createFakeTicketSource } from '../../src/adapters/fake/ticket-source';
 import { createFakeWorkspace } from '../../src/adapters/fake/workspace';
+import { readConfig } from '../../src/engine/config';
 import type { CodeHost } from '../../src/ports/code-host';
 import { PortError } from '../../src/ports/errors';
 import type { TicketSource } from '../../src/ports/ticket-source';
@@ -581,7 +582,11 @@ test("readWatch gives a fixture copy's ticket-to-pr its label, interval and cap 
       label: 'sail',
       everyMs: 300_000,
       maxConcurrentRuns: 2,
+      harnessKeys: [],
     });
+    const config = readConfig(sail);
+    if ('issues' in config) throw new Error('the fixture should load');
+    expect(await readWatch({ ...options, config })).toMatchObject({ harnessKeys: ['fake'] });
     expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
     const source = createFakeTicketSource({
       seed: join(sail, 'fake', 'tickets.json'),
@@ -601,7 +606,16 @@ test("readWatches gives a fixture copy's ticket-to-pr and skips review, and refu
   await withTempRepo(async (repo) => {
     const sail = copyFixture(repo.dir);
     expect(await readWatches({ sailDir: sail, config: { label: 'sail' } })).toEqual({
-      watches: [{ workflow: 'ticket-to-pr', kind: 'ticket', label: 'sail', everyMs: 300_000, maxConcurrentRuns: 2 }],
+      watches: [
+        {
+          workflow: 'ticket-to-pr',
+          kind: 'ticket',
+          label: 'sail',
+          everyMs: 300_000,
+          maxConcurrentRuns: 2,
+          harnessKeys: [],
+        },
+      ],
     });
     write(sail, 'workflows/broken/workflow.ts', 'export default 1;\n');
     const refused = await readWatches({ sailDir: sail, config: { label: 'sail' } });
@@ -854,6 +868,7 @@ test("committedWatches reads the declaration committed at the default branch, no
         label: 'sail-a',
         everyMs: 30_000,
         maxConcurrentRuns: 1,
+        harnessKeys: [],
       });
       edit(sail, 'workflows/a/workflow.ts', 'maxConcurrentRuns: 1', 'maxConcurrentRuns: 4');
       expect(await reader.read('a')).toMatchObject({ maxConcurrentRuns: 1 });

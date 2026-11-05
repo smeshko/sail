@@ -27,7 +27,10 @@ export const DEFAULT_LABEL = 'sail';
 export type ModelAlias = string | { harness: string; model: string };
 
 /** The model id `alias` names, and its named harness when it has one. Undefined when `models` doesn't define it. */
-export function aliasOf(config: ProjectConfig, alias: string): { model: string; harness?: string } | undefined {
+export function aliasOf(
+  config: Pick<ProjectConfig, 'models'>,
+  alias: string,
+): { model: string; harness?: string } | undefined {
   if (!Object.hasOwn(config.models, alias)) return undefined;
   const value = config.models[alias] as ModelAlias;
   return typeof value === 'string' ? { model: value } : { model: value.model, harness: value.harness };

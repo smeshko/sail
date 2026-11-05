@@ -142,6 +142,8 @@ export const QueueFile = z.strictObject({
       runId: z.string(),
       reason: z.string(),
       at: z.string(),
+      /** The harness key of a usage-limit hold: a release of that key (`sail watch --release-hold`) ends it. */
+      harnessKey: z.string().optional(),
     })
     .optional(),
   items: z.array(QueueItem),
@@ -239,9 +241,9 @@ export interface QueueStore {
   /**
    * Holds the workflow's dispatch until `until` because run `runId` hit the usage limit or several runs could not
    * reach a provider, and emits `queue:held`. A hold
-   * already set to a later time stays as it is, and emits nothing.
+   * already set to a later time stays as it is, and emits nothing. `harnessKey` names the key a usage limit holds.
    */
-  hold(until: string, runId: string, reason: string): void;
+  hold(until: string, runId: string, reason: string, harnessKey?: string): void;
   /**
    * Holds the workflow's dispatch with no time limit while the running sail's SDK fingerprint is `sail`, because run
    * `runId` was refused for definitions that need a newer sail, and emits `queue:held` with no `until`. It replaces a
@@ -604,12 +606,18 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
       });
       stream.emit({ type: 'queue:dropped', workflow, dedupKey: key, reason });
     },
-    hold(until, runId, reason) {
+    hold(until, runId, reason, harnessKey) {
       const current = queue.held;
       if (current?.until === undefined && current !== undefined) return;
       if (current?.until !== undefined && Date.parse(current.until) >= Date.parse(until)) return;
       change((next) => {
-        next.held = { until, runId, reason, at: now().toISOString() };
+        next.held = {
+          until,
+          runId,
+          reason,
+          at: now().toISOString(),
+          ...(harnessKey === undefined ? {} : { harnessKey }),
+        };
       });
       stream.emit({ type: 'queue:held', workflow, until, run: runId, reason });
     },

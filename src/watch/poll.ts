@@ -30,6 +30,7 @@ import type { TicketSource } from '../ports/ticket-source';
 import { PullRequest, Ticket } from '../ports/types';
 import type { WorkspacePort } from '../ports/workspace';
 import type { SourceKind } from '../sdk/intake';
+import { harnessKeysOf } from './holds';
 import type { Command } from './inbox';
 import { DEFAULT_QUEUE_POLICY, openQueue, type QueuePolicy, type QueueStore } from './queue-store';
 
@@ -44,9 +45,14 @@ export interface WatchDeclaration {
   label: string;
   everyMs: number;
   maxConcurrentRuns: number;
+  /** The harness keys its agent steps reach: a usage-limit hold on one holds its dispatch. None when left out. */
+  harnessKeys?: string[];
   /** Its tickets don't wait on open prerequisites. */
   ignorePrerequisites?: boolean;
 }
+
+/** The parts of the config a watch declaration reads: with no `models` or `adapters`, it reaches no harness key. */
+export type WatchConfig = Pick<ProjectConfig, 'label'> & Partial<Pick<ProjectConfig, 'models' | 'adapters'>>;
 
 /** One watched workflow, ready to poll. */
 export interface WatchTarget extends WatchDeclaration {
@@ -57,7 +63,7 @@ export interface WatchTarget extends WatchDeclaration {
 
 export interface ReadWatchOptions {
   sailDir: string;
-  config: Pick<ProjectConfig, 'label'>;
+  config: WatchConfig;
   /** The workflow's name. */
   name: string;
 }
@@ -67,15 +73,17 @@ export async function readWatch(options: ReadWatchOptions): Promise<WatchDeclara
   const { sailDir, name } = options;
   const loaded = await loadWorkflow(sailDir, name);
   if ('refused' in loaded) return loaded;
-  return declaration(name, loaded.workflow, options.config);
+  return declaration(name, loaded, options.config);
 }
 
 /** The watch declaration of a loaded workflow, or a refusal: it declares no watch, or a broken one. */
 function declaration(
   name: string,
-  workflow: LoadedWorkflow['workflow'],
-  config: Pick<ProjectConfig, 'label'>,
+  loaded: LoadedWorkflow,
+  config: WatchConfig,
 ): WatchDeclaration | { refused: string } {
+  const { workflow } = loaded;
+  const { models, adapters } = config;
   if (workflow.watch === undefined) return { refused: `workflow '${name}' isn't watched: it declares no watch` };
   const everyMs = parseEvery(workflow.watch.every);
   const problem = watchProblem(workflow);
@@ -90,6 +98,7 @@ function declaration(
     label: watchLabel(workflow, config),
     everyMs,
     maxConcurrentRuns,
+    harnessKeys: models === undefined || adapters === undefined ? [] : harnessKeysOf(loaded, { models, adapters }),
     ...(workflow.ignorePrerequisites === true ? { ignorePrerequisites: true } : {}),
   };
 }
@@ -100,7 +109,7 @@ function declaration(
  */
 export async function readWatches(options: {
   sailDir: string;
-  config: Pick<ProjectConfig, 'label'>;
+  config: WatchConfig;
 }): Promise<{ watches: WatchDeclaration[] } | { refused: string }> {
   const { sailDir, config } = options;
   const root = join(sailDir, 'workflows');
@@ -115,7 +124,7 @@ export async function readWatches(options: {
     const loaded = await loadWorkflow(sailDir, name);
     if ('refused' in loaded) return loaded;
     if (loaded.workflow.watch === undefined) continue;
-    const watch = declaration(name, loaded.workflow, config);
+    const watch = declaration(name, loaded, config);
     if ('refused' in watch) return watch;
     watches.push(watch);
   }

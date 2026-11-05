@@ -11,7 +11,7 @@
 // | `failed stopped` | parked at once: a person stopped it, and a stopped run is never retried |
 // | `failed` otherwise | a failed attempt, retried later or parked |
 // | `running` with its pid dead, `suspended interrupted`, `suspended crashed` | adopted under its lease's pid when a live process holds its lease, else resumed, once; a resume of a crashed run that crashed again is parked with the `error:crash` message it left, and with why when it left none |
-// | `suspended usage_limit` | adopted when a live process holds its lease; else held, and with it the whole dispatch, while now is before its reset time (or the back-off after it hit the limit), then resumed, even when this dispatcher resumed it before, unless its resume hit no limit since: then parked with why |
+// | `suspended usage_limit` | adopted when a live process holds its lease; else held, and with it the whole dispatch (and, by the harness key the answer names, every watched workflow on the machine that reaches it), while now is before its reset time (or the back-off after it hit the limit), then resumed, even when this dispatcher resumed it before, or at once when its harness key was released since it hit the limit, unless its resume hit no limit since: then parked with why |
 // | `suspended port_unavailable` | adopted when a live process holds its lease; else held, as its item alone, for the back-off its suspension's place in the run of them calls for (1, 2, 5, 10 then 30 minutes), then resumed; parked with why when its resume was not suspended again, and parked with the call, the count and the last port error once it has been suspended past the schedule |
 // | anything else, such as `suspended until` or `budget_exceeded` | left: a person resumes or stops it |
 //
@@ -36,6 +36,7 @@ import { parseNewerSail } from '../engine/sdk-version';
 import { readEvents } from '../events/consumers/ndjson';
 import type { ResumedFrom } from '../events/types';
 import type { WorkspacePort } from '../ports/workspace';
+import { harnessKeyOf } from './holds';
 import type { QueueItem } from './queue-store';
 import { dispatchLog, lastLine } from './spawn';
 
@@ -45,6 +46,8 @@ export interface ReconcileContext {
   isAlive: (pid: number) => boolean;
   /** Where the run's lease is read, before a resume. */
   workspace: Pick<WorkspacePort, 'holder'>;
+  /** When the machine-wide hold on a harness key was last released (`sail watch --release-hold`), in epoch ms. */
+  releasedAt?: (key: string) => number | undefined;
   /** The time a usage limit's hold is measured against. */
   now: Date;
   /** How long a usage limit holds the dispatch when the run names no reset time. */
@@ -78,7 +81,14 @@ export type Reconciled =
   | { kind: 'wait' }
   | { kind: 'adopt'; pid: number }
   | { kind: 'resume'; from: ResumedFrom }
-  | { kind: 'held'; stopReason: 'usage_limit' | 'port_unavailable'; until: string; reason: string };
+  | {
+      kind: 'held';
+      stopReason: 'usage_limit' | 'port_unavailable';
+      until: string;
+      reason: string;
+      /** The harness the limit counts against, for a usage limit whose run header can be read. */
+      harnessKey?: string;
+    };
 
 function statusOf(runDir: string): RunStatus | undefined {
   try {
@@ -95,7 +105,7 @@ function statusOf(runDir: string): RunStatus | undefined {
 function usageLimitOf(
   runDir: string,
   context: Pick<ReconcileContext, 'now' | 'backoffMs' | 'limitedAt'>,
-): { until: string; reason: string; at?: number } {
+): { until: string; reason: string; at?: number; key?: string } {
   const last = readEvents(runDir)
     .filter((event) => event.type === 'run:suspended' && event.stopReason === 'usage_limit')
     .at(-1);
@@ -106,7 +116,21 @@ function usageLimitOf(
   const until =
     resetsAt !== undefined && Date.parse(resetsAt) > base ? resetsAt : new Date(base + context.backoffMs).toISOString();
   const call = key === undefined ? 'a run' : key;
-  return { until, reason: `${call} hit the usage limit`, ...(last === undefined ? {} : { at: Date.parse(last.ts) }) };
+  return {
+    until,
+    reason: `${call} hit the usage limit`,
+    ...(last === undefined ? {} : { at: Date.parse(last.ts) }),
+    ...(key === undefined ? {} : { key }),
+  };
+}
+
+/** The harness key of the call `callKey` of the run in `runDir`, or undefined when its header can't be read. */
+function harnessKeyFor(runDir: string, callKey: string | undefined): string | undefined {
+  try {
+    return harnessKeyOf(JSON.parse(readFileSync(join(runDir, RUN_HEADER_FILE), 'utf8')), callKey);
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -231,11 +255,22 @@ export async function reconcileItem(item: QueueItem, context: ReconcileContext):
   if (status.status === 'suspended' && status.stopReason === 'usage_limit') {
     const holder = await liveHolder(runDir, runId, context);
     if (holder !== undefined) return { kind: 'adopt', pid: holder };
-    const { until, reason, at } = usageLimitOf(runDir, context);
+    const { until, reason, at, key } = usageLimitOf(runDir, context);
     if (context.resumedAt !== undefined && (at === undefined || at <= context.resumedAt.getTime())) {
       return { kind: 'park', reason: why(context, runId, 'its resume failed') ?? 'its resume failed' };
     }
-    if (context.now.getTime() < Date.parse(until)) return { kind: 'held', stopReason: 'usage_limit', until, reason };
+    const harnessKey = harnessKeyFor(runDir, key);
+    const released = harnessKey === undefined ? undefined : context.releasedAt?.(harnessKey);
+    const releasedSince = released !== undefined && at !== undefined && released > at;
+    if (!releasedSince && context.now.getTime() < Date.parse(until)) {
+      return {
+        kind: 'held',
+        stopReason: 'usage_limit',
+        until,
+        reason,
+        ...(harnessKey === undefined ? {} : { harnessKey }),
+      };
+    }
     return { kind: 'resume', from: { status: 'suspended', stopReason: 'usage_limit' } };
   }
   if (status.status === 'suspended' && status.stopReason === 'port_unavailable') {
