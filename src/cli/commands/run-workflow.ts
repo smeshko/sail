@@ -260,8 +260,8 @@ export interface Recorder {
 
 /**
  * `--record <dir>`: wraps the project's harness in a recorder (11.3 D2, D5). `dir` is relative to where sail runs and is
- * made when missing. Secrets are the environment's credentials of 8 characters or more, and the machine's paths are
- * masked in the files only. Undefined without the option.
+ * made when missing. Secrets are the environment's credentials of 8 characters or more and those sail filled from a
+ * credential source, and the machine's paths are masked in the files only. Undefined without the option.
  */
 export function recorded(
   args: Parsed,
@@ -273,7 +273,6 @@ export function recorded(
   const dir = resolve(io.cwd, named);
   mkdirSync(dir, { recursive: true });
   const env = io.env ?? process.env;
-  const secrets = credentialValues(env);
   const roots: Record<string, string> = {
     $RUNS: runsDir(project.sailDir),
     $REPO: dirname(project.sailDir),
@@ -282,7 +281,9 @@ export function recorded(
   };
   // The login, as a word: it names the home folder under any root, and the owner in `ls -l`, even when HOME is another.
   const names = { $USER: env.USER ?? userInfo().username };
-  const record = (inner: Harness) => recordingHarness(inner, { dir, secrets, roots, names });
+  // Read when each harness is wrapped: a named harness adds the credentials it was filled with once it is resolved.
+  const secrets = () => [...new Set([...credentialValues(env), ...credentialValues(project.adapters.credentials)])];
+  const record = (inner: Harness) => recordingHarness(inner, { dir, secrets: secrets(), roots, names });
   const harness = record(project.adapters.ports.harness);
   const harnesses: ResolvedAdapters['harnesses'] = async (wanted) => {
     const named = await project.adapters.harnesses(wanted);
