@@ -1,6 +1,7 @@
 // The decision for a command: every simple command it would run, found through wrappers, nested shells and
 // substitutions (D9), checked against the deny set first, then the step's commands, then where `cd`, git's directory
-// options and every redirection lead. A name the command sets earlier shadows the environment for its later words.
+// options and every redirection lead. A name the command sets earlier shadows the environment for its later words, and a
+// `cd` sets `PWD` and `OLDPWD` for the words after it.
 import { statSync } from 'node:fs';
 import {
   commandName,
@@ -254,6 +255,17 @@ class Collector {
     return expanded.path;
   }
 
+  /** Runs `fn`, then puts `PWD` and `OLDPWD` back as they were: the contexts that discard a cwd discard these too. */
+  private scoped(fn: () => void): void {
+    const names = ['PWD', 'OLDPWD'];
+    const before = names.map((name) => [name, this.bound.has(name), this.bound.get(name)] as const);
+    fn();
+    for (const [name, had, value] of before) {
+      if (had) this.bound.set(name, value);
+      else this.bound.delete(name);
+    }
+  }
+
   /** Collects `list` run from `cwd`; returns where its commands leave the working directory. */
   list(list: readonly Pipeline[], cwd: Cwd, depth: number, inBody = false, sure = true): Cwd {
     if (depth > MAX_DEPTH) {
@@ -261,15 +273,32 @@ class Collector {
       return cwd;
     }
     let here = cwd;
-    for (const pipeline of list) {
+    // A cd's `PWD` holds for what its `&&` chain runs after it. After a `||` on either side of the cd, or past the chain
+    // when the cd ran only on the status before it, the cd may not have run, so both names are unknown.
+    let cdInList = false;
+    let cdConditional = false;
+    for (const [index, pipeline] of list.entries()) {
+      const unsure = pipeline.conditional ? cdInList && list[index - 1]?.orElse === true : cdConditional;
+      if (unsure) {
+        this.bound.set('OLDPWD', undefined);
+        this.bound.set('PWD', undefined);
+      }
+      if (!pipeline.conditional) {
+        cdInList = false;
+        cdConditional = false;
+      }
       const argvs: string[][] = [];
       const surely = sure && pipeline.commands.length === 1 && !pipeline.background && !pipeline.conditional;
       let moved: Cwd | undefined;
-      for (const command of pipeline.commands) {
-        if (command.kind === 'simple') argvs.push(command.words.map((word) => this.known(word) ?? word.text));
-        else if (pipeline.commands.length > 1) argvs.push(...this.flat(command));
-        moved = this.command(command, here, depth, inBody, surely);
-      }
+      const walk = () => {
+        for (const command of pipeline.commands) {
+          if (command.kind === 'simple') argvs.push(command.words.map((word) => this.known(word) ?? word.text));
+          else if (pipeline.commands.length > 1) argvs.push(...this.flat(command));
+          moved = this.command(command, here, depth, inBody, surely);
+        }
+      };
+      if (pipeline.commands.length > 1 || pipeline.background) this.scoped(walk);
+      else walk();
       if (argvs.length > 0) this.out.pipelines.push(argvs);
       if (moved === undefined || pipeline.commands.length !== 1 || pipeline.background) continue;
       if (inBody) {
@@ -277,7 +306,16 @@ class Collector {
         this.out.refusals.push(
           `a cd inside a loop or branch body: ${quote(text)}; put it before the construct, or inside ( … )`,
         );
-      } else here = moved;
+      } else {
+        here = moved;
+        if ((pipeline.commands[0] as Command).kind === 'simple') {
+          const skippable = pipeline.conditional && list[index - 1]?.orElse === true;
+          this.bound.set('OLDPWD', skippable ? undefined : this.value('PWD'));
+          this.bound.set('PWD', skippable ? undefined : moved.logical);
+          cdInList = true;
+          cdConditional ||= pipeline.conditional;
+        }
+      }
     }
     return here;
   }
@@ -321,7 +359,7 @@ class Collector {
 
   /** A list run in a shell of its own: its names are unknown once it ends. */
   private subshell(list: readonly Pipeline[], cwd: Cwd, depth: number): void {
-    this.list(list, cwd, depth);
+    this.scoped(() => this.list(list, cwd, depth));
     this.unbind(assignedIn([list]));
   }
 
@@ -389,7 +427,7 @@ class Collector {
         return end === cwd ? undefined : end;
       }
       case 'subshell':
-        body(command.body, false);
+        this.scoped(() => body(command.body, false));
         return undefined;
       case 'for':
         this.out.assignments.push({ name: command.name, text: command.text });
@@ -589,7 +627,7 @@ class Collector {
       return;
     }
     if (!fresh) {
-      this.list(parsed.list, cwd, depth + 1);
+      this.scoped(() => this.list(parsed.list, cwd, depth + 1));
       return;
     }
     const outer = new Map(this.bound);
