@@ -266,6 +266,7 @@ const commands = new Map<string, CommandSpec>([
         to: { type: 'string' },
         model: { type: 'string' },
         out: { type: 'string' },
+        save: { type: 'string' },
       },
       positionals: 4,
       command: port,

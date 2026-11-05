@@ -275,10 +275,10 @@ export function createGitHubCodeHost(options: GitHubCodeHostOptions): CodeHost {
         if (rerun.length > 0) emit({ type: 'codehost:checks_rerun', number, headSha: pr.headSha, checks: rerun });
         return { number, headSha: pr.headSha, rerun, raw: { rerun } };
       }),
-    checkLog: (number, name) =>
+    checkLog: (number, name, options) =>
       guarded(async () => {
         const pr = await read('checkLog', number);
-        const { log, url } = await readCheckLog(client, 'checkLog', pr.headSha, name);
+        const { log, url } = await readCheckLog(client, 'checkLog', pr.headSha, name, options?.whole === true);
         return { number, name, log, ...(url === undefined ? {} : { url }), raw: { name, headSha: pr.headSha } };
       }),
     merge: (number, request) =>

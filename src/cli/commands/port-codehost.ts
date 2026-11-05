@@ -9,7 +9,7 @@
 //   list-designated <label>
 //   checks <pr>
 //   rerun-checks <pr>
-//   check-log <pr> <name>
+//   check-log <pr> <name> [--save <path>]
 //   merge <pr> --method <merge|squash|rebase> --expected-head-sha <sha>
 //   add-label <pr> <label>
 //   remove-label <pr> <label>
@@ -20,11 +20,16 @@
 // passed on as given: only the code host is resolved, so no ticket source parses it. `--method` too, and the port
 // refuses one it doesn't know, and `--expected-head-sha` as well: the head the workflow checked, which the pull request
 // must still be at. A merge answered `pending` or `refused`, a moved head among them, is a printed result: its state is
-// in the JSON. A merge the host rejects exits 1, as any port call that fails does.
+// in the JSON. A merge the host rejects exits 1, as any port call that fails does. `check-log --save` asks the port for
+// the whole log and writes it to the path (parents created), then prints the CheckLog with its `log` cut to the last
+// `CHECK_LOG_TAIL` characters and `saved`, the absolute path; a path that is a directory is refused before the port.
+import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 import { z } from 'zod';
 import type { CodeHost } from '../../ports/code-host';
 import { PortError } from '../../ports/errors';
 import {
+  CHECK_LOG_TAIL,
   CheckLog,
   Checks,
   Labelled,
@@ -63,7 +68,7 @@ export function notAPullRequest(ref: string, adapterName: string): string {
 /** An operation on the pull request `<pr>` names: `run` is given its number, once the adapter has read the ref. */
 const onPullRequest = (
   rest: Omit<PortOperation<CodeHost>, 'run'>,
-  run: (host: CodeHost, number: number, call: PortCall) => Promise<{ value: unknown }>,
+  run: (host: CodeHost, number: number, call: PortCall) => Promise<{ value: unknown } | { refused: string }>,
 ): PortOperation<CodeHost> => ({
   ...rest,
   async run(host, call) {
@@ -122,8 +127,25 @@ export const CODEHOST: PortTable<'codeHost'> = {
     'rerun-checks': onPullRequest({ positionals: ['pr'] }, async (host, number) =>
       answered('rerunChecks', 'Rerun', Rerun, await host.rerunChecks(number)),
     ),
-    'check-log': onPullRequest({ positionals: ['pr', 'name'] }, async (host, number, { positionals: [, name = ''] }) =>
-      answered('checkLog', 'CheckLog', CheckLog, await host.checkLog(number, name)),
+    'check-log': onPullRequest(
+      { positionals: ['pr', 'name'], options: { save: { value: 'path', filled: true } } },
+      async (host, number, { cwd, positionals: [, name = ''], values }) => {
+        const named = text(values.save);
+        if (named === undefined) return answered('checkLog', 'CheckLog', CheckLog, await host.checkLog(number, name));
+        const path = resolve(cwd, named);
+        if (existsSync(path) && statSync(path).isDirectory()) {
+          return { refused: `--save names ${named}, which is a directory` };
+        }
+        const { value } = answered(
+          'checkLog',
+          'CheckLog',
+          CheckLog,
+          await host.checkLog(number, name, { whole: true }),
+        );
+        mkdirSync(dirname(path), { recursive: true });
+        writeFileSync(path, value.log);
+        return { value: { ...value, log: value.log.slice(-CHECK_LOG_TAIL), saved: path } };
+      },
     ),
     merge: onPullRequest(
       {
