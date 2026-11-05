@@ -2,15 +2,16 @@
 // `--expected-head-sha`. A pull request with no checks at all is merged once a few reads have found none, since CI may
 // not have registered its run yet. A head the host reports that $INPUT_HEADSHA descends from is the host not having
 // caught up with the push, so it is read again for a while; any other head has moved. Failed checks are rerun once, to
-// rule out a flake. Still red, it reads each failed check's log and hands them back to the workflow as a retry,
-// `checks`. A head that conflicts with its base, probed before the first read and on every read with no checks, since
+// rule out a flake. Still red, it saves each failed check's whole log under $STAGE_OUT/check-logs/ and hands them back
+// to the workflow as a retry, `checks`: a log holding a failing test leads with the Bun version CI ran, each failing
+// test with its file and the errors above it, then the log's tail. A head that conflicts with its base, probed before the first read and on every read with no checks, since
 // a host runs no CI on a conflicting pull request, is a retry too, `base`, as is a merge the host rejects. On the last
 // try ($INPUT_LASTTRY), a retry, a moved head, a refused merge, the time running out or a reason in $INPUT_BLOCKED
 // instead comments why, swaps the label in $INPUT_LABEL for needs-human and exits 1. A merge after anything in
 // $INPUT_LANDING, or after a rerun, comments what it took. Prints the Merged.
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 const read = (name) => readFileSync(process.env[name], 'utf8');
 const pr = JSON.parse(read('INPUT_PR'));
@@ -29,12 +30,41 @@ const lagReads = fake ? 3 : 24;
 const deadline = Date.now() + 55 * 60_000;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const rerun = [];
+const { failingTests, failures, bunVersion } = await import(
+  join(dirname(process.env.SAIL_CONFIG), 'lib/test-failures.mjs')
+);
 
 /** Runs `sail port codehost …`: its parsed last line, or the error it printed. */
 function port(args) {
   const result = spawnSync('sail', ['port', 'codehost', ...args], { encoding: 'utf8' });
   if (result.status !== 0) return { error: (result.stderr || `exit ${result.status}`).trim() };
   return { answer: JSON.parse(result.stdout.trim().split('\n').at(-1)) };
+}
+
+/** The `bun-version:` pinned in the workspace's verify workflow, or undefined. */
+function pinnedBun() {
+  try {
+    return /bun-version:\s*(\S+)/.exec(readFileSync(join('.github', 'workflows', 'verify.yml'), 'utf8'))?.[1];
+  } catch {
+    return undefined;
+  }
+}
+
+/** A failed check's log for the fix: `tail` as it is, or, when `whole` holds a failing test, led by what reproduces it. */
+function feedback(whole, tail) {
+  const tests = failingTests(whole, { unfiled: true });
+  if (tests.length === 0) return tail;
+  const logged = bunVersion(whole);
+  const version = logged ?? pinnedBun();
+  const source = logged === undefined ? 'the verify.yml pin' : 'from the log';
+  return [
+    version === undefined ? '' : `CI ran Bun ${version} (${source}).`,
+    `Failing tests:\n${tests.map((each) => `${each.file ?? '(file unknown)'}: ${each.test}`).join('\n')}`,
+    failures(whole) ?? '',
+    `The log's tail:\n${tail}`,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 }
 
 /** Runs git in the workspace: its exit code and trimmed stdout. */
@@ -148,8 +178,14 @@ for (;;) {
   }
   if (failed.length > 0) {
     const logs = failed.map((check) => {
-      const log = port(['check-log', String(pr.number), check.name]);
-      return { name: check.name, url: check.url ?? null, log: log.error ? `no log: ${log.error}` : log.answer.log };
+      const save = join(process.env.STAGE_OUT, 'check-logs', `${check.name.replace(/[^\w.-]+/g, '-')}.log`);
+      const log = port(['check-log', String(pr.number), check.name, '--save', save]);
+      if (log.error) return { name: check.name, url: check.url ?? null, log: `no log: ${log.error}` };
+      let whole = log.answer.log;
+      try {
+        whole = readFileSync(save, 'utf8');
+      } catch {}
+      return { name: check.name, url: check.url ?? null, log: feedback(whole, log.answer.log) };
     });
     retry('checks', `checks failed: ${failed.map((check) => check.url ?? check.name).join(', ')}`, logs);
   }

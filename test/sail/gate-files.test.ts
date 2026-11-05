@@ -325,6 +325,7 @@ test('every module the review workflow and the guard reach is a gate file', () =
       '.sail/lib/jev-check.mjs',
       '.sail/lib/play.sh',
       '.sail/lib/play.mjs',
+      '.sail/lib/test-failures.mjs',
       '.sail/stages/file-follow-ups/stage.ts',
       '.sail/stages/validate/validate.mjs',
       '.sail/workflows/review/stages/19-sync-base/sync.mjs',
