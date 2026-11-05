@@ -310,6 +310,7 @@ class Collector {
         body(command.body, false);
         return undefined;
       case 'for':
+        this.out.assignments.push({ name: command.name, text: command.text });
         this.nested(command.words ?? [], cwd, depth);
         this.loop(command.name, command.words, () => body(command.body, true));
         return undefined;

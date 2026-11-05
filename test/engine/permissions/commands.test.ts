@@ -197,6 +197,10 @@ test.each([
   ['GIT_CONFIG_PARAMETERS="\'core.pager=sh\'" git log', { commands: ['git *'] }, DENY('environment override')],
   ['export PATH=/tmp', { commands: ['export *'] }, DENY('environment override')],
   ['env LD_PRELOAD=x.so ls', { commands: ['ls *'] }, DENY('environment override')],
+  ['for PATH in ./bin; do git status; done', { commands: ['git *'] }, DENY('environment override')],
+  ['for IFS in x; do git status; done', { commands: ['git *'] }, DENY('environment override')],
+  ['for GIT_EXEC_PATH in $(x); do git status; done', { commands: ['git *', 'x'] }, DENY('environment override')],
+  ['for f in a; do git status; done', { commands: ['git *'] }, 'allow'],
   ['CI=1 NODE_ENV=test npm test', { commands: ['npm test *'] }, 'allow'],
 ] as [string, Partial<Permissions>, Want][])('assignments: %j under %j is %j', (command, open, want) => {
   expect(verdict(run(command, open), want)).toEqual(want);
