@@ -80,6 +80,19 @@ test('a pipeline ended by & runs in the background', () => {
   expect(parsed.ok ? parsed.list.map((pipeline) => pipeline.background) : parsed.reason).toEqual([true, false, false]);
 });
 
+test.each([
+  ['a && b', [false, true]],
+  ['a || b', [false, true]],
+  ['a && b || c', [false, true, true]],
+  ['a && b; c', [false, true, false]],
+  ['a; b', [false, false]],
+  ['a & b', [false, false]],
+  ['a | b', [false]],
+])('conditional: %j marks the pipelines that follow && or ||: %j', (text, expected) => {
+  const parsed = parseCommand(text);
+  expect(parsed.ok ? parsed.list.map((pipeline) => pipeline.conditional) : parsed.reason).toEqual(expected);
+});
+
 test('quotes and escapes come off, and the words stay literal', () => {
   const command = only(`echo 'a b' "c d" e\\ f "\\$x \\" \\\\"`);
   expect(command.words.map((word) => [word.text, word.literal])).toEqual([

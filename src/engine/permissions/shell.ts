@@ -37,6 +37,8 @@ export interface Redirection {
 export interface Assignment {
   readonly name: string;
   readonly value: Word;
+  /** Written `NAME+=value`: the value is appended to what the name held. */
+  readonly append?: true;
 }
 
 export interface SimpleCommand {
@@ -95,6 +97,8 @@ export interface Pipeline {
   readonly commands: readonly Command[];
   /** Ended by `&`: it runs beside what follows. */
   readonly background: boolean;
+  /** Runs only on the exit status of the pipeline before it: it follows `&&` or `||`. */
+  readonly conditional: boolean;
 }
 
 export type Parsed =
@@ -305,6 +309,7 @@ class Parser {
   /** Pipelines up to the end, or up to one of `stops`, which is left for the caller. */
   private list(stops: Stops): Pipeline[] {
     const list: Pipeline[] = [];
+    let conditional = false;
     for (;;) {
       this.blank();
       const c = this.peek();
@@ -318,26 +323,29 @@ class Parser {
       if (keyword !== undefined && stops.words.includes(keyword)) return list;
       if (c === ';' || c === '&' || c === '|') throw new Refusal(`a command can't start with ${c}`);
       const commands = this.pipeline();
+      const follows = conditional;
+      conditional = false;
       this.spaces();
       if (this.startsWith('&&') || this.startsWith('||')) {
         const op = this.src.slice(this.pos, this.pos + 2);
         this.pos += 2;
         this.blank();
         this.followed(op);
-        list.push({ commands, background: false });
+        list.push({ commands, background: false, conditional: follows });
+        conditional = true;
       } else if (stops.arm && this.armEnd()) {
-        list.push({ commands, background: false });
+        list.push({ commands, background: false, conditional: follows });
         return list;
       } else if (this.startsWith(';;')) {
         throw new Refusal('a case clause (;;)');
       } else if (this.peek() === ';') {
         this.pos++;
-        list.push({ commands, background: false });
+        list.push({ commands, background: false, conditional: follows });
       } else if (this.peek() === '&') {
         this.pos++;
-        list.push({ commands, background: true });
+        list.push({ commands, background: true, conditional: follows });
       } else {
-        list.push({ commands, background: false });
+        list.push({ commands, background: false, conditional: follows });
       }
     }
   }
@@ -578,9 +586,10 @@ class Parser {
       }
       if (words.length === 0 && this.assignmentAhead()) {
         const name = (NAME.exec(this.src.slice(this.pos)) as RegExpExecArray)[0];
+        const append = this.src[this.src.indexOf('=', this.pos) - 1] === '+';
         this.pos = this.src.indexOf('=', this.pos) + 1;
         if (this.peek() === '(') throw new Refusal(`an array assignment to ${name}`);
-        assignments.push({ name, value: this.word() });
+        assignments.push(append ? { name, value: this.word(), append } : { name, value: this.word() });
         continue;
       }
       const word = this.word();

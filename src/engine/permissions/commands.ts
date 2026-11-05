@@ -1,6 +1,6 @@
 // The decision for a command: every simple command it would run, found through wrappers, nested shells and
 // substitutions (D9), checked against the deny set first, then the step's commands, then where `cd`, git's directory
-// options and every redirection lead.
+// options and every redirection lead. A name the command sets earlier shadows the environment for its later words.
 import { statSync } from 'node:fs';
 import {
   commandName,
@@ -72,6 +72,13 @@ const VALUE_LETTERS: Record<string, string> = { sh: 'o', dash: 'o', zsh: 'o', ba
 const DECLARERS = new Set(['export', 'declare', 'typeset', 'local', 'readonly']);
 /** Builtins that assign the names among their arguments, other than by `NAME=value`. */
 const ASSIGNERS = new Set(['read', 'mapfile', 'readarray', 'getopts', 'printf', 'let', 'unset', ...DECLARERS]);
+/** The names a builtin sets without being given them. */
+const SET_BY_DEFAULT: Record<string, string[]> = {
+  read: ['REPLY'],
+  mapfile: ['MAPFILE'],
+  readarray: ['MAPFILE'],
+  getopts: ['OPTARG', 'OPTIND'],
+};
 const GIT_PATHS = new Set(['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE']);
 const OUTPUT = /^--o(?:u(?:t(?:p(?:u(?:t)?)?)?)?)?(?:=|$)/;
 
@@ -161,6 +168,42 @@ function skipOptions(args: readonly Word[], grammar: Grammar): { at: number; wri
   return { at: Math.min(i + (grammar.positional ?? 0), args.length), writes };
 }
 
+/** The names a builtin among `name` and `args` sets: every argument that starts like a name, and its defaults. */
+function setNames(name: string, args: readonly Word[]): string[] {
+  const names = [...(SET_BY_DEFAULT[name] ?? [])];
+  for (const arg of args) {
+    const assigned = /^[A-Za-z_][A-Za-z0-9_]*/.exec(arg.text);
+    if (assigned !== null) names.push(assigned[0]);
+  }
+  return names;
+}
+
+/** Every name a static scan finds `lists` set, inside compound bodies and `eval` text too, but not in substitutions. */
+function assignedIn(lists: readonly (readonly Pipeline[])[]): Set<string> {
+  const names = new Set<string>();
+  const scan = (list: readonly Pipeline[]): void => {
+    for (const pipeline of list) for (const command of pipeline.commands) visit(command);
+  };
+  const visit = (command: Command): void => {
+    if (command.kind !== 'simple') {
+      if (command.kind === 'for') names.add(command.name);
+      for (const body of bodies(command)) scan(body);
+      return;
+    }
+    for (const assignment of command.assignments) names.add(assignment.name);
+    const at = command.words.findIndex((word) => ASSIGNERS.has(commandName(word.text)) || word.text === 'eval');
+    if (at === -1) return;
+    const rest = command.words.slice(at + 1);
+    const head = commandName((command.words[at] as Word).text);
+    if (head === 'eval') {
+      const parsed = parseCommand(rest.map((word) => word.text).join(' '));
+      if (parsed.ok) scan(parsed.list);
+    } else for (const name of setNames(head, rest)) names.add(name);
+  };
+  for (const list of lists) scan(list);
+  return names;
+}
+
 class Collector {
   readonly out: Collected = {
     runs: [],
@@ -176,6 +219,8 @@ class Collector {
   private readonly bound = new Map<string, string | undefined>();
   /** Loop variables a command assigns: the walk is repeated with each never bound, since bash uses the new value. */
   readonly reassigned = new Set<string>();
+  /** Loop variables whose body is being walked: an assignment to one never binds a value. */
+  private readonly looping = new Set<string>();
   private walks = 0;
 
   constructor(
@@ -185,9 +230,12 @@ class Collector {
 
   /** A command assigns `name`: a loop variable of that name no longer holds its word. */
   private assigned(name: string): void {
-    if (!this.bound.has(name)) return;
-    this.reassigned.add(name);
+    if (this.looping.has(name) && this.bound.get(name) !== undefined) this.reassigned.add(name);
     this.bound.set(name, undefined);
+  }
+
+  private unbind(names: Iterable<string>): void {
+    for (const name of names) this.assigned(name);
   }
 
   private value(name: string): string | undefined {
@@ -207,7 +255,7 @@ class Collector {
   }
 
   /** Collects `list` run from `cwd`; returns where its commands leave the working directory. */
-  list(list: readonly Pipeline[], cwd: Cwd, depth: number, inBody = false): Cwd {
+  list(list: readonly Pipeline[], cwd: Cwd, depth: number, inBody = false, sure = true): Cwd {
     if (depth > MAX_DEPTH) {
       this.out.refusals.push(`commands nested deeper than ${MAX_DEPTH} levels`);
       return cwd;
@@ -215,11 +263,12 @@ class Collector {
     let here = cwd;
     for (const pipeline of list) {
       const argvs: string[][] = [];
+      const surely = sure && pipeline.commands.length === 1 && !pipeline.background && !pipeline.conditional;
       let moved: Cwd | undefined;
       for (const command of pipeline.commands) {
         if (command.kind === 'simple') argvs.push(command.words.map((word) => this.known(word) ?? word.text));
         else if (pipeline.commands.length > 1) argvs.push(...this.flat(command));
-        moved = this.command(command, here, depth, inBody);
+        moved = this.command(command, here, depth, inBody, surely);
       }
       if (argvs.length > 0) this.out.pipelines.push(argvs);
       if (moved === undefined || pipeline.commands.length !== 1 || pipeline.background) continue;
@@ -244,14 +293,17 @@ class Collector {
       values !== undefined && values.length > 0 && values.length <= LOOP_WORDS && !this.unbindable.has(name);
     if (literal && values.every((value) => value !== undefined) && this.walks + values.length <= LOOP_WALKS) {
       this.walks += values.length;
+      this.looping.add(name);
       for (const value of values) {
         this.bound.set(name, value);
         walk();
       }
     } else {
+      this.looping.add(name);
       this.bound.set(name, undefined);
       walk();
     }
+    this.looping.delete(name);
     this.bound.set(name, undefined);
   }
 
@@ -264,17 +316,36 @@ class Collector {
   }
 
   private nested(words: readonly (Word | undefined)[], cwd: Cwd, depth: number): void {
-    for (const word of words) for (const list of word?.nested ?? []) this.list(list, cwd, depth + 1);
+    for (const word of words) for (const list of word?.nested ?? []) this.subshell(list, cwd, depth + 1);
+  }
+
+  /** A list run in a shell of its own: its names are unknown once it ends. */
+  private subshell(list: readonly Pipeline[], cwd: Cwd, depth: number): void {
+    this.list(list, cwd, depth);
+    this.unbind(assignedIn([list]));
   }
 
   /** Collects one command; returns where it moves the working directory, if it does. */
-  private command(command: Command, cwd: Cwd, depth: number, inBody: boolean): Cwd | undefined {
-    if (command.kind !== 'simple') return this.compound(command, cwd, depth, inBody);
+  private command(command: Command, cwd: Cwd, depth: number, inBody: boolean, surely: boolean): Cwd | undefined {
+    if (command.kind !== 'simple') return this.compound(command, cwd, depth, inBody, surely);
     this.nested([...command.assignments.map((a) => a.value), ...command.words], cwd, depth);
-    this.redirections(command.redirections, command.text, cwd, depth);
-    for (const assignment of command.assignments) this.assign(assignment.name, assignment.value, command.text, cwd);
-    if (command.words.length === 0) return undefined;
-    return this.unwrap(command.words, command.text, cwd, depth, false);
+    const bare = command.words.length === 0;
+    // With no command name, bash makes the assignments before the redirections.
+    if (!bare) this.redirections(command.redirections, command.text, cwd, depth);
+    for (const assignment of command.assignments) {
+      this.assign(assignment.name, assignment.value, command.text, cwd);
+      if (bare && surely && !this.looping.has(assignment.name) && assignment.append !== true) {
+        this.bound.set(assignment.name, this.known(assignment.value));
+      } else this.unbind([assignment.name]);
+    }
+    if (bare) {
+      this.redirections(command.redirections, command.text, cwd, depth);
+      return undefined;
+    }
+    const moved = this.unwrap(command.words, command.text, cwd, depth, false);
+    this.unbind(command.assignments.map((assignment) => assignment.name));
+    if (!surely) this.unbind(assignedIn([[{ commands: [command], background: false, conditional: false }]]));
+    return moved;
   }
 
   /** The substitutions, heredocs and targets of redirections, whether on a simple or a compound command. */
@@ -285,7 +356,7 @@ class Collector {
       depth,
     );
     for (const redirection of list) {
-      for (const inner of redirection.heredoc?.nested ?? []) this.list(inner, cwd, depth + 1);
+      for (const inner of redirection.heredoc?.nested ?? []) this.subshell(inner, cwd, depth + 1);
       const target = redirection.target;
       if (target === undefined || redirection.op === '<<<') continue;
       const into = redirection.op === '<' ? this.out.reads : this.out.writes;
@@ -298,12 +369,23 @@ class Collector {
     return { path: this.known(word), raw: word.raw, text, cwd };
   }
 
-  private compound(command: Compound, cwd: Cwd, depth: number, inBody: boolean): Cwd | undefined {
+  private compound(command: Compound, cwd: Cwd, depth: number, inBody: boolean, surely: boolean): Cwd | undefined {
+    const moved = this.compoundBody(command, cwd, depth, inBody, surely);
+    if (command.kind !== 'group' || !surely) this.unbind(assignedIn(bodies(command)));
+    return moved;
+  }
+
+  private compoundBody(command: Compound, cwd: Cwd, depth: number, inBody: boolean, surely: boolean): Cwd | undefined {
     this.redirections(command.redirections, command.text, cwd, depth);
-    const body = (list: readonly Pipeline[], branch: boolean) => this.list(list, cwd, depth + 1, branch);
+    const body = (list: readonly Pipeline[], branch: boolean, sure = true) =>
+      this.list(list, cwd, depth + 1, branch, sure);
+    const arm = (list: readonly Pipeline[]) => {
+      body(list, true);
+      this.unbind(assignedIn([list]));
+    };
     switch (command.kind) {
       case 'group': {
-        const end = body(command.body, inBody);
+        const end = body(command.body, inBody, surely);
         return end === cwd ? undefined : end;
       }
       case 'subshell':
@@ -312,30 +394,31 @@ class Collector {
       case 'for':
         this.out.assignments.push({ name: command.name, text: command.text });
         this.nested(command.words ?? [], cwd, depth);
+        this.unbind(assignedIn(bodies(command)));
         this.loop(command.name, command.words, () => body(command.body, true));
         return undefined;
       case 'while':
       case 'until':
+        this.unbind(assignedIn(bodies(command)));
         body(command.condition, true);
         body(command.body, true);
         return undefined;
       case 'if':
         for (const clause of command.clauses) {
           body(clause.condition, true);
-          body(clause.body, true);
+          arm(clause.body);
         }
-        if (command.otherwise !== undefined) body(command.otherwise, true);
+        if (command.otherwise !== undefined) arm(command.otherwise);
         return undefined;
       case 'case':
         this.nested([command.word, ...command.arms.flatMap((arm) => arm.patterns)], cwd, depth);
-        for (const arm of command.arms) body(arm.body, true);
+        for (const each of command.arms) arm(each.body);
         return undefined;
     }
   }
 
   private assign(name: string, value: Word, text: string, cwd: Cwd): void {
     this.out.assignments.push({ name, text });
-    this.assigned(name);
     if (GIT_PATHS.has(name)) this.inside(value, `${name}=${value.raw}`, cwd.physical);
   }
 
@@ -395,17 +478,18 @@ class Collector {
     const open = fed || words.some((word) => this.known(word) === undefined);
     this.out.runs.push({ argv, open, match: words.map((word) => word.text).join(' '), text });
     if (DECLARERS.has(name)) {
+      const nameref = args.find((arg) => /^-[A-Za-z]*n/.test(arg.text));
+      if (name !== 'export' && nameref !== undefined) {
+        this.out.refusals.push(
+          `a nameref, ${name} ${nameref.text}, which sets one name through another: ${quote(text)}`,
+        );
+      }
       for (const arg of args) {
         const assigned = /^([A-Za-z_][A-Za-z0-9_]*)\+?=/.exec(arg.text);
         if (assigned !== null) this.out.assignments.push({ name: assigned[1] as string, text });
       }
     }
-    if (ASSIGNERS.has(name)) {
-      for (const arg of args) {
-        const assigned = /^[A-Za-z_][A-Za-z0-9_]*/.exec(arg.text);
-        if (assigned !== null) this.assigned(assigned[0]);
-      }
-    }
+    if (ASSIGNERS.has(name)) this.unbind(setNames(name, args));
     if (name === 'find') this.find(args, text, cwd, depth);
     if (name === 'git') this.git(argv, fed ? undefined : words, open, text, cwd, depth);
     return undefined;
@@ -479,7 +563,7 @@ class Collector {
         this.out.refusals.push(`${name} -c with text that isn't literal: ${quote(text)}`);
         return true;
       }
-      this.parse(body.text, `${name} -c`, cwd, depth);
+      this.parse(body.text, `${name} -c`, cwd, depth, true);
       return true;
     }
     if (input || i >= args.length) {
@@ -494,13 +578,25 @@ class Collector {
       this.out.refusals.push(`eval of text that isn't literal: ${quote(text)}`);
       return;
     }
-    this.parse(args.map((arg) => arg.text).join(' '), 'eval', cwd, depth);
+    this.parse(args.map((arg) => arg.text).join(' '), 'eval', cwd, depth, false);
   }
 
-  private parse(body: string, by: string, cwd: Cwd, depth: number): void {
+  /** A new shell (`fresh`) sees only the names the environment exports, and leaves none of its own behind. */
+  private parse(body: string, by: string, cwd: Cwd, depth: number, fresh: boolean): void {
     const parsed = parseCommand(body);
-    if (!parsed.ok) this.out.refusals.push(`${by}: ${parsed.reason}`);
-    else this.list(parsed.list, cwd, depth + 1);
+    if (!parsed.ok) {
+      this.out.refusals.push(`${by}: ${parsed.reason}`);
+      return;
+    }
+    if (!fresh) {
+      this.list(parsed.list, cwd, depth + 1);
+      return;
+    }
+    const outer = new Map(this.bound);
+    for (const name of outer.keys()) if (!(name in this.ctx.env)) this.bound.set(name, undefined);
+    this.list(parsed.list, cwd, depth + 1);
+    this.bound.clear();
+    for (const [name, value] of outer) this.bound.set(name, value);
   }
 
   /** `find`'s `-exec` and its kin run a command per file: each is collected. */
@@ -576,7 +672,7 @@ class Collector {
       for (const { option, value } of optionValues(args, grammar.long, grammar.short)) {
         if (value === undefined || value.trim() === '') {
           this.out.refusals.push(`git ${subcommand} ${option} without its command`);
-        } else this.parse(value, `git ${subcommand} ${option}`, from, depth);
+        } else this.parse(value, `git ${subcommand} ${option}`, from, depth, true);
       }
     }
     let at: number | undefined;
@@ -598,7 +694,7 @@ class Collector {
       const body = this.known(inner[0] as Word);
       if (body === undefined || body.trim() === '') {
         this.out.refusals.push('git submodule foreach without a resolvable command');
-      } else this.parse(body, 'git submodule foreach', from, depth);
+      } else this.parse(body, 'git submodule foreach', from, depth, true);
     } else if (
       subcommand === 'submodule' &&
       // Git's use_shell runs argv[0] as shell text when it contains a metacharacter,
