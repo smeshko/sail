@@ -10,6 +10,7 @@ import { readConfig } from '../../src/engine/config';
 import { type Status, type StopReason, writeStatus } from '../../src/engine/run-dir';
 import { PortError } from '../../src/ports/errors';
 import { commandsDir, dropCommand } from '../../src/watch/inbox';
+import { committedWatches } from '../../src/watch/poll';
 import { queueDir } from '../../src/watch/queue-store';
 import { type RegistryEntry, readEntry, recordEntry } from '../../src/watch/registry';
 import { QUEUE_LEASE_DIR, startWatcher, type Watcher, type WatcherOptions } from '../../src/watch/watcher';
@@ -1590,5 +1591,121 @@ test('a watcher starts a ticket whose prerequisite is open at once when its work
     expect(w.out.filter((line) => line.includes('waits on'))).toEqual([]);
     expect(queueEventIssues(queueDir(w.runs, 'a'))).toEqual([]);
     await watcher.stop();
+  });
+});
+
+// The watcher re-reads each workflow's watch declaration, as the default branch's tip commits it, before every poll.
+
+/** Commits `.sail/` of the repository: what `committedWatches()` reads. */
+function commitSail(repo: TempRepo, message: string): void {
+  repo.git('add', '.sail');
+  repo.git('commit', '-m', message);
+}
+
+const queueLabel = (runs: string, workflow: string): string =>
+  JSON.parse(readFileSync(join(queueDir(runs, workflow), 'queue.json'), 'utf8')).polling.label;
+
+test('a committed raise of maxConcurrentRuns takes effect on the next poll, and an uncommitted edit does not', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(
+      repo,
+      [{ name: 'a', label: 'sail-a', cap: 1 }],
+      tickets({ 'FAKE-1': 'sail-a', 'FAKE-2': 'sail-a', 'FAKE-3': 'sail-a' }),
+    );
+    commitSail(repo, 'watch a');
+    const reader = committedWatches({ workspace: w.adapters.ports.workspace });
+    const watcher = await w.start(['a'], { rereadWatch: reader.read });
+    try {
+      await w.timers.advance(1000);
+      expect(w.order('a')).toEqual(['FAKE-1']);
+
+      edit(w.sail, 'workflows/a/workflow.ts', 'maxConcurrentRuns: 1', 'maxConcurrentRuns: 2');
+      await w.timers.advance(31_000);
+      expect(w.order('a')).toEqual(['FAKE-1']);
+      expect(w.out.join('')).not.toContain('at most 2 at once');
+
+      commitSail(repo, 'raise a');
+      await w.timers.advance(31_000);
+      expect(w.out.join('')).toContain('a  watching: label sail-a, every 30.0s, at most 2 at once');
+      expect(w.order('a')).toEqual(['FAKE-1', 'FAKE-2']);
+      await w.timers.advance(61_000);
+      expect(w.order('a')).toEqual(['FAKE-1', 'FAKE-2']);
+    } finally {
+      await watcher.stop();
+      reader.dispose();
+    }
+  });
+});
+
+test("a committed label change is polled next, and one onto a watched workflow's label is refused once and the old label kept", async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(
+      repo,
+      [
+        { name: 'a', label: 'sail-a', cap: 1 },
+        { name: 'b', label: 'sail-b', cap: 1 },
+      ],
+      [],
+    );
+    commitSail(repo, 'watch a and b');
+    const reader = committedWatches({ workspace: w.adapters.ports.workspace });
+    const watcher = await w.start(['a', 'b'], { rereadWatch: reader.read });
+    try {
+      edit(w.sail, 'workflows/a/workflow.ts', "label: 'sail-a'", "label: 'sail-c'");
+      commitSail(repo, 'a polls sail-c');
+      await w.timers.advance(31_000);
+      expect(w.out.join('')).toContain('a  watching: label sail-c, every 30.0s, at most 1 at once');
+      expect(queueLabel(w.runs, 'a')).toBe('sail-c');
+      expect(w.events('a').findLast((event) => event.type === 'queue:polled')).toMatchObject({ label: 'sail-c' });
+      expect(readEntry(w.registryDir, 'stub')?.watcher?.labels).toEqual(['sail-c', 'sail-b']);
+
+      edit(w.sail, 'workflows/a/workflow.ts', "label: 'sail-c'", "label: 'sail-b'");
+      commitSail(repo, 'a polls sail-b');
+      await w.timers.advance(31_000);
+      await w.timers.advance(31_000);
+      const refusal = "workflow 'a' keeps its watch config: workflows 'a' and 'b' both poll the label 'sail-b'";
+      expect(w.out.join('').split(refusal).length - 1).toBe(1);
+      expect(queueLabel(w.runs, 'a')).toBe('sail-c');
+      expect(w.events('a').findLast((event) => event.type === 'queue:polled')).toMatchObject({ label: 'sail-c' });
+      expect(readEntry(w.registryDir, 'stub')?.watcher?.labels).toEqual(['sail-c', 'sail-b']);
+    } finally {
+      await watcher.stop();
+      reader.dispose();
+    }
+  });
+});
+
+test('a re-read the commit refuses keeps the last watch config and says why once', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(repo, [{ name: 'a', label: 'sail-a', cap: 3 }], tickets({ 'FAKE-1': 'sail-a' }));
+    commitSail(repo, 'watch a');
+    const reader = committedWatches({ workspace: w.adapters.ports.workspace });
+    const watcher = await w.start(['a'], { rereadWatch: reader.read });
+    const said = () =>
+      w.out
+        .join('')
+        .split('\n')
+        .filter((line) => line.includes('keeps its watch config'));
+    try {
+      edit(w.sail, 'workflows/a/workflow.ts', ", watch: { every: '30s', label: 'sail-a' }, maxConcurrentRuns: 3", '');
+      commitSail(repo, 'unwatch a');
+      await w.timers.advance(31_000);
+      await w.timers.advance(31_000);
+      expect(said()).toHaveLength(1);
+      expect(said()[0]).toContain("workflow 'a' isn't watched: it declares no watch (in the .sail/ committed at ");
+
+      repo.git('rm', '-r', '-q', '.sail/workflows/a');
+      repo.git('commit', '-m', 'delete a');
+      await w.timers.advance(31_000);
+      await w.timers.advance(31_000);
+      expect(said()).toHaveLength(2);
+      expect(said()[1]).toContain("workflow 'a' keeps its watch config:");
+      expect(watcher.watching()).toEqual(['a']);
+      expect(w.out.join('')).not.toContain('at most 1 at once');
+      expect(w.events('a').filter((event) => event.type === 'watch:added')).toHaveLength(1);
+    } finally {
+      await watcher.stop();
+      reader.dispose();
+    }
   });
 });

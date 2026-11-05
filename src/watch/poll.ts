@@ -9,6 +9,7 @@
 //   still can't queue a started or undesignated ticket (D10), or a draft, closed or unlabelled pull request.
 // - A poll that finds a ticket already queued at another priority updates the item and its place in the queue's order.
 // - One poll at a time per workflow: a poll asked for while one is in flight joins it (D11).
+// - Before each poll the poller's `refresh` may change the target, as a re-read watch declaration does.
 // - A poll that throws, as a queue write on a full disk does, is retried at the backoff all the same. `pollNow` rejects
 //   with it, and a poll nobody awaits (a timer's, a command's, the start's) hands it to `onError`, never to an unhandled
 //   rejection, which would end the watcher.
@@ -391,6 +392,11 @@ export interface PollerOptions {
   policy?: QueuePolicy;
   /** Hears a poll nobody awaits that threw. Without it, the poller writes the error to stderr. */
   onError?: (workflow: string, error: unknown) => void;
+  /**
+   * Runs before each poll of a target, once for a poll that others join: it may change the target in place, as a
+   * re-read watch declaration does. One that throws goes to `onError`, and the poll runs all the same.
+   */
+  refresh?: (target: WatchTarget) => Promise<void>;
 }
 
 export function createPoller(options: PollerOptions): Poller {
@@ -423,7 +429,17 @@ export function createPoller(options: PollerOptions): Poller {
     const running = inFlight.get(target.workflow);
     if (running !== undefined) return running;
     clear(target);
-    const polling = pollOnce(target, now, policy, () => dropped).then(
+    const refreshed = async (): Promise<PollOutcome> => {
+      if (options.refresh !== undefined) {
+        try {
+          await options.refresh(target);
+        } catch (error) {
+          options.onError?.(target.workflow, error);
+        }
+      }
+      return dropped ? 'dropped' : pollOnce(target, now, policy, () => dropped);
+    };
+    const polling = refreshed().then(
       (outcome) => {
         inFlight.delete(target.workflow);
         schedule(target, outcome);

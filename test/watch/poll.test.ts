@@ -917,3 +917,51 @@ test("committedWatches refuses a workflow the commit lacks or doesn't watch, nam
     broken.dispose();
   });
 });
+
+test('a poller refreshes its target before every poll, once for a joined poll, and polls after a refresh that throws', async () => {
+  const dir = tempDir();
+  const timers = fakeTimers(START);
+  const a = counted(fakeSource(dir));
+  const refreshed: string[] = [];
+  const heard: string[] = [];
+  let fail = false;
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let hold = false;
+  const poller = createPoller({
+    targets: [target(dir, 'a', 'sail', a.source, timers.now, 60_000)],
+    timers,
+    now: timers.now,
+    onError: (_, error) => heard.push((error as Error).message),
+    refresh: async (each) => {
+      refreshed.push(each.label);
+      if (hold) await gate;
+      if (fail) throw new Error('re-read failed');
+      each.label = 'review';
+    },
+  });
+  await poller.start();
+  expect(refreshed).toEqual(['sail']);
+  expect(a.calls).toBe(1);
+
+  await timers.advance(60_000);
+  expect(refreshed).toEqual(['sail', 'review']);
+  expect(a.calls).toBe(2);
+
+  hold = true;
+  const first = poller.pollNow('a');
+  const joined = poller.pollNow('a');
+  release();
+  await Promise.all([first, joined]);
+  expect(refreshed).toHaveLength(3);
+  expect(a.calls).toBe(3);
+
+  hold = false;
+  fail = true;
+  expect(await poller.pollNow('a')).toBe('polled');
+  expect(heard).toEqual(['re-read failed']);
+  expect(a.calls).toBe(4);
+  poller.stop();
+});

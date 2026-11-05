@@ -138,6 +138,28 @@ async function leaseByHand(w: World, ticketKey: string) {
   return { branch, holder, release: () => workspace.releaseLease(url, branch, holder.runId) };
 }
 
+test('configure changes the cap a tick dispatches to, starting nothing over a lowered one', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 5, 3);
+    const dispatcher = w.dispatcher();
+    await dispatcher.tick();
+    expect(spawnedKeys(w.spawner)).toEqual(['FAKE-1', 'FAKE-2', 'FAKE-3']);
+
+    dispatcher.configure({ label: 'sail', maxConcurrentRuns: 1, waitingRecheckMs: 60_000, ignorePrerequisites: false });
+    await w.spawner.end('FAKE-1');
+    await dispatcher.tick();
+    expect(spawnedKeys(w.spawner)).toEqual(['FAKE-1', 'FAKE-2', 'FAKE-3']);
+    expect(dispatcher.inFlight()).toBe(2);
+    await w.spawner.end('FAKE-2');
+    await dispatcher.tick();
+    expect(spawnedKeys(w.spawner)).toEqual(['FAKE-1', 'FAKE-2', 'FAKE-3']);
+
+    dispatcher.configure({ label: 'sail', maxConcurrentRuns: 3, waitingRecheckMs: 60_000, ignorePrerequisites: false });
+    await dispatcher.tick();
+    expect(spawnedKeys(w.spawner)).toEqual(['FAKE-1', 'FAKE-2', 'FAKE-3', 'FAKE-4', 'FAKE-5']);
+  });
+});
+
 test('a cap of 2 starts the first two due items in queue order, and once one completes the next tick settles it done and starts the third', async () => {
   await withTempRepo(async (repo) => {
     const w = await world(repo, 4, 2);

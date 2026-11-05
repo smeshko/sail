@@ -145,6 +145,16 @@ export interface Dispatcher {
   tick(): Promise<void>;
   /** How many of the workflow's dispatched runs are alive. The live manual runs, which also fill the cap, are not in it. */
   inFlight(): number;
+  /**
+   * Changes what the workflow's watch declares, from the next tick on. A cap lowered under the live runs stops none of
+   * them: nothing starts or resumes until the count is under it.
+   */
+  configure(next: {
+    label: string;
+    maxConcurrentRuns: number;
+    waitingRecheckMs: number;
+    ignorePrerequisites: boolean;
+  }): void;
 }
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
@@ -156,7 +166,10 @@ const sourceOf = (item: QueueItem): Pick<Settled, 'ticketKey' | 'pr'> =>
     : { pr: { number: item.source.number, headSha: item.source.headSha } };
 
 export function createDispatcher(options: DispatcherOptions): Dispatcher {
-  const { workflow, label, store, ticketSource, codeHost, workspace, isAlive, now } = options;
+  const { workflow, store, ticketSource, codeHost, workspace, isAlive, now } = options;
+  /** What the workflow's watch declares now: `configure()` changes them when its declaration is re-read. */
+  let label = options.label;
+  let maxConcurrentRuns = options.maxConcurrentRuns;
   /** The run that held each skipped item's branch when it was last reported. */
   const skipped = new Map<string, string>();
   /** The message reported for each dispatched item that could not be settled, until it settles again. */
@@ -175,7 +188,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
   const limitedAt = new Map<string, Date>();
   /** When each waiting item's ticket was last read, by dedup key: it is read again only after `waitingRecheckMs`. */
   const waitingReadAt = new Map<string, number>();
-  const waitingRecheckMs = options.waitingRecheckMs ?? 60_000;
+  let waitingRecheckMs = options.waitingRecheckMs ?? 60_000;
   /** Whether items skip the prerequisite check, until a start refuses for one. */
   let ignorePrerequisites = options.ignorePrerequisites === true;
   const sail = options.sail ?? sdkFingerprint;
@@ -198,7 +211,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
   let manual: number | undefined;
   /** The message reported for the live runs that could not be counted, until they are counted again. */
   let uncounted: string | undefined;
-  const full = () => manual === undefined || inFlight() + manual >= options.maxConcurrentRuns;
+  const full = () => manual === undefined || inFlight() + manual >= maxConcurrentRuns;
 
   const countManual = async () => {
     try {
@@ -559,5 +572,9 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
       await dispatch();
     },
     inFlight,
+    configure(next) {
+      ({ label, maxConcurrentRuns, waitingRecheckMs } = next);
+      ignorePrerequisites = next.ignorePrerequisites;
+    },
   };
 }

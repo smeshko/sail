@@ -7,6 +7,11 @@
 // only then does each workflow get its `watch:added`, a poller of its own and a dispatcher. Its inbox is emptied
 // before it is live because a second `sail watch` drops its command only once it sees a live watcher in the registry.
 //
+// Before each poll of a workflow, when `rereadWatch` is given, the watcher re-reads its watch declaration as the default
+// branch's tip commits it, and applies a change of cap, label or interval to its poller, dispatcher and queue, saying so
+// with a fresh `watch:added`. A re-read that refuses, a changed kind or a label another workflow or watcher polls keeps
+// the last declaration, and prints `workflow '<w>' keeps its watch config: <why>` once per reason.
+//
 // A tick every second, never two at once, drains the inbox, asks `checkConfig()` whether the config can be dispatched
 // on, then runs each workflow's dispatch in the order the set was formed: one the config can't be dispatched on settles
 // what ended but starts and resumes nothing. A run's process ending asks for a tick at once. The commands:
@@ -62,7 +67,14 @@ import {
   sweptLine,
   type WatchLine,
 } from './lines';
-import { createPoller, openWatchTarget, type Poller, type Timers, type WatchTarget } from './poll';
+import {
+  createPoller,
+  openWatchTarget,
+  type Poller,
+  type Timers,
+  type WatchDeclaration,
+  type WatchTarget,
+} from './poll';
 import { DEFAULT_QUEUE_POLICY, dedupKey, type QueueItem, type QueuePolicy } from './queue-store';
 import { liveHolder } from './reconcile';
 import {
@@ -141,6 +153,11 @@ export interface WatcherOptions {
    * Asked at every tick: while it answers a reason, nothing starts or resumes, and the reason is printed once.
    */
   checkConfig?: () => Promise<string | undefined>;
+  /**
+   * Reads workflow `name`'s watch declaration as the default branch's tip commits it: before each of its polls, the
+   * watcher applies a change to its cap, label or interval. Left out, it keeps the declaration it started with.
+   */
+  rereadWatch?: (workflow: string) => Promise<WatchDeclaration | { refused: string }>;
   /** The least time between two fast-forwards of the clone: `FAST_FORWARD_MS` when left out. */
   fastForwardMs?: number;
   /** The running sail's SDK fingerprint, handed to each dispatcher: its own when left out. */
@@ -206,6 +223,23 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
   ];
   const watchedTargets = () => [...set.values()].map((watched) => watched.target);
 
+  /**
+   * Why two of `all` poll one label, or undefined. One label per kind: a ticket workflow and a pull-request workflow may
+   * both poll `sail`, which is the hand-over. A pull request's label matches whatever its case, so `sail` and `Sail` are
+   * one label to two pull-request workflows.
+   */
+  const labelClash = (all: readonly WatchTarget[]): string | undefined => {
+    const clash = (a: WatchTarget, b: WatchTarget) =>
+      a.kind === b.kind && (a.kind === 'pr' ? sameLabel(a.label, b.label) : a.label === b.label);
+    for (const [index, target] of all.entries()) {
+      const other = all.slice(0, index).find((each) => clash(each, target));
+      if (other !== undefined) {
+        return `workflows '${other.workflow}' and '${target.workflow}' both poll the label '${target.label}'`;
+      }
+    }
+    return undefined;
+  };
+
   /** Opens the workflows of `names` not watched yet, refusing on one that refuses, or on two that poll one label. */
   const open = async (names: readonly string[]): Promise<WatchTarget[] | { refused: string }> => {
     const targets: WatchTarget[] = [];
@@ -224,19 +258,8 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
       if ('refused' in target) return target;
       targets.push(target);
     }
-    const all = [...watchedTargets(), ...targets];
-    // One label per kind: a ticket workflow and a pull-request workflow may both poll `sail`, which is the hand-over.
-    // A pull request's label matches whatever its case, so `sail` and `Sail` are one label to two pull-request workflows.
-    const clash = (a: WatchTarget, b: WatchTarget) =>
-      a.kind === b.kind && (a.kind === 'pr' ? sameLabel(a.label, b.label) : a.label === b.label);
-    for (const [index, target] of all.entries()) {
-      const other = all.slice(0, index).find((each) => clash(each, target));
-      if (other !== undefined) {
-        return {
-          refused: `workflows '${other.workflow}' and '${target.workflow}' both poll the label '${target.label}'`,
-        };
-      }
-    }
+    const clash = labelClash([...watchedTargets(), ...targets]);
+    if (clash !== undefined) return { refused: clash };
     return targets;
   };
 
@@ -363,6 +386,67 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
     else again = true;
   };
 
+  /** Why each workflow keeps its watch config, as its last re-read said, so a reason is said once. */
+  const keeping = new Map<string, string>();
+  /**
+   * Re-reads `target`'s watch declaration and applies what changed to its poller, dispatcher and queue. A re-read that
+   * refuses, a changed kind or a label that clashes keeps the last declaration, and says why once.
+   */
+  const reconfigure = async (target: WatchTarget) => {
+    const { workflow } = target;
+    const reread = options.rereadWatch;
+    if (reread === undefined) return;
+    const keep = (why: string) => {
+      if (keeping.get(workflow) === why) return;
+      keeping.set(workflow, why);
+      print(errorLine(workflow, `workflow '${workflow}' keeps its watch config: ${why}`, now()));
+    };
+    let next: WatchDeclaration | { refused: string };
+    try {
+      next = await reread(workflow);
+    } catch (error) {
+      next = { refused: messageOf(error) };
+    }
+    const dispatcher = set.get(workflow)?.dispatcher;
+    if (dispatcher === undefined || set.get(workflow)?.target !== target) return;
+    if ('refused' in next) return keep(next.refused);
+    if (next.kind !== target.kind) {
+      return keep(`it now polls ${next.kind === 'pr' ? 'pull requests' : 'tickets'}: unwatch and watch it again`);
+    }
+    const ignorePrerequisites = next.ignorePrerequisites === true;
+    const labelChanged = next.label !== target.label;
+    if (
+      !labelChanged &&
+      next.everyMs === target.everyMs &&
+      next.maxConcurrentRuns === target.maxConcurrentRuns &&
+      ignorePrerequisites === (target.ignorePrerequisites === true)
+    ) {
+      keeping.delete(workflow);
+      return;
+    }
+    if (labelChanged) {
+      const moved = watchedTargets().map((each) => (each === target ? { ...each, label: next.label } : each));
+      const clash = labelClash(moved);
+      if (clash !== undefined) return keep(clash);
+      const refused = claim(labelsOf(moved));
+      if (refused !== undefined) return keep(refused);
+    }
+    keeping.delete(workflow);
+    target.label = next.label;
+    target.everyMs = next.everyMs;
+    target.maxConcurrentRuns = next.maxConcurrentRuns;
+    if (ignorePrerequisites) target.ignorePrerequisites = true;
+    else delete target.ignorePrerequisites;
+    if (labelChanged) target.store.relabel(next.label);
+    dispatcher.configure({
+      label: target.label,
+      maxConcurrentRuns: target.maxConcurrentRuns,
+      waitingRecheckMs: target.everyMs,
+      ignorePrerequisites,
+    });
+    target.store.watched({ pid, everyMs: target.everyMs, maxConcurrentRuns: target.maxConcurrentRuns });
+  };
+
   const add = async (target: WatchTarget) => {
     const { workflow } = target;
     target.store.watched({ pid, everyMs: target.everyMs, maxConcurrentRuns: target.maxConcurrentRuns });
@@ -372,6 +456,7 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
       now,
       ...(policy ? { policy } : {}),
       onError: (_, error) => print(errorLine(workflow, error, now())),
+      ...(options.rereadWatch === undefined ? {} : { refresh: reconfigure }),
     });
     const dispatcher = createDispatcher({
       workflow,
