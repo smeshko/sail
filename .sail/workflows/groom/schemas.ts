@@ -21,9 +21,6 @@ export const Duplicates = z.object({
   candidates: z.array(z.object({ ticketKey: z.string(), confidence: z.number().min(0).max(1), why: z.string() })),
 });
 
-/** Whether the repository already does what the ticket asks. */
-export const Staleness = z.object({ stale: z.boolean(), evidence: z.string() });
-
 /**
  * One open question, answerable where it is read: two to four options and what each means day to day, the option
  * recommended and why, and the `file:line` it rests on. A malformed one is invalid output, so it gets a corrective try.
@@ -49,17 +46,19 @@ export const Question = z
 export const Questions = z.object({ questions: z.array(Question) });
 
 /**
- * Whether the ticket earns its place: kept, or canceled as not worth doing, each with how sure the check is; and the
- * open tickets it should become one ticket with.
+ * Whether the ticket earns its place: kept, or canceled as not worth doing, each with how sure the check is; the open
+ * tickets it should become one ticket with; and whether the repository already does what the ticket asks (`stale`).
  */
 export const Worth = z.object({
   verdict: z.enum(['keep', 'cancel']),
   confidence: z.number().min(0).max(1),
   why: z.string(),
   merges: z.array(z.object({ ticketKey: z.string(), confidence: z.number().min(0).max(1), why: z.string() })),
+  stale: z.boolean(),
+  staleEvidence: z.string(),
 });
 
-export const Findings = z.object({ duplicates: Duplicates, staleness: Staleness, questions: Questions, worth: Worth });
+export const Findings = z.object({ duplicates: Duplicates, questions: Questions, worth: Worth });
 
 /** The labels a groomed ticket carries, one of each group as AGENTS.md lists them. */
 export const LabelSet = z.object({
