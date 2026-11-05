@@ -561,6 +561,14 @@ test.each([
     UNRESOLVED('write'),
   ],
   ['echo x > $STAGE_OUT/r.md; read STAGE_OUT', SET_OPEN, 'allow'],
+  [
+    'declare -n r=STAGE_OUT; r=lib; echo x > $STAGE_OUT/r.md',
+    { ...SET_OPEN, commands: ['*'] },
+    ['commands', 'a nameref'],
+  ],
+  ['typeset -gn r=STAGE_OUT; echo x > $STAGE_OUT/r.md', { ...SET_OPEN, commands: ['*'] }, ['commands', 'a nameref']],
+  ['local -n r; echo x > $STAGE_OUT/r.md', { ...SET_OPEN, commands: ['*'] }, ['commands', 'a nameref']],
+  ['declare -r r=x; echo x > $STAGE_OUT/r.md', { ...SET_OPEN, commands: ['*'] }, 'allow'],
   ['git ls-files | while read -r f; do git show "$f"; done', GIT_ONLY, ['commands', 'hold an expansion']],
 ] as [string, Partial<Permissions>, Want][])(
   'names a command sets shadow the environment: %j under %j is %j',

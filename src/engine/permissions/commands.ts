@@ -478,6 +478,12 @@ class Collector {
     const open = fed || words.some((word) => this.known(word) === undefined);
     this.out.runs.push({ argv, open, match: words.map((word) => word.text).join(' '), text });
     if (DECLARERS.has(name)) {
+      const nameref = args.find((arg) => /^-[A-Za-z]*n/.test(arg.text));
+      if (name !== 'export' && nameref !== undefined) {
+        this.out.refusals.push(
+          `a nameref, ${name} ${nameref.text}, which sets one name through another: ${quote(text)}`,
+        );
+      }
       for (const arg of args) {
         const assigned = /^([A-Za-z_][A-Za-z0-9_]*)\+?=/.exec(arg.text);
         if (assigned !== null) this.out.assignments.push({ name: assigned[1] as string, text });
