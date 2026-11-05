@@ -95,6 +95,12 @@ test('a grep of a folder no read glob covers is blocked under read, and one a fo
   });
 });
 
+test('a grep of the workspace is blocked when a ! read glob excludes some of it (review R3)', () => {
+  const g = gate({ ...STEP, read: ['**', '!docs/**'] });
+  expect(g.toolCall(call('grep', { pattern: 'x' }, 'c6'))?.block).toBe(true);
+  expect(g.toolCall(call('grep', { pattern: 'x', path: 'src' }, 'c7'))).toBeUndefined();
+});
+
 test('a gate whose call directories are not all set blocks every call', () => {
   const g = gate(STEP, { ...CTX, stageOut: '' });
   const verdict = g.toolCall(call('read', { path: join(work, 'README.md') }, 'c8'));
