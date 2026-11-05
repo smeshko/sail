@@ -1687,6 +1687,41 @@ test("a first poll's committed label is claimed with the labels of the workflows
   });
 });
 
+test('a committed label another live watcher polls is refused once and the old label kept (review R12)', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(repo, [{ name: 'a', label: 'sail-a', cap: 1 }], []);
+    commitSail(repo, 'watch a');
+    const reader = committedWatches({ workspace: w.adapters.ports.workspace });
+    const watcher = await w.start(['a'], { rereadWatch: reader.read });
+    try {
+      const mine = readEntry(w.registryDir, 'stub')?.watcher;
+      if (mine === undefined) throw new Error('the watcher recorded no field');
+      const otherSail = join(repo.home, 'other', '.sail');
+      recordEntry(w.registryDir, {
+        schema: 'sail.registry.v1' as const,
+        name: 'other',
+        remote: null,
+        clone: join(repo.home, 'other'),
+        sailDir: otherSail,
+        updatedAt: START,
+        watcher: { ...mine, pid: process.ppid, sailDir: otherSail, labels: ['sail-x'] },
+      });
+      edit(w.sail, 'workflows/a/workflow.ts', "label: 'sail-a'", "label: 'sail-x'");
+      commitSail(repo, 'a polls sail-x');
+      await w.timers.advance(31_000);
+      await w.timers.advance(31_000);
+      const refusal = `workflow 'a' keeps its watch config: the label 'sail-x' on the fake ticket source is polled by the watcher of 'other' in ${join(repo.home, 'other')} (pid ${process.ppid})`;
+      expect(w.out.join('').split(refusal).length - 1).toBe(1);
+      expect(queueLabel(w.runs, 'a')).toBe('sail-a');
+      expect(readEntry(w.registryDir, 'stub')?.watcher?.labels).toEqual(['sail-a']);
+      expect(watcher.watching()).toEqual(['a']);
+    } finally {
+      await watcher.stop();
+      reader.dispose();
+    }
+  });
+});
+
 test('a re-read the commit refuses keeps the last watch config and says why once', async () => {
   await withTempRepo(async (repo) => {
     const w = await watched(repo, [{ name: 'a', label: 'sail-a', cap: 3 }], tickets({ 'FAKE-1': 'sail-a' }));
