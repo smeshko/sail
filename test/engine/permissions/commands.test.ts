@@ -569,6 +569,28 @@ test.each([
   },
 );
 
+test.each([
+  ['echo x > $REPLY/r.md', 'allow'],
+  ['read; echo x > $REPLY/r.md', UNRESOLVED('write')],
+  ['read -r; echo x > $REPLY/r.md', UNRESOLVED('write')],
+  ['mapfile; echo x > $MAPFILE/r.md', UNRESOLVED('write')],
+  ['readarray; echo x > $MAPFILE/r.md', UNRESOLVED('write')],
+  ['getopts ab x; echo x > $OPTARG/r.md', UNRESOLVED('write')],
+  ['getopts ab x; echo x > $OPTIND/r.md', UNRESOLVED('write')],
+] as [string, Want][])(
+  'a name a builtin sets without being given it shadows the environment: %j is %j',
+  (command, want) => {
+    const names = ['REPLY', 'MAPFILE', 'OPTARG', 'OPTIND'];
+    const env = { ...layout.ctx.env, ...Object.fromEntries(names.map((name) => [name, layout.stageOut])) };
+    const open = {
+      commands: ['echo *', 'read *', 'read', 'mapfile', 'readarray', 'getopts *'],
+      write: ['$STAGE_OUT/**'],
+    };
+    const decision = decideCommand(command, perms(open), { ...layout.ctx, env });
+    expect(verdict(decision, want)).toEqual(want);
+  },
+);
+
 const BARE = { commands: ['echo *', 'true', 'sh *', 'eval *'], write: ['src/**'] };
 const STAGE_UNKNOWN = UNRESOLVED('write');
 
