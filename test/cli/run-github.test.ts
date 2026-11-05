@@ -7,15 +7,18 @@
 // One run per repository: the cases that read what a completed run left share one, and the draft, the crash and the
 // preflight each have a repository of their own.
 import { afterAll, expect, test } from 'bun:test';
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EXIT_OK, EXIT_REFUSED } from '../../src/cli/exit-codes';
 import { readJournal } from '../../src/engine/journal';
 import { readEvents } from '../../src/events/consumers/ndjson';
 import type { SailEvent } from '../../src/events/types';
+import { fakeCredentialTools } from '../helpers/fake-credentials';
 import { copyFixture, edit, holdAfterOpen, killWhenHeld } from '../helpers/fixture';
-import { createGitHubWorld, type GitHubWorld } from '../helpers/github-world';
+import { createGitHubWorld, type GitHubWorld, type WorldSeedPull } from '../helpers/github-world';
 import { withOrigin } from '../helpers/origin';
+import { writePrWorkflow } from '../helpers/pr-workflow';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
 
 const MAIN = join(import.meta.dir, '..', '..', 'src', 'cli', 'main.ts');
@@ -36,7 +39,11 @@ interface Clone {
  * A clone of the fixture repository on github: `.sail/` uncommitted, `.sail-runs/` ignored, a bare origin that the
  * world reads its branches from, and the workspace on git-worktree. `codeHost` is the entry's options after `use`.
  */
-async function withClone<T>(codeHost: string, fn: (clone: Clone) => Promise<T>, env: { token?: boolean } = {}) {
+async function withClone<T>(
+  codeHost: string,
+  fn: (clone: Clone) => Promise<T>,
+  env: { token?: boolean; pulls?: readonly WorldSeedPull[] } = {},
+) {
   return withTempRepo(async (repo) => {
     writeFileSync(join(repo.dir, '.gitignore'), '.sail-runs/\n');
     repo.git('add', '.gitignore');
@@ -52,6 +59,7 @@ async function withClone<T>(codeHost: string, fn: (clone: Clone) => Promise<T>, 
       bare: origin,
       env: repo.env,
       token: TOKEN,
+      ...(env.pulls === undefined ? {} : { pullRequests: env.pulls }),
     });
     const served = world.serve();
     try {
@@ -262,6 +270,82 @@ test('without SAIL_GITHUB_TOKEN and GITHUB_TOKEN, sail FAKE-1 on github is refus
         '.sail/project.yaml  /adapters/codeHost needs one of SAIL_GITHUB_TOKEN, GITHUB_TOKEN, none of which is set\n',
         false,
         [],
+      ]);
+    },
+    { token: false },
+  );
+}, 60_000);
+
+const toolDirs: string[] = [];
+afterAll(() => {
+  for (const dir of toolDirs) rmSync(dir, { recursive: true, force: true });
+});
+/** A directory for the fake tools, outside the clone's HOME: the token in a script there is not the run's to leak. */
+const toolsDir = (): string => {
+  const dir = mkdtempSync(join(tmpdir(), 'sail-test-tools-'));
+  toolDirs.push(dir);
+  return dir;
+};
+
+/** The environment of a `sail` that reads its GitHub token from `gh`: the lookup on, and `gh` first on the PATH. */
+const lookupEnv = (tools: Parameters<typeof fakeCredentialTools>[1]) => ({
+  SAIL_CREDENTIAL_LOOKUP: 'on',
+  PATH: fakeCredentialTools(toolsDir(), tools, process.env.PATH),
+});
+
+test('without SAIL_GITHUB_TOKEN and GITHUB_TOKEN, sail FAKE-1 on github takes the token gh auth token prints, and GitHub receives it', async () => {
+  await withClone(
+    'repository: o/r',
+    async (clone) => {
+      const ran = await sail(clone, ['FAKE-1'], lookupEnv({ ghToken: TOKEN }));
+      expect([ran.code, ran.stderr, clone.world.requests.length > 0]).toEqual([EXIT_OK, '', true]);
+      expect(markerIn(clone)).toEqual(NOWHERE);
+    },
+    { token: false },
+  );
+}, 90_000);
+
+test("sail '#1' on github with no token takes the one gh auth token prints, and without gh is refused naming gh auth token", async () => {
+  const pull: WorldSeedPull = {
+    number: 1,
+    head: 'sail/FAKE-1-x',
+    labels: ['sail'],
+    body: '<!-- sail:ticket FAKE-1 -->',
+  };
+  await withClone(
+    'repository: o/r',
+    async (clone) => {
+      writePrWorkflow(join(clone.repo.dir, '.sail'), 'review-pr');
+      clone.repo.git('checkout', '-q', '-b', pull.head, 'main');
+      writeFileSync(join(clone.repo.dir, 'x.txt'), 'x\n');
+      clone.repo.git('add', 'x.txt');
+      clone.repo.git('commit', '-q', '-m', 'x');
+      clone.repo.git('push', '-q', 'origin', pull.head);
+      clone.repo.git('checkout', '-q', 'main');
+      const argv = ['#1', '--workflow', 'review-pr', '--dry-run'];
+      const found = await sail(clone, argv, lookupEnv({ ghToken: TOKEN }));
+      expect([found.code, found.stderr]).toEqual([EXIT_OK, '']);
+      expect(clone.world.requests.length).toBeGreaterThan(0);
+      const before = clone.world.requests.length;
+      const missing = await sail(clone, argv, lookupEnv({ noGh: true }));
+      expect([missing.code, missing.stderr]).toEqual([
+        EXIT_REFUSED,
+        '.sail/project.yaml  /adapters/codeHost needs one of SAIL_GITHUB_TOKEN, GITHUB_TOKEN, none of which is set, and gh auth token gave none\n',
+      ]);
+      expect(clone.world.requests.length).toBe(before);
+    },
+    { token: false, pulls: [pull] },
+  );
+}, 90_000);
+
+test('without a token and without gh, sail FAKE-1 on github is refused naming gh auth token', async () => {
+  await withClone(
+    'repository: o/r',
+    async (clone) => {
+      const ran = await sail(clone, ['FAKE-1'], lookupEnv({ noGh: true }));
+      expect([ran.code, ran.stderr]).toEqual([
+        EXIT_REFUSED,
+        '.sail/project.yaml  /adapters/codeHost needs one of SAIL_GITHUB_TOKEN, GITHUB_TOKEN, none of which is set, and gh auth token gave none\n',
       ]);
     },
     { token: false },

@@ -9,6 +9,7 @@ import { EXIT_FAILED, EXIT_OK, EXIT_REFUSED, EXIT_SUSPENDED } from '../../src/cl
 import type { RunHeader } from '../../src/engine/run-header';
 import { readEvents } from '../../src/events/consumers/ndjson';
 import { Ticket } from '../../src/ports/types';
+import { type FakeCredentialTools, fakeCredentialTools } from '../helpers/fake-credentials';
 import { edit } from '../helpers/fixture';
 import { createLinearWorld, DEFAULT_STATES, type LinearWorld, WORLD_WORKSPACE } from '../helpers/linear-world';
 import { parseIssues } from '../helpers/ports';
@@ -59,6 +60,10 @@ interface LinearOptions {
   project?: string;
   /** What the command reads on stdin. */
   stdin?: string;
+  /** Turns the credential lookup on over fake `security` and `gh` tools. */
+  tools?: FakeCredentialTools;
+  /** A second command, run after the first in the same repository and environment, from the first's run id. */
+  followUp?: (runId: string) => string[];
   /** Changes the world before the command runs, such as a failure to inject. */
   prepare?: (world: LinearWorld) => void;
 }
@@ -73,6 +78,12 @@ function everything(dir: string): string {
     .join('\n');
 }
 
+/** The id of the run in `dir`'s `.sail-runs/`, or '' when there is none. */
+function firstRunId(dir: string): string {
+  const runs = join(dir, '.sail-runs');
+  return existsSync(runs) ? (readdirSync(runs).find((name) => name !== 'fake') ?? '') : '';
+}
+
 /** `sail <argv>` in a stub repository on the linear ticket source, against a world of its own. */
 async function linearRun(argv: string[], options: LinearOptions = {}) {
   return withTempRepo(async (repo) => {
@@ -82,11 +93,19 @@ async function linearRun(argv: string[], options: LinearOptions = {}) {
     options.prepare?.(linear);
     const served = linear.serve();
     try {
-      const env = { ...repo.env, LINEAR_API_KEY: KEY, SAIL_LINEAR_API_URL: served.url, ...options.env };
+      const lookup =
+        options.tools === undefined
+          ? {}
+          : { SAIL_CREDENTIAL_LOOKUP: 'on', PATH: fakeCredentialTools(repo.home, options.tools, repo.env.PATH) };
+      const env = { ...repo.env, LINEAR_API_KEY: KEY, SAIL_LINEAR_API_URL: served.url, ...lookup, ...options.env };
       const captured = await runCaptured(argv, repo.dir, {
         env,
         ...(options.stdin === undefined ? {} : { stdin: options.stdin }),
       });
+      const followed =
+        options.followUp === undefined
+          ? undefined
+          : await runCaptured(options.followUp(firstRunId(repo.dir)), repo.dir, { env });
       const runs = join(repo.dir, '.sail-runs');
       const runIds = existsSync(runs) ? readdirSync(runs).filter((name) => name !== 'fake') : [];
       const [runId = ''] = runIds;
@@ -97,6 +116,7 @@ async function linearRun(argv: string[], options: LinearOptions = {}) {
         ran && existsSync(join(call, name)) ? readFileSync(join(call, name), 'utf8') : '';
       return {
         ...captured,
+        followed,
         runIds,
         runId,
         dir,
@@ -364,4 +384,67 @@ test("sail port ticket-source update --state in-review moves the Linear ticket t
     mutations: [['SailMove', 'state-in-review']],
     held: 'In Review',
   });
+});
+
+const FROM_KEYCHAIN: FakeCredentialTools = { items: { 'linear-api-key': KEY } };
+
+test('without LINEAR_API_KEY, sail ADW-1 --until spec reads the key from the keychain item linear-api-key, Linear receives it, and sail resume from the same environment goes on', async () => {
+  const run = await linearRun(['ADW-1', '--until', 'spec'], {
+    env: { LINEAR_API_KEY: undefined },
+    tools: FROM_KEYCHAIN,
+    followUp: (runId) => ['resume', runId],
+  });
+  expect({ code: run.code, stderr: run.stderr, runs: run.runIds.length }).toEqual({
+    code: EXIT_SUSPENDED,
+    stderr: '',
+    runs: 1,
+  });
+  expect(run.world.requests.length).toBeGreaterThan(0);
+  expect(run.world.ticket(1).state).toBe('In Progress');
+  expect(run.followed?.stderr).toBe('');
+  expect(run.followed?.code).toBe(EXIT_OK);
+  expect(run.followed?.stdout).toContain('completed');
+});
+
+test('without LINEAR_API_KEY and with the keychain lacking linear-api-key, sail ADW-1 is refused with exit 3 naming the item', async () => {
+  const run = await linearRun(['ADW-1'], { env: { LINEAR_API_KEY: undefined }, tools: { items: {} } });
+  expect({ code: run.code, stderr: run.stderr, requests: run.world.requests, runs: run.runIds }).toEqual({
+    code: EXIT_REFUSED,
+    stderr:
+      '.sail/project.yaml  /adapters/ticketSource needs LINEAR_API_KEY, which is not set, and the keychain holds no linear-api-key item\n',
+    requests: [],
+    runs: [],
+  });
+});
+
+test("a keychain that exits 51 refuses sail ADW-1 with exit 3, naming the item and security's stderr", async () => {
+  const run = await linearRun(['ADW-1'], {
+    env: { LINEAR_API_KEY: undefined },
+    tools: { refuse: { code: 51, stderr: 'User interaction is not allowed.' } },
+  });
+  expect({ code: run.code, stderr: run.stderr, requests: run.world.requests }).toEqual({
+    code: EXIT_REFUSED,
+    stderr:
+      '.sail/project.yaml  /adapters/ticketSource LINEAR_API_KEY: the keychain refused its linear-api-key item: User interaction is not allowed.\n',
+    requests: [],
+  });
+});
+
+test('a LINEAR_API_KEY in the environment wins: the keychain is not asked, and its other key is never sent', async () => {
+  const run = await linearRun(['ADW-1', '--until', 'spec'], {
+    tools: { items: { 'linear-api-key': 'lin_api_WRONG_from_keychain' } },
+  });
+  expect(run.code).toBe(EXIT_SUSPENDED);
+  expect(run.world.requests.length).toBeGreaterThan(0);
+});
+
+test('with SAIL_CREDENTIAL_LOOKUP=off, a keychain that holds the key is not asked and the refusal reads as before', async () => {
+  const run = await linearRun(['ADW-1'], {
+    env: { LINEAR_API_KEY: undefined, SAIL_CREDENTIAL_LOOKUP: 'off' },
+    tools: FROM_KEYCHAIN,
+  });
+  expect([run.code, run.stderr]).toEqual([
+    EXIT_REFUSED,
+    '.sail/project.yaml  /adapters/ticketSource needs LINEAR_API_KEY, which is not set\n',
+  ]);
 });

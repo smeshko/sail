@@ -167,7 +167,7 @@ export async function fillCredentials(
       if ('error' in answer) errors.push(`${member}: ${answer.error}`);
       else if (answer.unset !== '') unset.push(answer.unset);
     }
-    if (!found && unset.length > 0) tried[members.join(',')] = unset.join(' and ');
+    if (!found && unset.length > 0) tried[members.join(',')] = [...new Set(unset)].join(' and ');
   }
   return { filled, tried, errors };
 }

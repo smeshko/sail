@@ -17,6 +17,7 @@ import {
   resolveAdapters,
 } from '../../src/engine/adapters';
 import { type AdapterConfig, PORTS, type Port, type ProjectConfig, readConfig } from '../../src/engine/config';
+import type { CredentialLookup } from '../../src/engine/credentials';
 import { runsDir } from '../../src/engine/run-dir';
 import { type AdapterEntry, type RunHeader, validateRunHeader } from '../../src/engine/run-header';
 import type { SchemaIssue } from '../../src/engine/schemas';
@@ -1047,4 +1048,120 @@ test("with a root apart from sailDir, an adapter is handed that root and its run
     runsDir: join(clone.root, '.sail-runs'),
     workspace: 'fake://origin',
   });
+});
+
+// Credentials an adapter requires and the environment leaves unset are read from their sources.
+
+const keyed = (seen: Env[], requires: unknown = ['LINEAR_API_KEY']) => ({
+  requires: () => requires,
+  create: (_options: unknown, context: { env: Env }) => {
+    seen.push(context.env);
+    return stubAdapter('ticketSource');
+  },
+});
+
+const withTicketSource = (definition: object, lookup: CredentialLookup, env: Env = {}) => {
+  const { sailDir } = repo();
+  return resolveAdapters({
+    sailDir,
+    config: configOf({ ticketSource: { use: 'keyed' } }),
+    builtins: { ...BUILTINS, ...builtin('keyed', 'ticketSource', definition) },
+    env,
+    credentials: lookup,
+  });
+};
+
+test('an unset LINEAR_API_KEY that its source fills creates the adapter on the filled key, and credentials holds it', async () => {
+  const seen: Env[] = [];
+  const resolved = resolvedOrThrow(await withTicketSource(keyed(seen), async () => ({ value: 'lin_filled' })));
+  expect(seen[0]?.LINEAR_API_KEY).toBe('lin_filled');
+  expect(resolved.credentials).toEqual({ LINEAR_API_KEY: 'lin_filled' });
+});
+
+test('a variable set in the environment is not asked for', async () => {
+  const asked: string[] = [];
+  const seen: Env[] = [];
+  const lookup: CredentialLookup = async (name) => {
+    asked.push(name);
+    return { value: 'other' };
+  };
+  const resolved = resolvedOrThrow(await withTicketSource(keyed(seen), lookup, { LINEAR_API_KEY: 'from-env' }));
+  expect(asked).toEqual([]);
+  expect(seen[0]?.LINEAR_API_KEY).toBe('from-env');
+  expect(resolved.credentials).toEqual({});
+});
+
+test('a refusal says what the source held, and with the lookup off reads as before', async () => {
+  const none = await withTicketSource(keyed([]), async () => ({
+    unset: 'the keychain holds no linear-api-key item',
+  }));
+  expect(none).toEqual(
+    issue('ticketSource', 'needs LINEAR_API_KEY, which is not set, and the keychain holds no linear-api-key item'),
+  );
+  const off = await withTicketSource(keyed([]), async () => ({ unset: '' }));
+  expect(off).toEqual(issue('ticketSource', 'needs LINEAR_API_KEY, which is not set'));
+});
+
+test('a group of alternatives names what was tried for it', async () => {
+  const result = await withTicketSource(keyed([], [['SAIL_GITHUB_TOKEN', 'GITHUB_TOKEN']]), async () => ({
+    unset: 'gh auth token gave none',
+  }));
+  expect(result).toEqual(
+    issue(
+      'ticketSource',
+      'needs one of SAIL_GITHUB_TOKEN, GITHUB_TOKEN, none of which is set, and gh auth token gave none',
+    ),
+  );
+});
+
+test('a lookup error is an issue at the port naming the item, and nothing is created', async () => {
+  const seen: Env[] = [];
+  const result = await withTicketSource(keyed(seen), async () => ({
+    error: 'the keychain refused its linear-api-key item: locked',
+  }));
+  expect(result).toEqual(issue('ticketSource', 'LINEAR_API_KEY: the keychain refused its linear-api-key item: locked'));
+  expect(seen).toEqual([]);
+});
+
+test('a named harness reached through harnesses() is filled, and credentials gains it', async () => {
+  const { sailDir } = repo();
+  const seen: Env[] = [];
+  const resolved = resolvedOrThrow(
+    await resolveAdapters({
+      sailDir,
+      config: withHarnesses({ other: { use: 'keyed' } }),
+      builtins: {
+        ...BUILTINS,
+        keyed: {
+          harness: {
+            requires: () => [['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN']],
+            create: (_o: unknown, context: { env: Env }) => {
+              seen.push(context.env);
+              return stubAdapter('harness');
+            },
+          },
+        },
+      } as unknown as Builtins,
+      env: {},
+      credentials: async (name) => (name === 'CLAUDE_CODE_OAUTH_TOKEN' ? { value: 'oauth-filled' } : { unset: '' }),
+    }),
+  );
+  expect(resolved.credentials).toEqual({});
+  const named = await resolved.harnesses(['other']);
+  if ('issues' in named) throw new Error(JSON.stringify(named.issues));
+  expect(seen[0]?.CLAUDE_CODE_OAUTH_TOKEN).toBe('oauth-filled');
+  expect(resolved.credentials).toEqual({ CLAUDE_CODE_OAUTH_TOKEN: 'oauth-filled' });
+});
+
+test('portVariables resolves on the filled environment', async () => {
+  const resolved = resolvedOrThrow(
+    await withTicketSource(
+      {
+        create: () => stubAdapter('ticketSource'),
+        requires: (_o: unknown, env: Env) => (env.LINEAR_API_KEY === 'lin_filled' ? [] : ['LINEAR_API_KEY']),
+      },
+      async () => ({ value: 'lin_filled' }),
+    ),
+  );
+  expect(await resolved.portVariables('ticketSource')).toEqual([]);
 });
