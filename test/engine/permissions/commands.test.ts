@@ -411,6 +411,26 @@ test.each([
   expect(verdict(run(command, open), want)).toEqual(want);
 });
 
+const ANY = {
+  commands: ['echo *', 'cat', 'true', 'read *', 'export *', 'declare *', 'git *'],
+  read: ['**'],
+  write: ['**'],
+};
+const UNRESOLVED = (rule: string): Want => [rule, "can't be resolved"];
+
+test.each([
+  ['for f in a.txt; do f=/etc/x; echo hi > $f; done', ANY, UNRESOLVED('write')],
+  ['for f in a.txt; do export f=/etc/x; echo hi > $f; done', ANY, UNRESOLVED('write')],
+  ['for f in a.txt; do declare f=/etc/x; cat < $f; done', ANY, UNRESOLVED('read')],
+  ['for f in a.txt; do read f; cat < $f; done', ANY, UNRESOLVED('read')],
+  ['for f in a.txt; do read -r f; git -C $f status; done', ANY, ['commands', 'hold an expansion']],
+  ['for f in a.txt; do for g in 1 2; do echo hi > $f; f=/etc/x; done; done', ANY, UNRESOLVED('write')],
+  ['for f in a.txt; do while true; do echo hi > $f; f=/etc/x; done; done', ANY, UNRESOLVED('write')],
+  ['for f in a.txt; do echo hi > $f; done', ANY, 'allow'],
+] as [string, Partial<Permissions>, Want][])('a loop variable the body assigns: %j is %j', (command, open, want) => {
+  expect(verdict(run(command, open), want)).toEqual(want);
+});
+
 const DENIED = (text: string): Want => ['commands', `\`${text}\` is among the step's denied commands`];
 const PROFILE = { commands: ['*'], deny: ['git push *', 'gh *', 'curl *'] };
 

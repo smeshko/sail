@@ -70,6 +70,8 @@ const LOOP_WALKS = 64;
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh']);
 const VALUE_LETTERS: Record<string, string> = { sh: 'o', dash: 'o', zsh: 'o', bash: 'oO', ksh: 'oR' };
 const DECLARERS = new Set(['export', 'declare', 'typeset', 'local', 'readonly']);
+/** Builtins that assign the names among their arguments, other than by `NAME=value`. */
+const ASSIGNERS = new Set(['read', 'mapfile', 'readarray', 'getopts', 'printf', 'let', 'unset', ...DECLARERS]);
 const GIT_PATHS = new Set(['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE']);
 const OUTPUT = /^--o(?:u(?:t(?:p(?:u(?:t)?)?)?)?)?(?:=|$)/;
 
@@ -172,9 +174,21 @@ class Collector {
 
   /** Loop variables in scope: a name bound to a value, or to undefined when the shell's value isn't known here. */
   private readonly bound = new Map<string, string | undefined>();
+  /** Loop variables a command assigns: the walk is repeated with each never bound, since bash uses the new value. */
+  readonly reassigned = new Set<string>();
   private walks = 0;
 
-  constructor(private readonly ctx: DecideContext) {}
+  constructor(
+    private readonly ctx: DecideContext,
+    private readonly unbindable: ReadonlySet<string> = new Set(),
+  ) {}
+
+  /** A command assigns `name`: a loop variable of that name no longer holds its word. */
+  private assigned(name: string): void {
+    if (!this.bound.has(name)) return;
+    this.reassigned.add(name);
+    this.bound.set(name, undefined);
+  }
 
   private value(name: string): string | undefined {
     return this.bound.has(name) ? this.bound.get(name) : this.ctx.env[name];
@@ -226,7 +240,8 @@ class Collector {
    */
   private loop(name: string, list: readonly Word[] | undefined, walk: () => void): void {
     const values = list?.map((word) => this.known(word));
-    const literal = values !== undefined && values.length > 0 && values.length <= LOOP_WORDS;
+    const literal =
+      values !== undefined && values.length > 0 && values.length <= LOOP_WORDS && !this.unbindable.has(name);
     if (literal && values.every((value) => value !== undefined) && this.walks + values.length <= LOOP_WALKS) {
       this.walks += values.length;
       for (const value of values) {
@@ -319,6 +334,7 @@ class Collector {
 
   private assign(name: string, value: Word, text: string, cwd: Cwd): void {
     this.out.assignments.push({ name, text });
+    this.assigned(name);
     if (GIT_PATHS.has(name)) this.inside(value, `${name}=${value.raw}`, cwd.physical);
   }
 
@@ -381,6 +397,12 @@ class Collector {
       for (const arg of args) {
         const assigned = /^([A-Za-z_][A-Za-z0-9_]*)\+?=/.exec(arg.text);
         if (assigned !== null) this.out.assignments.push({ name: assigned[1] as string, text });
+      }
+    }
+    if (ASSIGNERS.has(name)) {
+      for (const arg of args) {
+        const assigned = /^[A-Za-z_][A-Za-z0-9_]*/.exec(arg.text);
+        if (assigned !== null) this.assigned(assigned[0]);
       }
     }
     if (name === 'find') this.find(args, text, cwd, depth);
@@ -624,8 +646,13 @@ export function decideCommand(command: string, permissions: Permissions, ctx: De
   const from = insideRoots(start, ctx);
   if (!from.ok) return deny('commands', `the working directory of ${quote(command)}: ${from.reason}`);
 
-  const collector = new Collector(ctx);
+  let collector = new Collector(ctx);
   collector.list(parsed.list, { logical: start, physical: from.path }, 0);
+  for (const unbindable = new Set<string>(); [...collector.reassigned].some((name) => !unbindable.has(name)); ) {
+    for (const name of collector.reassigned) unbindable.add(name);
+    collector = new Collector(ctx, unbindable);
+    collector.list(parsed.list, { logical: start, physical: from.path }, 0);
+  }
   const out = collector.out;
 
   for (const run of out.runs) {
