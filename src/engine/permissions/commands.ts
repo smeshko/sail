@@ -329,15 +329,19 @@ class Collector {
   private command(command: Command, cwd: Cwd, depth: number, inBody: boolean, surely: boolean): Cwd | undefined {
     if (command.kind !== 'simple') return this.compound(command, cwd, depth, inBody, surely);
     this.nested([...command.assignments.map((a) => a.value), ...command.words], cwd, depth);
-    this.redirections(command.redirections, command.text, cwd, depth);
     const bare = command.words.length === 0;
+    // With no command name, bash makes the assignments before the redirections.
+    if (!bare) this.redirections(command.redirections, command.text, cwd, depth);
     for (const assignment of command.assignments) {
       this.assign(assignment.name, assignment.value, command.text, cwd);
       if (bare && surely && !this.looping.has(assignment.name) && assignment.append !== true) {
         this.bound.set(assignment.name, this.known(assignment.value));
       } else this.unbind([assignment.name]);
     }
-    if (bare) return undefined;
+    if (bare) {
+      this.redirections(command.redirections, command.text, cwd, depth);
+      return undefined;
+    }
     const moved = this.unwrap(command.words, command.text, cwd, depth, false);
     this.unbind(command.assignments.map((assignment) => assignment.name));
     if (!surely) this.unbind(assignedIn([[{ commands: [command], background: false, conditional: false }]]));

@@ -596,6 +596,9 @@ test.each([
   ['f=a; git show $f', GIT_ONLY, 'allow'],
   ['X=/tmp/; X+=src; echo x > $X/a.ts', BARE, STAGE_UNKNOWN],
   ['X+=src; echo x > $X/a.ts', BARE, STAGE_UNKNOWN],
+  ['X=src; X=lib >$X/a.dart', BARE, ['write', 'lib/a.dart']],
+  ['STAGE_OUT=lib >$STAGE_OUT/a.dart', { ...SET_OPEN, write: ['$STAGE_OUT/**'] }, ['write', 'lib/a.dart']],
+  ['true && STAGE_OUT=lib >$STAGE_OUT/a.dart', { ...SET_OPEN, write: ['$STAGE_OUT/**'] }, STAGE_UNKNOWN],
 ] as [string, Partial<Permissions>, Want][])(
   'a bare assignment shadows the environment where it surely runs: %j under %j is %j',
   (command, open, want) => {
