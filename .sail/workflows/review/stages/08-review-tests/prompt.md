@@ -38,7 +38,8 @@ A finding is something you can point at: the file and line, the input or state t
 Run a test or the typecheck when that settles a doubt. Leave out taste, speculation, and another reviewer's question.
 
 Give each finding a severity: `high` for one that ships broken, wrong or unsafe behaviour, `medium` for one with a
-narrow trigger or that will cost the next change, `low` for the rest.
+narrow trigger or that will cost the next change. Report only `high` and `medium` findings: leave out a test gap that
+lets no failure through, however small, and say in your coverage why that item holds.
 
 ## Coverage
 

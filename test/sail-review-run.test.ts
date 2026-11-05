@@ -783,3 +783,16 @@ test("the pull request's description reaches fix and check-fix wrapped as untrus
     );
   });
 }, 120_000);
+
+test('review-tests is asked for medium and high findings only', async () => {
+  await withTempRepo(async (repo) => {
+    setUp(repo);
+    const { code, stderr, dir } = await review(repo);
+    expect({ code, stderr: code === 0 ? '' : stderr }).toEqual({ code: 0, stderr: '' });
+    const folder = readdirSync(dir).find((name) => name.replace(/^\d+-/, '') === 'review-tests');
+    const prompt = readFileSync(join(dir, folder ?? '', 'call-1', 'prompt.md'), 'utf8');
+    expect(prompt).toContain('`medium` for one with a\nnarrow trigger or that will cost the next change');
+    expect(prompt).toContain('Report only `high` and `medium` findings');
+    expect(prompt).not.toContain('`low` for the rest');
+  });
+}, 120_000);
