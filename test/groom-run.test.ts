@@ -890,6 +890,22 @@ test('groom takes factory off a ticket it rules manual', async () => {
   });
 }, 120_000);
 
+test('groom takes manual off a ticket ruled manual before that it now plans', async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeGroomRepo(repo);
+    edit(sailDir, 'fake/tickets.json', '"labels": ["groom"]', '"labels": ["groom", "manual"]');
+    repo.git('commit', '-am', 'FAKE-2 was ruled manual');
+    reseed(sailDir, 'decide', (output) => {
+      output.questions = [];
+    });
+    const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+
+    expect(fakeTicket(repo.dir, 'FAKE-2').labels).toEqual(['planned', 'factory']);
+    expect(labelEvents(repo.dir, 'ticket:unlabelled').sort()).toEqual(['groom', 'manual']);
+  });
+}, 120_000);
+
 test('groom reports a manual beside a cancel that ends the ticket, and labels it groomed', async () => {
   await withTempRepo(async (repo) => {
     const sailDir = writeGroomRepo(repo);

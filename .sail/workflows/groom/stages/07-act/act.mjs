@@ -214,6 +214,8 @@ const comment = posted ? { url: current.url } : port(['ticket-source', 'comment'
 for (const name of outcomeLabels) tried(['ticket-source', 'add-label', ticketKey, name]);
 // A regroomed ticket can carry `factory`; a manual ticket is not the factory's.
 if (verdict.outcome === 'manual') tried(['ticket-source', 'remove-label', ticketKey, 'factory']);
+// A ticket ruled manual before and groomed to another outcome now is no longer waiting on a person.
+else if (current.labels.includes('manual')) tried(['ticket-source', 'remove-label', ticketKey, 'manual']);
 const relabelled = tried(['ticket-source', 'remove-label', ticketKey, label]);
 console.log(
   JSON.stringify({
