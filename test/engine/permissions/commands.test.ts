@@ -346,6 +346,37 @@ test.each([
   ).toEqual(want);
 });
 
+const OPEN_ECHO = ['echo *', 'bash *'];
+const NOT_RESOLVED = ['write', "can't be resolved"] as Want;
+
+test.each([
+  ['cd lib && echo x > $PWD/a.ts', ['src/**'], ['write', 'lib/a.ts']],
+  ['cd lib && echo x > $PWD/a.ts', ['a.ts'], ['write', 'lib/a.ts']],
+  ['cd src && echo x > $PWD/a.ts', ['src/**'], 'allow'],
+  ['cd -P top/.. && echo x > $PWD/a.ts', ['src/**'], 'allow'],
+  ['cd top/.. && echo x > $PWD/a.ts', ['src/**'], ['write', 'a.ts']],
+  ['cd lib && echo x > $OLDPWD/a.ts', ['a.ts'], 'allow'],
+  ['cd lib && cd ../src && echo x > $OLDPWD/a.ts', ['lib/**'], 'allow'],
+  ['(cd lib); echo x > $PWD/a.ts', ['a.ts'], 'allow'],
+  ['echo | cd lib; echo x > $PWD/a.ts', ['a.ts'], 'allow'],
+  ['cd lib & echo x > $PWD/a.ts', ['a.ts'], 'allow'],
+  ['x=$(cd lib); echo x > $PWD/a.ts', ['a.ts'], 'allow'],
+  ["bash -c 'cd lib'; echo x > $PWD/a.ts", ['a.ts'], 'allow'],
+  ['{ cd lib; }; echo x > $PWD/a.ts', ['a.ts'], ['write', 'lib/a.ts']],
+] as [string, string[], Want][])('cd and $PWD: %j under %j is %j', (command, write, want) => {
+  const ctx = { ...layout.ctx, env: { ...layout.ctx.env, PWD: layout.worktree } };
+  const decision = decideCommand(placed(command), perms({ commands: OPEN_ECHO, write }), ctx);
+  expect(verdict(decision, want)).toEqual(want);
+});
+
+test('cd and $OLDPWD: with no PWD in the environment the path cannot be resolved', () => {
+  const decision = decideCommand('cd lib && echo x > $OLDPWD/a.ts', perms({ commands: OPEN_ECHO, write: ['a.ts'] }), {
+    ...layout.ctx,
+    env: Object.fromEntries(Object.entries(layout.ctx.env).filter(([name]) => name !== 'PWD')),
+  });
+  expect(verdict(decision, NOT_RESOLVED)).toEqual(NOT_RESOLVED);
+});
+
 test.each([
   ['for f in a; do ls; done > out.txt', { write: ['out.txt'] }, 'allow'],
   ['for f in a; do ls; done > lib/a.dart', { write: ['src/**'] }, ['write', 'lib/a.dart']],
