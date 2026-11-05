@@ -384,11 +384,18 @@ const TABLE: Row[] = [
     mention: "can't be decided",
   },
   {
-    label: 'closed: a loop the parser refuses',
-    call: bash('for f in *; do rm $f; done'),
+    label: 'closed: a select loop the parser refuses',
+    call: bash('select f in *; do rm $f; done'),
     open: { commands: ['rm *'] },
     want: 'commands',
     mention: "can't be checked",
+  },
+  {
+    label: 'closed: a loop around a command the step does not list',
+    call: bash('for f in a b; do rm "$f"; done'),
+    open: { commands: ['git *'] },
+    want: 'commands',
+    mention: 'rm "$f"',
   },
   {
     label: 'closed: a redirection through a file used as a directory',
