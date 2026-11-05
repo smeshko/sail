@@ -15,6 +15,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { BACKGROUND, refusedCommand } from '../../../src/adapters/claude-code/command-check';
 import { createGate } from '../../../src/adapters/claude-code/gate';
 
 const base = mkdtempSync(join(tmpdir(), 'sail-command-check-'));
@@ -120,9 +121,43 @@ function command(rand: () => number, depth: number): string {
     `echo "$(${inner})"`,
     `eval ${sq(inner)}`,
     `cat <<EOF\n$(${inner})\nEOF`,
+    `for x in a b; do\n${inner}\ndone`,
+    `{\n${inner}\n}`,
+    `(\n${inner}\n)`,
+    `if true; then\n${inner}\nfi`,
+    `while true; do\n${inner}\nbreak; done`,
+    `case x in x) ${sq(inner)} | bash ;; esac`,
   ]);
   return rand() < 0.5 ? wrapped : `${text}${pick(JOINS)}${wrapped}`;
 }
+
+test.each([
+  ['for x in a; do sleep 1 & done', BACKGROUND],
+  ['{ sleep 1 & }', BACKGROUND],
+  ['(sleep 1 &)', BACKGROUND],
+  ['if true; then sleep 1 & fi', BACKGROUND],
+  ['while true; do sleep 1 & break; done', BACKGROUND],
+  ['until false; do sleep 1 & done', BACKGROUND],
+  ['case x in x) sleep 1 & ;; esac', BACKGROUND],
+  ['for x in a; do zsh -c true; done', 'zsh reads some commands'],
+  ['{ zsh -c true; }', 'zsh reads some commands'],
+  ['(sh -c true)', 'sh reads some commands'],
+  ['for x in zsh; do x; done', 'zsh reads some commands'],
+  ['case zsh in x) y;; esac', 'zsh reads some commands'],
+  ['for x in a; do :; done > zsh', 'zsh reads some commands'],
+  ['{ :; } <<EOF\n$(zsh -c true)\nEOF', 'zsh reads some commands'],
+  ['for x in a; do git diff ../x; done', 'git diff of ../x'],
+  ['if true; then git diff --no-index a b; fi', '--no-index'],
+] as [string, string][])('the gate looks inside compound commands: %j is refused', (text, reason) => {
+  expect(refusedCommand(text)).toContain(reason);
+});
+
+test.each(['for x in a b; do git diff HEAD; done', '{ git log -1; } > out.txt', '(echo hi)'])(
+  'a compound command with nothing to refuse is let through: %j',
+  (text) => {
+    expect(refusedCommand(text)).toBeUndefined();
+  },
+);
 
 const alive = (pid: number): boolean => {
   try {

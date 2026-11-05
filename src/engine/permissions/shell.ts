@@ -1,5 +1,6 @@
 // A shell parser for the permission engine: it turns a command string into every simple command a shell would run for
-// it, nested ones included, and refuses, with a reason, any construct outside the closed list it understands (D7).
+// it, nested ones included, and refuses, with a reason, any construct outside the closed list it understands (D7, as
+// ADW-478 revises it: loops, conditionals, case, groups and subshells are read, select and functions still refused).
 // It parses and never expands: a word keeps its `$VAR` and its substitutions as written.
 
 export type RedirectionOp = '>' | '>>' | '>|' | '<' | '<<<' | '&>' | '&>>' | '<<' | 'dup';
@@ -39,6 +40,7 @@ export interface Assignment {
 }
 
 export interface SimpleCommand {
+  readonly kind: 'simple';
   /** The command as written, for reasons. */
   readonly text: string;
   readonly assignments: readonly Assignment[];
@@ -47,9 +49,50 @@ export interface SimpleCommand {
   readonly redirections: readonly Redirection[];
 }
 
+interface CompoundBase {
+  /** The construct as written, trailing redirections included, for reasons. */
+  readonly text: string;
+  /** Those after its closing keyword, which apply to the whole construct. */
+  readonly redirections: readonly Redirection[];
+}
+
+export interface Group extends CompoundBase {
+  readonly kind: 'group' | 'subshell';
+  readonly body: readonly Pipeline[];
+}
+
+export interface ForLoop extends CompoundBase {
+  readonly kind: 'for';
+  readonly name: string;
+  /** Absent when there is no `in`: the loop runs over `"$@"`. */
+  readonly words?: readonly Word[];
+  readonly body: readonly Pipeline[];
+}
+
+export interface WhileLoop extends CompoundBase {
+  readonly kind: 'while' | 'until';
+  readonly condition: readonly Pipeline[];
+  readonly body: readonly Pipeline[];
+}
+
+export interface IfClause extends CompoundBase {
+  readonly kind: 'if';
+  readonly clauses: readonly { readonly condition: readonly Pipeline[]; readonly body: readonly Pipeline[] }[];
+  readonly otherwise?: readonly Pipeline[];
+}
+
+export interface CaseClause extends CompoundBase {
+  readonly kind: 'case';
+  readonly word: Word;
+  readonly arms: readonly { readonly patterns: readonly Word[]; readonly body: readonly Pipeline[] }[];
+}
+
+export type Compound = Group | ForLoop | WhileLoop | IfClause | CaseClause;
+export type Command = SimpleCommand | Compound;
+
 /** Commands joined by `|`. A list joins pipelines by `;`, `&&`, `||`, `&` and newlines. */
 export interface Pipeline {
-  readonly commands: readonly SimpleCommand[];
+  readonly commands: readonly Command[];
   /** Ended by `&`: it runs beside what follows. */
   readonly background: boolean;
 }
@@ -57,6 +100,25 @@ export interface Pipeline {
 export type Parsed =
   | { readonly ok: true; readonly list: readonly Pipeline[] }
   | { readonly ok: false; readonly reason: string };
+
+/** The lists a compound command runs, in source order: none for a simple command. */
+export function bodies(command: Command): readonly (readonly Pipeline[])[] {
+  switch (command.kind) {
+    case 'simple':
+      return [];
+    case 'group':
+    case 'subshell':
+    case 'for':
+      return [command.body];
+    case 'while':
+    case 'until':
+      return [command.condition, command.body];
+    case 'if':
+      return [...command.clauses.flatMap((clause) => [clause.condition, clause.body]), command.otherwise ?? []];
+    case 'case':
+      return command.arms.map((arm) => arm.body);
+  }
+}
 
 /** How deep substitutions may nest before a parse refuses. */
 export const MAX_DEPTH = 32;
@@ -106,6 +168,18 @@ const KEYWORDS: ReadonlyMap<string, string> = new Map([
   [']]', 'the keyword ]]'],
 ]);
 
+/** Where a list stops: at one of these reserved words, at `)`, or at a case arm's end. The stop is left unread. */
+interface Stops {
+  readonly words: readonly string[];
+  readonly paren: boolean;
+  readonly arm: boolean;
+}
+
+const TOP: Stops = { words: [], paren: false, arm: false };
+const CLOSERS = ['then', 'elif', 'else', 'fi', 'do', 'done', 'esac', '}'];
+const KEYWORD_AT =
+  /^(?:for|while|until|if|case|then|elif|else|fi|do|done|esac|in|select|function|\{|\})(?=$|[ \t\n;&|<>()])/;
+
 interface WordState {
   text: string;
   literal: boolean;
@@ -143,7 +217,7 @@ class Parser {
   }
 
   program(): Pipeline[] {
-    const list = this.list(false);
+    const list = this.list(TOP);
     if (this.pending.length > 0) this.missingDelimiter();
     return list;
   }
@@ -222,17 +296,26 @@ class Parser {
     while (!this.atEnd() && this.src[this.pos] !== '\n') this.pos++;
   }
 
-  /** Pipelines up to the end, or up to an unquoted `)` when `nested`, which is left for the caller. */
-  private list(nested: boolean): Pipeline[] {
+  /** The reserved word at the read position, if the word there is exactly one. */
+  private keywordAt(): string | undefined {
+    this.squashRun(this.pos, /[A-Za-z{}]/);
+    return KEYWORD_AT.exec(this.src.slice(this.pos, this.pos + 10))?.[0];
+  }
+
+  /** Pipelines up to the end, or up to one of `stops`, which is left for the caller. */
+  private list(stops: Stops): Pipeline[] {
     const list: Pipeline[] = [];
     for (;;) {
       this.blank();
       const c = this.peek();
       if (c === undefined) return list;
       if (c === ')') {
-        if (nested) return list;
+        if (stops.paren) return list;
         throw new Refusal('an unmatched )');
       }
+      if (stops.arm && this.armEnd()) return list;
+      const keyword = this.keywordAt();
+      if (keyword !== undefined && stops.words.includes(keyword)) return list;
       if (c === ';' || c === '&' || c === '|') throw new Refusal(`a command can't start with ${c}`);
       const commands = this.pipeline();
       this.spaces();
@@ -242,6 +325,9 @@ class Parser {
         this.blank();
         this.followed(op);
         list.push({ commands, background: false });
+      } else if (stops.arm && this.armEnd()) {
+        list.push({ commands, background: false });
+        return list;
       } else if (this.startsWith(';;')) {
         throw new Refusal('a case clause (;;)');
       } else if (this.peek() === ';') {
@@ -256,24 +342,215 @@ class Parser {
     }
   }
 
+  /** At `;;`, `;&` or `;;&`, which end a case arm. */
+  private armEnd(): boolean {
+    return this.startsWith(';;') || this.startsWith(';&');
+  }
+
   /** After `op`, a command must follow. */
   private followed(op: string): void {
     const c = this.peek();
-    if (c === undefined || c === ')' || c === ';' || c === '&' || c === '|') {
+    const keyword = this.keywordAt();
+    if (
+      c === undefined ||
+      c === ')' ||
+      c === ';' ||
+      c === '&' ||
+      c === '|' ||
+      (keyword !== undefined && CLOSERS.includes(keyword))
+    ) {
       throw new Refusal(`a command that ends with ${op}`);
     }
   }
 
-  private pipeline(): SimpleCommand[] {
-    const commands = [this.simple()];
+  private pipeline(): Command[] {
+    const commands = [this.command()];
     for (;;) {
       this.spaces();
       if (this.peek() !== '|' || this.startsWith('||')) return commands;
       this.pos += this.startsWith('|&') ? 2 : 1;
       this.blank();
       this.followed('|');
-      commands.push(this.simple());
+      commands.push(this.command());
     }
+  }
+
+  /** A compound command when a reserved word or `(` starts it, a simple command otherwise. */
+  private command(): Command {
+    this.spaces();
+    const start = this.pos;
+    if (this.peek() === '(' && this.after(1) !== '(') return this.subshell(start);
+    switch (this.keywordAt()) {
+      case 'for':
+        return this.forLoop(start);
+      case 'while':
+      case 'until':
+        return this.whileLoop(start);
+      case 'if':
+        return this.ifClause(start);
+      case 'case':
+        return this.caseClause(start);
+      case '{':
+        return this.group(start);
+      default:
+        return this.simple();
+    }
+  }
+
+  /** The commands of one body, read a level deeper, up to one of `stops`. */
+  private body(stops: Stops, construct: string, empty = false): Pipeline[] {
+    this.enter();
+    const list = this.list(stops);
+    this.depth--;
+    if (list.length === 0 && !empty) throw new Refusal(`${construct} with an empty body`);
+    return list;
+  }
+
+  /** Consumes the reserved word `keyword`, or refuses `construct` for lacking it. */
+  private expect(keyword: string, construct: string): void {
+    this.blank();
+    if (this.keywordAt() !== keyword) throw new Refusal(`${construct} without its ${keyword}`);
+    this.pos += keyword.length;
+  }
+
+  /** What follows a closing keyword: redirections for the whole construct, and then a separator or the end. */
+  private closing(start: number, close: string): { text: string; redirections: Redirection[] } {
+    const redirections: Redirection[] = [];
+    for (;;) {
+      this.spaces();
+      const redirection = this.redirection();
+      if (redirection === undefined) break;
+      redirections.push(redirection);
+    }
+    const c = this.peek();
+    if (c !== undefined && !'\n;&|)#'.includes(c)) throw new Refusal(`a word after ${close}`);
+    return { text: this.src.slice(start, this.pos).trim(), redirections };
+  }
+
+  private group(start: number): Command {
+    this.pos += 1;
+    const body = this.body({ words: ['}'], paren: false, arm: false }, 'a brace group');
+    this.expect('}', 'a brace group');
+    return { kind: 'group', body, ...this.closing(start, '}') };
+  }
+
+  private subshell(start: number): Command {
+    this.pos += 1;
+    const body = this.body({ words: [], paren: true, arm: false }, 'a subshell');
+    if (this.peek() !== ')') throw new Refusal('a subshell without its )');
+    this.pos++;
+    return { kind: 'subshell', body, ...this.closing(start, ')') };
+  }
+
+  private forLoop(start: number): Command {
+    this.pos += 3;
+    this.spaces();
+    if (this.startsWith('((')) throw new Refusal('an arithmetic for loop');
+    const c = this.peek();
+    if (c === undefined || META.has(c)) throw new Refusal('a for loop without a name');
+    const name = this.word().raw;
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new Refusal(`a for loop over ${name}, which isn't a name`);
+    this.blank();
+    let words: Word[] | undefined;
+    if (this.keywordAt() === 'in') {
+      this.pos += 2;
+      words = [];
+      for (;;) {
+        this.spaces();
+        const next = this.peek();
+        if (next === undefined || next === '\n' || next === ';') break;
+        if (next === '#') {
+          this.comment();
+          break;
+        }
+        if (META.has(next)) throw new Refusal(`a for loop word list holding ${next}`);
+        words.push(this.word());
+      }
+    }
+    this.spaces();
+    if (this.peek() === ';') this.pos++;
+    this.expect('do', 'a for loop');
+    const body = this.body({ words: ['done'], paren: false, arm: false }, 'a for loop');
+    this.expect('done', 'a for loop');
+    const tail = this.closing(start, 'done');
+    return { kind: 'for', name, ...(words === undefined ? {} : { words }), body, ...tail };
+  }
+
+  private whileLoop(start: number): Command {
+    const kind = this.keywordAt() === 'until' ? 'until' : 'while';
+    const construct = kind === 'until' ? 'an until loop' : 'a while loop';
+    this.pos += kind.length;
+    const condition = this.body({ words: ['do'], paren: false, arm: false }, construct);
+    this.expect('do', construct);
+    const body = this.body({ words: ['done'], paren: false, arm: false }, construct);
+    this.expect('done', construct);
+    return { kind, condition, body, ...this.closing(start, 'done') };
+  }
+
+  private ifClause(start: number): Command {
+    const clauses: { condition: Pipeline[]; body: Pipeline[] }[] = [];
+    let otherwise: Pipeline[] | undefined;
+    this.pos += 2;
+    for (;;) {
+      const condition = this.body({ words: ['then'], paren: false, arm: false }, 'an if');
+      this.expect('then', 'an if');
+      const body = this.body({ words: ['elif', 'else', 'fi'], paren: false, arm: false }, 'an if');
+      clauses.push({ condition, body });
+      this.blank();
+      const next = this.keywordAt();
+      if (next === 'elif') {
+        this.pos += 4;
+        continue;
+      }
+      if (next === 'else') {
+        this.pos += 4;
+        otherwise = this.body({ words: ['fi'], paren: false, arm: false }, 'an if');
+      }
+      break;
+    }
+    this.expect('fi', 'an if');
+    return {
+      kind: 'if',
+      clauses,
+      ...(otherwise === undefined ? {} : { otherwise }),
+      ...this.closing(start, 'fi'),
+    };
+  }
+
+  private caseClause(start: number): Command {
+    this.pos += 4;
+    this.spaces();
+    const c = this.peek();
+    if (c === undefined || META.has(c)) throw new Refusal('a case without a word');
+    const word = this.word();
+    this.expect('in', 'a case');
+    const arms: { patterns: Word[]; body: Pipeline[] }[] = [];
+    for (;;) {
+      this.blank();
+      if (this.keywordAt() === 'esac') {
+        this.pos += 4;
+        break;
+      }
+      if (this.atEnd()) throw new Refusal('a case without its esac');
+      if (this.peek() === '(') this.pos++;
+      const patterns: Word[] = [];
+      for (;;) {
+        this.spaces();
+        const first = this.peek();
+        if (first === undefined || META.has(first)) throw new Refusal('a case pattern missing');
+        patterns.push(this.word());
+        this.spaces();
+        if (this.peek() !== '|') break;
+        this.pos++;
+      }
+      if (this.peek() !== ')') throw new Refusal('a case pattern without its )');
+      this.pos++;
+      const body = this.body({ words: ['esac'], paren: false, arm: true }, 'a case arm', true);
+      arms.push({ patterns, body });
+      if (this.startsWith(';;&')) this.pos += 3;
+      else if (this.startsWith(';;') || this.startsWith(';&')) this.pos += 2;
+    }
+    return { kind: 'case', word, arms, ...this.closing(start, 'esac') };
   }
 
   private simple(): SimpleCommand {
@@ -311,7 +588,7 @@ class Parser {
       if (words.length === 0 && keyword !== undefined) throw new Refusal(keyword);
       words.push(word);
     }
-    return { text: this.src.slice(start, this.pos).trim(), assignments, words, redirections };
+    return { kind: 'simple', text: this.src.slice(start, this.pos).trim(), assignments, words, redirections };
   }
 
   /** Whether `NAME=` or `NAME+=` starts here, a line continuation inside it removed. */
@@ -451,7 +728,7 @@ class Parser {
       if (this.after(2) === '(') throw new Refusal('an arithmetic expansion $(( … ))');
       this.pos += 2;
       this.enter();
-      const list = this.list(true);
+      const list = this.list({ words: [], paren: true, arm: false });
       this.depth--;
       if (this.peek() !== ')') throw new Refusal('an unterminated $(');
       this.pos++;
