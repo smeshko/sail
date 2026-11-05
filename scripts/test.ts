@@ -93,6 +93,7 @@ Object.assign(env, {
   GIT_COMMITTER_EMAIL: 'test@sail.invalid',
   SAIL_TEST_HOME: home,
   SAIL_KEEP_AWAKE: 'off',
+  SAIL_CREDENTIAL_LOOKUP: 'off',
 });
 
 const given = (option: string) => args.some((arg) => arg === option || arg.startsWith(`${option}=`));
