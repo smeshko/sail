@@ -544,7 +544,6 @@ const SET_OPEN = {
 };
 
 test.each([
-  ['STAGE_OUT=lib; echo x > $STAGE_OUT/a.dart', SET_OPEN, UNRESOLVED('write')],
   ['read STAGE_OUT; echo x > $STAGE_OUT/r.md', SET_OPEN, UNRESOLVED('write')],
   ['read -r A STAGE_OUT; echo x > $STAGE_OUT/r.md', SET_OPEN, UNRESOLVED('write')],
   ['unset STAGE_OUT; echo x > $STAGE_OUT/r.md', SET_OPEN, UNRESOLVED('write')],
@@ -565,6 +564,38 @@ test.each([
   ['git ls-files | while read -r f; do git show "$f"; done', GIT_ONLY, ['commands', 'hold an expansion']],
 ] as [string, Partial<Permissions>, Want][])(
   'names a command sets shadow the environment: %j under %j is %j',
+  (command, open, want) => {
+    expect(verdict(run(command, open), want)).toEqual(want);
+  },
+);
+
+const BARE = { commands: ['echo *', 'true', 'sh *', 'eval *'], write: ['src/**'] };
+const STAGE_UNKNOWN = UNRESOLVED('write');
+
+test.each([
+  ['STAGE_OUT=lib; echo x > $STAGE_OUT/a.dart', { ...SET_OPEN, write: ['$STAGE_OUT/**'] }, ['write', 'lib/a.dart']],
+  ['STAGE_OUT=src; echo x > $STAGE_OUT/a.ts', BARE, 'allow'],
+  ['STAGE_OUT=src && echo x > $STAGE_OUT/a.ts', BARE, 'allow'],
+  ['A=src B=$A/a.ts; echo x > $B', BARE, 'allow'],
+  ['X=lib; echo x > $X/a.dart', BARE, ['write', 'lib/a.dart']],
+  ['(STAGE_OUT=src); echo x > $STAGE_OUT/a.ts', BARE, STAGE_UNKNOWN],
+  ['echo $(STAGE_OUT=src); echo x > $STAGE_OUT/a.ts', BARE, STAGE_UNKNOWN],
+  ['STAGE_OUT=src | true; echo x > $STAGE_OUT/a.ts', BARE, STAGE_UNKNOWN],
+  ['true && STAGE_OUT=src; echo x > $STAGE_OUT/a.ts', BARE, STAGE_UNKNOWN],
+  ['STAGE_OUT=src & echo x > $STAGE_OUT/a.ts', BARE, STAGE_UNKNOWN],
+  ['true && { STAGE_OUT=src; }; echo x > $STAGE_OUT/a.ts', BARE, STAGE_UNKNOWN],
+  ['if true; then STAGE_OUT=src; fi; echo x > $STAGE_OUT/a.ts', BARE, STAGE_UNKNOWN],
+  ['case a in a) STAGE_OUT=src;; esac; echo x > $STAGE_OUT/a.ts', BARE, STAGE_UNKNOWN],
+  ['if true; then STAGE_OUT=src; echo x > $STAGE_OUT/a.ts; fi', BARE, 'allow'],
+  ['{ STAGE_OUT=src; }; echo x > $STAGE_OUT/a.ts', BARE, 'allow'],
+  ['for f in a b; do X=src/$f; echo x > $X; done', BARE, 'allow'],
+  ["X=src; sh -c 'echo x > $X/a.ts'", BARE, STAGE_UNKNOWN],
+  ["STAGE_OUT=src; sh -c 'echo x > $STAGE_OUT/a.ts'", BARE, 'allow'],
+  ["sh -c 'STAGE_OUT=src'; echo x > $STAGE_OUT/a.ts", BARE, ['write', 'a.ts']],
+  ["X=src; eval 'echo x > $X/a.ts'", BARE, 'allow'],
+  ['f=a; git show $f', GIT_ONLY, 'allow'],
+] as [string, Partial<Permissions>, Want][])(
+  'a bare assignment shadows the environment where it surely runs: %j under %j is %j',
   (command, open, want) => {
     expect(verdict(run(command, open), want)).toEqual(want);
   },
