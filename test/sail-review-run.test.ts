@@ -4,6 +4,7 @@
 // its hint, and a regression it reports goes to the next pass. One is about the tickets it files. The
 // rest are about landing: a check still red after its rerun goes to fix, a rejected merge merges the base in, and both
 // take the fix passes left. Every merge is preceded by gate-files; a gate change is handed to a human instead.
+// A fix pass that commits nothing and leaves the same findings open ends the fix loop early.
 // Triage cases show Jev decisions surviving omissions and judge overrides winning.
 import { expect, test } from 'bun:test';
 import { appendFileSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -386,6 +387,129 @@ test('with no adapters.jev, check-fix runs beside validate every round as the fa
   });
 }, 120_000);
 
+/** Seeds `fix#2` as the default fix answer with no commit and no description rewrite. */
+function idleSecondFix(repo: TempRepo) {
+  const sail = join(repo.dir, '.sail');
+  const seeds = JSON.parse(readFileSync(join(sail, 'fake', 'harness.json'), 'utf8'));
+  seedHarness(sail, 'fix#2', [
+    {
+      ...seeds.fix[0],
+      output: { fixes: seeds.fix[0].output.fixes.map((each: object) => ({ ...each, commit: null })), body: null },
+    },
+  ]);
+  return seeds;
+}
+
+test('a fix pass that commits nothing and leaves the same finding open ends the fix loop, and the review hands the pull request to a human', async () => {
+  await withTempRepo(async (repo) => {
+    setUp(repo);
+    const seeds = idleSecondFix(repo);
+    seedHarness(join(repo.dir, '.sail'), 'check-fix#2', seeds['check-fix#1']);
+    const { code, keys, dir } = await review(repo);
+    expect(code).not.toBe(0);
+
+    expect(keys.filter((key) => key.startsWith('fix#'))).toEqual(['fix#1', 'fix#2']);
+    expect(keys).not.toContain('merge#1');
+    expect(
+      readEvents(dir).find((event) => event.type === 'loop:exit' && (event as { loop?: string }).loop === 'fix'),
+    ).toMatchObject({
+      iterations: 2,
+      reason: 'break',
+    });
+    const summary = JSON.parse(readFileSync(join(dir, 'summary.json'), 'utf8')) as Summary;
+    expect(summary.loops?.fix?.iterations).toBe(2);
+    const pr = await pullRequest(repo);
+    expect(pr.labels).toContain('needs-human');
+    expect(pr.labels).not.toContain('factory');
+    const comment = pr.comments.at(-1) ?? '';
+    expect(comment).toStartWith('## sail review\n\n1 finding still open after 2 fix rounds');
+    expect(comment).toContain('- Round 2: 0 commits');
+    expect(comment).toContain('### Still open\n\n- R2: ');
+  });
+}, 120_000);
+
+test('a fix pass that commits nothing but leaves a different finding open gets the next pass', async () => {
+  await withTempRepo(async (repo) => {
+    setUp(repo);
+    const seeds = idleSecondFix(repo);
+    const both = structuredClone(seeds['check-fix#1']);
+    both[0].output.items = both[0].output.items.map((each: { finding: string }) =>
+      each.finding === 'D1' ? { ...each, resolved: false } : each,
+    );
+    seedHarness(join(repo.dir, '.sail'), 'check-fix#2', both);
+    seedHarness(join(repo.dir, '.sail'), 'check-fix#3', both);
+    const { code, keys } = await review(repo);
+    expect(code).not.toBe(0);
+
+    expect(keys.filter((key) => key.startsWith('fix#'))).toEqual(['fix#1', 'fix#2', 'fix#3']);
+  });
+}, 120_000);
+
+/** Seeds the validate stage's reports by call: each a failing test's name, or null for a validation that passes. */
+function seedValidate(repo: TempRepo, failing: (string | null)[]): void {
+  const reports = failing.map((name) =>
+    name === null
+      ? {
+          exit: 0,
+          output: { ok: true, uncommitted: [], verify: { ok: true, exitCode: 0, tail: ' 1990 pass\n 0 fail' } },
+        }
+      : {
+          exit: 1,
+          output: {
+            ok: false,
+            uncommitted: [],
+            verify: { ok: false, exitCode: 1, tail: `1 failing test:\n\n(fail) ${name}\n\n 1989 pass\n 1 fail` },
+          },
+        },
+  );
+  writeFileSync(join(repo.dir, '.sail', 'fake', 'scripts', 'validate.json'), JSON.stringify(reports));
+}
+
+test('a fix pass that lists no commit but leaves a different validation failure gets the next pass', async () => {
+  await withTempRepo(async (repo) => {
+    setUp(repo);
+    const seeds = idleSecondFix(repo);
+    seedHarness(join(repo.dir, '.sail'), 'check-fix#2', seeds['check-fix#1']);
+    seedHarness(join(repo.dir, '.sail'), 'check-fix#3', seeds['check-fix#1']);
+    seedValidate(repo, ['a zero total', 'a zero total', 'a rounded total']);
+    const { code, keys } = await review(repo);
+    expect(code).not.toBe(0);
+
+    expect(keys.filter((key) => key.startsWith('fix#'))).toEqual(['fix#1', 'fix#2', 'fix#3']);
+  });
+}, 120_000);
+
+test('a fix pass that commits nothing but leaves validation failing where it passed gets the next pass', async () => {
+  await withTempRepo(async (repo) => {
+    setUp(repo);
+    const seeds = idleSecondFix(repo);
+    seedHarness(join(repo.dir, '.sail'), 'check-fix#2', seeds['check-fix#1']);
+    seedHarness(join(repo.dir, '.sail'), 'check-fix#3', seeds['check-fix#1']);
+    seedValidate(repo, ['a zero total', null, 'a zero total']);
+    const { code, keys } = await review(repo);
+    expect(code).not.toBe(0);
+
+    expect(keys.filter((key) => key.startsWith('fix#'))).toEqual(['fix#1', 'fix#2', 'fix#3']);
+  });
+}, 120_000);
+
+test('a fix pass that commits nothing but meets a fresh medium finding gets the next pass', async () => {
+  await withTempRepo(async (repo) => {
+    setUp(repo);
+    const seeds = idleSecondFix(repo);
+    const regressed = structuredClone(seeds['check-fix#1']);
+    regressed[0].output.findings = [
+      { severity: 'medium', file: 'notes.txt', title: 'the fix broke the footer', detail: 'x' },
+    ];
+    seedHarness(join(repo.dir, '.sail'), 'check-fix#2', regressed);
+    seedHarness(join(repo.dir, '.sail'), 'check-fix#3', seeds['check-fix#1']);
+    const { code, keys } = await review(repo);
+    expect(code).not.toBe(0);
+
+    expect(keys.filter((key) => key.startsWith('fix#'))).toEqual(['fix#1', 'fix#2', 'fix#3']);
+  });
+}, 120_000);
+
 test('a low-severity finding the judge sends to a ticket is not filed, and a medium one is', async () => {
   await withTempRepo(async (repo) => {
     setUp(repo);
@@ -728,6 +852,56 @@ test('check-fix reads the rewritten description on a later pass whose fix leaves
     expect(readFileSync(join(dir, folder, 'call-2', 'in', 'description.txt'), 'utf8')).toBe(body);
   });
 });
+
+/**
+ * Seeds the description finding R1 left open by every check-fix, and each fix pass with no commit and the body
+ * `bodies` gives it by pass.
+ */
+function describeOpen(repo: TempRepo, bodies: (string | null)[]): void {
+  const sail = join(repo.dir, '.sail');
+  const seeds = describeOnly(repo);
+  for (const [index, body] of bodies.entries()) {
+    seedHarness(sail, `fix#${index + 1}`, [
+      { ...seeds.fix[0], output: { fixes: [{ finding: 'R1', commit: null, note: 'Rewrote the Summary.' }], body } },
+    ]);
+  }
+  seedHarness(sail, 'check-fix', [
+    {
+      ...seeds['check-fix'][0],
+      output: {
+        items: [{ finding: 'R1', resolved: false, detail: 'The Summary still promises a footer.' }],
+        findings: [],
+      },
+    },
+  ]);
+}
+
+test('a fix pass that rewrites the description to the text it already holds ends the fix loop', async () => {
+  await withTempRepo(async (repo) => {
+    setUp(repo);
+    const body = '## Summary\n\nA note in notes.txt.\n\nCloses FAKE-1';
+    describeOpen(repo, [body, body, body]);
+    const { code, keys } = await review(repo);
+    expect(code).not.toBe(0);
+
+    expect(keys.filter((key) => key.startsWith('fix#'))).toEqual(['fix#1', 'fix#2']);
+  });
+}, 120_000);
+
+test('a fix pass that only rewrites the description, leaving the same finding open, gets the next pass', async () => {
+  await withTempRepo(async (repo) => {
+    setUp(repo);
+    describeOpen(repo, [
+      '## Summary\n\nA note.\n\nCloses FAKE-1',
+      '## Summary\n\nA note in notes.txt.\n\nCloses FAKE-1',
+      '## Summary\n\nOne note in notes.txt.\n\nCloses FAKE-1',
+    ]);
+    const { code, keys } = await review(repo);
+    expect(code).not.toBe(0);
+
+    expect(keys.filter((key) => key.startsWith('fix#'))).toEqual(['fix#1', 'fix#2', 'fix#3']);
+  });
+}, 120_000);
 
 test("a fix while landing is shown the description the fix loop rewrote, not the pull request's first", async () => {
   await withTempRepo(async (repo) => {
