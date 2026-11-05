@@ -2,6 +2,7 @@
 export { z } from 'zod';
 export { type Binding, type BindingKind, type Consumes, type FileBinding, type FromStep, type FromStepBinding, file, fromStep, type GitDiffBinding, gitDiff, type ProducedFile, type ValueBinding, value, } from './bindings';
 export { type Bounds, type CountOptions, checklist, countItems, type DerivedValue, type Document, type DocumentContent, type DocumentHeading, type DocumentItem, type DocumentSection, doc, hasSections, noPlaceholders, type Validator, type Verdict, } from './documents';
+export { matchesGlob } from './globs';
 export { type Intake, type IntakeOptions, intake, type SourceKind } from './intake';
 export { type AgentOptions, type AgentOutcome, type AgentProduces, type AgentStep, agent, type Budget, type CoversSteps, type EarlierSteps, type EndsIn, type ExitCodes, type FitsSteps, type InOrder, type KindOf, type OutcomeOf, type Permissions, type Produces, type ScriptOptions, type ScriptOutcome, type ScriptPort, type ScriptStep, type Stage, type StageDefinition, type StageOptions, type Step, type StepList, type StepNeeds, script, stage, } from './steps';
 export { type Untrusted, untrusted } from './untrusted';

@@ -8,9 +8,12 @@ export type ScriptOutcome = 'passed' | 'failed' | 'error';
 export type AgentOutcome = 'done' | 'blocked' | 'error';
 /** What a step may do. Enforced for agents. For scripts, `network` is declared and recorded but not enforced. */
 export interface Permissions {
-    /** Globs of paths the step may read. */
+    /** Globs of paths the step may read. A glob starting with `!` excludes the paths it matches, after the others. */
     readonly read: readonly string[];
-    /** Globs of paths the step may write. `$STAGE_OUT/**` covers the files it produces. */
+    /**
+     * Globs of paths the step may write. `$STAGE_OUT/**` covers the files it produces. A glob starting with `!` excludes
+     * the paths it matches, after the others.
+     */
     readonly write: readonly string[];
     /** Command patterns the step may run, such as `git diff *`. */
     readonly commands: readonly string[];
