@@ -151,3 +151,19 @@ test('a reference the reader cannot resolve is passed through as a problem', () 
     },
   ]);
 });
+
+test("an intake's folder scan stops at a stage a workflow helper imports", () => {
+  const dir = sailDir({
+    'workflows/w/read.sh': 'sail port ticket-source get X\n',
+    'workflows/w/helpers.ts': "import { pub } from './stages/pub/stage';\nexport { pub };\n",
+    'workflows/w/stages/pub/stage.ts': "script({ run: './pub.sh', ports: ['codehost'] })\n",
+    'workflows/w/stages/pub/pub.sh': '#!/bin/sh\nsail port codehost push x\n',
+  });
+  const intake: IntakeEntry = {
+    name: 'read',
+    workflow: 'w',
+    file: join(dir, 'workflows/w/intake.ts'),
+    scripts: [{ step: 'read', run: join(dir, 'workflows/w/read.sh'), ports: ['ticket-source'] }],
+  };
+  expect(messages(dir, [], [intake])).toEqual([]);
+});

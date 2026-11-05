@@ -59,13 +59,17 @@ export function references(file: string, sailDir: string): References {
   return { files, problems };
 }
 
-/** `entries` and every file they reach, absolute and in no set order. */
-export function reachFiles(entries: string[], sailDir: string): References {
+/** `entries` and every file they reach, absolute and in no set order. A file `stop` accepts is neither read nor kept. */
+export function reachFiles(
+  entries: string[],
+  sailDir: string,
+  stop: (file: string) => boolean = () => false,
+): References {
   const seen = new Set<string>();
   const problems: DefinitionProblem[] = [];
   const queue = [...entries];
   for (let file = queue.pop(); file !== undefined; file = queue.pop()) {
-    if (seen.has(file)) continue;
+    if (seen.has(file) || stop(file)) continue;
     seen.add(file);
     const found = references(file, sailDir);
     queue.push(...found.files);

@@ -6,9 +6,10 @@
 //
 // A step is checked with its `run` file and every file the reader reaches from it. The definition folder's own
 // top-level script files, which no step reaches, are checked against the union of its steps' ports: top-level only,
-// because an intake's folder is its workflow's folder, which holds every private stage.
+// because an intake's folder is its workflow's folder, which holds every private stage. Their walk stops at every
+// `stage.ts` and `intake.ts`, as a workflow helper may import a stage, whose scripts are that stage's to check.
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { dirname, join, relative } from 'node:path';
+import { basename, dirname, join, relative } from 'node:path';
 import { SCRIPT_PORTS } from '../kinds/script';
 import type { DefinitionProblem, Definitions, ScriptRef } from './definitions';
 import { reachFiles } from './references';
@@ -18,6 +19,7 @@ const JS_CALL = /['"]port['"]\s*,\s*['"]([a-z][a-z-]*)['"]/;
 const COMMENT = /^\s*(?:#|\/\/|\/\*|\*)/;
 const SCRIPT_FILE = /\.(?:sh|mjs|js|cjs|ts)$/;
 const DEFINITION_FILES = new Set(['stage.ts', 'intake.ts', 'workflow.ts', 'schemas.ts']);
+const DEFINITIONS = new Set(['stage.ts', 'intake.ts']);
 const PORTS = Object.keys(SCRIPT_PORTS);
 
 interface Call {
@@ -87,7 +89,7 @@ function folderProblems(
     .map((f) => join(folder, f.name))
     .filter((file) => !reached.has(file))
     .sort();
-  const reach = reachFiles(files, sailDir);
+  const reach = reachFiles(files, sailDir, (file) => DEFINITIONS.has(basename(file)));
   const problems = [...reach.problems];
   const reported = new Set<string>();
   for (const call of reach.files.filter((file) => !reached.has(file)).flatMap(callsIn)) {
