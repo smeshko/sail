@@ -111,6 +111,19 @@ test('the Bun version preflight script is a gate file', async () => {
   });
 });
 
+test('the config and the workspace setup script are gate files', async () => {
+  await withTempRepo((repo) => {
+    const base = setup(repo);
+    appendFileSync(join(repo.dir, '.sail/project.yaml'), '\n# a harmless change\n');
+    put(repo, 'scripts/workspace-docs.ts');
+    commit(repo, '.sail/project.yaml', 'scripts/workspace-docs.ts');
+    expect(stage(repo, base)).toEqual({
+      code: 0,
+      output: { base, touched: ['.sail/project.yaml', 'scripts/workspace-docs.ts'] },
+    });
+  });
+});
+
 test('the silence watchdog the test launcher runs is a gate file', async () => {
   await withTempRepo((repo) => {
     const base = setup(repo);
@@ -246,7 +259,6 @@ test('review prompts and files outside the graph merge on their own', () => {
   const paths = [
     '.sail/workflows/review/stages/06-review-architecture/prompt.md',
     '.sail/workflows/review/stages/18-merge-notes/x.md',
-    '.sail/project.yaml',
     '.sail/lib/demo.mjs',
     '.sail/lib/demo.sh',
     '.sail/workflows/factory/workflow.ts',
@@ -255,13 +267,56 @@ test('review prompts and files outside the graph merge on their own', () => {
   expect(paths.filter((path) => lib.isGateFile(path))).toEqual([]);
 });
 
-test('every module the review workflow and the guard reach is a gate file', () => {
+function reach(entries: string[]): string[] {
   const { files, problems } = reachFiles(
-    [join(ROOT, '.sail/workflows/review/workflow.ts'), join(ROOT, '.sail/lib/gate-files.mjs')],
+    entries.map((entry) => join(ROOT, entry)),
     join(ROOT, '.sail'),
   );
   expect(problems).toEqual([]);
-  const reached = files.map((file) => relative(ROOT, file)).sort();
+  return files.map((file) => relative(ROOT, file)).sort();
+}
+
+function adapterModules(config: unknown): string[] {
+  const adapters = (config as { adapters?: Record<string, unknown> }).adapters ?? {};
+  const uses: unknown[] = [];
+  for (const [name, entry] of Object.entries(adapters)) {
+    if (name === 'harnesses') {
+      for (const named of Object.values((entry ?? {}) as Record<string, { use?: unknown }>)) uses.push(named?.use);
+    } else {
+      uses.push((entry as { use?: unknown } | null)?.use);
+    }
+  }
+  return uses
+    .filter((use): use is string => typeof use === 'string' && (use.startsWith('./') || use.startsWith('../')))
+    .map((use) => relative(ROOT, join(ROOT, '.sail', use)));
+}
+
+// The modules the review workflow, the guard and the config's adapters reach that are not gate files.
+function ungatedGraph(config: unknown): { reached: string[]; ungated: string[] } {
+  const reached = reach(['.sail/workflows/review/workflow.ts', '.sail/lib/gate-files.mjs', ...adapterModules(config)]);
+  return { reached, ungated: reached.filter((path) => !lib.isGateFile(path)) };
+}
+
+test('an adapter module the config names joins the derived graph', () => {
+  const config = {
+    adapters: {
+      codeHost: { use: './adapters/gh.ts' },
+      harness: { use: 'claude-code' },
+      harnesses: { pi: { use: '../x.ts' } },
+    },
+  };
+  expect(adapterModules(config)).toEqual(['.sail/adapters/gh.ts', 'x.ts']);
+});
+
+test('a config naming an ungated adapter module fails the derived graph', () => {
+  const config = { adapters: { codeHost: { use: './lib/demo.mjs' } } };
+  expect(ungatedGraph(config).ungated).toEqual(['.sail/lib/demo.mjs']);
+});
+
+test('every module the review workflow and the guard reach is a gate file', () => {
+  const config = Bun.YAML.parse(readFileSync(join(ROOT, '.sail/project.yaml'), 'utf8'));
+  const { reached, ungated } = ungatedGraph(config);
+  expect(lib.isGateFile('.sail/project.yaml')).toBe(true);
   expect(reached).toEqual(
     expect.arrayContaining([
       '.sail/workflows/review/schemas.ts',
@@ -275,7 +330,7 @@ test('every module the review workflow and the guard reach is a gate file', () =
       '.sail/workflows/review/stages/19-sync-base/sync.mjs',
     ]),
   );
-  expect(reached.filter((path) => !lib.isGateFile(path))).toEqual([]);
+  expect(ungated).toEqual([]);
   const missesSchemas = (path: string) => lib.isGateFile(path) && path !== '.sail/workflows/review/schemas.ts';
   expect(reached.filter((path) => !missesSchemas(path))).toEqual(['.sail/workflows/review/schemas.ts']);
 });
