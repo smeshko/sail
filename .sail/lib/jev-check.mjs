@@ -44,12 +44,12 @@ export function noul(instructions, yes, no) {
 }
 
 /**
- * Asks Jev `questions` about `state` through `sail port jev ask`, the request kept as `jev-request.json` in `out`.
+ * Asks Jev `questions` about `state` through `sail port jev ask`, the request kept as `name` in `out`.
  * `{ asked: true, model, answers }`, or `{ asked: false, note }` when the request is over MAX_REQUEST_BYTES, or the port
  * refuses, fails or answers nothing.
  */
-export function askNouls(questions, state, out) {
-  const file = join(out, 'jev-request.json');
+export function askNouls(questions, state, out, name = 'jev-request.json') {
+  const file = join(out, name);
   const body = JSON.stringify({ state, questions });
   writeFileSync(file, body);
   const bytes = Buffer.byteLength(body);
@@ -281,23 +281,54 @@ export function commitLines(log) {
   return lines;
 }
 
-export function leakState(lines) {
-  return { note: SAIL_NOTE, lines: Object.fromEntries(lines.map((line, i) => [`leak-${i + 1}`, line])) };
+/** The lines as `leak-<n>` entries, numbered from `start + 1`. */
+export function leakState(lines, start = 0) {
+  return { note: SAIL_NOTE, lines: Object.fromEntries(lines.map((line, i) => [`leak-${start + i + 1}`, line])) };
 }
-export function leakQuestions(lines) {
-  return Object.fromEntries(
-    lines.map((line, i) => {
-      const id = `leak-${i + 1}`;
-      return [
-        id,
-        noul(
-          `Does lines.${id} name a project, company, product or issue tracker other than sail, or a private ticket?`,
-          'A name the note does not list as sail’s own or as a tool sail integrates with.',
-          'Only sail’s names, those tools, or generic words.',
-        ),
-      ];
-    }),
-  );
+export function leakQuestions(lines, start = 0) {
+  return Object.fromEntries(lines.map((_, i) => leakQuestion(`leak-${start + i + 1}`)));
+}
+function leakQuestion(id) {
+  return [
+    id,
+    noul(
+      `Does lines.${id} name a project, company, product or issue tracker other than sail, or a private ticket?`,
+      'A name the note does not list as sail’s own or as a tool sail integrates with.',
+      'Only sail’s names, those tools, or generic words.',
+    ),
+  ];
+}
+
+/**
+ * The lines split into requests that each fit MAX_REQUEST_BYTES, in order and as many lines to each as fit, numbered
+ * `leak-<n>` across them all: `[{ state, questions }]`. A line too long to fit even alone is a request of its own, which
+ * askNouls then refuses. Each request is measured by adding its entries' bytes, so splitting stays linear.
+ */
+export function leakRequests(lines) {
+  const empty = Buffer.byteLength(JSON.stringify({ state: leakState([]), questions: {} }));
+  const requests = [];
+  let start = 0;
+  let bytes = empty;
+  for (let i = 0; i < lines.length; i++) {
+    const [id, question] = leakQuestion(`leak-${i + 1}`);
+    // An entry is `"id":value` in both objects, and each after a request's first also adds a comma to both.
+    const entry =
+      Buffer.byteLength(JSON.stringify({ [id]: lines[i] })) +
+      Buffer.byteLength(JSON.stringify({ [id]: question })) -
+      4 +
+      (i > start ? 2 : 0);
+    if (i > start && bytes + entry > MAX_REQUEST_BYTES) {
+      requests.push({
+        state: leakState(lines.slice(start, i), start),
+        questions: leakQuestions(lines.slice(start, i), start),
+      });
+      start = i;
+      bytes = empty + entry - 2;
+    } else bytes += entry;
+  }
+  if (lines.length > start)
+    requests.push({ state: leakState(lines.slice(start), start), questions: leakQuestions(lines.slice(start), start) });
+  return requests;
 }
 
 // --- banned-words: is each avoided word used in the sense the glossary forbids?
