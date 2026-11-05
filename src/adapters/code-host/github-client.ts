@@ -18,6 +18,8 @@ export interface GitHubClientOptions {
   readonly fetch?: Fetch;
   /** How long a request may take. 30 s unless given. */
   readonly timeoutMs?: number;
+  /** The pause before a GET's one retry after a transport failure. 1 s unless given. */
+  readonly retryDelayMs?: number;
 }
 
 export interface GitHubClient {
@@ -123,7 +125,20 @@ export function createGitHubClient(options: GitHubClientOptions): GitHubClient {
     const raw = 'json' in parsed ? parsed.json : undefined;
     return new PortError('codeHost', op, code, `${githubMessage(response.status, parsed)}${reset}`, raw);
   };
+  /**
+   * One exchange, and for a GET one more after a transport failure: a long-lived watcher meets dropped keep-alive
+   * sockets and short network blips, and one of those shouldn't fail a dispatch. A write may have landed, so it isn't.
+   */
   const exchange = async (op: string, method: string, path: string, body?: unknown) => {
+    try {
+      return await exchangeOnce(op, method, path, body);
+    } catch (error) {
+      if (method !== 'GET' || !(error instanceof PortError)) throw error;
+      await Bun.sleep(options.retryDelayMs ?? 1_000);
+      return exchangeOnce(op, method, path, body);
+    }
+  };
+  const exchangeOnce = async (op: string, method: string, path: string, body?: unknown) => {
     const send = options.fetch ?? fetch;
     let response: Response;
     try {
