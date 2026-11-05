@@ -393,7 +393,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
               now(),
             );
           }
-          store.hold(answer.until, runId, answer.reason);
+          store.hold(answer.until, runId, answer.reason, answer.harnessKey);
         } else store.holdItem(item.dedupKey, answer.until, answer.reason);
         break;
       case 'resume':
@@ -583,16 +583,15 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
     const own = new Set(dispatchedItems().map((item) => item.runId));
     for (const { key, hold } of activeHolds(options.machineDir, options.harnessKeys?.() ?? [], now())) {
       if (own.has(hold.runId)) continue;
-      store.hold(hold.until, hold.runId, `${key} hit the usage limit in ${hold.repository}: ${hold.reason}`);
+      store.hold(hold.until, hold.runId, `${key} hit the usage limit in ${hold.repository}: ${hold.reason}`, key);
     }
   };
 
-  /** Whether a release of a key the workflow reaches came after the local usage-limit hold was set. */
+  /** Whether the key the local usage-limit hold was set on was released after it was set. */
   const releasedSinceHold = (): boolean => {
     const { held } = store.snapshot();
-    if (held === undefined || held.sail !== undefined || options.machineDir === undefined) return false;
-    const at = Date.parse(held.at);
-    return (options.harnessKeys?.() ?? []).some((key) => (releasedAt(options.machineDir as string, key) ?? 0) > at);
+    if (held?.harnessKey === undefined || options.machineDir === undefined) return false;
+    return (releasedAt(options.machineDir, held.harnessKey) ?? 0) > Date.parse(held.at);
   };
 
   return {

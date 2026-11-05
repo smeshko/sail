@@ -2161,3 +2161,18 @@ test('a release resumes the held runs in both entries on the next tick, and the 
     t.cleanup();
   });
 });
+
+test('a release of another key the workflow reaches leaves its hold on the limited key as it is (review R3)', async () => {
+  await withTempRepo(async (repo) => {
+    const t = await twoEntries(repo, ['claude-code', 'pi:openai-codex']);
+    await t.a.tick();
+    await t.b.tick();
+    t.w.clock.advance(60_000);
+    expect(releaseHold(t.machine, 'pi:openai-codex', t.w.clock())).toBe(false);
+    await t.b.tick();
+    expect(t.bEvents('queue:released')).toEqual([]);
+    expect(t.bEvents('queue:held').length).toBe(1);
+    expect(spawnedKeys(t.w.spawner)).toEqual(['FAKE-1', 'FAKE-2']);
+    t.cleanup();
+  });
+});
