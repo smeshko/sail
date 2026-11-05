@@ -682,6 +682,31 @@ test('groom cancels a stale ticket whatever the worth check gave', async () => {
   });
 }, 120_000);
 
+test("groom's checkers get AGENTS.md alone as conventions, and decide gets both", async () => {
+  await withTempRepo(async (repo) => {
+    writeGroomRepo(repo);
+    const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+
+    const dir = onlyRun(repo.dir);
+    const promptOf = (stage: string) => {
+      const folder = readdirSync(dir).find((name) => name.endsWith(`-${stage}`));
+      return readFileSync(join(dir, folder ?? `missing-${stage}`, 'call-1', 'prompt.md'), 'utf8');
+    };
+    for (const stage of ['duplicates', 'worth', 'questions']) {
+      const prompt = promptOf(stage);
+      expect({ stage, agents: prompt.includes('# AGENTS.md'), context: prompt.includes('# CONTEXT.md') }).toEqual({
+        stage,
+        agents: true,
+        context: false,
+      });
+    }
+    const decided = promptOf('decide');
+    expect(decided).toContain('# AGENTS.md');
+    expect(decided).toContain('# CONTEXT.md');
+  });
+}, 120_000);
+
 test('groom runs the questions check on a keep that worth found stale', async () => {
   await withTempRepo(async (repo) => {
     const sailDir = writeGroomRepo(repo);
