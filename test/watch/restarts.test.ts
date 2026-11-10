@@ -287,6 +287,60 @@ test(
 );
 
 test(
+  'a watcher leaves a held interrupted run suspended across polls, and the run ends completed once sail resume runs it',
+  async () => {
+    await withTempRepo(async (repo) => {
+      const { env, runs } = repository(repo, { a: 1, b: 1 }, [{ key: 'FAKE-1', labels: ['sail-a'] }]);
+      const first = sailProcess(repo.dir, env, ['watch', 'a']);
+      let second: SailProcess | undefined;
+      try {
+        expect(await until('the run held', () => heldRuns(repo.dir).length === 1)).toBe('the run held');
+        killOne(first.pid, 'SIGTERM');
+        expect(await gone(first.pid)).toBe(true);
+        const [item] = queueOf(runs, 'a').items;
+        const runId = item?.runId ?? '';
+        killOne(item?.pid ?? 0, 'SIGTERM');
+        expect(await gone(item?.pid ?? 0)).toBe(true);
+        const ofRun = () => runsIn(runs).find((run) => run.runId === runId);
+        expect(ofRun()?.status).toBe('suspended interrupted');
+        const held = await sail(repo.dir, env, ['stop', runId, '--suspend']);
+        expect(held.code).toBe(0);
+        releaseHeld(repo.dir);
+        const polled = () => eventsOf(runs, 'a', 'queue:polled').length;
+        const before = polled();
+        second = sailProcess(repo.dir, env, ['watch', 'a']);
+        expect(await until('a poll', () => polled() > before)).toBe('a poll');
+        expect((await sail(repo.dir, env, ['queue', 'poll', 'a'])).code).toBe(0);
+        expect(await until('a later poll', () => polled() > before + 1)).toBe('a later poll');
+        const whilePolling = { status: ofRun()?.status, resumed: eventsOf(runs, 'a', 'run:resumed').length };
+        const resumed = await sail(repo.dir, env, ['resume', runId]);
+        expect(
+          await until('the item done', () => queueOf(runs, 'a').items.every((each) => each.state === 'done')),
+        ).toBe('the item done');
+        expect((await sail(repo.dir, env, ['unwatch', 'a'])).code).toBe(0);
+        expect(await exitOf(second)).toBe(0);
+        expect({
+          whilePolling,
+          resumed: resumed.code,
+          status: ofRun()?.status,
+          hold: existsSync(join(runs, runId, 'HOLD')),
+          issues: issues(runs, ['a']),
+        }).toEqual({
+          whilePolling: { status: 'suspended interrupted', resumed: 0 },
+          resumed: 0,
+          status: 'completed',
+          hold: false,
+          issues: [],
+        });
+      } finally {
+        cleanUp(repo.dir, [first, second]);
+      }
+    });
+  },
+  TIMEOUT_MS,
+);
+
+test(
   "a watcher dispatching a workflow its default branch's commit lacks has the start refused: the item fails its attempt with the last line of the dispatch log, naming the commit, and no run exists",
   async () => {
     await withTempRepo(async (repo) => {
