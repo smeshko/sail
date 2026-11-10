@@ -411,6 +411,17 @@ test('the harness receives the rendered prompt with its feedback, the preamble a
   expect(run.record).toMatchObject({ try: 3, validationTry: 2, validationFailed: false });
 });
 
+test('the harness request carries the step effort, and has no effort key when the step sets none', async () => {
+  const sent = async (step: AgentStep) => {
+    const s = setup(step, 'Write the spec from {{brief}}.\n');
+    const harness = scripted({ resolves: done(VALID), files: { 'spec.md': '# Spec\n' } });
+    await agentKind.run(step, s.context(harness));
+    return harness.requests[0] ?? ({} as Partial<HarnessRequest>);
+  };
+  expect((await sent(spec({ effort: 'xhigh' }))).effort).toBe('xhigh');
+  expect(await sent(spec())).not.toHaveProperty('effort');
+});
+
 test("problems() reports a step's conventions that aren't a list of distinct, non-empty paths relative to the repository", () => {
   expect(agentKind.problems(spec({ conventions: [] }))).toEqual([]);
   expect(agentKind.problems(spec({ conventions: ['CONTEXT.md', 'docs/STYLE.md'] }))).toEqual([]);

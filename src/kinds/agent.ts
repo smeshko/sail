@@ -317,6 +317,7 @@ async function run(step: AgentStep, context: StepContext): Promise<StepRun> {
       // The preamble alone: what sail's own process inherited, credentials included, is not the session's to read.
       env: Object.fromEntries(preamble(context).map(({ name, value }) => [name, value])),
       model: agent.model,
+      ...(step.effort === undefined ? {} : { effort: step.effort }),
       permissions: step.permissions,
       budget: step.budget,
       outputSchema: submission.schema,

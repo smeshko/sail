@@ -160,6 +160,15 @@ test("the system prompt gives the session its working directory and every preamb
   });
 });
 
+test('the session options hold the request effort as the SDK effort, and no effort key when it has none, with thinking unchanged', () => {
+  const withEffort = sessionOptions({ ...request(), effort: 'medium' }, {});
+  const without = sessionOptions(request(), {});
+  expect(withEffort.effort).toBe('medium');
+  expect('effort' in without).toBe(false);
+  expect(withEffort.thinking).toEqual({ type: 'adaptive', display: 'summarized' });
+  expect(without.thinking).toEqual({ type: 'adaptive', display: 'summarized' });
+});
+
 test("the session's options are the step's model, workspace, envelope and budgets, isolated from the user's settings", () => {
   const req = request();
   const options = sessionOptions(req, {});

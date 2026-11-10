@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Provider } from '@earendil-works/pi-ai';
 import type { Env } from '../../ports/adapter';
+import type { Effort } from '../../sdk/steps';
 import { CODEX_PROVIDER, keychainCodexStore, NO_LOGIN } from './codex-login';
 import type { ExtensionHost } from './gate';
 import type { PiEvent } from './messages';
@@ -20,6 +21,8 @@ export interface PiSessionParams {
   readonly cwd: string;
   /** pi's `provider/model`. */
   readonly model: string;
+  /** The reasoning effort, as pi's thinking level. Left out, `medium`. */
+  readonly effort?: Effort;
   /** Appended to pi's own system prompt. */
   readonly systemPrompt: string;
   /** The built-in tools the session is offered; `submit` is always added. */
@@ -44,6 +47,8 @@ export interface PiSession {
   readonly sessionId: string;
   /** What the model is told before the prompt. */
   readonly systemPrompt: string;
+  /** The thinking level the session runs at, where the session reports it. */
+  readonly thinkingLevel?: string;
   subscribe(listener: (event: PiEvent) => void): () => void;
   prompt(text: string): Promise<void>;
   abort(): Promise<void>;
@@ -133,7 +138,7 @@ export const createPiSession: PiSessionFactory = async (params) => {
       agentDir,
       modelRuntime: runtime,
       model,
-      thinkingLevel: 'medium',
+      thinkingLevel: params.effort ?? 'medium',
       tools: [...params.tools, params.submit.name],
       customTools: [...bash, params.submit] as never,
       resourceLoader,
@@ -143,6 +148,7 @@ export const createPiSession: PiSessionFactory = async (params) => {
     return {
       sessionId: session.sessionId,
       systemPrompt: session.systemPrompt,
+      thinkingLevel: session.thinkingLevel,
       subscribe: (listener) => session.subscribe((event) => listener(event as unknown as PiEvent)),
       prompt: (text) => session.prompt(text),
       abort: () => session.abort(),
