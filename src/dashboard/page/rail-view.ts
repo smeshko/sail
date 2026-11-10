@@ -13,41 +13,12 @@ import type { RunActions } from '../actions';
 import { ago, cost, duration } from './format';
 import { html, type SafeHtml } from './html';
 import { newestFirst, type RailRepo, type RailRun, type RailWorkflow, workflowOf } from './index-model';
+import { isOpen, more, runLabel, runMenu, tooltipOf, watchButton } from './list-view';
 import { queueId } from './queue-view';
-import { runControls } from './run-view';
 import { pillOf, type UiState } from './ui-state';
-
-/** Whether `run` of `repo` is the open run: not while a queue holds the centre. */
-const isOpen = (repo: string, run: RailRun, ui: UiState) =>
-  ui.queue === undefined && ui.repo === repo && ui.runId === run.runId;
 
 /** Live means neither failed nor completed: running, suspended, blocked or unknown. */
 const isLive = (run: RailRun) => run.status !== 'failed' && run.status !== 'completed';
-
-/** The ID a run is listed by: its pull request, else its ticket key, else its run id. */
-const runLabel = (run: RailRun) => (run.pr === undefined ? (run.ticketKey ?? run.runId) : `PR #${run.pr}`);
-
-/** The full title, led by the run id for a pull-request run. */
-const tooltipOf = (run: RailRun): string | undefined =>
-  run.pr === undefined ? run.title : run.title === undefined ? run.runId : `${run.runId} · ${run.title}`;
-
-/** Whether `run`'s menu is open: only the open run's can be. */
-const isMenuOpen = (repo: string, run: RailRun, ui: UiState) => isOpen(repo, run, ui) && ui.runMenu === run.runId;
-
-/** A row's ⋯: on any run but a completed one, which offers nothing. */
-function more(repo: string, run: RailRun, ui: UiState): SafeHtml | '' {
-  if (run.status === 'completed') return '';
-  return html`<button class="r-more${isMenuOpen(repo, run, ui) ? ' open' : ''}" type="button" data-action="run-menu" data-repo="${repo}" data-run="${run.runId}" aria-label="actions for ${run.runId}" aria-expanded="${isMenuOpen(repo, run, ui) ? 'true' : 'false'}" title="actions for ${run.runId}">⋯</button>`;
-}
-
-/** The open menu under `run`'s row: what the run offers, once its actions are read. */
-function runMenu(repo: string, run: RailRun, ui: UiState, offers: RunActions | undefined): SafeHtml | '' {
-  if (!isMenuOpen(repo, run, ui)) return '';
-  const controls = runControls(offers, ui);
-  if (controls !== undefined) return html`<div class="r-menu">${controls}</div>`;
-  const why = offers === undefined ? 'reading what the run offers…' : (offers.why ?? 'the run offers nothing');
-  return html`<div class="r-menu"><span class="act-why">${why}</span></div>`;
-}
 
 function liveRow(repo: string, run: RailRun, ui: UiState, offers: RunActions | undefined): SafeHtml {
   const tip = tooltipOf(run);
@@ -153,16 +124,6 @@ function badge(group: string, queue: NonNullable<RailWorkflow['queue']>, ui: UiS
   return html`<button class="qbadge ${queue.waiting > 0 ? 'warn' : 'idle'}${sel}"${tip} data-action="select-queue" data-queue="${group}">${
     queue.waiting > 0 ? `${queue.waiting} queued` : 'queue'
   }</button>`;
-}
-
-/** A watch or unwatch button for a workflow, or for the whole repository when `workflow` is left out. An armed unwatch asks for its second click. */
-function watchButton(repo: string, op: 'watch' | 'unwatch', ui: UiState, workflow?: string): SafeHtml {
-  const all = workflow === undefined;
-  const armed = op === 'unwatch' && ui.armedWatch === (all ? repo : queueId(repo, workflow));
-  const word = all ? `${op} all` : op;
-  return html`<button class="wf-act${armed ? ' armed' : ''}" data-action="watch-set" data-repo="${repo}" data-op="${op}"${
-    all ? '' : html` data-workflow="${workflow}"`
-  }>${armed ? `${word}? click again` : word}</button>`;
 }
 
 function workflowHeader(

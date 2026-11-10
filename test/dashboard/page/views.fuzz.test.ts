@@ -10,10 +10,13 @@ import { attention } from '../../../src/dashboard/page/attention';
 import { renderAttention } from '../../../src/dashboard/page/attention-view';
 import { queuePanels, railRepos, watchState } from '../../../src/dashboard/page/index-model';
 import { renderInspector } from '../../../src/dashboard/page/inspector-view';
+import { navCounts } from '../../../src/dashboard/page/list-model';
+import { renderList } from '../../../src/dashboard/page/list-view';
 import { renderQueue } from '../../../src/dashboard/page/queue-view';
 import { renderRail } from '../../../src/dashboard/page/rail-view';
 import { foldRun } from '../../../src/dashboard/page/run-model';
 import { renderRun, renderStatus } from '../../../src/dashboard/page/run-view';
+import { renderSidebar } from '../../../src/dashboard/page/sidebar-view';
 import { initialUi, TABS } from '../../../src/dashboard/page/ui-state';
 import { readEvents } from '../../../src/events/consumers/ndjson';
 import type { QueueEvent } from '../../../src/events/types';
@@ -151,6 +154,9 @@ test('the rail, needs attention and the queue view keep their structure under a 
     };
     return [
       renderRail(railRepos(input, NOW), rail, NOW).value,
+      renderList('active', railRepos(input, NOW), ui, NOW).value,
+      renderList('queues', railRepos(input, NOW), ui, NOW).value,
+      renderSidebar(railRepos(input, NOW), navCounts(railRepos(input, NOW)), 2, ui).value,
       renderAttention(attention(input), true).value,
       ...queuePanels(input).map((panel) => renderQueue(panel, stream, ui, NOW).value),
     ];
@@ -162,7 +168,11 @@ test('the rail, needs attention and the queue view keep their structure under a 
       events.map((event) => poison(event, new Set(['title', 'reason', 'message', 'dedupKey', 'label']), payload)),
     );
     for (const [i, view] of benign.entries())
-      await same(view, hostile[i] ?? '', `${['rail', 'attention', 'queues'][i]}: ${payload}`);
+      await same(
+        view,
+        hostile[i] ?? '',
+        `${['rail', 'active', 'queues-list', 'sidebar', 'attention'][i] ?? 'queues'}: ${payload}`,
+      );
   }
 });
 

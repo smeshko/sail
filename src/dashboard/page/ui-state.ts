@@ -1,7 +1,8 @@
 // What a person has chosen on the page, which every view reads: the open run, card and tab, whether the card's timeline
 // is open, which of its tool calls and which kinds of its entries it hides, the queue open in its place with its folded
-// sections, the rail's open sections and opened groups, whether needs attention is open, the theme, the offset their
+// sections, the list's view, filter, cursor and folded groups, whether needs attention is open, the theme, the offset their
 // clock is at, and the file open in the drawer. It holds nothing about the runs themselves.
+import type { ViewName } from './list-model';
 
 export const TABS = ['overview', 'files', 'permissions', 'log'] as const;
 export type InspectorTab = (typeof TABS)[number];
@@ -37,6 +38,12 @@ export interface UiState {
   open: string[];
   /** The rail's opened repositories and workflows, as `<repo>` and `<repo>/<workflow>`: every one starts folded. */
   expanded: string[];
+  /** The view the list shows, the repository it is narrowed to, what the filter field holds, the entry under the cursor (by id) and the folded groups (by id). */
+  view: ViewName;
+  repoFilter?: string;
+  listFilter: string;
+  listCursor?: string;
+  listFolded: string[];
   /** Whether the needs attention pane is open. */
   attention: boolean;
   /** The queue view's folded sections, as `<repo>/<workflow>:<state>`. */
@@ -87,6 +94,9 @@ export function initialUi(tz: number): UiState {
     hidden: [],
     open: [],
     expanded: [],
+    view: 'active',
+    listFilter: '',
+    listFolded: [],
     attention: false,
     folded: [],
     queueEvents: false,
