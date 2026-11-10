@@ -693,6 +693,11 @@ test.each<[string, Change, string]>([
     "'huge'",
   ],
   [
+    'an effort outside the five levels',
+    (sail) => edit(sail, `${SPEC_STAGE}/stage.ts`, "model: 'deep'", "model: 'deep', effort: 'huge' as never"),
+    "stage 'spec' sets effort 'huge', which is not one of low, medium, high, xhigh, max",
+  ],
+  [
     'a harness whose credential is not set',
     (sail) => edit(sail, 'project.yaml', 'harness: { use: fake }', 'harness: { use: ./adapters/echo-harness.ts }'),
     'ECHO_HARNESS_TOKEN',

@@ -1,7 +1,9 @@
 // The Harness port: runs an agent step's session, with permissions, a budget and a schema to submit against. It speaks
 // sail's own events, and the agent kind stamps each one with the call's key. It never rejects: every failure, an abort
 // included, is the `error` outcome (ADR-0008).
+
 import type { CallEvent } from '../events/types';
+import type { Effort } from '../sdk/steps';
 import type { Budget, HarnessCapabilities, HarnessResult, Permissions } from './types';
 
 type HarnessEventType =
@@ -29,6 +31,8 @@ export interface HarnessRequest {
   /** The call's preamble: `STAGE_IN`, `STAGE_OUT` and `INPUT_*`. */
   readonly env: Readonly<Record<string, string>>;
   readonly model: string;
+  /** The reasoning effort to run the session at. Left out, the harness's own default. */
+  readonly effort?: Effort;
   readonly permissions: Permissions;
   readonly budget: Budget;
   /** The JSON Schema the agent submits its output against. */

@@ -60,6 +60,24 @@ test('the golden run view shows $1.35 of its $25.00 budget, its PR and sail show
   expect(markup).not.toContain('sail resume');
 });
 
+test('a card and a pending card show the effort after the model when one is set, and the model alone when none is', () => {
+  const events = readEvents(GOLDEN_RUN);
+  const start = events.find((event) => event.type === 'stage:start' && event.key === 'spec#1');
+  const head = events[0] as { roster: { stages: Record<string, object> } };
+  const roster = {
+    ...head.roster,
+    stages: { ...head.roster.stages, 'self-review': { ...head.roster.stages['self-review'], effort: 'max' } },
+  };
+  const draw = (...fed: unknown[]) => renderRun(foldRun(fed), summaryOf(GOLDEN_RUN), initialUi(0), NOW).value;
+  const effort = draw({ ...head, roster }, { ...start, effort: 'medium' });
+  expect(effort).toContain('<span class="c-model">claude-opus-5-5 · medium</span>');
+  expect(effort).toContain('<span class="c-model">claude-opus-5-5 · max</span>');
+  const plain = draw(head, start);
+  expect(plain).toContain('<span class="c-model">claude-opus-5-5</span>');
+  expect(plain).not.toContain(' · medium');
+  expect(plain).not.toContain(' · max');
+});
+
 test("FAKE-3's view has a lint#1 card and a not called yet group of describe, open, self-review and tests, no resume command, and no page module names lint", () => {
   const markup = renderRun(foldRun(readEvents(FAKE_3)), summaryOf(FAKE_3), initialUi(0), NOW).value;
   expect(groups(markup)).toEqual([

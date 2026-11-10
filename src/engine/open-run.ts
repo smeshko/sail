@@ -77,7 +77,7 @@ import { type LoadedWorkflow, loadWorkflow } from './load-workflow';
 import { type ResolvedPullRequest, resolvePullRequest, resolveRef } from './pr-source';
 import { isAlive } from './process';
 import { credentialValues, type Redactor, redactor } from './redact';
-import { buildRoster, harnessesReached, modelProblems } from './roster';
+import { buildRoster, effortProblems, harnessesReached, modelProblems } from './roster';
 import {
   copyDefinitions,
   createRunDir,
@@ -535,7 +535,7 @@ export async function preflightRun(options: OpenRunOptions): Promise<Preflight |
   claim(found.dir);
   const loaded = await loadWorkflow(found.dir, workflow);
   if ('refused' in loaded) return loaded;
-  const models = modelProblems(loaded, config);
+  const models = [...modelProblems(loaded, config), ...effortProblems(loaded)];
   if (models.length > 0) return { refused: models.join('\n') };
   const named = await resolveNamed(options.adapters, found.dir, harnessesReached(loaded, config));
   if ('refused' in named) return named;

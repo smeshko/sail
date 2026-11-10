@@ -298,6 +298,7 @@ function callSite(request: CallRequest, definition: AgentStep): TrySite {
       kind: 'agent',
       model,
       ...(harnessName === undefined ? {} : { harness: harnessName }),
+      ...(definition.effort === undefined ? {} : { effort: definition.effort }),
       consumed: suppliedFrom(definition, request.supplied),
       permissions: definition.permissions,
       budget: definition.budget,

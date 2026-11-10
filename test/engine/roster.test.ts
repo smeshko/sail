@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { type ProjectConfig, readConfig } from '../../src/engine/config';
 import { type LoadedWorkflow, loadWorkflow } from '../../src/engine/load-workflow';
-import { buildRoster, harnessesReached, modelProblems, origin } from '../../src/engine/roster';
+import { buildRoster, effortProblems, harnessesReached, modelProblems, origin } from '../../src/engine/roster';
 import { validateDocument } from '../../src/engine/schemas';
 import { agent, intake, type StageDefinition, script, stage, type Workflow, z } from '../../src/sdk/index';
 import * as intakes from '../../src/sdk/intakes';
@@ -349,6 +349,67 @@ test('problems come with the intake first, then the stages sorted by name', () =
     undefinedAlias("intake 'brief'", 'slow'),
     undefinedAlias("stage 'alpha'", 'a'),
     undefinedAlias("stage 'zeta'", 'z'),
+  ]);
+});
+
+test('an agent step records the effort it sets, one that sets none records no effort key, and run.json takes both', () => {
+  const high = agent('high', { prompt: './p.md', output: Out, permissions, budget, effort: 'high' });
+  const plain = agent('plain', { prompt: './p.md', output: Out, permissions, budget });
+  const two = stage('two', {
+    output: Out,
+    steps: [agent('first', { prompt: './p.md', output: Out, permissions, budget, effort: 'max' }), plain],
+  });
+  const entries = { high: entryOf(high), plain: entryOf(plain), two: entryOf(two) };
+  expect(entries.high).toMatchObject({ effort: 'high' });
+  expect(entries.plain).not.toHaveProperty('effort');
+  expect(entries.two?.steps?.map((step) => step.effort)).toEqual(['max', undefined]);
+  expect(entries.two?.steps?.[1]).not.toHaveProperty('effort');
+  const header = {
+    schema: 'sail.run.v1',
+    runId: 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N',
+    source: { kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: [] },
+    claim: { claimed: true, state: { type: 'started', name: 'In Progress' } },
+    workflow: { name: 'unit', version: 1 },
+    sail: { version: '0.0.0', runtime: 'bun' },
+    adapters: Object.fromEntries(
+      Object.keys(CONFIG.adapters).map((port) => [port, { use: 'fake', origin: 'builtin' }]),
+    ),
+    intake: { name: 'ticket', origin: 'builtin' },
+    stages: entries,
+    startedAt: '2026-09-27T09:00:00.000Z',
+  };
+  expect(validateDocument('sail.run.v1', header)).toEqual([]);
+  expect(
+    validateDocument('sail.run.v1', { ...header, stages: { high: { ...entries.high, effort: 'huge' } } }),
+  ).not.toEqual([]);
+});
+
+const LEVELS = 'low, medium, high, xhigh, max';
+
+const effortAgent = (name: string, effort: unknown) =>
+  agent(name, { prompt: './p.md', output: Out, permissions, budget, effort: effort as never });
+
+test('effortProblems names a stage whose agent step has an effort outside the five levels, and is empty for each of them', () => {
+  expect(effortProblems(loadedOf([effortAgent('plan', 'huge')]))).toEqual([
+    `stage 'plan' sets effort 'huge', which is not one of ${LEVELS}`,
+  ]);
+  expect(effortProblems(loadedOf([effortAgent('plan', 3)]))).toEqual([
+    `stage 'plan' sets effort '3', which is not one of ${LEVELS}`,
+  ]);
+  for (const level of ['low', 'medium', 'high', 'xhigh', 'max']) {
+    expect(effortProblems(loadedOf([effortAgent('plan', level)]))).toEqual([]);
+  }
+  expect(effortProblems(loadedOf([agentOf('plain')]))).toEqual([]);
+});
+
+test('a bad effort on a step of a multi-step stage names the stage and the step, and on an intake step the intake', () => {
+  const lint = script('lint', { run: './r.sh', output: Out });
+  const two = stage('two', { output: Out, steps: [lint, effortAgent('first', 'huge')] });
+  const brief = intake('brief', { accepts: ['ticket'], output: Out, steps: [effortAgent('write', 'ultra')] });
+  const own = { definition: brief, path: '/r/.sail/workflows/unit/intake.ts', module: { Out, brief } };
+  expect(effortProblems(loadedOf([two], { Out }, own))).toEqual([
+    `intake 'brief' sets effort 'ultra', which is not one of ${LEVELS}`,
+    `stage 'two' step 'first' sets effort 'huge', which is not one of ${LEVELS}`,
   ]);
 });
 

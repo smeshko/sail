@@ -59,7 +59,7 @@ import {
   undoOpened,
 } from './open-run';
 import { credentialValues, redactor } from './redact';
-import { harnessesReached, modelProblems } from './roster';
+import { effortProblems, harnessesReached, modelProblems } from './roster';
 import {
   copyDefinitions,
   DEFINITION_DIR,
@@ -254,7 +254,7 @@ export async function openSeededRun(options: SeededRunOptions): Promise<OpenedRu
   if (unmarked !== undefined) return { refused: unmarked };
   const loaded = await loadWorkflow(found.dir, source.header.workflow.name);
   if ('refused' in loaded) return loaded;
-  const models = modelProblems(loaded, config);
+  const models = [...modelProblems(loaded, config), ...effortProblems(loaded)];
   if (models.length > 0) return { refused: models.join('\n') };
   const harnesses = await resolveNamed(options.adapters, found.dir, harnessesReached(loaded, config));
   if ('refused' in harnesses) return harnesses;

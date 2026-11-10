@@ -8,7 +8,7 @@ import { createClaudeCodeHarness } from './harness';
 export { createClaudeCodeHarness } from './harness';
 
 /** The Agent SDK's version, which `package.json` pins: the SDK exports no way to read it. */
-export const SDK_VERSION = '0.3.282';
+export const SDK_VERSION = '0.3.322';
 
 /** Whether a switch such as `CLAUDE_CODE_USE_BEDROCK` is on, read as the CLI reads it: 1, true, yes or on, in any case. */
 const on = (value: string | undefined): boolean =>

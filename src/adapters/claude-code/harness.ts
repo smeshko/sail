@@ -148,6 +148,7 @@ export function sessionOptions(
     abortController: new AbortController(),
     cwd: request.cwd,
     model: request.model,
+    ...(request.effort === undefined ? {} : { effort: request.effort }),
     env: sessionEnv(request.env, env),
     additionalDirectories: [...new Set(stageDirs)],
     settingSources: [],
