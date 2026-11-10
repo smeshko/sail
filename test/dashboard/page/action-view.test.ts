@@ -7,7 +7,7 @@ import type { ActState } from '../../../src/dashboard/page/ui-state';
 
 const RUN: Subject = { kind: 'run', repo: 'alpha', runId: 'R1' };
 const NOTHING: OfferSource = { index: [] };
-const idle: ActState = { drafts: {} };
+const idle: ActState = { drafts: {}, results: {} };
 
 /** A made-up entry: offered as the source's `state` says, with one text and one number parameter. */
 const made = (state: 'on' | 'off' | 'absent'): ActionDef => ({
@@ -39,6 +39,7 @@ test('a made-up entry is drawn enabled, armed, disabled and not at all', () => {
   );
   const armed: ActState = {
     drafts: { poke: { note: 'a<b', times: '3' } },
+    results: {},
     pending: { id: 'poke', subject: RUN, values: {}, sent: false },
   };
   expect(actionControl(made('on'), RUN, armed, NOTHING, { wrap: true }).toString()).toBe(
@@ -56,6 +57,7 @@ test('a made-up entry is drawn enabled, armed, disabled and not at all', () => {
 test('only a pending action that is unsent, this one, on this subject, is armed', () => {
   const pending = (fields: Partial<NonNullable<ActState['pending']>>): ActState => ({
     drafts: {},
+    results: {},
     pending: { id: 'poke', subject: RUN, values: {}, sent: false, ...fields },
   });
   const drawn = (act: ActState) => actionControl(made('on'), RUN, act, NOTHING).toString();
@@ -90,7 +92,11 @@ test("a button carries its subject's data, its class and its title when asked", 
   expect(actionControl(drop, item, idle, source, { data: true, title: 'drop ticket:FAKE-5' }).toString()).toBe(
     '<button class="btn" data-action="drop-item" data-repo="a&quot;" data-workflow="wf" data-item="ticket:FAKE-5" title="drop ticket:FAKE-5">drop</button>',
   );
-  const armed: ActState = { drafts: {}, pending: { id: 'drop-item', subject: item, values: {}, sent: false } };
+  const armed: ActState = {
+    drafts: {},
+    results: {},
+    pending: { id: 'drop-item', subject: item, values: {}, sent: false },
+  };
   expect(actionControl(drop, item, armed, source, { class: 'wf-act' }).toString()).toBe(
     '<button class="wf-act armed" data-action="drop-item">confirm drop</button>',
   );
@@ -118,17 +124,17 @@ test('a choice is drawn as a select with the draft chosen, else the initial one,
   expect(actionControl(stop, RUN, idle, source).toString()).toContain(
     '<input type="checkbox" name="now" data-action="stop-now"> stop now</label>',
   );
-  expect(actionControl(stop, RUN, { drafts: { 'stop-run': { now: 'on' } } }, source).toString()).toContain(
+  expect(actionControl(stop, RUN, { drafts: { 'stop-run': { now: 'on' } }, results: {} }, source).toString()).toContain(
     'name="now" data-action="stop-now" checked>',
   );
   const select = (act: ActState) => actionControl(restart, RUN, act, source).toString();
   expect(select(idle)).toContain(
     '<option value="a" title="a once">a</option><option value="b" title="b once" selected>b</option>',
   );
-  expect(select({ drafts: { 'restart-run': { stage: 'a' } } })).toContain(
+  expect(select({ drafts: { 'restart-run': { stage: 'a' } }, results: {} })).toContain(
     '<option value="a" title="a once" selected>a</option>',
   );
-  expect(select({ drafts: { 'restart-run': { stage: 'zzz' } } })).toContain(
+  expect(select({ drafts: { 'restart-run': { stage: 'zzz' } }, results: {} })).toContain(
     '<option value="b" title="b once" selected>b</option>',
   );
 });
@@ -159,11 +165,13 @@ test('a parameter the row gives is not drawn', () => {
 test('resultOf gives the last result only at its place, and for the repository and workflow it names', () => {
   const act: ActState = {
     drafts: {},
-    result: {
-      id: 'poll-queue',
-      subject: { kind: 'item', repo: 'a', workflow: 'wf', item: 'k' },
-      text: 'polled',
-      place: 'queue',
+    results: {
+      queue: {
+        id: 'poll-queue',
+        subject: { kind: 'item', repo: 'a', workflow: 'wf', item: 'k' },
+        text: 'polled',
+        place: 'queue',
+      },
     },
   };
   expect(resultOf(act, 'queue')).toBe('polled');
@@ -173,8 +181,12 @@ test('resultOf gives the last result only at its place, and for the repository a
   expect(resultOf(act, 'run')).toBeUndefined();
   expect(resultOf(idle, 'queue')).toBeUndefined();
   expect(
-    resultOf({ drafts: {}, result: { id: 'x', subject: { kind: 'none' }, text: 't', place: 'rail' } }, 'rail', {
-      repo: 'a',
-    }),
+    resultOf(
+      { drafts: {}, results: { rail: { id: 'x', subject: { kind: 'none' }, text: 't', place: 'rail' } } },
+      'rail',
+      {
+        repo: 'a',
+      },
+    ),
   ).toBeUndefined();
 });

@@ -19,14 +19,22 @@ export type Theme = (typeof THEMES)[number];
 /** Where an action's answer is shown: the run's menu, the queue's header, under a repository's header, or the rail's top. */
 export type ActPlace = 'run' | 'queue' | 'repo' | 'rail';
 
+/** An action's answer as shown: for what, and where. */
+export interface ShownResult {
+  id: string;
+  subject: Subject;
+  text: string;
+  place: ActPlace;
+}
+
 /**
  * Carrying an action out, for every action alike: the one pending, which a first click of a confirmed action arms
- * (`sent: false`) and a second sends (`sent: true`, until its answer), the last result with where it shows and for
- * what, and what was typed for each action's parameters, kept across a draw.
+ * (`sent: false`) and a second sends (`sent: true`, until its answer), the last result of each place, for what, so one
+ * place's answer leaves another's, and what was typed for each action's parameters, kept across a draw.
  */
 export interface ActState {
   pending?: { id: string; subject: Subject; values: Record<string, string>; sent: boolean };
-  result?: { id: string; subject: Subject; text: string; place: ActPlace };
+  results: Partial<Record<ActPlace, ShownResult>>;
   drafts: Record<string, Record<string, string>>;
 }
 
@@ -72,7 +80,7 @@ export interface UiState {
   follow: boolean;
   /** The clock's offset east of UTC, in minutes: times are shown at it. */
   tz: number;
-  /** The action being carried out, its last result and the parameters typed. */
+  /** The action being carried out, the last result of each place and the parameters typed. */
   act: ActState;
 }
 
@@ -92,7 +100,7 @@ export function initialUi(tz: number): UiState {
     cursor: 0,
     follow: false,
     tz,
-    act: { drafts: {} },
+    act: { results: {}, drafts: {} },
   };
 }
 

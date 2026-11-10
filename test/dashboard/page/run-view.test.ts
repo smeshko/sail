@@ -203,8 +203,9 @@ const RUN_SUBJECT = { kind: 'run', repo: '', runId: '' } as const;
 const act = (armed?: string, drafts: Record<string, Record<string, string>> = {}, result?: string) => ({
   act: {
     drafts,
+    results:
+      result === undefined ? {} : { run: { id: 'x', subject: RUN_SUBJECT, text: result, place: 'run' as const } },
     ...(armed === undefined ? {} : { pending: { id: armed, subject: RUN_SUBJECT, values: {}, sent: false } }),
-    ...(result === undefined ? {} : { result: { id: 'x', subject: RUN_SUBJECT, text: result, place: 'run' as const } }),
   },
 });
 

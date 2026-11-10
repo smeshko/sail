@@ -257,11 +257,13 @@ test("the panel's notice is drawn as a warn chip beside its header, and not when
       ...initialUi(0),
       act: {
         drafts: {},
-        result: {
-          id: 'poll-queue',
-          subject: { kind: 'workflow', repo: panel.repo, workflow: panel.workflow },
-          text: 'no watcher is running <now>',
-          place: 'queue',
+        results: {
+          queue: {
+            id: 'poll-queue',
+            subject: { kind: 'workflow', repo: panel.repo, workflow: panel.workflow },
+            text: 'no watcher is running <now>',
+            place: 'queue',
+          },
         },
       },
     },
@@ -416,7 +418,7 @@ test('the drop an armed click named reads confirm drop and is armed; the others 
   const subject = { kind: 'item', repo: 'beta', workflow: 'ticket-to-pr', item: 'ticket:FAKE-6' } as const;
   const ui = {
     ...initialUi(0),
-    act: { drafts: {}, pending: { id: 'drop-item', subject, values: {}, sent: false } },
+    act: { drafts: {}, results: {}, pending: { id: 'drop-item', subject, values: {}, sent: false } },
     itemMenu: 'ticket:FAKE-6',
   };
   const markup = renderQueue(panel, undefined, ui, NOW).value;
@@ -449,7 +451,7 @@ test('the header has a poll button for the workflow, and the add form shows only
 test('what was typed in the add field and whether force is ticked survive a draw', () => {
   const [panel] = queuePanels(index(m.registryDir));
   if (panel === undefined) throw new Error('beta has no queue');
-  const ui = { ...initialUi(0), act: { drafts: { 'add-ticket': { ticket: 'FAKE-"9"', force: 'on' } } } };
+  const ui = { ...initialUi(0), act: { drafts: { 'add-ticket': { ticket: 'FAKE-"9"', force: 'on' } }, results: {} } };
   const markup = renderQueue(panel, { recent: [], watch: 'watched', polls: 'ticket' }, ui, NOW).value;
   expect(markup).toContain('name="add-ticket" placeholder="ticket key" value="FAKE-&quot;9&quot;"');
   expect(markup).toContain('<input type="checkbox" name="add-force" checked> force');

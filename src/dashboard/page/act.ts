@@ -61,7 +61,7 @@ export interface Actor {
   keep(place: 'run' | 'queue', subject?: Subject): void;
   /** Forgets what a run's actions hold: the pending one, the result shown in the run's menu and the drafts. */
   forget(kind: 'run'): void;
-  /** Clears the last result when it shows at `place`. */
+  /** Clears the last result shown at `place`. */
   clearResult(place: ActPlace): void;
 }
 
@@ -92,8 +92,15 @@ export function createActor(deps: ActorDeps): Actor {
   };
 
   function setResult(id: string, subject: Subject, place: ActPlace, text: string | undefined) {
-    if (text === undefined) delete state.result;
-    else state.result = { id, subject, text, place };
+    if (text === undefined) delete state.results[place];
+    else state.results[place] = { id, subject, text, place };
+  }
+
+  /** Clears what `def` showed at its own place for `subject`, such as its sending line, and leaves any other's. */
+  function clearOwn(def: ActionDef, subject: Subject) {
+    const shown = state.results[def.place];
+    if (shown !== undefined && shown.id === def.id && sameSubject(shown.subject, subject))
+      delete state.results[def.place];
   }
 
   function disarm(except?: { id: string; subject: Subject }): boolean {
@@ -134,7 +141,7 @@ export function createActor(deps: ActorDeps): Actor {
     const runEffect = effect !== undefined && effect !== 'took';
     const stillOpen = subject.kind === 'run' && open?.repo === subject.repo && open.runId === subject.runId;
     if (runEffect && !stillOpen) {
-      delete state.result;
+      clearOwn(def, subject);
     } else {
       if (effect === 'reopen' && subject.kind === 'run')
         effects.reopen(subject.repo, subject.runId, answer.keepMenu === true);
@@ -148,6 +155,7 @@ export function createActor(deps: ActorDeps): Actor {
         stale.add(def.place === 'run' ? 'run' : 'queue');
         effects.took();
       }
+      clearOwn(def, subject);
       setResult(def.id, subject, answer.place, answer.text);
     }
     mark('rail', 'main');
@@ -157,7 +165,7 @@ export function createActor(deps: ActorDeps): Actor {
   function send(def: ActionDef, subject: Subject, values: Values, request: { path: string; body: unknown }) {
     if (def.tier === 'confirmed') state.pending = { id: def.id, subject, values: { ...values }, sent: true };
     if (def.sending !== undefined) setResult(def.id, subject, def.place, def.sending(subject));
-    else if (subject.kind === 'run') delete state.result;
+    else if (subject.kind === 'run') delete state.results.run;
     mark('rail', 'main');
     void host.post(request.path, request.body).then(({ status, body }) => finish(def, subject, status, body));
   }
@@ -201,7 +209,7 @@ export function createActor(deps: ActorDeps): Actor {
         rearms.every((param) => pending.values[param.name] === values[param.name]);
       if (!confirms) {
         state.pending = { id: def.id, subject, values: { ...values }, sent: false };
-        if (subject.kind === 'run') delete state.result;
+        if (subject.kind === 'run') delete state.results.run;
         mark('rail', 'main');
         return;
       }
@@ -238,12 +246,12 @@ export function createActor(deps: ActorDeps): Actor {
     },
     forget() {
       if (state.pending?.subject.kind === 'run') delete state.pending;
-      if (state.result?.place === 'run') delete state.result;
+      delete state.results.run;
       for (const def of registry) if (def.appliesTo.includes('run')) delete state.drafts[def.id];
       stale.add('run');
     },
     clearResult(place) {
-      if (state.result?.place === place) delete state.result;
+      delete state.results[place];
     },
   };
 }

@@ -1379,7 +1379,7 @@ test("a click on a waiting row's down button posts the move to the queue's move 
   expect({
     posts: host.posts,
     refused: refused?.includes('<span class="warnchip">no watcher is running for &#39;beta&#39;</span>'),
-    cleared: [page.ui.act.result?.text, host.regions.main?.includes('no watcher is running')],
+    cleared: [page.ui.act.results.queue?.text, host.regions.main?.includes('no watcher is running')],
   }).toEqual({
     posts: [
       {
@@ -1674,7 +1674,7 @@ test('a poll click posts an empty body to the queue poll route; a 200 shows its 
     host.click({ action: 'poll-queue', ...BETA });
     await settle();
     host.advance(100);
-    notices.push(page?.ui.act.result?.text);
+    notices.push(page?.ui.act.results.queue?.text);
   }
   expect(host.posts).toEqual(Array(4).fill({ path: `${QUEUE_PATH}/poll`, body: {} }));
   expect(notices).toEqual([
@@ -1706,7 +1706,7 @@ test('the add form shows once the queue stream has polled tickets; add posts the
   await settle();
   host.advance(100);
   expect(host.posts).toEqual([{ path: `${QUEUE_PATH}/add`, body: { ticketKey: 'FAKE-9', force: true } }]);
-  expect(page?.ui.act.result?.text).toBe('sail queue: queued ticket:FAKE-9 Nine');
+  expect(page?.ui.act.results.queue?.text).toBe('sail queue: queued ticket:FAKE-9 Nine');
   expect(host.regions.main).toContain('value=""');
   host.fields['add-force'] = '';
   host.click({ action: 'add-ticket', ...BETA });
@@ -1733,7 +1733,7 @@ test('the first click on drop arms it and posts nothing, the second posts the de
   host.click({ action: 'drop-item', ...BETA, item: 'ticket:FAKE-5' });
   await settle();
   host.advance(100);
-  expect([host.posts, armedDrop(), page?.ui.itemMenu, page?.ui.act.result?.text]).toEqual([
+  expect([host.posts, armedDrop(), page?.ui.itemMenu, page?.ui.act.results.queue?.text]).toEqual([
     [{ path: `${QUEUE_PATH}/drop`, body: { dedupKey: 'ticket:FAKE-5' } }],
     undefined,
     undefined,
@@ -1835,7 +1835,7 @@ test('a requeue click posts at once with the dedup key, and a 409 shows the CLI 
   host.click({ action: 'requeue-item', ...BETA, item: 'ticket:FAKE-6' });
   await settle();
   host.advance(100);
-  expect([host.posts, page?.ui.act.result?.text]).toEqual([
+  expect([host.posts, page?.ui.act.results.queue?.text]).toEqual([
     [{ path: `${QUEUE_PATH}/requeue`, body: { dedupKey: 'ticket:FAKE-6' } }],
     'ticket:FAKE-6 is queued: only a parked or failed item is requeued',
   ]);
@@ -1972,7 +1972,7 @@ test('Clean arms with what it removes, posts {} on the second click, and leaves 
   await settle();
   host.advance(100);
   expect(host.posts).toEqual([{ path: `${FAKE_2_PATH}/clean`, body: {} }]);
-  expect([before?.closed, page?.ui.act.result?.text]).toEqual([true, cleaned]);
+  expect([before?.closed, page?.ui.act.results.rail?.text]).toEqual([true, cleaned]);
   expect(host.regions.rail).toContain(`<span class="warnchip">${cleaned.replace('->', '-&gt;')}</span>`);
   host.click({ action: 'select-run', repo: 'alpha', run: GOLDEN_RUN_ID });
   host.advance(100);
@@ -2023,8 +2023,8 @@ const watchClick = (op: string, workflow?: string) =>
   host.click({ action: op, repo: 'beta', ...(workflow === undefined ? {} : { workflow }) });
 /** What the last watch or unwatch answered, shown under the repository: its text, with the repository it names. */
 const watchNotice = () => {
-  const result = page?.ui.act.result;
-  return result?.place === 'repo' && 'repo' in result.subject
+  const result = page?.ui.act.results.repo;
+  return result !== undefined && 'repo' in result.subject
     ? { repo: result.subject.repo, text: result.text }
     : undefined;
 };

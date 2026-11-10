@@ -101,14 +101,14 @@ export function actionControl(
   );
 }
 
-/** The text of the last result when it shows at `place`, and, where `scope` names them, for that repository and workflow. */
+/** The text of the last result shown at `place`, and, where `scope` names them, for that repository and workflow. */
 export function resultOf(
   act: ActState,
   place: ActPlace,
   scope: { repo?: string; workflow?: string } = {},
 ): string | undefined {
-  const { result } = act;
-  if (result === undefined || result.place !== place) return undefined;
+  const result = act.results[place];
+  if (result === undefined) return undefined;
   const { subject } = result;
   const repo = 'repo' in subject ? subject.repo : undefined;
   const workflow = 'workflow' in subject ? subject.workflow : undefined;

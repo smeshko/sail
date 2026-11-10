@@ -310,7 +310,7 @@ test('a watched workflow draws unwatch, an unwatched one with a queue draws watc
 
 test('an armed unwatch reads unwatch? click again, and an armed unwatch all unwatch all? click again, and nothing else is armed', () => {
   const arm = (subject: Subject) => ({
-    act: { drafts: {}, pending: { id: 'unwatch', subject, values: {}, sent: false } },
+    act: { drafts: {}, results: {}, pending: { id: 'unwatch', subject, values: {}, sent: false } },
   });
   const one = gamma(['flow'], arm({ kind: 'workflow', repo: 'gamma', workflow: 'flow' }));
   expect(one).toContain(button('gamma', 'unwatch', 'unwatch? click again', 'flow', true));
@@ -324,7 +324,10 @@ test('an armed unwatch reads unwatch? click again, and an armed unwatch all unwa
 test("the watch notice shows under its own repository's header, open or folded, and under no other", () => {
   const text = 'sail watch: no workflow declares a watch';
   const said = {
-    act: { drafts: {}, result: { id: 'watch', subject: { kind: 'repo', repo: 'gamma' }, text, place: 'repo' } },
+    act: {
+      drafts: {},
+      results: { repo: { id: 'watch', subject: { kind: 'repo', repo: 'gamma' }, text, place: 'repo' } },
+    },
   } as const;
   expect(gamma(['flow'], said)).toContain(`</button>\n<div class="lgrp-p">${text}</div>`);
   const folded = renderRail(watchedRepo(['flow']), { ...initialUi(0), ...said }, NOW).value;
