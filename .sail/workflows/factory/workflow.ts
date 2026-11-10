@@ -26,7 +26,7 @@ export default workflow(
   'factory',
   {
     intake: ticket,
-    version: 9,
+    version: 10,
     watch: { every: '5m' },
     // One at a time: two factory runs beside the reviews load the machine until every gate turns flaky (ADW-444).
     maxConcurrentRuns: 1,
@@ -52,12 +52,16 @@ export default workflow(
     // implement-plan, its final validation, then a surface check that every task is implemented: a failed validation,
     // or a task left out, goes back to implement. Tests failing on the base too end the run: no pass would fix them.
     // A failed last pass would fail the run with the loop exceeded: break instead, so the run fails below, saying why.
+    // A task implement reported with no commit changed no file: it counts as implemented on its evidence, decided here
+    // in code, whatever the task check answered for it.
     let implemented = false;
+    let verified: { id: string; evidence: string }[] = [];
     let passes = 0;
     for (const iteration of run.loop('implement', { max: IMPLEMENT_PASSES, feedback: PassFeedback })) {
       passes++;
       const impl = await run.stage(implement, { plan: planFile, commit, feedback: iteration.previous });
       if (impl.outcome === 'blocked') return handOff(`implement blocked: ${impl.reason}`);
+      verified = impl.output.tasks.filter((task) => task.commit === null).map(({ id, evidence }) => ({ id, evidence }));
       const v = await run.stage(validate);
       if (v.outcome === 'failed' && v.output.baseRed) return run.fail(`staging is red: ${redTests(v.output)}`);
       if (v.outcome === 'failed') {
@@ -69,10 +73,23 @@ export default workflow(
       const asked = await run.stage(jevTasks, { plan: planFile });
       let tasks = asked.output.checked;
       if (tasks === null) {
-        const checked = await run.stage(checkTasks, { plan: planFile, jev: asked.output });
+        const checked = await run.stage(checkTasks, {
+          plan: planFile,
+          jev: asked.output,
+          verified: verified.map((task) => task.id),
+        });
         if (checked.outcome === 'blocked') return handOff(`check-tasks blocked: ${checked.reason}`);
         tasks = checked.output;
       }
+      const accepted = new Set(verified.map((task) => task.id));
+      tasks = {
+        ...tasks,
+        tasks: tasks.tasks.map((task) =>
+          !task.implemented && accepted.has(task.id)
+            ? { ...task, implemented: true, evidence: "no commit: accepted on implement's evidence" }
+            : task,
+        ),
+      };
       if (tasks.tasks.some((task) => !task.implemented)) {
         if (passes === IMPLEMENT_PASSES) break;
         iteration.fail({ validation: null, tasks });
