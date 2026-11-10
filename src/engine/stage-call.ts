@@ -387,6 +387,7 @@ export async function runStageCall(request: CallRequest, stage: Stage, hooks: St
         ? {
             model: modelOf(request.agent, step),
             ...(onHarness === undefined ? {} : { harness: onHarness }),
+            ...(step.effort === undefined ? {} : { effort: step.effort }),
           }
         : { command: checkoutPath(request.root, request.runDir, join(dirname(request.stageFile), step.run)) }),
     });

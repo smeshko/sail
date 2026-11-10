@@ -5,7 +5,15 @@
 import { relative, sep } from 'node:path';
 import { exitCodeMap } from '../kinds/script';
 import type { Intake } from '../sdk/intake';
-import { type Budget, EFFORTS, type Permissions, type ScriptStep, type StageDefinition, type Step } from '../sdk/steps';
+import {
+  type Budget,
+  EFFORTS,
+  type Effort,
+  type Permissions,
+  type ScriptStep,
+  type StageDefinition,
+  type Step,
+} from '../sdk/steps';
 import { aliasOf, type ProjectConfig } from './config';
 import type { LoadedWorkflow } from './load-workflow';
 
@@ -16,6 +24,8 @@ export interface StepRosterEntry {
   model?: string;
   /** The named harness the step's model alias names. Left out for the default harness. */
   harness?: string;
+  /** An agent step's reasoning effort, when it sets one. */
+  effort?: Effort;
   output?: string;
   produces?: string[];
   network?: readonly string[];
@@ -32,6 +42,8 @@ export interface RosterEntry {
   model?: string;
   /** The named harness the step's model alias names. Left out for the default harness. */
   harness?: string;
+  /** An agent step's reasoning effort, when it sets one. */
+  effort?: Effort;
   output?: string;
   produces?: string[];
   network?: readonly string[];
@@ -158,6 +170,7 @@ function stepFields(
       kind: 'agent',
       ...field('model', model),
       ...field('harness', harness),
+      ...field('effort', step.effort),
       ...own,
       permissions: step.permissions,
       budget: step.budget,

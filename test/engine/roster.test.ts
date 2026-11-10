@@ -352,6 +352,38 @@ test('problems come with the intake first, then the stages sorted by name', () =
   ]);
 });
 
+test('an agent step records the effort it sets, one that sets none records no effort key, and run.json takes both', () => {
+  const high = agent('high', { prompt: './p.md', output: Out, permissions, budget, effort: 'high' });
+  const plain = agent('plain', { prompt: './p.md', output: Out, permissions, budget });
+  const two = stage('two', {
+    output: Out,
+    steps: [agent('first', { prompt: './p.md', output: Out, permissions, budget, effort: 'max' }), plain],
+  });
+  const entries = { high: entryOf(high), plain: entryOf(plain), two: entryOf(two) };
+  expect(entries.high).toMatchObject({ effort: 'high' });
+  expect(entries.plain).not.toHaveProperty('effort');
+  expect(entries.two?.steps?.map((step) => step.effort)).toEqual(['max', undefined]);
+  expect(entries.two?.steps?.[1]).not.toHaveProperty('effort');
+  const header = {
+    schema: 'sail.run.v1',
+    runId: 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N',
+    source: { kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: [] },
+    claim: { claimed: true, state: { type: 'started', name: 'In Progress' } },
+    workflow: { name: 'unit', version: 1 },
+    sail: { version: '0.0.0', runtime: 'bun' },
+    adapters: Object.fromEntries(
+      Object.keys(CONFIG.adapters).map((port) => [port, { use: 'fake', origin: 'builtin' }]),
+    ),
+    intake: { name: 'ticket', origin: 'builtin' },
+    stages: entries,
+    startedAt: '2026-09-27T09:00:00.000Z',
+  };
+  expect(validateDocument('sail.run.v1', header)).toEqual([]);
+  expect(
+    validateDocument('sail.run.v1', { ...header, stages: { high: { ...entries.high, effort: 'huge' } } }),
+  ).not.toEqual([]);
+});
+
 const LEVELS = 'low, medium, high, xhigh, max';
 
 const effortAgent = (name: string, effort: unknown) =>
