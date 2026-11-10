@@ -232,6 +232,34 @@ test('a SIGINT leaves neither a script that ignores SIGTERM nor its child alive 
   });
 }, 30_000);
 
+test('a SIGINT ends the script and its child before STATUS first reads suspended', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir, { sleepAt: 'implement#1' });
+    mkdirSync(join(repo.dir, '.stub'), { recursive: true });
+    writeFileSync(join(repo.dir, '.stub', 'sleep-ignores-term'), '');
+    const sail = Bun.spawn([process.execPath, shim, 'FAKE-1'], {
+      cwd: repo.dir,
+      env: repo.env,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const pids = await whenSleeping(repo.dir);
+    const status = join(repo.dir, '.sail-runs', runIdIn(repo.dir), 'STATUS');
+    sail.kill('SIGINT');
+    const deadline = performance.now() + 15_000;
+    let alive: number[] = pids;
+    while (performance.now() < deadline) {
+      const read = existsSync(status) ? readFileSync(status, 'utf8') : '';
+      alive = pids.filter(isAlive);
+      if (read.startsWith('suspended')) break;
+      await Bun.sleep(5);
+    }
+    for (const pid of alive) process.kill(pid, 'SIGKILL');
+    expect(alive).toEqual([]);
+    expect(await sail.exited).toBe(2);
+  });
+}, 30_000);
+
 // In a process of its own, because bun test fails a test on any unhandled rejection, whatever the process listens for.
 test("a run.fail() in a chain the workflow doesn't await, after the run has ended, changes neither its end nor its code", async () => {
   await withTempRepo((repo) => {
