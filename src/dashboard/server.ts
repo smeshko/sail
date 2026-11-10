@@ -52,14 +52,15 @@ import type { TicketSource } from '../ports/ticket-source';
 import { commandTaken, dropCommand, NOT_TAKEN } from '../watch/inbox';
 import { commandFor, itemLine, outcomeOf, streamMark } from '../watch/queue-commands';
 import { queueItemsNaming, startingRun } from '../watch/queue-store';
-import { liveSet, liveWatcher, type RegistryEntry } from '../watch/registry';
+import { liveSet, liveWatcher } from '../watch/registry';
 import { lastLine, type SpawnedRun, spawnDetached } from '../watch/spawn';
 import { runActions } from './actions';
 import { clonePorts, type ResolveClonePorts } from './clone-ports';
 import { callFile, containedFile, findRepo, findRunDir, repos, runItems } from './files';
 import { renderMarkdown } from './markdown';
+import { offeredQueues, watching } from './offers';
 import { createPage } from './page';
-import { findQueueDir, queueViews, readQueue } from './queues';
+import { findQueueDir, readQueue } from './queues';
 import { createIndexFeed, openQueueFollow, openRunStream, resolveTarget } from './streams';
 
 export interface DashboardOptions {
@@ -150,22 +151,6 @@ const MoveBody = z
   });
 
 /**
- * The repository's live watcher when it runs in this clone and watches `workflow`, with how to name it and the label it
- * polls the workflow on, or the 409 that says why not.
- */
-function watchedBy(entry: RegistryEntry, workflow: string): { named: string; label: string } | Response {
-  const watcher = liveWatcher(entry);
-  if (watcher === undefined) {
-    return error(409, `no watcher is running for '${entry.name}': sail watch ${workflow} first`);
-  }
-  const named = `the watcher of '${entry.name}' (pid ${watcher.pid})`;
-  if (watcher.sailDir !== entry.sailDir) return error(409, `${named} runs in another clone: ${watcher.sailDir}`);
-  const set = liveSet(entry.sailDir, watcher.pid).find((each) => each.workflow === workflow);
-  if (set === undefined) return error(409, `${named} does not watch '${workflow}': sail watch ${workflow} first`);
-  return { named, label: set.label };
-}
-
-/**
  * Asks the repository's live watcher to move a queued item, by dropping a move command in its inbox: the watcher alone
  * writes the queue. Refused unless the item and its target are both queued, and the repository's live watcher runs in
  * its `.sail/` and watches the workflow, as `sail queue move` checks.
@@ -198,8 +183,8 @@ async function moveRoute(registryDir: string, segments: string[], request: Reque
     if (item === undefined) return error(409, `${workflow}'s queue has no item ${key}`);
     if (item.state !== 'queued') return error(409, `${key} is ${item.state}: only a queued item is moved`);
   }
-  const watched = watchedBy(entry, workflow);
-  if (watched instanceof Response) return watched;
+  const watched = watching(entry, workflow);
+  if ('refused' in watched) return error(409, watched.refused);
   const file = dropCommand(runsDir(entry.sailDir), {
     op: 'move',
     workflow,
@@ -237,8 +222,8 @@ async function queueOpRoute(options: DashboardOptions, segments: string[], reque
   } else {
     return error(404, `no queue operation '${op}'`);
   }
-  const watched = watchedBy(entry, workflow);
-  if (watched instanceof Response) return watched;
+  const watched = watching(entry, workflow);
+  if ('refused' in watched) return error(409, watched.refused);
 
   const { sailDir } = entry;
   const runs = runsDir(sailDir);
@@ -677,7 +662,7 @@ async function route(options: DashboardOptions, segments: string[], url: URL): P
   if (name === undefined) return Response.json(repos(registryDir));
   const entry = findRepo(registryDir, name);
   if (entry === undefined) return error(404, `no repository '${name}'`);
-  if (kind === 'queues' && runId === undefined) return Response.json(queueViews(entry));
+  if (kind === 'queues' && runId === undefined) return Response.json(offeredQueues(entry));
   if (kind !== 'runs') return error(404, 'no such route');
   if (runId === undefined) return Response.json(runItems(entry));
   const runDir = findRunDir(entry, runId);

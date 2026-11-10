@@ -13,7 +13,7 @@ import { EVENTS_FILE, readEvents } from '../events/consumers/ndjson';
 import type { Summary } from '../events/summary';
 import { liveSet, liveWatcher, type RegistryEntry, type RegistryProblem, readRegistry } from '../watch/registry';
 import { containedFile, inside } from './contained';
-import { type QueueView, queueViews } from './queues';
+import { type OfferedQueue, offeredQueues, type RepoOffers, repoOffers } from './offers';
 
 export { containedFile, inside };
 
@@ -26,7 +26,9 @@ export type RunItem = Omit<RunListing, 'dir'> & { source?: Source; summary: Summ
 /** A repository with its runs and its queues: what the index stream sends. */
 export type IndexRepo = Repo & {
   runs: RunItem[];
-  queues: QueueView[];
+  queues: OfferedQueue[];
+  /** What the repository offers: its watch set, and each workflow's watch or unwatch. */
+  offers?: RepoOffers;
   /** The live watcher of this repository and the workflows it watches, set only while it runs in this clone. */
   watching?: { pid: number; workflows: string[] };
 };
@@ -150,9 +152,23 @@ export function index(registryDir: string): IndexRepo[] {
               },
             }
           : {};
-      return { ...repo, runs: runItems(repo), queues: queueViews(repo), ...watching };
+      const runs = runItems(repo);
+      const queues = offeredQueues(repo, runs);
+      return {
+        ...repo,
+        runs,
+        queues,
+        offers: repoOffers(repo, queues, watching.watching?.workflows ?? []),
+        ...watching,
+      };
     } catch (error) {
-      return { ...repo, runs: [], queues: [], problem: `its runs can't be listed: ${messageOf(error)}` };
+      return {
+        ...repo,
+        runs: [],
+        queues: [],
+        offers: { watch: repoOffers(repo, [], []).watch, workflows: {} },
+        problem: `its runs can't be listed: ${messageOf(error)}`,
+      };
     }
   });
 }
