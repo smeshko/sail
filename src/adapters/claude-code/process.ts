@@ -8,11 +8,13 @@
 // every group it saw one in along with the leader's. A shell that starts and ends between two looks, leaving a job
 // behind, goes unseen: the gate refuses a command that sends one to the background.
 //
+// Every group is also registered with the engine, so sail's exit waits for its stop.
+//
 // stderr is ignored (D17): the SDK speaks stream-json over stdin and stdout, and reads nothing else.
 // POSIX process groups only. A descendant that calls `setsid` leaves the group, and survives unless a look saw it.
 import { type ChildProcess, spawn as spawnChild } from 'node:child_process';
 import type { SpawnedProcess, SpawnOptions } from '@anthropic-ai/claude-agent-sdk';
-import { DEFAULT_GRACE_MS, stopGroup } from '../../engine/process';
+import { DEFAULT_GRACE_MS, stopGroup, trackGroup, untrackGroup } from '../../engine/process';
 
 /** How long the leader has to exit by itself once its session ends: beyond the SDK's own ~2 s grace. */
 export const REAP_WAIT_MS = 3_000;
@@ -83,9 +85,14 @@ export function createSpawner(options: SpawnerOptions = {}): Spawner {
   const groups = new Set<number>();
   const alive = () => child !== undefined && child.exitCode === null && child.signalCode === null;
   const look = (pid: number) => {
-    if (alive()) for (const pgid of descendantGroups(pid)) groups.add(pgid);
+    if (!alive()) return;
+    for (const pgid of descendantGroups(pid)) {
+      groups.add(pgid);
+      trackGroup(pgid);
+    }
   };
-  const stopAll = (pid: number) => Promise.all([pid, ...groups].map((pgid) => stopGroup(pgid, DEFAULT_GRACE_MS)));
+  const stopAll = (pid: number) =>
+    Promise.all([pid, ...groups].map((pgid) => stopGroup(pgid, DEFAULT_GRACE_MS).then(() => untrackGroup(pgid))));
   const stop = (pid: number) => {
     look(pid);
     stopping ??= stopAll(pid);
@@ -103,6 +110,7 @@ export function createSpawner(options: SpawnerOptions = {}): Spawner {
       child = spawned;
       const { pid } = spawned;
       if (pid !== undefined) {
+        trackGroup(pid);
         tracker = setInterval(() => look(pid), options.trackMs ?? TRACK_MS);
         tracker.unref();
         spawned.once('exit', () => clearInterval(tracker));
