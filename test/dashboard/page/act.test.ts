@@ -384,3 +384,58 @@ test('an action the queue does not offer for an item is not carried out', () => 
   r.actor.act('poll-queue', { repo: 'beta', workflow: 'other' });
   expect([r.posts, r.ui.act.pending]).toEqual([[], undefined]);
 });
+
+const watchIndex = [
+  {
+    name: 'beta',
+    runs: [],
+    queues: [],
+    offers: {
+      watch: on,
+      unwatch: on,
+      workflows: { wf: { unwatch: on }, side: { watch: on } },
+    },
+  },
+] as unknown as IndexRepo[];
+
+test('a watch posts the workflow at once and says it is watching until the answer, which replaces it under the repository', async () => {
+  const r = rig(undefined, watchIndex);
+  r.actor.act('watch', { repo: 'beta', workflow: 'side' });
+  expect(r.posts).toEqual([{ path: '/api/repos/beta/watch', body: { workflows: ['side'] } }]);
+  expect([r.ui.act.result?.text, r.ui.act.result?.place, r.ui.act.pending]).toEqual(['watching…', 'repo', undefined]);
+  await r.answer(200, { message: 'sail watch: it watches side' });
+  expect(r.ui.act.result).toEqual({
+    id: 'watch',
+    subject: { kind: 'workflow', repo: 'beta', workflow: 'side' },
+    text: 'sail watch: it watches side',
+    place: 'repo',
+  });
+  r.actor.act('watch', { repo: 'beta' });
+  expect(r.posts[1]).toEqual({ path: '/api/repos/beta/watch', body: { workflows: [] } });
+  await r.answer(202, {});
+  expect(r.ui.act.result).toBeUndefined();
+});
+
+test('an unwatch arms on a first click, any other action disarms it, and a second click posts it', async () => {
+  const r = rig(undefined, watchIndex);
+  r.actor.act('unwatch', { repo: 'beta', workflow: 'wf' });
+  expect([
+    r.posts,
+    r.actor.armed('unwatch', { repo: 'beta', workflow: 'wf' }),
+    r.actor.armed('unwatch', { repo: 'beta' }),
+  ]).toEqual([[], true, false]);
+  r.actor.act('watch', { repo: 'beta', workflow: 'side' });
+  expect(r.ui.act.pending).toBeUndefined();
+  r.actor.act('unwatch', { repo: 'beta' });
+  r.actor.act('unwatch', { repo: 'beta' });
+  expect(r.posts.at(-1)).toEqual({ path: '/api/repos/beta/unwatch', body: { workflows: [] } });
+  await r.answer(409, { error: 'sail unwatch: nothing to do' });
+  expect(r.ui.act.result?.text).toBe('sail unwatch: nothing to do');
+});
+
+test('a watch of a workflow the repository does not offer it for is not sent', () => {
+  const r = rig(undefined, watchIndex);
+  r.actor.act('watch', { repo: 'beta', workflow: 'wf' });
+  r.actor.act('unwatch', { repo: 'other' });
+  expect(r.posts).toEqual([]);
+});

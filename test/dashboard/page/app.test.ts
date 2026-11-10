@@ -2003,22 +2003,51 @@ test('a refused Stop or Clean shows its error beside the buttons and disarms, an
 function bootWatching(workflows?: string[]) {
   page = boot(host);
   const repos = index(m.registryDir).map((repo) =>
-    repo.name === 'beta' && workflows !== undefined ? { ...repo, watching: { pid: 4242, workflows } } : repo,
+    repo.name === 'beta' && workflows !== undefined
+      ? {
+          ...repo,
+          watching: { pid: 4242, workflows },
+          // What the server then offers: unwatch for what is watched, and for the whole set while it holds any.
+          offers: {
+            watch: { enabled: true },
+            ...(workflows.length === 0 ? {} : { unwatch: { enabled: true } }),
+            workflows: Object.fromEntries(workflows.map((name) => [name, { unwatch: { enabled: true } }])),
+          },
+        }
+      : repo,
   );
   host.push(host.open('index')[0], { kind: 'index', repos });
   host.advance(100);
 }
 const watchClick = (op: string, workflow?: string) =>
-  host.click({ action: 'watch-set', repo: 'beta', op, ...(workflow === undefined ? {} : { workflow }) });
+  host.click({ action: op, repo: 'beta', ...(workflow === undefined ? {} : { workflow }) });
+/** What the last watch or unwatch answered, shown under the repository: its text, with the repository it names. */
+const watchNotice = () => {
+  const result = page?.ui.act.result;
+  return result?.place === 'repo' && 'repo' in result.subject
+    ? { repo: result.subject.repo, text: result.text }
+    : undefined;
+};
+/** The unwatch a first click has armed: the repository, or `<repository>/<workflow>`. */
+const armedWatch = () => {
+  const pending = page?.ui.act.pending;
+  if (pending?.id !== 'unwatch' || pending.sent) return undefined;
+  const { subject } = pending;
+  return subject.kind === 'workflow'
+    ? `${subject.repo}/${subject.workflow}`
+    : 'repo' in subject
+      ? subject.repo
+      : undefined;
+};
 
 test('a Watch click posts the workflow to the repository watch route at once, and says it is watching until the answer', async () => {
   bootWatching();
   host.postAnswer = { status: 200, body: JSON.stringify({ message: 'sail watch: it watches ticket-to-pr' }) };
   watchClick('watch', QUEUE_WORKFLOW);
   expect(host.posts).toEqual([{ path: '/api/repos/beta/watch', body: { workflows: [QUEUE_WORKFLOW] } }]);
-  expect(page?.ui.watchNotice).toEqual({ repo: 'beta', text: 'watching…' });
+  expect(watchNotice()).toEqual({ repo: 'beta', text: 'watching…' });
   await settle();
-  expect(page?.ui.watchNotice).toEqual({ repo: 'beta', text: 'sail watch: it watches ticket-to-pr' });
+  expect(watchNotice()).toEqual({ repo: 'beta', text: 'sail watch: it watches ticket-to-pr' });
   host.advance(100);
   expect(host.regions.rail).toContain('<div class="lgrp-p">sail watch: it watches ticket-to-pr</div>');
 });
@@ -2029,18 +2058,18 @@ test('an Unwatch click arms and posts nothing, another action disarms it, and th
   host.click({ action: 'toggle-group', group: `beta/${QUEUE_WORKFLOW}` });
   watchClick('unwatch', QUEUE_WORKFLOW);
   host.advance(100);
-  expect([host.posts, page?.ui.armedWatch]).toEqual([[], `beta/${QUEUE_WORKFLOW}`]);
+  expect([host.posts, armedWatch()]).toEqual([[], `beta/${QUEUE_WORKFLOW}`]);
   expect(host.regions.rail).toContain('unwatch? click again');
   host.click({ action: 'toggle-group', group: 'alpha' });
   host.advance(100);
-  expect(page?.ui.armedWatch).toBeUndefined();
+  expect(armedWatch()).toBeUndefined();
   expect(host.regions.rail).not.toContain('click again');
   watchClick('unwatch', QUEUE_WORKFLOW);
   expect(host.posts).toEqual([]);
   host.postAnswer = { status: 200, body: JSON.stringify({ message: 'sail unwatch: done' }) };
   watchClick('unwatch', QUEUE_WORKFLOW);
   expect(host.posts).toEqual([{ path: '/api/repos/beta/unwatch', body: { workflows: [QUEUE_WORKFLOW] } }]);
-  expect([page?.ui.armedWatch, page?.ui.watchNotice]).toEqual([undefined, { repo: 'beta', text: 'unwatching…' }]);
+  expect([armedWatch(), watchNotice()]).toEqual([undefined, { repo: 'beta', text: 'unwatching…' }]);
 });
 
 test('Watch all posts an empty list at once, and Unwatch all posts one on its second click', async () => {
@@ -2049,7 +2078,7 @@ test('Watch all posts an empty list at once, and Unwatch all posts one on its se
   expect(host.posts).toEqual([{ path: '/api/repos/beta/watch', body: { workflows: [] } }]);
   host.posts.length = 0;
   watchClick('unwatch');
-  expect([host.posts, page?.ui.armedWatch]).toEqual([[], 'beta']);
+  expect([host.posts, armedWatch()]).toEqual([[], 'beta']);
   watchClick('unwatch');
   expect(host.posts).toEqual([{ path: '/api/repos/beta/unwatch', body: { workflows: [] } }]);
   await settle();
@@ -2067,7 +2096,7 @@ test('a 202 shows its waiting line, a 409 the CLI refusal, and no answer says so
     host.postAnswer = answer;
     watchClick('watch');
     await settle();
-    notices.push(page?.ui.watchNotice?.text);
+    notices.push(watchNotice()?.text);
   }
   expect(notices).toEqual([
     'the watcher of beta (pid 7) starts',

@@ -1,7 +1,8 @@
 // What a person has chosen on the page, which every view reads: the open run, card and tab, whether the card's timeline
 // is open, which of its tool calls and which kinds of its entries it hides, the queue open in its place with its folded
 // sections, the rail's open sections and opened groups, whether needs attention is open, the theme, the offset their
-// clock is at, and the file open in the drawer. It holds nothing about the runs themselves.
+// clock is at, and the file open in the drawer. `act` is the one state of carrying an action out: the pending action on
+// its subject, the last result and the parameters typed. It holds nothing about the runs themselves.
 
 import type { Subject } from './action-registry';
 
@@ -61,10 +62,6 @@ export interface UiState {
   queueEvents: boolean;
   /** The item whose ⋯ menu is open, by dedup key. */
   itemMenu?: string;
-  /** The unwatch a first click has armed, as `<repo>` for every workflow or `<repo>/<workflow>`, which a second click makes. */
-  armedWatch?: string;
-  /** The answer to the last change of a repository's watch set, shown under its header until the next. */
-  watchNotice?: { repo: string; text: string };
   /** The open run whose ⋯ menu is open in the rail, by run id. */
   runMenu?: string;
   theme: Theme;

@@ -4,6 +4,7 @@
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { ACTIONS } from '../../../src/dashboard/page/action-registry';
 import { actions } from '../../../src/dashboard/page/actions';
 import * as app from '../../../src/dashboard/page/app';
 import type { PageHost } from '../../../src/dashboard/page/host';
@@ -24,7 +25,7 @@ const SPLIT = [
   'reads.ts',
   'streams.ts',
   'actions.ts',
-  'requests.ts',
+  'act.ts',
   'keys.ts',
   'app.ts',
 ];
@@ -105,13 +106,13 @@ test('two marks before the timer runs schedule one flush, at the flush delay, an
 
 /** What a source holds that a module of the sockets must not: a click, a key, or an import of an action module. */
 const handlesInput = (text: string) =>
-  [/\bonAction\b/, /\bonKey\b/, /from '\.\/(actions|requests|keys)'/].filter((rule) => rule.test(text)).length;
+  [/\bonAction\b/, /\bonKey\b/, /from '\.\/(actions|act|keys)'/].filter((rule) => rule.test(text)).length;
 
 test('the scan for input in the sockets flags a made-up source with each, and streams.ts has none', () => {
   expect(handlesInput('host.onAction(() => {});')).toBe(1);
   expect(handlesInput('host.onKey(() => {});')).toBe(1);
   expect(handlesInput("import { dispatch } from './actions';")).toBe(1);
-  expect(handlesInput("import { queueOp } from './requests';")).toBe(1);
+  expect(handlesInput("import { createActor } from './act';")).toBe(1);
   expect(handlesInput("import { moves } from './keys';")).toBe(1);
   expect(handlesInput("import { tick } from './draw';")).toBe(0);
   expect(handlesInput(source('streams.ts'))).toBe(0);
@@ -120,14 +121,15 @@ test('the scan for input in the sockets flags a made-up source with each, and st
 /** Whether a source opens a socket: the sockets are the streams' alone. */
 const opensSocket = (text: string) => /\.connect\(/.test(text);
 
-test('the scan for sockets flags a made-up source, and neither actions.ts nor requests.ts opens one', () => {
+test('the scan for sockets flags a made-up source, and neither actions.ts nor act.ts opens one', () => {
   expect(opensSocket('host.connect(`index=1`, handlers);')).toBe(true);
   expect(opensSocket('host.post(path, body);')).toBe(false);
   expect(opensSocket(source('actions.ts'))).toBe(false);
-  expect(opensSocket(source('requests.ts'))).toBe(false);
+  expect(opensSocket(source('act.ts'))).toBe(false);
 });
 
-test('the actions are exactly the data-actions the page had', () => {
+test("the shell's actions are exactly the page's view actions: every action of the registry is the actor's", () => {
+  expect(ACTIONS.filter((each) => each.id in actions)).toEqual([]);
   expect(Object.keys(actions).sort()).toEqual(
     [
       'select-run',
@@ -145,23 +147,12 @@ test('the actions are exactly the data-actions the page had', () => {
       'stream',
       'log-step',
       'toggle-group',
-      'move-item',
-      'poll-queue',
-      'add-ticket',
       'item-menu',
-      'requeue-item',
-      'drop-item',
-      'watch-set',
-      'resume-run',
-      'restart-run',
-      'stop-run',
-      'clean-run',
       'stop-now',
       'run-menu',
       'toggle-queue-events',
       'toggle-queue-section',
       'toggle-attention',
-      'clear-attention',
       'toggle-section',
       'toggle-inspector',
       'toggle-theme',

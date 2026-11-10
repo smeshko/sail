@@ -234,10 +234,10 @@ function watchOffer(kind: 'watch' | 'unwatch') {
 }
 
 const runPath = (subject: Subject, op: string) =>
-  subject.kind === 'run' ? `/api/repos/${enc(subject.repo)}/runs/${enc(subject.runId)}/${op}` : '';
+  subject.kind === 'run' ? `/api/repos/${enc(subject.repo)}/runs/${enc(subject.runId)}${op}` : '';
 const queuePath = (subject: Subject, op: string) =>
   subject.kind === 'item' || subject.kind === 'workflow'
-    ? `/api/repos/${enc(subject.repo)}/queues/${enc(subject.workflow)}/${op}`
+    ? `/api/repos/${enc(subject.repo)}/queues/${enc(subject.workflow)}${op}`
     : '';
 const itemKey = (subject: Subject) => (subject.kind === 'item' ? subject.item : '');
 
@@ -273,7 +273,7 @@ function queueAnswer(word: string) {
   };
 }
 
-function queueItemAction(id: string, op: 'requeue' | 'drop', tier: Tier): ActionDef {
+function queueItemAction(id: string, op: 'requeue' | 'drop', tier: Tier, path: string): ActionDef {
   return {
     id,
     label: () => op,
@@ -284,12 +284,12 @@ function queueItemAction(id: string, op: 'requeue' | 'drop', tier: Tier): Action
     params: () => [],
     available: itemOffer(op),
     ...(tier === 'confirmed' ? { confirm: () => 'confirm drop' } : {}),
-    request: (subject) => ({ path: queuePath(subject, op), body: { dedupKey: itemKey(subject) } }),
+    request: (subject) => ({ path: queuePath(subject, path), body: { dedupKey: itemKey(subject) } }),
     answer: queueAnswer(op),
   };
 }
 
-function watchAction(op: 'watch' | 'unwatch'): ActionDef {
+function watchAction(op: 'watch' | 'unwatch', path: string): ActionDef {
   return {
     id: op,
     label: (subject) => (subject.kind === 'repo' ? `${op} all` : op),
@@ -304,7 +304,7 @@ function watchAction(op: 'watch' | 'unwatch'): ActionDef {
       : {}),
     sending: () => (op === 'watch' ? 'watching…' : 'unwatching…'),
     request: (subject) => ({
-      path: `/api/repos/${enc(REPO(subject))}/${op}`,
+      path: `/api/repos/${enc(REPO(subject))}${path}`,
       body: { workflows: subject.kind === 'workflow' ? [subject.workflow] : [] },
     }),
     answer: (status, body) => {
@@ -355,7 +355,7 @@ export const ACTIONS: readonly ActionDef[] = [
     sending: (subject) => `resuming ${subject.kind === 'run' ? subject.runId : ''}…`,
     request: (subject, values, source) => {
       const raising = source.run?.resume?.raise;
-      const path = runPath(subject, 'resume');
+      const path = runPath(subject, '/resume');
       if (raising === undefined) return { path, body: {} };
       const typed = values.raise;
       const amount = Number(typed);
@@ -402,7 +402,7 @@ export const ACTIONS: readonly ActionDef[] = [
     },
     sending: (subject) => `restarting ${subject.kind === 'run' ? subject.runId : ''}…`,
     request: (subject, values, source) => ({
-      path: runPath(subject, 'restart'),
+      path: runPath(subject, '/restart'),
       body: { stage: values.stage ?? source.run?.restart?.stage },
     }),
     answer: (status, body) => {
@@ -424,7 +424,7 @@ export const ACTIONS: readonly ActionDef[] = [
     confirm: (_, values) =>
       values.now === 'on' ? 'confirm stop now · ends its running call' : 'confirm stop · at its next call boundary',
     sending: (subject) => `stopping ${subject.kind === 'run' ? subject.runId : ''}…`,
-    request: (subject, values) => ({ path: runPath(subject, 'stop'), body: { now: values.now === 'on' } }),
+    request: (subject, values) => ({ path: runPath(subject, '/stop'), body: { now: values.now === 'on' } }),
     answer: (status, body) => {
       if (!ok(status)) return { place: 'run', text: refusal(status, body, 'stop') };
       const text = answerField(body, 'message');
@@ -448,15 +448,15 @@ export const ACTIONS: readonly ActionDef[] = [
       return `confirm clean · removes ${offer.removes.join(', ') || 'nothing'}${where}`;
     },
     sending: (subject) => `cleaning ${subject.kind === 'run' ? subject.runId : ''}…`,
-    request: (subject) => ({ path: runPath(subject, 'clean'), body: {} }),
+    request: (subject) => ({ path: runPath(subject, '/clean'), body: {} }),
     answer: (status, body) => {
       if (!ok(status)) return { place: 'run', text: refusal(status, body, 'clean') };
       const text = answerField(body, 'message');
       return { place: 'rail', effect: 'leave', ...(text === undefined ? {} : { text }) };
     },
   },
-  queueItemAction('drop-item', 'drop', 'confirmed'),
-  queueItemAction('requeue-item', 'requeue', 'instant'),
+  queueItemAction('drop-item', 'drop', 'confirmed', '/drop'),
+  queueItemAction('requeue-item', 'requeue', 'instant', '/requeue'),
   {
     id: 'move-item',
     label: () => 'move',
@@ -470,7 +470,7 @@ export const ACTIONS: readonly ActionDef[] = [
     ],
     available: itemOffer('move'),
     request: (subject, values) => ({
-      path: queuePath(subject, 'move'),
+      path: queuePath(subject, '/move'),
       body:
         values.dir === 'up'
           ? { dedupKey: itemKey(subject), before: values.target }
@@ -487,7 +487,7 @@ export const ACTIONS: readonly ActionDef[] = [
     place: 'queue',
     params: () => [],
     available: queueOffer('poll'),
-    request: (subject) => ({ path: queuePath(subject, 'poll'), body: {} }),
+    request: (subject) => ({ path: queuePath(subject, '/poll'), body: {} }),
     answer: queueAnswer('poll'),
   },
   {
@@ -506,14 +506,14 @@ export const ACTIONS: readonly ActionDef[] = [
       const ticketKey = (values.ticket ?? '').trim();
       if (ticketKey === '') return undefined;
       return {
-        path: queuePath(subject, 'add'),
+        path: queuePath(subject, '/add'),
         body: values.force === 'on' ? { ticketKey, force: true } : { ticketKey },
       };
     },
     answer: queueAnswer('add'),
   },
-  watchAction('watch'),
-  watchAction('unwatch'),
+  watchAction('watch', '/watch'),
+  watchAction('unwatch', '/unwatch'),
   {
     id: 'clear-attention',
     label: () => 'all clear',

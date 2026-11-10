@@ -4,7 +4,8 @@
 // - `draw.ts` draws the regions marked dirty, coalesced into one flush at most every 100 ms, and draws the running
 //   times again each second while anything runs.
 // - `streams.ts` keeps the index, run and queue sockets, and `reads.ts` reads over REST what the selection shows.
-// - `actions.ts` does what a click asks, its POSTs in `requests.ts`; `keys.ts` does what a key asks. Enter and Space on
+// - `actions.ts` does what a click on a view asks, and `act.ts` carries out the registry's actions (`action-registry.ts`,
+//   drawn by `action-view.ts`), the only module that posts; `keys.ts` does what a key asks. Enter and Space on
 //   a focused stage card arrive as its action, and on a focused button or link not at all.
 //
 // The rules each module follows are in its own header.
@@ -15,6 +16,7 @@ import type { PageHost } from './host';
 import { REGIONS } from './host';
 import { onKey } from './keys';
 import { stopReads } from './reads';
+import { saveCleared, storedCleared } from './saved';
 import { createStore } from './store';
 import { closeRun, openIndex, selectRun, stopStreams } from './streams';
 import type { UiState } from './ui-state';
@@ -49,7 +51,13 @@ export function boot(host: PageHost): Page {
       open: (repo, runId) => selectRun(store, repo, runId),
       leave: () => closeRun(store),
       took: () => store.fresh.add('main'),
-      local: {},
+      local: {
+        'clear-attention': () => {
+          store.cleared = new Set([...storedCleared(host), ...store.cleared, ...store.drawn]);
+          saveCleared(host, store.cleared);
+          store.mark('attention');
+        },
+      },
     },
     mark: (...regions) => store.mark(...regions),
     stopped: () => store.stopped,

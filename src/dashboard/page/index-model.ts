@@ -5,7 +5,7 @@
 import type { QueueEvent } from '../../events/types';
 import type { QueueItem, QueueItemState } from '../../watch/queue-store';
 import type { IndexRepo, RunItem } from '../files';
-import type { QueueOffers } from '../offers';
+import type { QueueOffers, RepoOffers } from '../offers';
 import type { OfferSource } from './action-registry';
 
 /** One run as the rail lists it. */
@@ -25,13 +25,11 @@ export interface RailRun {
   problem?: string;
 }
 
-/** One workflow of a repository as the rail lists it: its runs newest first, its queue when it has one, and the change of the watch set it offers. */
+/** One workflow of a repository as the rail lists it: its runs newest first and its queue when it has one. */
 export interface RailWorkflow {
   name: string;
   runs: RailRun[];
   queue?: { waiting: number; lastPolledAt?: string };
-  /** `unwatch` while the live watcher watches it, `watch` when it has a queue and is not watched, else none. */
-  toggle?: 'watch' | 'unwatch';
 }
 
 /** One repository as the rail lists it: `live` while any of its runs runs, and its runs by workflow. */
@@ -42,8 +40,8 @@ export interface RailRepo {
   live: boolean;
   runs: RailRun[];
   workflows: RailWorkflow[];
-  /** The workflows the repository's live watcher watches, or absent while none runs in this clone. */
-  watching?: string[];
+  /** What the repository offers: its watch set, and each workflow's watch or unwatch. */
+  offers?: RepoOffers;
 }
 
 /** The workflow a run ran, without its version: `name@3` is `name`. A run that names none is `unknown`. */
@@ -122,8 +120,6 @@ function workflows(repo: IndexRepo, runs: readonly RailRun[]): RailWorkflow[] {
       const polled = view.queue?.polling.lastPolledAt;
       workflow.queue = polled === undefined ? { waiting } : { waiting, lastPolledAt: polled };
     }
-    if (watched.includes(name)) workflow.toggle = 'unwatch';
-    else if (view !== undefined) workflow.toggle = 'watch';
     return workflow;
   });
 }
@@ -140,7 +136,7 @@ export function railRepos(index: readonly IndexRepo[], now: number): RailRepo[] 
       workflows: workflows(repo, runs),
     };
     if (repo.problem !== undefined) rail.problem = repo.problem;
-    if (repo.watching !== undefined) rail.watching = repo.watching.workflows;
+    if (repo.offers !== undefined) rail.offers = repo.offers;
     return rail;
   });
 }

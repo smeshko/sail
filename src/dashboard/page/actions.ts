@@ -1,12 +1,11 @@
-// What each `data-action` does, as one function of the store apiece, and `dispatch()`, the delegated click's rule: a click
-// on anything but a run action disarms an armed Resume, Restart, Stop or Clean (a registry action the actor carries out), on anything but a drop disarms an armed
-// drop, and on anything but `watch-set` an armed unwatch; an item's menu and a run's menu shut by the same rule. No
-// action opens a socket: what needs one goes through `streams.ts`, and what posts goes through `requests.ts`.
+// What each view `data-action` does, as one function of the store apiece, and `dispatch()`, the delegated click's rule.
+// An action of the registry (`action-registry.ts`) is carried out by the actor (`act.ts`), which drops any confirmation
+// but its own; a click on anything else drops an armed one. An item's menu and a run's menu shut by the rules below. No
+// action opens a socket: what needs one goes through `streams.ts`, and what posts goes through the actor.
 
 import { actionOf } from './action-registry';
 import { closeFile, openedOutputKeys, openFile, readLog, readOutput, selectCard } from './reads';
-import { watchSet } from './requests';
-import { FILTER_KEY, RAIL_KEY, saveCleared, storedCleared, THEME_KEY } from './saved';
+import { FILTER_KEY, RAIL_KEY, THEME_KEY } from './saved';
 import type { Store } from './store';
 import { reopenQueue, selectRun } from './streams';
 import { FILTERS, type InspectorTab, TABS, THEMES, type TimelineFilter } from './ui-state';
@@ -126,18 +125,6 @@ export const actions: Record<string, Action> = {
     else store.ui.itemMenu = data.item;
     store.mark('main');
   },
-  'watch-set': (store, data) => {
-    const { repo, op, workflow } = data;
-    if (repo === undefined || (op !== 'watch' && op !== 'unwatch')) return;
-    const id = workflow === undefined ? repo : `${repo}/${workflow}`;
-    if (op === 'unwatch' && store.ui.armedWatch !== id) {
-      store.ui.armedWatch = id;
-      store.mark('rail');
-      return;
-    }
-    delete store.ui.armedWatch;
-    watchSet(store, repo, op, workflow);
-  },
   // Ticking Stop now redraws an armed Stop's confirmation, which names what it will do.
   'stop-now': (store) => {
     store.ui.act.drafts['stop-run'] = {
@@ -181,11 +168,6 @@ export const actions: Record<string, Action> = {
     store.ui.attention = !store.ui.attention;
     store.mark('attention');
   },
-  'clear-attention': (store) => {
-    store.cleared = new Set([...storedCleared(store.host), ...store.cleared, ...store.drawn]);
-    saveCleared(store.host, store.cleared);
-    store.mark('attention');
-  },
   'toggle-section': (store, data) => {
     const section = data.section ?? '';
     store.ui.open = store.ui.open.includes(section)
@@ -218,17 +200,13 @@ export function dispatch(store: Store, action: string, data: Record<string, stri
   // drops it, and `stop-now` keeps it: ticking the box redraws an armed Stop. An item's menu shuts on any click but its
   // ⋯, which toggles it, and the confirmed action of an item that arms. A run's menu shuts on any click but a run
   // action and a run's ⋯, which handles its own.
-  const acts = def !== undefined && def.run === undefined;
+  const acts = def !== undefined;
   const runAction = action === 'stop-now' || (def?.appliesTo.includes('run') ?? false);
   const arming =
     def?.appliesTo.includes('item') === true && def.tier === 'confirmed' && !store.actor.armed(action, data);
   const shuts = ui.itemMenu !== undefined && action !== 'item-menu' && !arming;
   const shutsRun = ui.runMenu !== undefined && !runAction && action !== 'run-menu';
   const disarmed = !acts && action !== 'stop-now' && store.actor.disarm();
-  if (ui.armedWatch !== undefined && action !== 'watch-set') {
-    delete ui.armedWatch;
-    store.mark('rail');
-  }
   if (shuts) delete ui.itemMenu;
   if (shutsRun) delete ui.runMenu;
   if (disarmed || shuts || shutsRun) store.mark('main', 'rail');

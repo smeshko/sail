@@ -216,39 +216,19 @@ function betaRail(watching?: { pid: number; workflows: string[] }) {
   return beta;
 }
 
-const togglesOf = (repo: ReturnType<typeof betaRail>) =>
-  repo.workflows.map((workflow) => [workflow.name, workflow.toggle]);
-
-test('with no live watcher a workflow with a queue offers watch, one with runs alone offers nothing, and the repository has no watch set', () => {
+test("a repository's rail entry carries the offers its index entry has, and a workflow's watch comes from them alone", () => {
+  const entry = index(m.registryDir).find((repo) => repo.name === 'beta');
   const beta = betaRail();
-  expect(togglesOf(beta)).toEqual([
-    ['review', undefined],
-    [QUEUE_WORKFLOW, 'watch'],
-  ]);
-  expect(beta.watching).toBeUndefined();
+  expect(beta.offers).toEqual(entry?.offers);
+  expect(beta.offers?.workflows).toEqual({ [QUEUE_WORKFLOW]: { watch: { enabled: true } } });
+  expect(beta.workflows.map((workflow) => workflow.name)).toEqual(['review', QUEUE_WORKFLOW]);
+  expect(Object.keys(beta.workflows[0] ?? {}).sort()).toEqual(['name', 'runs']);
+  const { offers: _, ...without } = entry as NonNullable<typeof entry>;
+  expect(railRepos([without], NOW)[0]?.offers).toBeUndefined();
 });
 
-test('a workflow in the live watch set offers unwatch, and a queued one outside it offers watch', () => {
-  const watched = betaRail({ pid: 1, workflows: [QUEUE_WORKFLOW] });
-  expect(togglesOf(watched)).toEqual([
-    ['review', undefined],
-    [QUEUE_WORKFLOW, 'unwatch'],
-  ]);
-  expect(watched.watching).toEqual([QUEUE_WORKFLOW]);
-  const empty = betaRail({ pid: 1, workflows: [] });
-  expect(togglesOf(empty)).toEqual([
-    ['review', undefined],
-    [QUEUE_WORKFLOW, 'watch'],
-  ]);
-  expect(empty.watching).toEqual([]);
-});
-
-test('a workflow in the watch set with no queue view is listed too, and offers unwatch', () => {
+test('a workflow in the watch set with no queue view is listed too, with no runs', () => {
   const beta = betaRail({ pid: 1, workflows: ['review', 'ghost', QUEUE_WORKFLOW] });
-  expect(togglesOf(beta)).toEqual([
-    ['ghost', 'unwatch'],
-    ['review', 'unwatch'],
-    [QUEUE_WORKFLOW, 'unwatch'],
-  ]);
+  expect(beta.workflows.map((workflow) => workflow.name)).toEqual(['ghost', 'review', QUEUE_WORKFLOW]);
   expect(beta.workflows.find((workflow) => workflow.name === 'ghost')?.runs).toEqual([]);
 });
