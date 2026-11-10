@@ -116,6 +116,7 @@ export const actions: Record<string, Action> = {
   'select-view': (store, data) => {
     if (!(VIEWS as readonly string[]).includes(data.view ?? '')) return;
     store.ui.view = data.view as ViewName;
+    store.host.setParam('view', store.ui.view);
     store.ui.listFilter = '';
     delete store.ui.listCursor;
     store.mark('sidebar', 'list');

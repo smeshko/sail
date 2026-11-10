@@ -56,12 +56,14 @@ export interface PageHost {
   /** Copies to the clipboard: false when it can't. */
   copy(text: string): Promise<boolean>;
   setTheme(theme: string): void;
+  /** Sets the URL's parameter `name` to `value`, keeping the others, without a history entry. */
+  setParam(name: string, value: string): void;
   setInspector(open: boolean): void;
   /** Whether a run or queue is open beside the list: the centre is laid out by it. */
   setDetail(open: boolean): void;
   /** The browser's offset east of UTC, in minutes. */
   offset(): number;
-  /** What the page's URL asks it to open first, from `?repo=…&run=…&key=…&tab=…`: empty when it asks nothing. */
+  /** What the page's URL asks it to open first, from `?repo=…&run=…&key=…&tab=…&view=…`: empty when it asks nothing. */
   start(): Record<string, string>;
 }
 
@@ -114,7 +116,8 @@ export interface BrowserWindow {
     documentElement: { dataset: Record<string, string | undefined> };
     activeElement?: ElementLike | null;
   };
-  location: { host: string; search: string };
+  location: { host: string; pathname: string; search: string };
+  history: { replaceState(state: unknown, title: string, url: string): void };
   fetch(
     url: string,
     init: { headers: Record<string, string>; method?: string; body?: string },
@@ -424,6 +427,11 @@ export function browserHost(win: BrowserWindow): PageHost {
       doc.documentElement.dataset.theme = theme;
     },
     start: () => Object.fromEntries(new URLSearchParams(win.location.search)),
+    setParam(name, value) {
+      const params = new URLSearchParams(win.location.search);
+      params.set(name, value);
+      win.history.replaceState(null, '', `${win.location.pathname}?${params}`);
+    },
     setInspector(open) {
       doc.documentElement.dataset.inspector = open ? 'open' : 'closed';
     },

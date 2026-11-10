@@ -30,7 +30,7 @@ async function until(condition: () => boolean, ms = 8000): Promise<boolean> {
 }
 
 /** Boots the bundle `GET /` serves against a fake window on `dashboard`. Its regions, and a click. */
-async function bootHeadless(dashboard: Dashboard) {
+async function bootHeadless(dashboard: Dashboard, search = '') {
   const html = await (await fetch(dashboard.url)).text();
   const script = /<script type="module" id="sail-page">([\s\S]*)<\/script>/.exec(html)?.[1] ?? '';
   const ids = [...html.replace(/<script[\s\S]*<\/script>/, '').matchAll(/\sid="([^"]+)"/g)].map(([, id]) => id ?? '');
@@ -44,6 +44,7 @@ async function bootHeadless(dashboard: Dashboard) {
   const origin = `http://127.0.0.1:${dashboard.port}`;
   const sockets: WebSocket[] = [];
   const timers = new Set<ReturnType<typeof setTimeout>>();
+  const urls: string[] = [];
   const win: BrowserWindow = {
     document: {
       getElementById: (id) => regions[id] ?? null,
@@ -53,7 +54,8 @@ async function bootHeadless(dashboard: Dashboard) {
       removeEventListener() {},
       documentElement: { dataset: {} },
     },
-    location: { host: `127.0.0.1:${dashboard.port}`, search: '' },
+    location: { host: `127.0.0.1:${dashboard.port}`, pathname: '/', search },
+    history: { replaceState: (_state, _title, url) => void urls.push(url) },
     fetch: (path, init) => fetch(`${origin}${path}`, init),
     // Bun's own WebSocket, with the Origin a browser would send.
     WebSocket: class extends WebSocket {
@@ -86,7 +88,7 @@ async function bootHeadless(dashboard: Dashboard) {
       listener({ target: { innerHTML: '', dataset, parentElement: null } satisfies ElementLike });
     }
   };
-  return { ids, text, click };
+  return { ids, text, click, urls };
 }
 
 test("the real bundle boots headless: both repositories, the golden run's eight cards and its $1.35 once its row is clicked, then FAKE-2's denial on the permissions tab", async () => {
@@ -129,4 +131,16 @@ test("once beta's queue/ is gone, the next index drops its queue row and gives t
   expect(await until(() => !page.text('list').includes('select-queue'))).toBe(true);
   expect(await until(() => page.text('main').includes('no run selected'))).toBe(true);
   expect(page.text('sidebar')).toContain('<span class="nm">beta</span>');
+}, 30_000);
+
+test('the real bundle opens the view the URL names, and writes the view it is changed to (ADW-522)', async () => {
+  m = seedFixtures();
+  const started = startDashboard({ registryDir: m.registryDir, port: 0, followPollMs: 20, indexPollMs: 50 });
+  if ('refused' in started) throw new Error(started.refused);
+  server = started;
+  const page = await bootHeadless(server, '?view=history');
+  expect(await until(() => page.text('list').includes('<span class="lh-t">History</span>'))).toBe(true);
+  page.click({ action: 'select-view', view: 'queues' });
+  expect(await until(() => page.text('list').includes('<span class="lh-t">Queues</span>'))).toBe(true);
+  expect(page.urls).toEqual(['/?view=queues']);
 }, 30_000);

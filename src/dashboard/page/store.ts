@@ -8,6 +8,7 @@ import { attention, identity } from './attention';
 import type { PageHost, Region } from './host';
 import { queuePanels } from './index-model';
 import type { Loaded } from './inspector-view';
+import { VIEWS, type ViewName } from './list-model';
 import { type QueueStream, queueId } from './queue-view';
 import type { RunModel } from './run-model';
 import { savedFolded, savedHidden, savedTheme, storedCleared } from './saved';
@@ -101,6 +102,8 @@ export function createStore(host: PageHost): Store {
   host.setTheme(ui.theme);
   ui.hidden = savedHidden(host);
   ui.listFolded = savedFolded(host);
+  const asked = host.start().view;
+  if ((VIEWS as readonly string[]).includes(asked ?? '')) ui.view = asked as ViewName;
   const cleared = new Set<string>(storedCleared(host));
   host.setInspector(ui.inspector);
   const store: Store = {

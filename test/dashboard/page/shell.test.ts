@@ -50,6 +50,7 @@ function fakeHost(stored: Record<string, string>) {
     setTheme: () => {},
     setInspector: () => {},
     setDetail: () => {},
+    setParam: () => {},
     offset: () => 120,
     start: () => ({ run: 'r-1' }),
     later: (_fn: () => void, ms: number) => timers.push({ ms }),

@@ -191,6 +191,11 @@ class FakeHost implements PageHost {
   type(name: string, value: string) {
     this.input?.(name, value);
   }
+  /** The URL parameters the page wrote, in order. */
+  params: [string, string][] = [];
+  setParam(name: string, value: string) {
+    this.params.push([name, value]);
+  }
   setInspector(open: boolean) {
     this.inspector = open;
   }
@@ -1405,6 +1410,46 @@ test('select-view redraws the list with History and Queues rows, and filter-repo
   host.advance(100);
   expect(host.regions.sidebar).not.toContain('aria-pressed="true"');
   expect(host.regions.list).toContain(`data-run="${FAKE_2_ID}"`);
+});
+
+test('booted with ?view=history the list draws History, and with ?view=nope or no view, Active (ADW-522)', () => {
+  for (const [startAt, view, head] of [
+    [{ view: 'history' }, 'history', 'History'],
+    [{ view: 'queues' }, 'queues', 'Queues'],
+    [{ view: 'nope' }, 'active', 'Active'],
+    [{}, 'active', 'Active'],
+  ] as const) {
+    host = new FakeHost(m);
+    host.startAt = { ...startAt };
+    page = boot(host);
+    plainIndex();
+    host.advance(100);
+    expect([page.ui.view, host.regions.list?.includes(`<span class="lh-t">${head}</span>`)]).toEqual([view, true]);
+    page.stop();
+  }
+});
+
+test('select-view rewrites the view parameter, and a view that is none writes nothing (ADW-522)', () => {
+  page = boot(host);
+  plainIndex();
+  host.click({ action: 'select-view', view: 'queues' });
+  host.press('3');
+  host.click({ action: 'select-view', view: 'bogus' });
+  expect(host.params).toEqual([
+    ['view', 'queues'],
+    ['view', 'history'],
+  ]);
+});
+
+test('booted with ?repo=&run=&view=history the run opens beside the History list (ADW-522)', () => {
+  host.startAt = { repo: 'alpha', run: FAKE_2_ID, view: 'history' };
+  page = boot(host);
+  plainIndex();
+  host.advance(100);
+  expect(host.open('run=').map((socket) => socket.query)).toEqual([runQuery('alpha', FAKE_2_ID)]);
+  expect(host.regions.list).toContain('<span class="lh-t">History</span>');
+  expect(host.regions.list).toContain(`class="run lrow sel" data-row="run:alpha/${FAKE_2_ID}"`);
+  expect(host.details.at(-1)).toBe(true);
 });
 
 describe('the list by keyboard (ADW-522)', () => {

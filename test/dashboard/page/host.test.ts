@@ -234,6 +234,7 @@ function fakeWindow(
   const root = { dataset: {} as Record<string, string | undefined> };
   const stored = new Map<string, string>();
   const copied: string[] = [];
+  const replaced: { state: unknown; title: string; url: string }[] = [];
   const win: BrowserWindow = {
     document: {
       getElementById: (id) => elements[id] ?? null,
@@ -248,7 +249,12 @@ function fakeWindow(
         return focus.active;
       },
     },
-    location: { host: '127.0.0.1:4100', search: options.search ?? '' },
+    location: { host: '127.0.0.1:4100', pathname: '/dashboard', search: options.search ?? '' },
+    history: {
+      replaceState: (state, title, url) => {
+        replaced.push({ state, title, url });
+      },
+    },
     async fetch(url, init) {
       fetched.push({
         url,
@@ -328,6 +334,7 @@ function fakeWindow(
     root,
     stored,
     copied,
+    replaced,
     fire,
     listeners,
     focus,
@@ -951,5 +958,19 @@ describe('the list host members (ADW-522)', () => {
         preventDefault: () => void prevented.push(key),
       });
     expect(prevented).toEqual(['/']);
+  });
+});
+
+describe('the URL parameters (ADW-522)', () => {
+  test('setParam rewrites the query through replaceState, keeping the other parameters and the path', () => {
+    const fake = fakeWindow({ search: '?repo=alpha&run=FAKE-2&view=active' });
+    browserHost(fake.win).setParam('view', 'history');
+    expect(fake.replaced).toEqual([{ state: null, title: '', url: '/dashboard?repo=alpha&run=FAKE-2&view=history' }]);
+  });
+
+  test('setParam adds a parameter the URL lacks, and encodes its value', () => {
+    const fake = fakeWindow();
+    browserHost(fake.win).setParam('view', 'a b');
+    expect(fake.replaced.map((each) => each.url)).toEqual(['/dashboard?view=a+b']);
   });
 });
