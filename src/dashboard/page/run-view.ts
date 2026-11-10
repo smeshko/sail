@@ -39,7 +39,7 @@ function card(entry: StageCard, place: number, ui: UiState, now: number): SafeHt
 <div class="c-top"><span class="c-n">${String(place + 1).padStart(2, '0')}</span><span class="c-name">${entry.key}</span>${
     entry.tries > 1 ? html`<span class="retry">↻${entry.tries}</span>` : ''
   }${entry.denials.length > 0 ? html`<span class="warnchip">⊘ ${entry.denials.length}</span>` : ''}<span class="pill ${pillOf(state)}">${state}</span></div>
-<div class="c-agent">${entry.kind}${entry.model === undefined ? '' : html` <span class="c-model">${entry.model}</span>`}</div>
+<div class="c-agent">${entry.kind}${entry.model === undefined ? '' : html` <span class="c-model">${entry.effort === undefined ? entry.model : `${entry.model} · ${entry.effort}`}</span>`}</div>
 <div class="facts"><div><b>${duration(elapsedMs(entry, now))}</b><span class="lbl">duration</span></div>${
     entry.state === 'running' ? '' : html`<div><b>${cost(entry.costUsd)}</b><span class="lbl">cost</span></div>`
   }<div><b>${entry.toolCalls}</b><span class="lbl">tool calls</span></div></div>
@@ -55,7 +55,7 @@ ${
 
 function pendingCard(entry: PendingCard): SafeHtml {
   return html`<div class="card pending"><div class="c-top"><span class="c-name">${entry.stage}</span><span class="pill p-pend">pending</span></div>
-<div class="c-agent">${entry.kind}${entry.model === undefined ? '' : html` <span class="c-model">${entry.model}</span>`}</div></div>`;
+<div class="c-agent">${entry.kind}${entry.model === undefined ? '' : html` <span class="c-model">${entry.effort === undefined ? entry.model : `${entry.model} · ${entry.effort}`}</span>`}</div></div>`;
 }
 
 /**

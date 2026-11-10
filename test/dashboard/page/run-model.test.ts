@@ -211,6 +211,24 @@ test('a card and a pending card carry the named harness from the stage:start or 
   expect(pending.find((card) => card.stage === 'implement')?.harness).toBeUndefined();
 });
 
+test('a card carries the effort of its stage:start or its roster entry, a pending card the roster entry, and a call with none carries none', () => {
+  const events = golden();
+  const start = events.find((event) => event.type === 'stage:start' && event.key === 'spec#1');
+  expect(foldRun([events[0], { ...start, effort: 'medium' }]).cards.map((card) => card.effort)).toEqual(['medium']);
+  expect(foldRun([events[0], start]).cards.map((card) => card.effort)).toEqual([undefined]);
+
+  const roster = events[0] as { roster: { stages: Record<string, { effort?: string }> } };
+  const stages = {
+    ...roster.roster.stages,
+    spec: { ...roster.roster.stages.spec, effort: 'high' },
+    'self-review': { ...roster.roster.stages['self-review'], effort: 'max' },
+  };
+  const folded = foldRun([{ ...events[0], roster: { ...roster.roster, stages } }, start]);
+  expect(folded.cards.map((card) => card.effort)).toEqual(['high']);
+  expect(folded.pending.find((card) => card.stage === 'self-review')?.effort).toBe('max');
+  expect(folded.pending.find((card) => card.stage === 'implement')?.effort).toBeUndefined();
+});
+
 test("live cost: a session's usage updates, then a second session's, sum to what each last said before any session end", () => {
   const events = golden();
   const at = { ts: '2026-09-25T09:00:30.000Z', runId: 'x', key: 'spec#1' };
