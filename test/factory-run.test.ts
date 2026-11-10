@@ -265,3 +265,34 @@ test('a blocked implement hands the ticket over: commented, needs-human on, fact
     expect(again.stderr).toContain("carries no 'factory' label");
   });
 }, 120_000);
+
+test('implement reporting a task with no commit and blank evidence gets a corrective try, and the run goes on once the evidence is given', async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeOwnSail(repo);
+    const harness = join(sailDir, 'fake', 'harness.json');
+    const seeds = JSON.parse(readFileSync(harness, 'utf8'));
+    const answer = (evidence: string) => {
+      const copy = structuredClone(seeds.implement[0]);
+      copy.output.tasks.push({ id: 'TASK-002', commit: null, evidence });
+      return copy;
+    };
+    seeds.implement = [answer(' '), answer('bun run types: types/ is unchanged')];
+    writeFileSync(harness, JSON.stringify(seeds));
+    repo.git('add', '.sail/fake/harness.json');
+    repo.git('commit', '-q', '-m', 'seed a task with no commit');
+
+    const { code, stderr, keys, dir } = await factory(repo);
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    const invalid = readEvents(dir).filter(
+      (event) => event.type === 'output:invalid' && (event as { key?: string }).key === 'implement#1',
+    ) as { message?: string }[];
+    expect(invalid).toHaveLength(1);
+    expect(invalid[0]?.message).toContain('a task with no commit needs its evidence');
+
+    const entry = readJournal(dir).entries.find((each) => each.key === 'implement#1');
+    expect(entry?.outcome).toBe('done');
+    const tasks = ((entry?.output ?? {}) as { tasks?: { id: string; evidence: string }[] }).tasks ?? [];
+    expect(tasks.find((task) => task.id === 'TASK-002')?.evidence).toBe('bun run types: types/ is unchanged');
+    expect(keys[keys.indexOf('implement#1') + 1]).toBe('validate#1');
+  });
+}, 120_000);

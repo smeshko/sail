@@ -1,4 +1,4 @@
-Implement the plan at `{{plan}}`: walk its tasks in order, test first, and make exactly one commit per task. Read the
+Implement the plan at `{{plan}}`: walk its tasks in order, test first, and make exactly one commit per task that changes a file. Read the
 plan end to end first: its Goal, Scope, Decisions and Acceptance Criteria bound everything you do.
 
 Before the first task, run `git log --oneline origin/staging..HEAD`. A task already committed there, an earlier
@@ -38,13 +38,16 @@ steps below say, in a commit of its own.
      `HOME` runs inside `withTempRepo()`. A behaviour the existing tests already cover gets those tests updated.
 3. **Green**: change production code until the task's tests pass, and the test files beside the code you changed.
    **Refactor** with the tests staying green. Never weaken a test to make it pass.
-4. **Checklist** tasks are non-code work, such as `bun run types` or `bun run golden`: run their steps in order.
+4. **Checklist** tasks are non-code work, such as `bun run types` or `bun run golden`: run their steps in order. A
+   checklist task whose steps change files is committed like any other. One that changes no file, such as a manual
+   check or a command whose output is the result, has no commit: its evidence is the command you ran and the output
+   lines that show the check passed.
 5. **Verify the acceptance** with the evidence the task names: run the tests and keep the output. Code that compiles or
    looks right is not evidence. Don't commit a task whose acceptance fails.
 6. Run `bun run typecheck` and `bun run lint`. Run test files by name, never a folder or the whole suite, and never
    `bun run gate`: a broad run outlasts your 10-minute command limit, and validation runs the affected tests after the
    last task. `bun scripts/affected-tests.ts --list` prints the test files your change selects.
-7. **Commit** the task's tests and code together: stage every path it changed by name (`git add <paths>`, never `-A`
+7. **Commit** (a task that changed a file; never make an empty commit) the task's tests and code together: stage every path it changed by name (`git add <paths>`, never `-A`
    or `.`), then `git commit -m '<subject>'`, the task's suggested subject, its type or scope changed only if the diff
    demands it, ending with the ticket: `feat({{commit.scope}}): <what it does> ({{commit.ticketKey}})`.
 
@@ -64,4 +67,6 @@ network clients are denied too: the workflow's own stages push and open the pull
 ## Submit
 
 Submit each task with its commit's sha and the evidence that proves its acceptance: the tests that went red, then
-green. Add a short note on anything you did differently from the plan.
+green. A task that changed no file is submitted with `commit: null` and non-blank evidence: that evidence is published
+as it is in the pull request's body, so keep it to the command and the lines that matter, with no credential and no
+name outside sail. Add a short note on anything you did differently from the plan.
