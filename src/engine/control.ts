@@ -3,7 +3,8 @@
 // - `stopped`, which `sail stop` writes, fails the run: its workspace and lease are released, as for any failed run.
 // - `suspended`, which `sail stop --suspend` writes, ends the running call at once and suspends the run `interrupted`,
 //   keeping its workspace and lease (`requestSuspend()`). It comes with the run's hold: a `HOLD` file in the run directory
-//   (`holdRun()`), which the watcher honours by never resuming the run. `sail resume` removes it (`releaseHold()`).
+//   (`holdRun()`), which the watcher honours by never resuming the run. `sail resume` removes it (`releaseHold()`), with
+//   a suspend request the run never took.
 //
 // A stop replaces whatever is there (`requestStop()`). The engine takes the file before the intake and before each call
 // (`takeControl()`): it moves the file aside under a name only this process uses, reads it, and removes it. So each
@@ -68,8 +69,12 @@ export function isHeld(runDir: string): boolean {
   return existsSync(join(runDir, HOLD_FILE));
 }
 
-/** Removes the run's hold, if it has one. */
+/**
+ * Removes the run's hold, if it has one, and a suspend request still in `CONTROL`: one the run never took, as it
+ * suspended on its own first, would otherwise suspend the resume again with no hold.
+ */
 export function releaseHold(runDir: string): void {
+  if (suspendRequested(runDir)) takeControl(runDir);
   rmSync(join(runDir, HOLD_FILE), { force: true });
 }
 

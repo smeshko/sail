@@ -5,6 +5,7 @@ import { expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { EXIT_FAILED, EXIT_OK, EXIT_REFUSED } from '../../src/cli/exit-codes';
+import { holdRun, requestSuspend } from '../../src/engine/control';
 import { readStatus } from '../../src/engine/run-dir';
 import { runWorkflow } from '../../src/engine/runtime';
 import { validateRunDir } from '../../src/engine/schemas';
@@ -89,6 +90,30 @@ test('sail stop --suspend holds a suspended run and prints the held line, and sa
       hold: false,
       status: { status: 'completed' },
     });
+  });
+}, 60_000);
+
+test('sail resume runs a held run to its end though a suspend request the run never took is still in CONTROL (review R5)', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const end = await runWorkflow({
+      cwd: repo.dir,
+      adapters: await fakeAdapters(repo.dir),
+      workflow: 'ticket-to-pr',
+      ticket: 'FAKE-1',
+      until: 'spec',
+    });
+    if ('refused' in end) throw new Error(end.refused);
+    // The run suspended on its own before a boundary took the suspend sail stop --suspend wrote with its hold.
+    holdRun(end.dir);
+    requestSuspend(end.dir);
+    const resumed = await runCaptured(['resume', end.runId], repo.dir, { env: repo.env });
+    expect({
+      code: resumed.code,
+      hold: existsSync(join(end.dir, 'HOLD')),
+      control: existsSync(join(end.dir, 'CONTROL')),
+      status: readStatus(end.dir),
+    }).toEqual({ code: EXIT_OK, hold: false, control: false, status: { status: 'completed' } });
   });
 }, 60_000);
 
