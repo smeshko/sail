@@ -1,7 +1,16 @@
 // sail's own demo harness, `.sail/lib/demo.mjs`: `new --own` makes a demo repository from the repository's own
 // `.sail/` with every adapter on fake, while `--from` still refuses a `.sail/` whose ports aren't.
 import { expect, test } from 'bun:test';
-import { existsSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { withTempRepo } from './helpers/temp-repo';
 
@@ -404,3 +413,118 @@ test.skipIf(chrome === undefined)(
   },
   120_000,
 );
+
+const DENSE = join(ROOT, 'test', 'fixtures', 'dashboard', 'dense');
+
+test('new --clone registers a clone under the demo, with the folder as its .sail-runs/ and an entry the registry reads', async () => {
+  await withTempRepo(async (repo) => {
+    const dir = join(repo.dir, 'demo');
+    const { code, stdout } = await demo(
+      repo.env,
+      'new',
+      dir,
+      '--clone',
+      `atlas=${join(DENSE, 'atlas')}`,
+      '--clone',
+      `ember=${join(DENSE, 'ember')}`,
+    );
+    const entry = JSON.parse(readFileSync(join(dir, 'home', '.sail', 'watchers', 'atlas.json'), 'utf8'));
+    expect({
+      code,
+      printed: stdout.split('\n').filter((line) => line.startsWith('demo: registered')),
+      runs: readdirSync(join(dir, 'clones', 'atlas', '.sail-runs')).filter((name) => name.startsWith('ATL-')).length,
+      queue: existsSync(join(dir, 'clones', 'atlas', '.sail-runs', 'queue', 'ticket-to-pr', 'queue.json')),
+      entry: { ...entry, updatedAt: typeof entry.updatedAt },
+      sailDir: existsSync(entry.sailDir),
+      second: existsSync(join(dir, 'home', '.sail', 'watchers', 'ember.json')),
+    }).toEqual({
+      code: 0,
+      printed: ['demo: registered atlas', 'demo: registered ember'],
+      runs: 10,
+      queue: true,
+      entry: {
+        schema: 'sail.registry.v1',
+        name: 'atlas',
+        remote: 'https://example.com/atlas.git',
+        clone: join(dir, 'clones', 'atlas'),
+        sailDir: join(dir, 'clones', 'atlas', '.sail'),
+        updatedAt: 'string',
+      },
+      sailDir: true,
+      second: true,
+    });
+  });
+});
+
+test('new --clone refuses a bad name, a folder that is none and a name given twice, naming each, and makes nothing', async () => {
+  await withTempRepo(async (repo) => {
+    const dir = join(repo.dir, 'demo');
+    const bad = await demo(repo.env, 'new', dir, '--clone', `a/b=${join(DENSE, 'atlas')}`);
+    const missing = await demo(repo.env, 'new', dir, '--clone', `atlas=${join(repo.dir, 'nowhere')}`);
+    const twice = await demo(
+      repo.env,
+      'new',
+      dir,
+      '--clone',
+      `atlas=${join(DENSE, 'atlas')}`,
+      '--clone',
+      `atlas=${join(DENSE, 'ember')}`,
+    );
+    const noEquals = await demo(repo.env, 'new', dir, '--clone', join(DENSE, 'atlas'));
+    expect({
+      bad: [bad.code, bad.stderr.includes('a/b')],
+      missing: [missing.code, missing.stderr.includes('nowhere')],
+      twice: [twice.code, twice.stderr.includes('atlas') && twice.stderr.includes('twice')],
+      noEquals: noEquals.code,
+      made: existsSync(dir),
+    }).toEqual({ bad: [2, true], missing: [2, true], twice: [2, true], noEquals: 2, made: false });
+  });
+});
+
+/** A Chrome that does nothing but write its arguments, one a line, to `<dir>/chrome-args.txt`, and exit. */
+async function recordingChrome(dir: string) {
+  const script = join(dir, 'chrome.sh');
+  await Bun.write(script, `#!/bin/sh\nfor a in "$@"; do echo "$a"; done > "${join(dir, 'chrome-args.txt')}"\n`);
+  chmodSync(script, 0o755);
+  return script;
+}
+
+test('dashboard width=1280 starts Chrome with a 1280-wide window, 1440 without, and sends no width parameter', async () => {
+  await withTempRepo(async (repo) => {
+    const dir = join(repo.dir, 'demo');
+    const env = { ...repo.env, SAIL_DEMO_CHROME: await recordingChrome(repo.dir) };
+    expect((await demo(env, 'new', dir)).code).toBe(0);
+    const args = () => readFileSync(join(repo.dir, 'chrome-args.txt'), 'utf8').split('\n');
+    await demo(env, 'dashboard', dir, 'wide', 'width=1280');
+    expect(args()).toContain('--window-size=1280,900');
+    expect(args().some((arg) => arg.includes('width='))).toBe(false);
+    await demo(env, 'dashboard', dir, 'plain');
+    expect(args()).toContain('--window-size=1440,900');
+    expect(args()).not.toContain('--window-size=1280,900');
+  });
+}, 60_000);
+
+test('dashboard refuses a width that is no whole number from 800 to 2560 before Chrome starts', async () => {
+  await withTempRepo(async (repo) => {
+    const dir = join(repo.dir, 'demo');
+    const env = { ...repo.env, SAIL_DEMO_CHROME: await recordingChrome(repo.dir) };
+    expect((await demo(env, 'new', dir)).code).toBe(0);
+    const refused = [];
+    for (const width of ['abc', '1280.5', '799', '2561', '-1']) {
+      const { code, stderr } = await demo(env, 'dashboard', dir, 'x', `width=${width}`);
+      refused.push([width, code, stderr.includes('width')]);
+    }
+    expect(refused).toEqual([
+      ['abc', 2, true],
+      ['1280.5', 2, true],
+      ['799', 2, true],
+      ['2561', 2, true],
+      ['-1', 2, true],
+    ]);
+    expect(existsSync(join(repo.dir, 'chrome-args.txt'))).toBe(false);
+    for (const width of ['800', '2560']) {
+      await demo(env, 'dashboard', dir, 'edge', `width=${width}`);
+      expect(readFileSync(join(repo.dir, 'chrome-args.txt'), 'utf8')).toContain(`--window-size=${width},900`);
+    }
+  });
+}, 60_000);
