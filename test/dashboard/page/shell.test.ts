@@ -149,6 +149,7 @@ test('the actions are exactly the data-actions the page had', () => {
       'filter-repo',
       'toggle-list-group',
       'close-detail',
+      'list-filter',
       'move-item',
       'poll-queue',
       'add-ticket',

@@ -440,7 +440,10 @@ test("render writes a region by id, keys say whether they were typed in an input
   host.render('status', 'nowhere');
   expect(fake.elements.list?.innerHTML).toBe('<b>alpha</b>');
   const keys: [string, boolean][] = [];
-  host.onKey((key, inInput) => keys.push([key, inInput]));
+  host.onKey((key, inInput) => {
+    keys.push([key, inInput]);
+    return false;
+  });
   fake.fire('keydown', { key: 'j', target: element({ tagName: 'DIV' }) });
   fake.fire('keydown', { key: 'j', target: element({ tagName: 'INPUT' }) });
   expect(keys).toEqual([
@@ -591,7 +594,10 @@ describe('Enter and Space on a focused control', () => {
     const actions: [string, Record<string, string>][] = [];
     const keys: [string, boolean][] = [];
     host.onAction((action, data) => actions.push([action, data]));
-    host.onKey((key, inInput) => keys.push([key, inInput]));
+    host.onKey((key, inInput) => {
+      keys.push([key, inInput]);
+      return false;
+    });
     const press = (key: string, target: unknown) => {
       let prevented = 0;
       fake.fire('keydown', { key, target, preventDefault: () => prevented++ });
@@ -879,4 +885,71 @@ test('across a tick and a changed queue, the add field keeps its focus, its type
     page?.stop();
     m.remove();
   }
+});
+
+describe('the list host members (ADW-522)', () => {
+  test('onInput tells the handler the name and value of the named field typed into, and nothing for an element with no name', () => {
+    const fake = fakeWindow();
+    const host = browserHost(fake.win);
+    const typed: [string, string][] = [];
+    host.onInput((name, value) => typed.push([name, value]));
+    fake.fire('input', { target: element({ name: 'list-filter', value: 'pars', tagName: 'INPUT' }) });
+    fake.fire('input', { target: element({ tagName: 'DIV' }) });
+    fake.fire('input', { target: null });
+    fake.fire('input', { target: element({ name: 'raise', tagName: 'INPUT' }) });
+    expect(typed).toEqual([
+      ['list-filter', 'pars'],
+      ['raise', ''],
+    ]);
+  });
+
+  test('focus focuses the field of that name in whichever region holds it, and does nothing for a name no region holds', () => {
+    const fake = fakeWindow();
+    const field = element({ name: 'list-filter', focus: () => void focused.push('list-filter') });
+    const focused: string[] = [];
+    fake.elements.list = element({
+      querySelector: (selectors: string) => (selectors === '[name="list-filter"]' ? field : null),
+    });
+    const host = browserHost(fake.win);
+    host.focus('list-filter');
+    host.focus('nothing');
+    expect(focused).toEqual(['list-filter']);
+  });
+
+  test('blur takes the focus off the focused element, and does nothing when none has it', () => {
+    const fake = fakeWindow();
+    const host = browserHost(fake.win);
+    expect(() => host.blur()).not.toThrow();
+    const blurred: string[] = [];
+    fake.focus.active = element({ blur: () => void blurred.push('blurred') });
+    host.blur();
+    expect(blurred).toEqual(['blurred']);
+  });
+
+  test("reveal scrolls the region's cursor element into view, as little as it takes, and does nothing without one", () => {
+    const fake = fakeWindow();
+    const scrolled: unknown[] = [];
+    const cur = element({ scrollIntoView: (options) => void scrolled.push(options) });
+    fake.elements.list = element({ querySelector: (selectors: string) => (selectors === '.cur' ? cur : null) });
+    fake.elements.status = element({ querySelector: () => null });
+    const host = browserHost(fake.win);
+    host.reveal('list');
+    host.reveal('status');
+    host.reveal('main');
+    expect(scrolled).toEqual([{ block: 'nearest' }]);
+  });
+
+  test('a key whose handler answers true has its default suppressed, and one answered false does not', () => {
+    const fake = fakeWindow();
+    const host = browserHost(fake.win);
+    host.onKey((key) => key === '/');
+    const prevented: string[] = [];
+    for (const key of ['/', 'j'])
+      fake.fire('keydown', {
+        key,
+        target: element({ tagName: 'BODY' }),
+        preventDefault: () => void prevented.push(key),
+      });
+    expect(prevented).toEqual(['/']);
+  });
 });

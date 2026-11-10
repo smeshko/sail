@@ -28,7 +28,16 @@ export interface PageHost {
   /** Scrolls what holds `region` to its end. */
   scrollToEnd(region: Region): void;
   onAction(handler: (action: string, data: Record<string, string>) => void): void;
-  onKey(handler: (key: string, inInput: boolean) => void): void;
+  /** `handler` is told each key and whether it was typed in an input; answering true suppresses the key's default, as typing it would. */
+  onKey(handler: (key: string, inInput: boolean) => boolean): void;
+  /** `handler` is told the value of a named field each time it is typed into. */
+  onInput(handler: (name: string, value: string) => void): void;
+  /** Focuses the field named `name`, in whichever region draws it. */
+  focus(name: string): void;
+  /** Takes the focus off the focused element. */
+  blur(): void;
+  /** Scrolls the `.cur` element of `region` into view, as little as it takes. */
+  reveal(region: Region): void;
   /** A GET of `path` on the dashboard, with the client header. A failed request answers status 0. */
   get(path: string): Promise<{ status: number; body: string }>;
   /** A POST of `body` as JSON to `path`, with the client header. A failed request answers status 0. */
@@ -75,6 +84,8 @@ export interface ElementLike {
   setSelectionRange?(start: number, end: number, direction?: string): void;
   contains?(other: ElementLike): boolean;
   focus?(options?: { preventScroll?: boolean }): void;
+  blur?(): void;
+  scrollIntoView?(options?: { block?: string }): void;
   getAttribute?(name: string): string | null;
   querySelectorAll?(selectors: string): ArrayLike<ElementLike>;
   querySelector?(selectors: string): ElementLike | null;
@@ -305,6 +316,27 @@ export function browserHost(win: BrowserWindow): PageHost {
         if (element !== undefined) fire(element);
       });
     },
+    onInput(handler) {
+      doc.addEventListener('input', (event) => {
+        const target = isElement(event.target) ? event.target : undefined;
+        if (target?.name !== undefined && target.name !== '') handler(target.name, target.value ?? '');
+      });
+    },
+    focus(name) {
+      for (const region of REGIONS) {
+        const field = doc.getElementById(region)?.querySelector?.(`[name="${name}"]`);
+        if (field !== null && field !== undefined) {
+          field.focus?.();
+          return;
+        }
+      }
+    },
+    blur() {
+      doc.activeElement?.blur?.();
+    },
+    reveal(region) {
+      doc.getElementById(region)?.querySelector?.('.cur')?.scrollIntoView?.({ block: 'nearest' });
+    },
     onKey(handler) {
       doc.addEventListener('keydown', (event) => {
         const target = isElement(event.target) ? event.target : undefined;
@@ -319,7 +351,7 @@ export function browserHost(win: BrowserWindow): PageHost {
             return;
           }
         }
-        handler(event.key ?? '', tag !== undefined && INPUTS.has(tag));
+        if (handler(event.key ?? '', tag !== undefined && INPUTS.has(tag)) === true) event.preventDefault?.();
       });
     },
     async get(path) {

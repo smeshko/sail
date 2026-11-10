@@ -59,7 +59,7 @@ class FakeHost implements PageHost {
   private timers = new Map<number, { at: number; fn: () => void }>();
   private next = 1;
   private action?: (action: string, data: Record<string, string>) => void;
-  private key?: (key: string, inInput: boolean) => void;
+  private key?: (key: string, inInput: boolean) => boolean;
 
   constructor(private readonly machine: Machine) {}
 
@@ -78,7 +78,7 @@ class FakeHost implements PageHost {
   onAction(handler: (action: string, data: Record<string, string>) => void) {
     this.action = handler;
   }
-  onKey(handler: (key: string, inInput: boolean) => void) {
+  onKey(handler: (key: string, inInput: boolean) => boolean) {
     this.key = handler;
   }
   /** The reads of a run's actions: answered at once, and kept apart from the reads of its calls. */
@@ -170,6 +170,27 @@ class FakeHost implements PageHost {
   setDetail(open: boolean) {
     this.details.push(open);
   }
+  /** The filter field's typing handler, the fields focused by name, the blurs, and the regions revealed. */
+  private input?: (name: string, value: string) => void;
+  focused: string[] = [];
+  blurs = 0;
+  revealed: Region[] = [];
+  onInput(handler: (name: string, value: string) => void) {
+    this.input = handler;
+  }
+  focus(name: string) {
+    this.focused.push(name);
+  }
+  blur() {
+    this.blurs++;
+  }
+  reveal(region: Region) {
+    this.revealed.push(region);
+  }
+  /** Types `value` into the field `name`. */
+  type(name: string, value: string) {
+    this.input?.(name, value);
+  }
   setInspector(open: boolean) {
     this.inspector = open;
   }
@@ -196,7 +217,7 @@ class FakeHost implements PageHost {
     this.action?.(data.action ?? '', data);
   }
   press(key: string, inInput = false) {
-    this.key?.(key, inInput);
+    return this.key?.(key, inInput);
   }
   /** The open sockets whose query starts with `prefix`. */
   open(prefix: string) {
@@ -1384,6 +1405,181 @@ test('select-view redraws the list with History and Queues rows, and filter-repo
   host.advance(100);
   expect(host.regions.sidebar).not.toContain('aria-pressed="true"');
   expect(host.regions.list).toContain(`data-run="${FAKE_2_ID}"`);
+});
+
+describe('the list by keyboard (ADW-522)', () => {
+  /** Boots on the first index in History: failed FAKE-2, then done runs. */
+  const bootHistory = () => {
+    page = boot(host);
+    plainIndex();
+    host.press('3');
+    host.advance(100);
+    return page;
+  };
+
+  test('j and k move the cursor one entry and stop at both ends', () => {
+    const p = bootHistory();
+    expect(p.ui.view).toBe('history');
+    host.press('j');
+    expect(p.ui.listCursor).toBe('history:failed');
+    host.press('j');
+    expect(p.ui.listCursor).toBe(`run:alpha/${FAKE_2_ID}`);
+    host.press('k');
+    host.press('k');
+    expect(p.ui.listCursor).toBe('history:failed');
+    for (let i = 0; i < 9; i++) host.press('ArrowDown');
+    const last = p.ui.listCursor;
+    expect(last?.startsWith('run:')).toBe(true);
+    host.press('ArrowDown');
+    expect(p.ui.listCursor).toBe(last);
+    host.advance(100);
+    expect(host.regions.list).toContain(`class="run lrow cur" data-row="${last}"`);
+  });
+
+  test('an index that drops the cursor run leaves the cursor alone until the next move, which lands on the first entry', () => {
+    const p = bootHistory();
+    host.press('j');
+    host.press('j');
+    expect(p.ui.listCursor).toBe(`run:alpha/${FAKE_2_ID}`);
+    const repos = index(m.registryDir).map((repo) => ({
+      ...repo,
+      runs: repo.runs.filter((run) => run.runId !== FAKE_2_ID),
+    }));
+    host.push(host.open('index')[0], { kind: 'index', repos });
+    host.advance(100);
+    expect(p.ui.listCursor).toBe(`run:alpha/${FAKE_2_ID}`);
+    expect(host.regions.list).not.toContain(' cur"');
+    host.press('j');
+    expect(p.ui.listCursor).toBe(`history:done`);
+    host.press('k');
+    host.press('k');
+    expect(p.ui.listCursor).toBe(`history:done`);
+  });
+
+  test('Enter opens the row under the cursor, and folds the group under it', () => {
+    const p = bootHistory();
+    host.press('j');
+    host.press('Enter');
+    expect(p.ui.listFolded).toEqual(['history:failed']);
+    host.advance(100);
+    expect(host.regions.list).not.toContain(`data-run="${FAKE_2_ID}"`);
+    host.press('Enter');
+    expect(p.ui.listFolded).toEqual([]);
+    host.press('j');
+    host.press('Enter');
+    expect(host.open('run=').map((socket) => socket.query)).toEqual([runQuery('alpha', FAKE_2_ID)]);
+    expect([p.ui.repo, p.ui.runId]).toEqual(['alpha', FAKE_2_ID]);
+  });
+
+  test('Enter on a queue row opens the queue beside the list', () => {
+    const p = bootHistory();
+    host.press('2');
+    for (let i = 0; i < 3; i++) host.press('j');
+    expect(p.ui.listCursor).toBe(`queue:beta/${QUEUE_WORKFLOW}`);
+    host.press('Enter');
+    expect(p.ui.queue).toBe(`beta/${QUEUE_WORKFLOW}`);
+  });
+
+  test('. opens the menu of the run under the cursor', () => {
+    const p = bootHistory();
+    host.press('j');
+    host.press('j');
+    host.press('.');
+    expect([p.ui.runId, p.ui.runMenu]).toEqual([FAKE_2_ID, FAKE_2_ID]);
+    host.advance(100);
+    expect(host.regions.list).toContain('class="r-menu"');
+  });
+
+  test('. on a group header, or with no cursor, does nothing', () => {
+    const p = bootHistory();
+    host.press('.');
+    host.press('j');
+    host.press('.');
+    expect([p.ui.runMenu, p.ui.runId]).toEqual([undefined, undefined]);
+  });
+
+  test('/ focuses the filter field and asks for its default to be suppressed; typing narrows the rows and the head reads n of m', () => {
+    const p = bootHistory();
+    expect(host.press('/')).toBe(true);
+    expect(host.focused).toEqual(['list-filter']);
+    host.type('list-filter', 'fake-2');
+    host.advance(100);
+    expect(p.ui.listFilter).toBe('fake-2');
+    expect(host.regions.list).toContain('<span class="lh-t">History</span><span class="c">1 of 3</span>');
+    expect(host.regions.list).toContain('value="fake-2"');
+    expect(host.regions.list).toContain(`data-run="${FAKE_2_ID}"`);
+    expect(host.regions.list).not.toContain(`data-run="${GOLDEN_RUN_ID}"`);
+    host.type('list-filter', '');
+    host.advance(100);
+    expect(host.regions.list).toContain('<span class="c">3</span>');
+  });
+
+  test('Escape in the filter field blurs it and changes nothing else; any other key typed there changes only the filter', () => {
+    const p = bootHistory();
+    host.press('j');
+    host.press('Escape', true);
+    expect(host.blurs).toBe(1);
+    host.press('2', true);
+    host.press('j', true);
+    host.press('Enter', true);
+    host.press('/', true);
+    expect([p.ui.view, p.ui.listCursor, p.ui.runId, host.focused]).toEqual([
+      'history',
+      'history:failed',
+      undefined,
+      [],
+    ]);
+  });
+
+  test('the filter text survives a redraw of the list', () => {
+    const dom = new DomHost(m);
+    host = dom;
+    const p = bootHistory();
+    dom.field('list', 'list-filter').value = 'fake';
+    host.type('list-filter', 'fake');
+    host.advance(100);
+    host.click({ action: 'toggle-list-group', group: 'history:done' });
+    host.advance(100);
+    expect(dom.field('list', 'list-filter').value).toBe('fake');
+    expect(p.ui.listFilter).toBe('fake');
+  });
+
+  test('1, 2 and 3 change the view to Active, Queues and History, and clear the filter and the cursor', () => {
+    const p = bootHistory();
+    host.type('list-filter', 'x');
+    host.press('j');
+    host.press('1');
+    expect([p.ui.view, p.ui.listFilter, p.ui.listCursor]).toEqual(['active', '', undefined]);
+    host.press('2');
+    expect(p.ui.view).toBe('queues');
+    host.press('3');
+    expect(p.ui.view).toBe('history');
+  });
+
+  test('with a run open, j and k move the card cursor as before and leave the list cursor alone, and Escape steps back to the list', () => {
+    const p = bootHistory();
+    host.press('j');
+    host.press('j');
+    host.press('Enter');
+    replay(host.open('run=')[0], fake2Dir(m));
+    host.advance(100);
+    host.press('j');
+    expect([p.ui.cursor, p.ui.listCursor]).toEqual([1, `run:alpha/${FAKE_2_ID}`]);
+    host.press('k');
+    expect(p.ui.cursor).toBe(0);
+    host.press('Escape');
+    host.advance(100);
+    expect([p.ui.runId, host.details.at(-1)]).toEqual([undefined, false]);
+    host.press('j');
+    expect(p.ui.listCursor).toBe('history:done');
+  });
+
+  test('the list is revealed after it is drawn, so the cursor stays in sight', () => {
+    bootHistory();
+    host.press('j');
+    host.advance(100);
+    expect(host.revealed).toContain('list');
+  });
 });
 
 test('the needs attention button opens its pane, a and Escape toggle and close it, and opening an item closes it and leaves an open queue', () => {

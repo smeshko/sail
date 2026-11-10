@@ -135,6 +135,11 @@ export const actions: Record<string, Action> = {
     store.mark('list');
   },
   'close-detail': (store) => closeDetail(store),
+  // What was typed in the list's filter field, which `onInput` delivers under the field's name.
+  'list-filter': (store, data) => {
+    store.ui.listFilter = data.value ?? '';
+    store.mark('list');
+  },
   'move-item': (store, data) => {
     const { dir, repo, workflow, key, target } = data;
     if (repo === undefined || workflow === undefined || key === undefined || target === undefined) return;

@@ -35,6 +35,9 @@ export function boot(host: PageHost): Page {
   startDraw(store);
   host.onAction((action, data) => dispatch(store, action, data));
   host.onKey((key, inInput) => onKey(store, key, inInput));
+  host.onInput((name, value) => {
+    if (name === 'list-filter') dispatch(store, 'list-filter', { value });
+  });
   openIndex(store, (asked) => actions.open?.(store, asked));
   store.mark(...REGIONS);
 
