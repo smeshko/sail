@@ -91,6 +91,7 @@ export function markupWindow() {
     clearTimeout: () => {},
     Date: class {
       getTimezoneOffset = () => 0;
+      static now = () => 0;
     },
   };
   const region = (name: string): ElementLike => {
