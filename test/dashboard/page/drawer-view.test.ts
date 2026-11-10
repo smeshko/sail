@@ -14,7 +14,7 @@ test('a markdown path is .md or .markdown, in any case', () => {
 test('closed, the drawer is empty; open, it has the name, the path and a close button, and says loading', () => {
   expect(renderDrawer(ui(), { state: 'loaded', value: 'x' }).value).toBe('');
   expect(renderDrawer(ui(plan), { state: 'loading' }).value).toBe(
-    '<div class="drawer-h"><span><b>plan.md</b><span class="d">02-plan/call-1/plan.md</span></span><button class="btn" data-action="close-file" title="close (Esc)">✕</button></div><div class="drawer-b"><div class="code">loading…</div></div>',
+    '<div class="drawer-h"><span><b>plan.md</b><span class="d">02-plan/call-1/plan.md</span></span><button class="btn" data-action="close-file" aria-label="close" title="close (Esc)">✕</button></div><div class="drawer-b"><div class="code">loading…</div></div>',
   );
   expect(renderDrawer(ui(plan), undefined).value).toContain('loading…');
 });
@@ -29,5 +29,11 @@ test("markdown is the server's HTML as it came, any other file is escaped text, 
   );
   expect(renderDrawer(ui(json), { state: 'missing' }).value).toContain(
     '<div class="code bad">this file is not in the run</div>',
+  );
+});
+
+test("the drawer's close button is named (ADW-508)", () => {
+  expect(renderDrawer(ui(plan), undefined).value).toContain(
+    'data-action="close-file" aria-label="close" title="close (Esc)">✕</button>',
   );
 });

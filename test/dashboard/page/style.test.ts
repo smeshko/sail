@@ -84,3 +84,8 @@ test("a run's ⋯ shows on hover and on focus inside the row, and is never hidde
   expect(selectors).toContain('.run:focus-within .r-more');
   expect(forMore.filter(([, body]) => /visibility:\s*hidden/.test(body))).toEqual([]);
 });
+
+test('the theme and inspector buttons carry an aria-label beside their title (ADW-508)', () => {
+  expect(html).toContain('data-action="toggle-theme" aria-label="switch theme" title="theme"');
+  expect(html).toContain('data-action="toggle-inspector" aria-label="toggle inspector" title="inspector (i)"');
+});

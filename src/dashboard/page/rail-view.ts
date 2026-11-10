@@ -37,7 +37,7 @@ const isMenuOpen = (repo: string, run: RailRun, ui: UiState) => isOpen(repo, run
 /** A row's ⋯: on any run but a completed one, which offers nothing. */
 function more(repo: string, run: RailRun, ui: UiState): SafeHtml | '' {
   if (run.status === 'completed') return '';
-  return html`<button class="r-more${isMenuOpen(repo, run, ui) ? ' open' : ''}" type="button" data-action="run-menu" data-repo="${repo}" data-run="${run.runId}" title="actions for ${run.runId}">⋯</button>`;
+  return html`<button class="r-more${isMenuOpen(repo, run, ui) ? ' open' : ''}" type="button" data-action="run-menu" data-repo="${repo}" data-run="${run.runId}" aria-label="actions for ${run.runId}" aria-expanded="${isMenuOpen(repo, run, ui) ? 'true' : 'false'}" title="actions for ${run.runId}">⋯</button>`;
 }
 
 /** The open menu under `run`'s row: what the run offers, once its actions are read. */
@@ -123,7 +123,7 @@ function historyLine(
   if (parts.length === 0) return html``;
   const toggles = parts.map(({ which, held }) => {
     const id = `${group}:${which.name}`;
-    return html`<button class="hist-t${ui.open.includes(id) ? ' open' : ''}" data-action="toggle-section" data-section="${id}">${which.label(held.length)}</button>`;
+    return html`<button class="hist-t${ui.open.includes(id) ? ' open' : ''}" data-action="toggle-section" data-section="${id}" aria-expanded="${ui.open.includes(id) ? 'true' : 'false'}">${which.label(held.length)}</button>`;
   });
   const rows = parts.flatMap(({ which, held }) =>
     (ui.open.includes(`${group}:${which.name}`) ? held : held.filter((run) => isOpen(repo, run, ui))).map((run) =>
@@ -173,7 +173,7 @@ function workflowHeader(
   ui: UiState,
   now: number,
 ): SafeHtml {
-  return html`<div class="wf-h"><button class="wf-t${open ? ' open' : ''}" data-action="toggle-group" data-group="${group}"><span class="caret">›</span><span class="nm">${workflow.name}</span></button>${
+  return html`<div class="wf-h"><button class="wf-t${open ? ' open' : ''}" data-action="toggle-group" data-group="${group}" aria-expanded="${open ? 'true' : 'false'}"><span class="caret">›</span><span class="nm">${workflow.name}</span></button>${
     workflow.queue === undefined ? '' : badge(group, workflow.queue, ui, now)
   }${workflow.toggle === undefined ? '' : watchButton(repo, workflow.toggle, ui, workflow.name)}${counts(workflow.runs)}</div>`;
 }
@@ -205,7 +205,7 @@ function repoGroup(repo: RailRepo, ui: UiState, now: number, offers: RunActions 
   return html`<div class="lgrp">
 <button class="lgrp-h${open ? ' open' : ''}"${
     repo.remote === null ? '' : html` title="${repo.remote}"`
-  } data-action="toggle-group" data-group="${repo.name}"><span class="caret">›</span><span class="nm">${repo.name}</span>${counts(repo.runs)}</button>
+  } data-action="toggle-group" data-group="${repo.name}" aria-expanded="${open ? 'true' : 'false'}"><span class="caret">›</span><span class="nm">${repo.name}</span>${counts(repo.runs)}</button>
 ${repo.problem === undefined ? '' : html`<div class="lgrp-p">${repo.problem}</div>`}${
   ui.watchNotice?.repo === repo.name ? html`<div class="lgrp-p">${ui.watchNotice.text}</div>` : ''
 }${

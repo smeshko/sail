@@ -40,15 +40,15 @@ const shown = (markup: string) =>
 test('repository headers are one line with the remote as the tooltip and counts omitted at 0, with no diamond, live dot or remote line', () => {
   const markup = rail();
   expect(markup).toContain(
-    '<button class="lgrp-h open" title="https://example.com/alpha.git" data-action="toggle-group" data-group="alpha"><span class="caret">›</span><span class="nm">alpha</span><span class="counts"><span class="f">✗ 1</span><span>2</span></span></button>',
+    '<button class="lgrp-h open" title="https://example.com/alpha.git" data-action="toggle-group" data-group="alpha" aria-expanded="true"><span class="caret">›</span><span class="nm">alpha</span><span class="counts"><span class="f">✗ 1</span><span>2</span></span></button>',
   );
   expect(markup).toContain(
-    '<button class="lgrp-h open" title="https://example.com/beta.git" data-action="toggle-group" data-group="beta"><span class="caret">›</span><span class="nm">beta</span><span class="counts"><span class="r">▶ 1</span><span>2</span></span></button>',
+    '<button class="lgrp-h open" title="https://example.com/beta.git" data-action="toggle-group" data-group="beta" aria-expanded="true"><span class="caret">›</span><span class="nm">beta</span><span class="counts"><span class="r">▶ 1</span><span>2</span></span></button>',
   );
   for (const gone of ['lgrp-r', '◆', 'class="live"', 'class="ic"']) expect(markup).not.toContain(gone);
   const bare = renderRail(handMade([]), { ...initialUi(0), expanded: ['gamma'] }, NOW).value;
   expect(bare).toContain(
-    '<button class="lgrp-h open" data-action="toggle-group" data-group="gamma"><span class="caret">›</span><span class="nm">gamma</span><span class="counts"></span></button>',
+    '<button class="lgrp-h open" data-action="toggle-group" data-group="gamma" aria-expanded="true"><span class="caret">›</span><span class="nm">gamma</span><span class="counts"></span></button>',
   );
 });
 
@@ -68,10 +68,10 @@ test('each repository lists its workflows by name, the watched one with a warn q
   const groups = [...markup.matchAll(/data-action="toggle-group" data-group="([^"]+)"/g)].map(([, group]) => group);
   expect(groups).toEqual(['alpha', 'alpha/ticket-to-pr', 'beta', 'beta/review', 'beta/ticket-to-pr']);
   expect(markup).toContain(
-    '<div class="wf-h"><button class="wf-t open" data-action="toggle-group" data-group="beta/ticket-to-pr"><span class="caret">›</span><span class="nm">ticket-to-pr</span></button><button class="qbadge warn" title="polled 7d ago" data-action="select-queue" data-queue="beta/ticket-to-pr">1 queued</button><button class="wf-act" data-action="watch-set" data-repo="beta" data-op="watch" data-workflow="ticket-to-pr">watch</button><span class="counts"><span class="r">▶ 1</span><span>1</span></span></div>',
+    '<div class="wf-h"><button class="wf-t open" data-action="toggle-group" data-group="beta/ticket-to-pr" aria-expanded="true"><span class="caret">›</span><span class="nm">ticket-to-pr</span></button><button class="qbadge warn" title="polled 7d ago" data-action="select-queue" data-queue="beta/ticket-to-pr">1 queued</button><button class="wf-act" data-action="watch-set" data-repo="beta" data-op="watch" data-workflow="ticket-to-pr">watch</button><span class="counts"><span class="r">▶ 1</span><span>1</span></span></div>',
   );
   expect(markup).toContain(
-    '<div class="wf-h"><button class="wf-t open" data-action="toggle-group" data-group="alpha/ticket-to-pr"><span class="caret">›</span><span class="nm">ticket-to-pr</span></button><span class="counts"><span class="f">✗ 1</span><span>2</span></span></div>',
+    '<div class="wf-h"><button class="wf-t open" data-action="toggle-group" data-group="alpha/ticket-to-pr" aria-expanded="true"><span class="caret">›</span><span class="nm">ticket-to-pr</span></button><span class="counts"><span class="f">✗ 1</span><span>2</span></span></div>',
   );
   expect(markup.match(/class="qbadge/g)).toHaveLength(1);
   const idle = renderRail(handMade([{}], 0), { ...initialUi(0), expanded: ['gamma', 'gamma/flow'] }, NOW).value;
@@ -85,7 +85,7 @@ test('each repository lists its workflows by name, the watched one with a warn q
 test('an open workflow lists no live run and its history line toggles its failed and completed runs as one-line rows', () => {
   const markup = rail();
   expect(markup).toContain(
-    '<div class="hist"><button class="hist-t" data-action="toggle-section" data-section="alpha/ticket-to-pr:failed">✗ 1 failed</button><button class="hist-t" data-action="toggle-section" data-section="alpha/ticket-to-pr:completed">✓ 1 done ›</button></div>',
+    '<div class="hist"><button class="hist-t" data-action="toggle-section" data-section="alpha/ticket-to-pr:failed" aria-expanded="false">✗ 1 failed</button><button class="hist-t" data-action="toggle-section" data-section="alpha/ticket-to-pr:completed" aria-expanded="false">✓ 1 done ›</button></div>',
   );
   expect(markup).not.toContain('class="hist-t" data-action="toggle-section" data-section="beta/ticket-to-pr');
   expect([shown(markup), markup.includes('hist-run')]).toEqual([[], false]);
@@ -93,7 +93,7 @@ test('an open workflow lists no live run and its history line toggles its failed
   const failed = rail({ open: ['alpha/ticket-to-pr:failed'] });
   expect(shown(failed)).toEqual([`alpha ${FAKE_2_ID}`]);
   expect(failed).toContain(
-    '<button class="hist-t open" data-action="toggle-section" data-section="alpha/ticket-to-pr:failed">',
+    '<button class="hist-t open" data-action="toggle-section" data-section="alpha/ticket-to-pr:failed" aria-expanded="true">',
   );
   expect(shown(rail({ open: ['alpha/ticket-to-pr:failed', 'alpha/ticket-to-pr:completed'] }))).toEqual([
     `alpha ${FAKE_2_ID}`,
@@ -144,7 +144,9 @@ test('the tree starts folded: repository headers only, with no workflow header a
 
 test('only the expanded repositories and workflows open, and the others stay folded', () => {
   const markup = folded({ expanded: ['alpha'] });
-  expect(markup).toContain('<button class="wf-t" data-action="toggle-group" data-group="alpha/ticket-to-pr">');
+  expect(markup).toContain(
+    '<button class="wf-t" data-action="toggle-group" data-group="alpha/ticket-to-pr" aria-expanded="false">',
+  );
   expect(markup).not.toContain('class="hist"');
   expect(markup).not.toContain('data-group="beta/');
   expect(folded({ expanded: ['alpha', 'alpha/ticket-to-pr'] })).toContain('class="hist"');
@@ -155,7 +157,9 @@ test('the selected run and the selected queue stay visible while folded', () => 
   expect(shown(folded(golden))).toEqual([`alpha ${GOLDEN_RUN_ID} *`]);
   expect(shown(folded({ ...golden, expanded: ['alpha'] }))).toEqual([`alpha ${GOLDEN_RUN_ID} *`]);
   const queued = folded({ repo: 'beta', runId: FAKE_3_ID, queue: 'beta/ticket-to-pr' });
-  expect(queued).toContain('<button class="wf-t" data-action="toggle-group" data-group="beta/ticket-to-pr">');
+  expect(queued).toContain(
+    '<button class="wf-t" data-action="toggle-group" data-group="beta/ticket-to-pr" aria-expanded="false">',
+  );
   expect(queued).toContain('<button class="qbadge warn sel" title="polled 7d ago"');
   expect(queued).not.toContain('data-group="beta/review"');
   const live = folded({ repo: 'beta', runId: FAKE_3_ID });
@@ -174,11 +178,15 @@ test('under a folded repository the open queue’s workflow header opens and fol
   const repos = handMade([{ status: 'failed' }], 1);
   const ui = { ...initialUi(0), queue: 'gamma/flow' };
   const shut = renderRail(repos, ui, NOW).value;
-  expect(shut).toContain('<button class="wf-t" data-action="toggle-group" data-group="gamma/flow">');
+  expect(shut).toContain(
+    '<button class="wf-t" data-action="toggle-group" data-group="gamma/flow" aria-expanded="false">',
+  );
   expect(shut).not.toContain('class="hist"');
   const opened = renderRail(repos, { ...ui, expanded: ['gamma/flow'] }, NOW).value;
-  expect(opened).toContain('<button class="wf-t open" data-action="toggle-group" data-group="gamma/flow">');
-  expect(opened).toContain('data-section="gamma/flow:failed">✗ 1 failed</button>');
+  expect(opened).toContain(
+    '<button class="wf-t open" data-action="toggle-group" data-group="gamma/flow" aria-expanded="true">',
+  );
+  expect(opened).toContain('data-section="gamma/flow:failed" aria-expanded="false">✗ 1 failed</button>');
 });
 
 const handMade = (runs: Partial<RailRun>[], waiting = 0): RailRepo[] => [
@@ -325,7 +333,7 @@ test("every run but a completed one has a ⋯ in its row, and only the open run'
   const markup = renderRail(railRepos(index(m.registryDir), NOW), open, NOW, offers).value;
   expect(mores(markup)).toContain(`${FAKE_2_ID} open`);
   expect(markup).toContain(
-    `<span class="r-el">4.9s</span></button><button class="r-more open" type="button" data-action="run-menu" data-repo="alpha" data-run="${FAKE_2_ID}" title="actions for ${FAKE_2_ID}">⋯</button></div><div class="r-menu"><div class="acts"><span class="act"><label class="lbl">from <select name="stage"></select></label><button class="btn" data-action="restart-run">restart</button></span></div></div>`,
+    `<span class="r-el">4.9s</span></button><button class="r-more open" type="button" data-action="run-menu" data-repo="alpha" data-run="${FAKE_2_ID}" aria-label="actions for ${FAKE_2_ID}" aria-expanded="true" title="actions for ${FAKE_2_ID}">⋯</button></div><div class="r-menu"><div class="acts"><span class="act"><label class="lbl">from <select name="stage"></select></label><button class="btn" data-action="restart-run">restart</button></span></div></div>`,
   );
   // The menu is the open run's: a run that isn't open draws none, though the menu names it.
   const elsewhere = { ...open, runId: GOLDEN_RUN_ID };
@@ -356,4 +364,36 @@ test("a run's ⋯ is a button beside the button that opens the run, never inside
     if (done) expect(rest).toBe('');
   }
   expect(rows.some(([, , body]) => (body as string).includes(GOLDEN_RUN_ID))).toBe(true);
+});
+
+test("a repository's header, a workflow's header and a history toggle say whether they are open (ADW-508)", () => {
+  const sections = { open: ['alpha/ticket-to-pr:failed'] };
+  const open = rail(sections);
+  expect(open).toMatch(/<button class="lgrp-h open"[^>]*aria-expanded="true"/);
+  expect(open).toMatch(/<button class="wf-t open"[^>]*aria-expanded="true"/);
+  expect(open).toMatch(
+    /<button class="hist-t open"[^>]*data-section="alpha\/ticket-to-pr:failed" aria-expanded="true"/,
+  );
+  expect(open).toMatch(/<button class="hist-t"[^>]*data-section="alpha\/ticket-to-pr:completed" aria-expanded="false"/);
+  const closed = folded();
+  expect(closed).toMatch(/<button class="lgrp-h"[^>]*aria-expanded="false"/);
+  expect(closed).not.toContain('aria-expanded="true"');
+  const workflows = rail({ expanded: ['alpha'] });
+  expect(workflows).toMatch(/<button class="wf-t"[^>]*aria-expanded="false"/);
+});
+
+test("a run's ⋯ is named for its run and says whether its menu is open (ADW-508)", () => {
+  const sections = { open: ['alpha/ticket-to-pr:failed'] };
+  const idle = rail(sections);
+  expect(idle).toContain(
+    `data-action="run-menu" data-repo="alpha" data-run="${FAKE_2_ID}" aria-label="actions for ${FAKE_2_ID}" aria-expanded="false"`,
+  );
+  const open = renderRail(
+    railRepos(index(m.registryDir), NOW),
+    { ...initialUi(0), expanded: ALL, ...sections, repo: 'alpha', runId: FAKE_2_ID, runMenu: FAKE_2_ID },
+    NOW,
+  ).value;
+  expect(open).toContain(
+    `<button class="r-more open" type="button" data-action="run-menu" data-repo="alpha" data-run="${FAKE_2_ID}" aria-label="actions for ${FAKE_2_ID}" aria-expanded="true"`,
+  );
 });

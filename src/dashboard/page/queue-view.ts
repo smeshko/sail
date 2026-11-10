@@ -75,7 +75,7 @@ function itemButton(panel: QueuePanel, item: PanelItem, action: string, label: s
 function itemMenu(panel: QueuePanel, item: PanelItem, ui: UiState): SafeHtml | '' {
   if (item.state === 'dispatched') return '';
   const open = ui.itemMenu === item.dedupKey;
-  const toggle = html`<button class="btn mv more${open ? ' open' : ''}" data-action="item-menu" data-item="${item.dedupKey}" title="actions for ${item.dedupKey}">⋯</button>`;
+  const toggle = html`<button class="btn mv more${open ? ' open' : ''}" data-action="item-menu" data-item="${item.dedupKey}" aria-label="actions for ${item.dedupKey}" aria-expanded="${open ? 'true' : 'false'}" title="actions for ${item.dedupKey}">⋯</button>`;
   if (!open) return html`<span class="qmore">${toggle}</span>`;
   const requeue =
     item.state === 'parked' || (item.state === 'failed' && item.runEnded)
@@ -92,7 +92,7 @@ function addForm(panel: QueuePanel, ui: UiState): SafeHtml {
 
 /** A waiting row's ▲ or ▼: `target` is the waiting neighbour the item moves before or after. */
 function moveButton(panel: QueuePanel, item: PanelItem, dir: 'up' | 'down', target: PanelItem): SafeHtml {
-  return html`<button class="btn mv" data-action="move-item" data-dir="${dir}" data-repo="${panel.repo}" data-workflow="${panel.workflow}" data-key="${item.dedupKey}" data-target="${target.dedupKey}" title="move ${dir === 'up' ? 'up, before' : 'down, after'} ${target.dedupKey}">${dir === 'up' ? '▲' : '▼'}</button>`;
+  return html`<button class="btn mv" data-action="move-item" data-dir="${dir}" data-repo="${panel.repo}" data-workflow="${panel.workflow}" data-key="${item.dedupKey}" data-target="${target.dedupKey}" aria-label="move ${dir === 'up' ? 'up, before' : 'down, after'} ${target.dedupKey}" title="move ${dir === 'up' ? 'up, before' : 'down, after'} ${target.dedupKey}">${dir === 'up' ? '▲' : '▼'}</button>`;
 }
 
 function moveButtons(panel: QueuePanel, item: PanelItem): SafeHtml | '' {
@@ -141,7 +141,7 @@ const LABELS: Record<QueueItemState, string> = {
 /** The queue's recent events, folded under a toggle until opened. */
 function recentEvents(stream: QueueStream | undefined, ui: UiState): SafeHtml {
   const recent = stream?.recent ?? [];
-  const toggle = html`<button class="qrecent-h${ui.queueEvents ? ' open' : ''}" data-action="toggle-queue-events"><span class="caret">›</span>recent queue events<span class="n">${recent.length}</span></button>`;
+  const toggle = html`<button class="qrecent-h${ui.queueEvents ? ' open' : ''}" data-action="toggle-queue-events" aria-expanded="${ui.queueEvents ? 'true' : 'false'}"><span class="caret">›</span>recent queue events<span class="n">${recent.length}</span></button>`;
   if (!ui.queueEvents) return toggle;
   return html`${toggle}<div class="qrecent">${recent.map(
     (event) =>
@@ -176,7 +176,7 @@ ${
         if (items.length === 0) return '';
         const id = `${queueId(panel.repo, panel.workflow)}:${state}`;
         const open = !ui.folded.includes(id);
-        const heading = html`<button class="qsec grp-t${open ? ' open' : ''}" data-action="toggle-queue-section" data-section="${id}"><span class="caret">›</span>${LABELS[state]} · ${items.length}</button>`;
+        const heading = html`<button class="qsec grp-t${open ? ' open' : ''}" data-action="toggle-queue-section" data-section="${id}" aria-expanded="${open ? 'true' : 'false'}"><span class="caret">›</span>${LABELS[state]} · ${items.length}</button>`;
         if (!open) return heading;
         return html`${heading}<div class="qbox">${items.map((item) => itemRow(panel, item, ui))}</div>`;
       })
