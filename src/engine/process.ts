@@ -9,6 +9,7 @@
 // the leader exits, and a read waiting for it to close would hang until that descendant ends.
 //
 // Every live group is also kept in a process-wide set, so `stopLiveGroups` can end what a call left before sail exits.
+// A harness adapter registers the groups it spawns there too, with `trackGroup`.
 //
 // POSIX process groups only. A descendant that calls `setsid` leaves the group, and survives the stop.
 import { closeSync, openSync } from 'node:fs';
@@ -37,8 +38,18 @@ export type ProcessEnd =
   | { started: false; message: string }
   | { started: true; code: number | null; signal: string | null; timedOut: boolean; aborted: boolean };
 
-/** Every group a `runProcess` started whose leader it hasn't finished with. */
+/** Every group a `runProcess` or a harness adapter started that hasn't been stopped or found empty. */
 const live = new Set<number>();
+
+/** Registers a group a harness spawned, so `stopLiveGroups` ends it before sail exits. */
+export function trackGroup(pgid: number): void {
+  live.add(pgid);
+}
+
+/** Forgets a group once it is stopped or known empty. */
+export function untrackGroup(pgid: number): void {
+  live.delete(pgid);
+}
 
 /** Sends `signal` to the group: `gone` when nothing is left, `unknown` when macOS answers EPERM for a group that still holds an exiting member, so only SIGKILL settles it. */
 function signalGroup(pgid: number, signal: NodeJS.Signals | 0): 'gone' | 'sent' | 'unknown' {
@@ -96,7 +107,7 @@ export async function runProcess(options: ProcessOptions): Promise<ProcessEnd> {
   }
 
   const pgid = child.pid;
-  live.add(pgid);
+  trackGroup(pgid);
   let timedOut = false;
   let aborted = false;
   let stopping: Promise<void> | undefined;
@@ -124,7 +135,7 @@ export async function runProcess(options: ProcessOptions): Promise<ProcessEnd> {
     await stopping;
     await stopGroup(pgid, graceMs); // whatever the leader left running
   } finally {
-    live.delete(pgid);
+    untrackGroup(pgid);
   }
   return { started: true, code: child.exitCode, signal: child.signalCode ?? null, timedOut, aborted };
 }
