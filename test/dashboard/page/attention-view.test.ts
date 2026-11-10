@@ -15,12 +15,14 @@ afterEach(() => m.remove());
 test("FAKE-2's failure and the two errors are buttons in one list whose data opens the run and the key", () => {
   const items = attention(index(m.registryDir));
   const button =
-    '<button class="btn att-btn on" type="button" data-action="toggle-attention" title="needs attention (a)">⚑ needs attention<span class="badge">4</span></button>';
+    '<button class="btn att-btn on" type="button" data-action="toggle-attention" aria-expanded="true" title="needs attention (a)">⚑ needs attention<span class="badge">4</span></button>';
   const markup = renderAttention(items, true).value;
   expect(markup).toStartWith(
     `${button}<div class="att-scrim" data-action="toggle-attention"></div><div class="att-pane"><div class="rail-h"><span>needs attention</span><span class="c">4</span><button class="btn att-clear" type="button" data-action="clear-attention">all clear</button></div><div class="att-list">`,
   );
-  expect(renderAttention(items, false).value).toBe(button.replace(' on"', '"'));
+  expect(renderAttention(items, false).value).toBe(
+    button.replace(' on"', '"').replace('aria-expanded="true"', 'aria-expanded="false"'),
+  );
   expect(markup).toContain(
     `<button class="sig sig-failed" data-action="open" data-repo="alpha" data-run="${FAKE_2_ID}"><b>failed: stage_error</b><span class="w">alpha · ${FAKE_2_ID}</span><span class="p">FAKE-2 Print the version with --version · implement#1 ended in error: harness: the session ended before it submitted a result</span></button>`,
   );
@@ -43,7 +45,7 @@ test('a stalled session has no row', () => {
 
 test('an empty list has no count on the button, and the open pane says nothing needs attention', () => {
   expect(renderAttention([], false).value).toBe(
-    '<button class="btn att-btn" type="button" data-action="toggle-attention" title="needs attention (a)">⚑ needs attention</button>',
+    '<button class="btn att-btn" type="button" data-action="toggle-attention" aria-expanded="false" title="needs attention (a)">⚑ needs attention</button>',
   );
   expect(renderAttention([], true).value).toContain(
     '<div class="att-list"><div class="att-empty">nothing needs attention</div></div></div>',
@@ -57,4 +59,10 @@ test('the open pane with items has an all clear button after its count, and the 
   );
   expect(renderAttention(items, false).value).not.toContain('clear-attention');
   expect(renderAttention([], true).value).not.toContain('clear-attention');
+});
+
+test('the needs-attention button says whether its pane is open (ADW-508)', () => {
+  const items = attention(index(m.registryDir));
+  expect(renderAttention(items, true).value).toContain('data-action="toggle-attention" aria-expanded="true" title=');
+  expect(renderAttention(items, false).value).toContain('data-action="toggle-attention" aria-expanded="false" title=');
 });

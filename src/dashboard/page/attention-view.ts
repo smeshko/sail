@@ -22,7 +22,7 @@ function row(item: AttentionItem): SafeHtml {
 
 /** The button with its count, and while `open` the pane: the list, or a line saying nothing needs attention. */
 export function renderAttention(items: readonly AttentionItem[], open: boolean): SafeHtml {
-  const button = html`<button class="btn att-btn${open ? ' on' : ''}" type="button" data-action="toggle-attention" title="needs attention (a)">⚑ needs attention${
+  const button = html`<button class="btn att-btn${open ? ' on' : ''}" type="button" data-action="toggle-attention" aria-expanded="${open ? 'true' : 'false'}" title="needs attention (a)">⚑ needs attention${
     items.length === 0 ? '' : html`<span class="badge">${items.length}</span>`
   }</button>`;
   if (!open) return button;

@@ -103,7 +103,9 @@ test('a running card shows running and its time so far, a PR link is drawn only 
   const started = Date.parse(events[until]?.ts ?? '');
   const ui = { ...initialUi(0), key: 'tests#1', cursor: 3 };
   const markup = renderRun(model, undefined, ui, started + 2500).value;
-  expect(markup).toContain('<div class="card cursor sel" data-action="select-card" data-key="tests#1">');
+  expect(markup).toContain(
+    '<div class="card cursor sel" role="button" tabindex="0" data-action="select-card" data-key="tests#1">',
+  );
   expect(markup).toMatch(
     /data-key="tests#1">\n<div class="c-top"><span class="c-n">04<\/span><span class="c-name">tests#1<\/span><span class="pill p-run">running<\/span>/,
   );
@@ -313,4 +315,14 @@ test('Clean sits beside Restart, arms into a confirmation that lists what it rem
   expect(view({}, { enabled: false, removes: [], why: 'a queue item names it' })).toContain(
     '<button class="btn" disabled>clean</button><span class="act-why">a queue item names it</span>',
   );
+});
+
+test('a called card is a focusable button and a pending card is neither', () => {
+  const golden = renderRun(foldRun(readEvents(GOLDEN_RUN)), summaryOf(GOLDEN_RUN), initialUi(0), NOW).value;
+  expect(golden.match(/role="button" tabindex="0" data-action="select-card"/g)?.length).toBe(8);
+  const beta = renderRun(foldRun(readEvents(FAKE_3)), summaryOf(FAKE_3), initialUi(0), NOW).value;
+  expect(beta.match(/role="button" tabindex="0" data-action="select-card"/g)?.length).toBe(4);
+  const pending = beta.match(/<div class="card pending"[^>]*>/g) ?? [];
+  expect(pending.length).toBe(4);
+  for (const tag of pending) expect(tag).toBe('<div class="card pending">');
 });
