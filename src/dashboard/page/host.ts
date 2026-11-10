@@ -18,7 +18,10 @@ export interface ConnectHandlers {
 }
 
 export interface PageHost {
-  /** Draws `html` into `region`, keeping the scroll of each `data-scroll` box that is still there. */
+  /**
+   * Draws `html` into `region`, keeping the scroll of each `data-scroll` box that is still there and the focus, by the
+   * focus key of the focused element: its name, else its `data-action` and data, else its href.
+   */
   render(region: Region, html: string): void;
   /** Scrolls what holds `region` to its end. */
   scrollToEnd(region: Region): void;
@@ -61,6 +64,10 @@ export interface ElementLike {
   dataset: Record<string, string | undefined>;
   parentElement: ElementLike | null;
   tagName?: string;
+  name?: string;
+  contains?(other: ElementLike): boolean;
+  focus?(options?: { preventScroll?: boolean }): void;
+  getAttribute?(name: string): string | null;
   querySelectorAll?(selectors: string): ArrayLike<ElementLike>;
   querySelector?(selectors: string): ElementLike | null;
   style?: { setProperty(name: string, value: string): void };
@@ -86,6 +93,7 @@ export interface BrowserWindow {
     addEventListener(type: string, listener: (event: EventLike) => void): void;
     removeEventListener(type: string, listener: (event: EventLike) => void): void;
     documentElement: { dataset: Record<string, string | undefined> };
+    activeElement?: ElementLike | null;
   };
   location: { host: string; search: string };
   fetch(
@@ -97,7 +105,7 @@ export interface BrowserWindow {
   navigator: { clipboard?: { writeText(text: string): Promise<void> } };
   setTimeout(fn: () => void, ms: number): number;
   clearTimeout(id: number): void;
-  Date: { new (): { getTimezoneOffset(): number } };
+  Date: { new (): { getTimezoneOffset(): number }; now(): number };
 }
 
 const isElement = (value: unknown): value is ElementLike =>
@@ -110,6 +118,29 @@ function actionOf(target: unknown): ElementLike | undefined {
   }
   return undefined;
 }
+
+/** The elements a person can focus, and the ones a focus key is derived from. */
+const FOCUSABLE = '[name], [data-action], a[href]';
+
+/**
+ * What identifies a focusable element across a redraw, from what its markup carries: its `name`, else its `data-action`
+ * with its other `data-*` values, else its `href`. An element with none has no key, and its focus is not restored.
+ */
+function focusKey(element: ElementLike): string | undefined {
+  if (element.name !== undefined && element.name !== '') return `name=${element.name}`;
+  if (element.dataset.action !== undefined) {
+    const entries = Object.entries(element.dataset)
+      .filter(([, value]) => value !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return `action=${JSON.stringify(entries)}`;
+  }
+  const href = element.getAttribute?.('href');
+  return href === null || href === undefined ? undefined : `href=${href}`;
+}
+
+/** The focusable elements of `root` with `key`, in document order. */
+const keyed = (root: ElementLike, key: string) =>
+  Array.from(root.querySelectorAll?.(FOCUSABLE) ?? []).filter((element) => focusKey(element) === key);
 
 const INPUTS = new Set(['INPUT', 'TEXTAREA', 'SELECT']);
 
@@ -152,16 +183,29 @@ export function browserHost(win: BrowserWindow): PageHost {
     render(region, markup) {
       const element = doc.getElementById(region);
       if (element === null) return;
+      // The focus: the key of the focused element of this region, and its place among the ones with that key.
+      let focused: { key: string; place: number } | undefined;
+      const active = doc.activeElement;
+      if (active !== null && active !== undefined && element.contains?.(active) === true) {
+        const key = focusKey(active);
+        const place = key === undefined ? -1 : keyed(element, key).indexOf(active);
+        if (key !== undefined && place >= 0) focused = { key, place };
+      }
       const scrolled = new Map<string, number>();
       for (const box of Array.from(element.querySelectorAll?.('[data-scroll]') ?? [])) {
         const key = box.dataset.scroll;
         if (key !== undefined && (box.scrollTop ?? 0) > 0) scrolled.set(key, box.scrollTop ?? 0);
       }
       element.innerHTML = markup;
-      if (scrolled.size === 0) return;
-      for (const box of Array.from(element.querySelectorAll?.('[data-scroll]') ?? [])) {
-        const offset = scrolled.get(box.dataset.scroll ?? '');
-        if (offset !== undefined) box.scrollTop = offset;
+      if (scrolled.size > 0) {
+        for (const box of Array.from(element.querySelectorAll?.('[data-scroll]') ?? [])) {
+          const offset = scrolled.get(box.dataset.scroll ?? '');
+          if (offset !== undefined) box.scrollTop = offset;
+        }
+      }
+      if (focused !== undefined) {
+        const found = keyed(element, focused.key);
+        found[Math.min(focused.place, found.length - 1)]?.focus?.({ preventScroll: true });
       }
     },
     scrollToEnd(region) {
@@ -219,7 +263,7 @@ export function browserHost(win: BrowserWindow): PageHost {
       };
       return { close: () => socket.close() };
     },
-    now: () => Date.now(),
+    now: () => win.Date.now(),
     later: (fn, ms) => win.setTimeout(fn, ms),
     cancel: (id) => win.clearTimeout(id),
     load(key) {
