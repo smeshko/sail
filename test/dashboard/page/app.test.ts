@@ -239,7 +239,7 @@ test('boot renders the rail with alpha and beta from the first index, opens the 
   host.advance(99);
   expect(host.renders).toEqual([]);
   host.advance(1);
-  expect(host.renders.sort()).toEqual(['attention', 'inspector', 'main', 'rail', 'status']);
+  expect(host.renders.sort()).toEqual(['attention', 'main', 'rail', 'status']);
   expect(host.regions.rail).toContain('<span class="nm">alpha</span>');
   expect(host.regions.rail).toContain('<span class="nm">beta</span>');
   expect(host.regions.rail).toContain(
@@ -978,7 +978,7 @@ test("with no events, a running call's time is drawn again each second, and with
   host.renders = [];
   host.advance(1000);
   expect(host.regions.main).toContain('<span class="d-agent">2.1s');
-  expect(host.renders.sort()).toEqual(['inspector', 'main', 'rail', 'status']);
+  expect(host.renders.sort()).toEqual(['main', 'rail']);
   host.advance(1000);
   expect(host.regions.main).toContain('<span class="d-agent">3.1s');
   page.stop();
@@ -994,6 +994,51 @@ test("with no events, a running call's time is drawn again each second, and with
   host.renders = [];
   host.advance(5000);
   expect(host.renders).toEqual([]);
+});
+
+test('a tick that changes no markup writes no region and scrolls nothing, and one that changes the running time writes it (ADW-504)', () => {
+  const { dir, rest } = runningCopy(m, 1);
+  const lines = rest.map((line) => JSON.parse(line));
+  const start = lines.findIndex((event) => event.type === 'stage:start' && event.key === 'implement#1');
+  // Two hours and ten seconds into the run: its time reads in minutes, so only a minute's turn changes a draw.
+  host.clock = Date.parse('2026-09-25T09:00:00.600Z') + 2 * 3_600_000 + 10_000;
+  page = boot(host);
+  host.push(host.open('index')[0], indexMessage());
+  const socket = host.open('run=')[0];
+  replay(socket, dir, false);
+  for (const event of lines.slice(0, start + 1)) host.push(socket, { kind: 'event', event });
+  host.click({ action: 'select-card', key: 'implement#1' });
+  host.click({ action: 'toggle-follow' });
+  host.advance(100);
+  expect(host.scrolls).toEqual(['main']);
+  host.renders = [];
+  host.scrolls = [];
+  // A value typed between two unchanged ticks is still read by the draw whose write is skipped.
+  host.fields.raise = '7';
+  host.advance(2500);
+  expect([host.renders, host.scrolls, page.ui.raise]).toEqual([[], [], '7']);
+  host.advance(60_000);
+  expect(host.renders).toContain('main');
+  expect(host.renders).toContain('rail');
+  expect([...new Set(host.scrolls)]).toEqual(['main']);
+});
+
+test('an add that took writes main though its markup is what was last drawn (ADW-504)', async () => {
+  page = boot(host);
+  host.push(host.open('index')[0], indexMessage());
+  const [socket] = host.open('queue=');
+  host.click({ action: 'select-queue', queue: `beta/${QUEUE_WORKFLOW}` });
+  for (const event of readEvents(queueDirOf(m))) host.push(socket, { kind: 'queue-event', event });
+  host.advance(100);
+  expect(host.regions.main).toContain('name="add-ticket" placeholder="ticket key" value=""');
+  host.postAnswer = { status: 200, body: '{}' };
+  host.fields['add-ticket'] = 'FAKE-9';
+  host.click({ action: 'add-ticket', ...BETA });
+  await settle();
+  host.renders = [];
+  host.advance(100);
+  expect(host.renders).toContain('main');
+  expect(host.regions.main).toContain('name="add-ticket" placeholder="ticket key" value=""');
 });
 
 test('the open run, once ended, opens its stream again when the index says it runs again, folds past its old run:end as live, and leaves one socket (review R1-2)', () => {
@@ -1078,7 +1123,7 @@ test("a region whose draw throws shows that it couldn't be drawn, and every othe
   host.renders = [];
   host.push(host.open('index')[0], broken);
   expect(() => host.advance(100)).not.toThrow();
-  expect(host.renders.sort()).toEqual(['attention', 'main', 'rail', 'status']);
+  expect(host.renders.sort()).toEqual(['attention', 'rail']);
   expect(host.regions.rail).toContain('this part of the page could not be drawn');
   expect(cards(host.regions.main)).toHaveLength(8);
 });
