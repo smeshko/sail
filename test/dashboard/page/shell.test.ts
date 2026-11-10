@@ -4,6 +4,7 @@
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { actions } from '../../../src/dashboard/page/actions';
 import type { PageHost } from '../../../src/dashboard/page/host';
 import { CLEARED_KEY, FILTER_KEY, RAIL_KEY, THEME_KEY } from '../../../src/dashboard/page/saved';
 import { createStore, FLUSH_MS } from '../../../src/dashboard/page/store';
@@ -15,7 +16,7 @@ const source = (module: string) => readFileSync(join(PAGE, module), 'utf8');
 const lines = (text: string) => text.replace(/\n$/, '').split('\n').length;
 
 /** The modules split from `app.ts` so far. */
-const SPLIT = ['store.ts', 'saved.ts', 'draw.ts', 'reads.ts', 'streams.ts'];
+const SPLIT = ['store.ts', 'saved.ts', 'draw.ts', 'reads.ts', 'streams.ts', 'actions.ts', 'requests.ts'];
 
 test('the line counter counts a made-up source, and it is over the limit', () => {
   expect(lines('a\nb\nc\n')).toBe(3);
@@ -103,4 +104,58 @@ test('the scan for input in the sockets flags a made-up source with each, and st
   expect(handlesInput("import { moves } from './keys';")).toBe(1);
   expect(handlesInput("import { tick } from './draw';")).toBe(0);
   expect(handlesInput(source('streams.ts'))).toBe(0);
+});
+
+/** Whether a source opens a socket: the sockets are the streams' alone. */
+const opensSocket = (text: string) => /\.connect\(/.test(text);
+
+test('the scan for sockets flags a made-up source, and neither actions.ts nor requests.ts opens one', () => {
+  expect(opensSocket('host.connect(`index=1`, handlers);')).toBe(true);
+  expect(opensSocket('host.post(path, body);')).toBe(false);
+  expect(opensSocket(source('actions.ts'))).toBe(false);
+  expect(opensSocket(source('requests.ts'))).toBe(false);
+});
+
+test('the actions are exactly the data-actions the page had', () => {
+  expect(Object.keys(actions).sort()).toEqual(
+    [
+      'select-run',
+      'select-queue',
+      'select-card',
+      'open',
+      'close-timeline',
+      'open-file',
+      'close-file',
+      'step-card',
+      'toggle-tool',
+      'toggle-filter',
+      'show-all',
+      'tab',
+      'stream',
+      'log-step',
+      'toggle-group',
+      'move-item',
+      'poll-queue',
+      'add-ticket',
+      'item-menu',
+      'requeue-item',
+      'drop-item',
+      'watch-set',
+      'resume-run',
+      'restart-run',
+      'stop-run',
+      'clean-run',
+      'stop-now',
+      'run-menu',
+      'toggle-queue-events',
+      'toggle-queue-section',
+      'toggle-attention',
+      'clear-attention',
+      'toggle-section',
+      'toggle-inspector',
+      'toggle-theme',
+      'toggle-follow',
+      'copy',
+    ].sort(),
+  );
 });
