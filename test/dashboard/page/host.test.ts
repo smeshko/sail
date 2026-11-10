@@ -221,7 +221,7 @@ function fakeWindow(
   options: { storage?: 'throws'; clipboard?: 'rejects' | 'missing'; fetch?: 'fails'; search?: string } = {},
 ) {
   const listeners: Record<string, ((event: EventLike) => void)[]> = {};
-  const elements: Record<string, ReturnType<typeof element>> = { rail: element(), body: element() };
+  const elements: Record<string, ReturnType<typeof element>> = { list: element(), body: element() };
   const fetched: { url: string; headers: Record<string, string>; method?: string; body?: string }[] = [];
   const sockets: FakeSocket[] = [];
   const timers: number[] = [];
@@ -390,7 +390,7 @@ test('scrollToEnd scrolls the element holding a region to its height, and does n
   fake.elements.main = element({ parentElement: box });
   const host = browserHost(fake.win);
   host.scrollToEnd('main');
-  host.scrollToEnd('rail');
+  host.scrollToEnd('list');
   host.scrollToEnd('status');
   expect(box.scrollTop).toBe(900);
 });
@@ -436,9 +436,9 @@ test('load and save survive a throwing localStorage, and copy reports false when
 test("render writes a region by id, keys say whether they were typed in an input, the theme and inspector set the root's data, timers and the offset pass through, and a resize handle drags its column within bounds", () => {
   const fake = fakeWindow();
   const host = browserHost(fake.win);
-  host.render('rail', '<b>alpha</b>');
+  host.render('list', '<b>alpha</b>');
   host.render('status', 'nowhere');
-  expect(fake.elements.rail?.innerHTML).toBe('<b>alpha</b>');
+  expect(fake.elements.list?.innerHTML).toBe('<b>alpha</b>');
   const keys: [string, boolean][] = [];
   host.onKey((key, inInput) => keys.push([key, inInput]));
   fake.fire('keydown', { key: 'j', target: element({ tagName: 'DIV' }) });
@@ -458,12 +458,12 @@ test("render writes a region by id, keys say whether they were typed in an input
   const body = fake.elements.body;
   fake.fire('mousedown', { target: element({ dataset: { resize: 'left' } }), clientX: 300 });
   fake.fire('mousemove', { target: null, clientX: 340 });
-  expect(body?.styles['--rail-w']).toBe('300px');
+  expect(body?.styles['--side-w']).toBe('220px');
   fake.fire('mousemove', { target: null, clientX: 2000 });
-  expect(body?.styles['--rail-w']).toBe('480px');
+  expect(body?.styles['--side-w']).toBe('480px');
   fake.fire('mouseup', { target: null });
   fake.fire('mousemove', { target: null, clientX: 0 });
-  expect(body?.styles['--rail-w']).toBe('480px');
+  expect(body?.styles['--side-w']).toBe('480px');
   fake.fire('mousedown', { target: element({ dataset: { resize: 'right' } }), clientX: 1000 });
   fake.fire('mousemove', { target: null, clientX: 2000 });
   expect(body?.styles['--ins-w']).toBe('240px');
@@ -533,8 +533,8 @@ test('render passes on no offset to a box that is gone, and renders a region wit
   host.render('main', timeline(['c1']));
   expect(main.boxes.get('input:c1')?.scrollTop).toBe(0);
 
-  host.render('rail', '<b>alpha</b>');
-  expect(fake.elements.rail?.innerHTML).toBe('<b>alpha</b>');
+  host.render('list', '<b>alpha</b>');
+  expect(fake.elements.list?.innerHTML).toBe('<b>alpha</b>');
 });
 
 test('post sends the method, the client header, a JSON content type and the JSON body, and gives the status and body, or status 0 when the request fails', async () => {
@@ -552,22 +552,22 @@ test('post sends the method, the client header, a JSON content type and the JSON
   expect(await browserHost(fakeWindow({ fetch: 'fails' }).win).post('/x', {})).toEqual({ status: 0, body: '' });
 });
 
-test('value() reads a named field from whichever region holds it, the rail before the main region, and answers undefined for a name no region holds', () => {
+test('value() reads a named field from whichever region holds it, the list before the main region, and answers undefined for a name no region holds', () => {
   const { win, field } = markupWindow();
   const host = browserHost(win);
   expect(host.value('raise')).toBeUndefined();
-  host.render('rail', '<input class="num" type="number" name="raise" value="2.5">');
+  host.render('list', '<input class="num" type="number" name="raise" value="2.5">');
   host.render('main', '<input class="txt" type="text" name="add-ticket" value="FAKE-9">');
   expect([host.value('raise'), host.value('add-ticket'), host.value('stage')]).toEqual(['2.5', 'FAKE-9', undefined]);
   host.render('main', '<input class="num" type="number" name="raise" value="9">');
   expect(host.value('raise')).toBe('2.5');
   host.render(
-    'rail',
+    'list',
     '<select name="stage"><option value="spec">spec</option><option value="implement" title="a selected b" selected>implement</option></select>',
   );
   expect(host.value('stage')).toBe('implement');
-  expect(field('rail', 'stage').value).toBe('implement');
-  expect(() => field('rail', 'nothing')).toThrow('no field "nothing" in #rail');
+  expect(field('list', 'stage').value).toBe('implement');
+  expect(() => field('list', 'nothing')).toThrow('no field "nothing" in #list');
   const fake = fakeWindow();
   fake.elements.main = element();
   expect(browserHost(fake.win).value('raise')).toBeUndefined();
@@ -576,9 +576,9 @@ test('value() reads a named field from whichever region holds it, the rail befor
 test("value() of a checkbox is 'on' while it is ticked and empty while it is not, whatever its value attribute says", () => {
   const { win, field } = markupWindow();
   const host = browserHost(win);
-  host.render('rail', '<input type="checkbox" name="now" data-action="stop-now">');
+  host.render('list', '<input type="checkbox" name="now" data-action="stop-now">');
   expect(host.value('now')).toBe('');
-  field('rail', 'now').checked = true;
+  field('list', 'now').checked = true;
   expect(host.value('now')).toBe('on');
   host.render('main', '<input type="checkbox" name="add-force" value="on">');
   expect(host.value('add-force')).toBe('');
@@ -639,13 +639,13 @@ const row = (run: string) => `<button data-action="select-run" data-repo="alpha"
 
 test('render puts the focus back on the element with the same data-action and data, a new element, so Tab goes on from it', () => {
   const fake = fakeWindow();
-  const rail = fake.live('rail');
+  const rail = fake.live('list');
   const host = browserHost(fake.win);
-  host.render('rail', `${row('r1')}${row('r2')}${row('r3')}`);
+  host.render('list', `${row('r1')}${row('r2')}${row('r3')}`);
   fake.tab();
   fake.tab();
   const before = fake.focus.active;
-  host.render('rail', `${row('r1')}${row('r2')}${row('r3')}<span>more</span>`);
+  host.render('list', `${row('r1')}${row('r2')}${row('r3')}<span>more</span>`);
   expect(fake.focus.active).not.toBe(before);
   expect(fake.focus.active).toBe(rail.els[1] as ElementLike);
   expect(fake.focus.active?.dataset).toEqual({ action: 'select-run', repo: 'alpha', run: 'r2' });
@@ -656,17 +656,17 @@ test('render puts the focus back on the element with the same data-action and da
 
 test("of two elements with one key, the one at the focused one's place is focused, and the last when one is gone", () => {
   const fake = fakeWindow();
-  const rail = fake.live('rail');
+  const rail = fake.live('list');
   const host = browserHost(fake.win);
   const twin = (label: string) => `<button data-action="select-queue" data-queue="b/w">${label}</button>`;
-  host.render('rail', `${row('r1')}${twin('row')}${twin('badge')}`);
+  host.render('list', `${row('r1')}${twin('row')}${twin('badge')}`);
   fake.tab();
   fake.tab();
   fake.tab();
   expect(fake.focus.active).toBe(rail.els[2] as ElementLike);
-  host.render('rail', `${row('r1')}${twin('row')}${twin('badge')}<i>x</i>`);
+  host.render('list', `${row('r1')}${twin('row')}${twin('badge')}<i>x</i>`);
   expect(fake.focus.active).toBe(rail.els[2] as ElementLike);
-  host.render('rail', `${row('r1')}${twin('row')}`);
+  host.render('list', `${row('r1')}${twin('row')}`);
   expect(fake.focus.active).toBe(rail.els[1] as ElementLike);
 });
 
@@ -684,15 +684,15 @@ test('a focused link is found again by its href', () => {
 
 test('focus outside the region, on an element with no key, or on one the new markup lacks, is left alone, and a region without contains or querySelectorAll still renders', () => {
   const fake = fakeWindow();
-  fake.live('rail');
+  fake.live('list');
   const main = fake.live('main');
   const host = browserHost(fake.win);
-  host.render('rail', row('r1'));
+  host.render('list', row('r1'));
   host.render('main', row('m1'));
   fake.tab();
   fake.tab();
   expect(fake.focus.active).toBe(main.els[0] as ElementLike);
-  host.render('rail', `${row('r1')}<i>x</i>`);
+  host.render('list', `${row('r1')}<i>x</i>`);
   expect(fake.focus.active).toBe(main.els[0] as ElementLike);
   expect(fake.focus.calls).toEqual([]);
 
@@ -717,7 +717,7 @@ test('focus outside the region, on an element with no key, or on one the new mar
   expect(fake.elements.status.innerHTML).toBe('<b>x</b>');
 });
 
-test('across a tick the rail is rewritten, the focused row stays focused and Tab goes to the next row', () => {
+test('across a tick the list is rewritten, the focused row stays focused and Tab goes to the next row', () => {
   const m = seedFixtures();
   const fake = fakeWindow();
   const page = (() => {
@@ -741,11 +741,13 @@ test('across a tick the rail is rewritten, the focused row stays focused and Tab
   })();
   try {
     fake.advance(100);
-    const rail = fake.elements.rail as ReturnType<typeof liveRegion>;
+    const rail = fake.elements.list as ReturnType<typeof liveRegion>;
     const rows = rail.els.filter((el) => el.focusable);
     const at = Math.min(5, rows.length - 2);
     expect(at).toBeGreaterThan(0);
-    for (let step = 0; step <= at; step++) fake.tab();
+    // The sidebar comes first in the page, so its focusable elements are tabbed past.
+    const beforeList = (fake.elements.sidebar as ReturnType<typeof liveRegion>).els.filter((el) => el.focusable).length;
+    for (let step = 0; step < beforeList + at + 1; step++) fake.tab();
     const focused = fake.focus.active as ElementLike;
     expect(focused).toBe(rows[at] as ElementLike);
     fake.advance(1000);
@@ -801,30 +803,30 @@ test("a fresh render gives the fields the markup's values and still keeps the fo
 
 test("a select whose option is gone keeps the markup's choice, and one whose option is still there keeps the person's", () => {
   const fake = fakeWindow();
-  const rail = fake.live('rail');
+  const rail = fake.live('list');
   const host = browserHost(fake.win);
   const select = (options: string) => `<select name="stage">${options}</select>`;
-  host.render('rail', select('<option value="a">a</option><option value="b" selected>b</option>'));
+  host.render('list', select('<option value="a">a</option><option value="b" selected>b</option>'));
   field(rail, 'stage').value = 'a';
   host.render(
-    'rail',
+    'list',
     select('<option value="a">a</option><option value="b" selected>b</option><option value="c">c</option>'),
   );
   expect(field(rail, 'stage').value).toBe('a');
-  host.render('rail', select('<option value="b">b</option><option value="c" selected>c</option>'));
+  host.render('list', select('<option value="b">b</option><option value="c" selected>c</option>'));
   expect(field(rail, 'stage').value).toBe('c');
 });
 
 test('a focused number field keeps its value and takes no selection call that throws', () => {
   const fake = fakeWindow();
-  const rail = fake.live('rail');
+  const rail = fake.live('list');
   const host = browserHost(fake.win);
   const form = '<input name="raise" type="number" value="">';
-  host.render('rail', form);
+  host.render('list', form);
   fake.tab();
   field(rail, 'raise').value = '2.5';
   expect(field(rail, 'raise').selectionStart).toBeNull();
-  expect(() => host.render('rail', `${form}<i>x</i>`)).not.toThrow();
+  expect(() => host.render('list', `${form}<i>x</i>`)).not.toThrow();
   const after = field(rail, 'raise');
   expect([after.value, after.selectionCalls]).toEqual(['2.5', 0]);
   expect(fake.focus.active).toBe(after as ElementLike);

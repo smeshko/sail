@@ -8,9 +8,11 @@ import { REGIONS, type Region } from './host';
 import { html } from './html';
 import { railRepos, statusOf } from './index-model';
 import { renderInspector } from './inspector-view';
-import { renderQueue } from './queue-view';
-import { renderRail } from './rail-view';
+import { navCounts } from './list-model';
+import { renderList } from './list-view';
+import { queueId, renderQueue } from './queue-view';
 import { renderRun, renderStatus } from './run-view';
+import { renderSidebar } from './sidebar-view';
 import { listed, opened, openQueue, type Store, selected, summaryOf } from './store';
 import { renderTimeline } from './timeline-view';
 
@@ -21,7 +23,12 @@ export const TICK_MS = 1000;
 export function regions(store: Store): Record<Region, () => string> {
   const { ui, host } = store;
   return {
-    rail: () => {
+    sidebar: () => {
+      if (store.index === undefined) return '';
+      const repos = railRepos(store.index, host.now());
+      return renderSidebar(repos, navCounts(repos, ui.repoFilter), listed(store).length, ui).value;
+    },
+    list: () => {
       if (store.index === undefined) return html`<div class="qempty">connecting…</div>`.value;
       // A raise typed and a stage chosen in the open run's menu survive the draw, but not a switch of run.
       if (store.fieldsOwn) {
@@ -31,7 +38,7 @@ export function regions(store: Store): Record<Region, () => string> {
         if (now !== undefined) ui.stopNow = now !== '';
       }
       store.fieldsOwn = true;
-      return renderRail(railRepos(store.index, host.now()), ui, host.now(), store.offers).value;
+      return renderList(ui.view, railRepos(store.index, host.now()), ui, host.now(), store.offers).value;
     },
     attention: () => {
       const items = listed(store);
@@ -53,7 +60,10 @@ export function regions(store: Store): Record<Region, () => string> {
         if (armedItem === undefined || armedItem.state === 'dispatched') delete ui.armedDrop;
         const menuItem = panel.items.find((item) => item.dedupKey === ui.itemMenu);
         if (menuItem === undefined || menuItem.state === 'dispatched') delete ui.itemMenu;
-        return renderQueue(panel, store.queues.get(ui.queue ?? '')?.stream, ui, host.now()).value;
+        const toggle = railRepos(store.index ?? [], host.now())
+          .find((repo) => repo.name === panel.repo)
+          ?.workflows.find((workflow) => queueId(panel.repo, workflow.name) === ui.queue)?.toggle;
+        return renderQueue(panel, store.queues.get(ui.queue ?? '')?.stream, ui, host.now(), toggle).value;
       }
       if (store.run === undefined) return html`<div class="qempty">no run selected</div>`.value;
       const error = store.run.error === undefined ? '' : html`<div class="code bad">${store.run.error}</div>`;
@@ -77,6 +87,12 @@ export function flush(store: Store): void {
   store.flushTimer = undefined;
   const dirty = REGIONS.filter((region) => store.dirty.has(region));
   store.dirty.clear();
+  // The run or queue beside the list, or the list alone: the host lays the centre out by it.
+  const detail = store.run !== undefined || openQueue(store) !== undefined;
+  if (detail !== store.detail) {
+    store.detail = detail;
+    host.setDetail(detail);
+  }
   for (const region of dirty) {
     // A region that can't be drawn says so, and the others are still drawn (review R2-1).
     let markup: string;
@@ -102,7 +118,7 @@ export function startDraw(store: Store): void {
   store.flush = () => flush(store);
 }
 
-/** Whether a running time is on screen: the open run's, one of its calls', or a run's in the rail. */
+/** Whether a running time is on screen: the open run's, one of its calls', or a run's in the list. */
 export function anyRunning(store: Store): boolean {
   return (
     (store.run !== undefined &&
@@ -118,7 +134,7 @@ export function tick(store: Store): void {
   store.tickTimer = store.host.later(() => {
     store.tickTimer = undefined;
     if (!anyRunning(store)) return;
-    store.mark('rail', 'main', 'status');
+    store.mark('list', 'main', 'status');
     if (selected(store)?.state === 'running') store.mark('inspector');
     tick(store);
   }, TICK_MS);

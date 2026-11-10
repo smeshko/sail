@@ -6,9 +6,10 @@ import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { runActions } from '../../../src/dashboard/actions';
 import { callFile, findRepo, findRunDir, index } from '../../../src/dashboard/files';
-import { boot, CLEARED_KEY, FILTER_KEY, type Page, RAIL_KEY, THEME_KEY } from '../../../src/dashboard/page/app';
+import { boot, CLEARED_KEY, FILTER_KEY, LIST_KEY, type Page, THEME_KEY } from '../../../src/dashboard/page/app';
 import { attention, identity } from '../../../src/dashboard/page/attention';
 import { browserHost, type ConnectHandlers, type PageHost, type Region } from '../../../src/dashboard/page/host';
+import { newestFirst, railRepos } from '../../../src/dashboard/page/index-model';
 import { readEvents } from '../../../src/events/consumers/ndjson';
 import {
   FAKE_2_ID,
@@ -164,6 +165,11 @@ class FakeHost implements PageHost {
   setTheme(theme: string) {
     this.theme = theme;
   }
+  /** What the host was told about a run or queue beside the list, in order. */
+  details: boolean[] = [];
+  setDetail(open: boolean) {
+    this.details.push(open);
+  }
   setInspector(open: boolean) {
     this.inspector = open;
   }
@@ -246,25 +252,47 @@ const replay = (socket: FakeSocket | undefined, dir: string, end = true) => {
 const cards = (region: string | undefined) => [...(region ?? '').matchAll(/data-key="([^"]+)"/g)].map(([, key]) => key);
 const runQuery = (repo: string, runId: string) => `run=${encodeURIComponent(`${repo}/${runId}`)}`;
 const GOLDEN = () => m.alpha.runDir;
+/** The first index, then a click on the row of the newest running run, else the newest: the shell opens no run by itself. */
+const firstIndex = (runId?: string) => {
+  host.push(host.open('index')[0], indexMessage());
+  const all = newestFirst(
+    railRepos(index(m.registryDir), host.clock).flatMap((repo) =>
+      repo.runs.map((run) => ({ ...run, repo: repo.name })),
+    ),
+  );
+  const first = all.find((run) => run.runId === runId) ?? all.find((run) => run.status === 'running') ?? all[0];
+  if (first !== undefined) host.click({ action: 'select-run', repo: first.repo, run: first.runId });
+};
+const plainIndex = () => host.push(host.open('index')[0], indexMessage());
 
-test('boot renders the rail with alpha and beta from the first index, opens the newest run, and renders its eight cards, each region once a flush', () => {
+test('boot draws the sidebar and the list from the first index and opens no run; a click on a row opens it beside the list with its eight cards, each region once a flush', () => {
   page = boot(host);
   expect(host.sockets.map((socket) => socket.query)).toEqual(['index=1']);
   host.advance(100);
-  expect(host.renders.sort()).toEqual(['attention', 'drawer', 'inspector', 'main', 'rail', 'status']);
-  host.push(host.open('index')[0], indexMessage());
+  expect(host.renders.sort()).toEqual(['attention', 'drawer', 'inspector', 'list', 'main', 'sidebar', 'status']);
+  plainIndex();
+  expect(host.open('run=')).toEqual([]);
+  host.renders = [];
+  host.advance(100);
+  expect(host.renders.sort()).toEqual(['attention', 'list', 'sidebar']);
+  expect(host.regions.sidebar).toContain('<span class="nm">alpha</span>');
+  expect(host.regions.sidebar).toContain('<span class="nm">beta</span>');
+  expect(host.regions.list).toContain('<span class="lh-t">Active</span><span class="c">1</span>');
+  expect(host.regions.main).toContain('no run selected');
+  expect(host.details).toEqual([false]);
+  host.click({ action: 'select-view', view: 'history' });
+  host.advance(100);
+  expect(host.regions.list).toContain(`data-action="select-run" data-repo="alpha" data-run="${GOLDEN_RUN_ID}"`);
+  host.click({ action: 'select-run', repo: 'alpha', run: GOLDEN_RUN_ID });
   expect(host.open('run=').map((socket) => socket.query)).toEqual([runQuery('alpha', GOLDEN_RUN_ID)]);
   replay(host.open('run=')[0], GOLDEN());
   host.renders = [];
   host.advance(99);
   expect(host.renders).toEqual([]);
   host.advance(1);
-  expect(host.renders.sort()).toEqual(['attention', 'main', 'rail', 'status']);
-  expect(host.regions.rail).toContain('<span class="nm">alpha</span>');
-  expect(host.regions.rail).toContain('<span class="nm">beta</span>');
-  expect(host.regions.rail).toContain(
-    `<div class="run hist-run sel"><button class="r-open" title="$1.35" data-action="select-run" data-repo="alpha" data-run="${GOLDEN_RUN_ID}">`,
-  );
+  expect(host.renders.sort()).toEqual(['list', 'main', 'status']);
+  expect(host.regions.list).toContain(`class="run lrow sel" data-row="run:alpha/${GOLDEN_RUN_ID}"`);
+  expect(host.details).toEqual([false, true]);
   expect(cards(host.regions.main)).toEqual([
     'intake#1',
     'spec#1',
@@ -282,7 +310,7 @@ test('boot renders the rail with alpha and beta from the first index, opens the 
 
 test("opening FAKE-2's denial closes the golden run's socket, opens FAKE-2's, reads implement#1's result, and renders its permissions tab", async () => {
   page = boot(host);
-  host.push(host.open('index')[0], indexMessage());
+  firstIndex();
   const golden = host.open('run=')[0];
   replay(golden, GOLDEN());
   host.click({ action: 'open', repo: 'alpha', run: FAKE_2_ID, key: 'implement#1', tab: 'permissions' });
@@ -307,7 +335,7 @@ test("opening FAKE-2's denial closes the golden run's socket, opens FAKE-2's, re
 test("a URL naming FAKE-2's implement#1 and its permissions tab opens them on the first index, not the newest run", async () => {
   host.startAt = { repo: 'alpha', run: FAKE_2_ID, key: 'implement#1', tab: 'permissions' };
   page = boot(host);
-  host.push(host.open('index')[0], indexMessage());
+  plainIndex();
   expect(host.open('run=').map((socket) => socket.query)).toEqual([runQuery('alpha', FAKE_2_ID)]);
   expect(host.reads.map((read) => read.path)).toEqual([
     `/api/repos/alpha/runs/${FAKE_2_ID}/calls/implement%231/result`,
@@ -326,24 +354,24 @@ test("a URL naming FAKE-2's implement#1 and its permissions tab opens them on th
 test('a URL naming a run no repository lists opens the newest run instead', () => {
   host.startAt = { repo: 'alpha', run: 'FAKE-9-01M5PY0000000000000000000' };
   page = boot(host);
-  host.push(host.open('index')[0], indexMessage());
+  firstIndex();
   expect(host.open('run=').map((socket) => socket.query)).toEqual([runQuery('alpha', GOLDEN_RUN_ID)]);
 });
 
 test('the URL is read on the first index only: a run picked since stays open through the next index', () => {
   host.startAt = { repo: 'alpha', run: FAKE_2_ID };
   page = boot(host);
-  host.push(host.open('index')[0], indexMessage());
+  plainIndex();
   expect(host.open('run=').map((socket) => socket.query)).toEqual([runQuery('alpha', FAKE_2_ID)]);
   host.click({ action: 'select-run', repo: 'alpha', run: GOLDEN_RUN_ID });
-  host.push(host.open('index')[0], indexMessage());
+  firstIndex();
   expect(host.open('run=').map((socket) => socket.query)).toEqual([runQuery('alpha', GOLDEN_RUN_ID)]);
 });
 
 test("live: events pushed one by one show tests#1 running, then settled, and a running call's log is read again at most once a second", async () => {
   const { dir, rest } = runningCopy(m, 1);
   page = boot(host);
-  host.push(host.open('index')[0], indexMessage());
+  firstIndex();
   const socket = host.open('run=')[0];
   expect(socket?.query).toBe(runQuery('alpha', RUNNING_ID));
   replay(socket, dir, false);
@@ -376,7 +404,7 @@ test("live: events pushed one by one show tests#1 running, then settled, and a r
 test('live: opening a running card shows its timeline in the centre, which grows with each event, keeps an opened tool call open, follows its tail until follow is off, and closes back to the cards with the selection kept', () => {
   const { dir, rest } = runningCopy(m, 1);
   page = boot(host);
-  host.push(host.open('index')[0], indexMessage());
+  firstIndex();
   const socket = host.open('run=')[0];
   replay(socket, dir, false);
   const lines = rest.map((line) => JSON.parse(line));
@@ -446,7 +474,7 @@ test('live: opening a running card shows its timeline in the centre, which grows
 test('a queue opened over a followed running timeline is not scrolled to its end', () => {
   const { dir, rest } = runningCopy(m, 1);
   page = boot(host);
-  host.push(host.open('index')[0], indexMessage());
+  firstIndex();
   const socket = host.open('run=')[0];
   replay(socket, dir, false);
   const lines = rest.map((line) => JSON.parse(line));
@@ -468,7 +496,7 @@ test('a queue opened over a followed running timeline is not scrolled to its end
 
 test('a run socket closed without end reconnects after 2 s into a fresh model, one closed after end stays closed, and the index socket reconnects', () => {
   page = boot(host);
-  host.push(host.open('index')[0], indexMessage());
+  firstIndex();
   const first = host.open('run=')[0];
   replay(first, GOLDEN(), false);
   host.drop(first);
@@ -506,7 +534,7 @@ test('a run socket closed without end reconnects after 2 s into a fresh model, o
 test('a run stream that sends an error and closes is not reopened, keeps its cards and its error, and clicking the run opens it again from empty (ADW-209)', () => {
   const runSockets = () => host.sockets.filter((socket) => socket.query.startsWith('run='));
   page = boot(host);
-  host.push(host.open('index')[0], indexMessage());
+  firstIndex();
   const socket = host.open('run=')[0];
   const before = [...readEvents(GOLDEN())].slice(0, 12);
   for (const event of before) host.push(socket, { kind: 'event', event });
@@ -533,7 +561,7 @@ test('a run stream that sends an error and closes is not reopened, keeps its car
 
 test("a run stream's error is shown in the main region, and a message or a result that is no JSON changes nothing", async () => {
   page = boot(host);
-  host.push(host.open('index')[0], indexMessage());
+  firstIndex();
   const socket = host.open('run=')[0];
   expect(socket?.query).toBe(runQuery('alpha', GOLDEN_RUN_ID));
   socket?.handlers.message('not json');
@@ -555,7 +583,7 @@ test("a run stream's error is shown in the main region, and a message or a resul
 
 test('a result that arrives after the selection changed is not rendered', async () => {
   page = boot(host);
-  host.push(host.open('index')[0], indexMessage());
+  firstIndex();
   replay(host.open('run=')[0], GOLDEN());
   host.hold = true;
   host.click({ action: 'select-card', key: 'implement#1' });
@@ -581,20 +609,24 @@ test('a result that arrives after the selection changed is not rendered', async 
 test("with no queue the rail has no queue row and no queue socket opens; with beta's, its row opens queue=beta/ticket-to-pr in the centre with its recent events, until the queue leaves the index", () => {
   rmSync(join(m.beta.clone, '.sail-runs', 'queue'), { recursive: true });
   page = boot(host);
-  host.push(host.open('index')[0], indexMessage());
+  firstIndex();
+  host.click({ action: 'select-view', view: 'queues' });
   host.advance(100);
-  expect([host.regions.rail?.includes('select-queue'), host.open('queue=')]).toEqual([false, []]);
+  expect([host.regions.list?.includes('select-queue'), host.open('queue=')]).toEqual([false, []]);
   page.stop();
   m.remove();
   m = seedFixtures();
   host = new FakeHost(m);
   page = boot(host);
-  host.push(host.open('index')[0], indexMessage());
+  firstIndex();
   const sockets = host.open('queue=');
   expect(sockets.map((socket) => socket.query)).toEqual([`queue=${encodeURIComponent(`beta/${QUEUE_WORKFLOW}`)}`]);
   replay(host.open('run=')[0], GOLDEN());
+  host.click({ action: 'select-view', view: 'queues' });
   host.advance(100);
-  expect(host.regions.rail).toContain('<button class="q-row" title="polled 7d ago" data-action="select-queue"');
+  expect(host.regions.list).toContain(
+    `<button class="q-row" data-row="queue:beta/${QUEUE_WORKFLOW}" title="polled 7d ago" data-action="select-queue"`,
+  );
   host.renders = [];
   for (const event of readEvents(queueDirOf(m))) host.push(sockets[0], { kind: 'queue-event', event });
   host.advance(100);
@@ -628,11 +660,10 @@ test("with no queue the rail has no queue row and no queue socket opens; with be
   host.click({ action: 'toggle-queue-section', section: `beta/${QUEUE_WORKFLOW}:done` });
   host.advance(100);
   expect(host.regions.main).toContain('<span class="c-ref">ticket:FAKE-4</span>');
-  expect(host.regions.rail).toContain('<button class="q-row sel" title="polled 7d ago" data-action="select-queue"');
-  expect(host.regions.rail).toContain(
-    '<button class="qbadge warn sel" title="polled 7d ago" data-action="select-queue"',
+  expect(host.regions.list).toContain(
+    `<button class="q-row sel" data-row="queue:beta/${QUEUE_WORKFLOW}" title="polled 7d ago" data-action="select-queue"`,
   );
-  expect(host.regions.rail).not.toMatch(/<div class="run[^"]* sel">/);
+  expect(host.regions.list).not.toMatch(/<div class="run[^"]* sel">/);
   host.renders = [];
   host.push(sockets[0], {
     kind: 'queue-event',
@@ -644,7 +675,7 @@ test("with no queue the rail has no queue row and no queue socket opens; with be
     true,
   ]);
   rmSync(join(m.beta.clone, '.sail-runs', 'queue'), { recursive: true });
-  host.push(host.open('index')[0], indexMessage());
+  firstIndex();
   expect([sockets[0]?.closed, host.open('queue=')]).toEqual([true, []]);
   host.advance(100);
   expect([page.ui.queue, cards(host.regions.main)]).toEqual([undefined, expect.arrayContaining(['publish#1'])]);
@@ -654,7 +685,7 @@ test('a queue stream that sends an error and closes is not reopened and shows it
   const queueSockets = () => host.sockets.filter((socket) => socket.query.startsWith('queue='));
   const queue = `beta/${QUEUE_WORKFLOW}`;
   page = boot(host);
-  host.push(host.open('index')[0], indexMessage());
+  firstIndex();
   const socket = host.open('queue=')[0];
   host.click({ action: 'select-queue', queue });
   expect(queueSockets()).toHaveLength(1);
@@ -679,7 +710,7 @@ test('a queue stream that sends an error and closes is not reopened and shows it
 test('a failed queue reopened before its old socket closes keeps one open socket when the old one closes (review R1) (ADW-209)', () => {
   const queue = `beta/${QUEUE_WORKFLOW}`;
   page = boot(host);
-  host.push(host.open('index')[0], indexMessage());
+  firstIndex();
   const old = host.open('queue=')[0];
   host.click({ action: 'select-queue', queue });
   host.push(old, { kind: 'error', message: "events.ndjson:2 can't be read" });
@@ -692,7 +723,7 @@ test('a failed queue reopened before its old socket closes keeps one open socket
 
 test('keys move the cursor, Enter opens a timeline, ] and [ step it, Escape goes back to the cards then deselects, i toggles the inspector, and a key typed in an input does nothing', () => {
   page = boot(host);
-  host.push(host.open('index')[0], indexMessage());
+  firstIndex();
   replay(host.open('run=')[0], GOLDEN());
   const cursor = () =>
     /<div class="card cursor[^"]*" role="button" tabindex="0" data-action="select-card" data-key="([^"]+)"/.exec(
@@ -736,12 +767,10 @@ test('the theme cycles and is saved, a section toggles, copy copies, follow togg
   expect([host.theme, host.storage.get(THEME_KEY)]).toEqual(['system', 'system']);
   host.click({ action: 'toggle-theme' });
   expect(host.theme).toBe('dark');
-  host.push(host.open('index')[0], indexMessage());
+  firstIndex();
   replay(host.open('run=')[0], GOLDEN(), false);
-  host.click({ action: 'toggle-section', section: 'beta:completed' });
-  expect(page.ui.open).toEqual(['beta:completed']);
-  host.click({ action: 'toggle-section', section: 'beta:completed' });
-  expect(page.ui.open).toEqual([]);
+  host.click({ action: 'toggle-list-group', group: 'active:running' });
+  expect(page.ui.listFolded).toEqual(['active:running']);
   host.click({ action: 'copy', text: `sail show ${GOLDEN_RUN_ID}` });
   expect(host.copied).toEqual([`sail show ${GOLDEN_RUN_ID}`]);
   host.click({ action: 'select-card', key: 'tests#1' });
@@ -766,7 +795,7 @@ test('the theme cycles and is saved, a section toggles, copy copies, follow togg
 
 test("a multi-step call's log reads its steps by step key", async () => {
   page = boot(host);
-  host.push(host.open('index')[0], indexMessage());
+  firstIndex();
   replay(host.open('run=')[0], GOLDEN(), false);
   const base = `/api/repos/alpha/runs/${GOLDEN_RUN_ID}/calls`;
   const logReads = () => host.reads.map((read) => read.path).filter((path) => path.includes('/log?'));
@@ -794,7 +823,7 @@ test("a multi-step call's log reads its steps by step key", async () => {
 test("a running multi-step call's next step drops the last step's log and reads its own at once", async () => {
   const { dir, rest } = runningCopy(m, 1);
   page = boot(host);
-  host.push(host.open('index')[0], indexMessage());
+  firstIndex();
   const socket = host.open('run=')[0];
   replay(socket, dir, false);
   const lines = rest.map((line) => JSON.parse(line));
@@ -818,7 +847,7 @@ test('the timeline filter loads what was saved, toggles a kind in the order of t
   host.storage.set(FILTER_KEY, 'tools,bogus,thinking');
   page = boot(host);
   expect(page.ui.hidden).toEqual(['thinking', 'tools']);
-  host.push(host.open('index')[0], indexMessage());
+  firstIndex();
   replay(host.open('run=')[0], GOLDEN(), false);
   host.click({ action: 'select-card', key: 'publish#1' });
   host.click({ action: 'toggle-filter', filter: 'scripts' });
@@ -843,7 +872,7 @@ test("a file name opens the drawer with the file's markdown as HTML, another fil
   host.bodies.set(`${file('01-spec/call-1/out/spec.md')}&as=html`, { status: 200, body: '<h1>Spec</h1>' });
   host.bodies.set(file('00-intake/call-1/out/ticket.json'), { status: 200, body: '{}' });
   page = boot(host);
-  host.push(host.open('index')[0], indexMessage());
+  firstIndex();
   replay(host.open('run=')[0], GOLDEN(), false);
   host.click({ action: 'select-card', key: 'spec#1' });
   host.click({ action: 'open-file', name: 'spec.md', path: '01-spec/call-1/out/spec.md' });
@@ -881,7 +910,7 @@ test("a file name opens the drawer with the file's markdown as HTML, another fil
 
 test("opening a multi-step call's script command reads its step's stdout and stderr by step key", async () => {
   page = boot(host);
-  host.push(host.open('index')[0], indexMessage());
+  firstIndex();
   const socket = host.open('run=')[0];
   replay(socket, GOLDEN(), false);
   host.click({ action: 'select-card', key: 'publish#1' });
@@ -913,7 +942,7 @@ test("opening a multi-step call's script command reads its step's stdout and std
 
 test("opening a second script step keeps the first step's output while reading both keys", async () => {
   page = boot(host);
-  host.push(host.open('index')[0], indexMessage());
+  firstIndex();
   const socket = host.open('run=')[0];
   replay(socket, GOLDEN(), false);
   host.push(socket, {
@@ -957,7 +986,7 @@ test("opening a second script step keeps the first step's output while reading b
 
 test("opening a script command reads the call's stdout and stderr once, shows them, and a running call's are read again at most once a second", async () => {
   page = boot(host);
-  host.push(host.open('index')[0], indexMessage());
+  firstIndex();
   const socket = host.open('run=')[0];
   replay(socket, GOLDEN(), false);
   host.click({ action: 'select-card', key: 'tests#1' });
@@ -996,7 +1025,7 @@ test("with no events, a running call's time is drawn again each second, and with
   const start = lines.findIndex((event) => event.type === 'stage:start' && event.key === 'tests#1');
   host.clock = Date.parse(lines[start].ts) + 1000;
   page = boot(host);
-  host.push(host.open('index')[0], indexMessage());
+  firstIndex();
   const socket = host.open('run=')[0];
   replay(socket, dir, false);
   for (const event of lines.slice(0, start + 1)) host.push(socket, { kind: 'event', event });
@@ -1006,7 +1035,7 @@ test("with no events, a running call's time is drawn again each second, and with
   host.renders = [];
   host.advance(1000);
   expect(host.regions.main).toContain('<span class="d-agent">2.1s');
-  expect(host.renders.sort()).toEqual(['main', 'rail']);
+  expect(host.renders.sort()).toEqual(['list', 'main']);
   host.advance(1000);
   expect(host.regions.main).toContain('<span class="d-agent">3.1s');
   page.stop();
@@ -1016,7 +1045,7 @@ test("with no events, a running call's time is drawn again each second, and with
   host = new FakeHost(m);
   rmSync(dir, { recursive: true });
   page = boot(host);
-  host.push(host.open('index')[0], indexMessage());
+  firstIndex();
   replay(host.open('run=')[0], GOLDEN());
   host.advance(100);
   host.renders = [];
@@ -1031,7 +1060,7 @@ test('a tick that changes no markup writes no region and scrolls nothing, and on
   // Two hours and ten seconds into the run: its time reads in minutes, so only a minute's turn changes a draw.
   host.clock = Date.parse('2026-09-25T09:00:00.600Z') + 2 * 3_600_000 + 10_000;
   page = boot(host);
-  host.push(host.open('index')[0], indexMessage());
+  firstIndex();
   const socket = host.open('run=')[0];
   replay(socket, dir, false);
   for (const event of lines.slice(0, start + 1)) host.push(socket, { kind: 'event', event });
@@ -1047,13 +1076,13 @@ test('a tick that changes no markup writes no region and scrolls nothing, and on
   expect([host.renders, host.scrolls, page.ui.raise]).toEqual([[], [], '7']);
   host.advance(60_000);
   expect(host.renders).toContain('main');
-  expect(host.renders).toContain('rail');
+  expect(host.renders).toContain('list');
   expect([...new Set(host.scrolls)]).toEqual(['main']);
 });
 
 test('an add that took writes main though its markup is what was last drawn (ADW-504)', async () => {
   page = boot(host);
-  host.push(host.open('index')[0], indexMessage());
+  firstIndex();
   const [socket] = host.open('queue=');
   host.click({ action: 'select-queue', queue: `beta/${QUEUE_WORKFLOW}` });
   for (const event of readEvents(queueDirOf(m))) host.push(socket, { kind: 'queue-event', event });
@@ -1076,24 +1105,24 @@ test('a switch of run draws the rail fresh, and a tick does not (ADW-504)', () =
   const start = rest.map((line) => JSON.parse(line)).find((event) => event.type === 'stage:start');
   host.clock = Date.parse(start.ts) + 1000;
   page = boot(host);
-  host.push(host.open('index')[0], indexMessage());
+  firstIndex();
   replay(host.open('run=')[0], dir, false);
   host.advance(100);
-  expect(host.freshes).toEqual(['rail']);
+  expect(host.freshes).toEqual(['list']);
   host.renders = [];
   host.freshes = [];
   host.advance(2500);
-  expect(host.renders).toContain('rail');
+  expect(host.renders).toContain('list');
   expect(host.freshes).toEqual([]);
   host.click({ action: 'select-run', repo: 'alpha', run: GOLDEN_RUN_ID });
   host.advance(100);
-  expect(host.freshes).toEqual(['rail']);
+  expect(host.freshes).toEqual(['list']);
 });
 
 test('the open run, once ended, opens its stream again when the index says it runs again, folds past its old run:end as live, and leaves one socket (review R1-2)', () => {
   const beta = join(m.beta.clone, '.sail-runs', FAKE_3_ID);
   page = boot(host);
-  host.push(host.open('index')[0], indexMessage());
+  firstIndex();
   host.click({ action: 'select-run', repo: 'beta', run: FAKE_3_ID });
   const first = host.open('run=')[0];
   expect(first?.query).toBe(runQuery('beta', FAKE_3_ID));
@@ -1123,7 +1152,7 @@ test('the open run, once ended, opens its stream again when the index says it ru
 test("the selected call's result and log are read again when it ends, and a read answered late never overwrites a newer one (review R1-3)", async () => {
   const { dir, rest } = runningCopy(m, 1);
   page = boot(host);
-  host.push(host.open('index')[0], indexMessage());
+  firstIndex();
   const socket = host.open('run=')[0];
   replay(socket, dir, false);
   const lines = rest.map((line) => JSON.parse(line));
@@ -1162,7 +1191,7 @@ test("the selected call's result and log are read again when it ends, and a read
 
 test("a region whose draw throws shows that it couldn't be drawn, and every other region is still drawn (review R2-1)", () => {
   page = boot(host);
-  host.push(host.open('index')[0], indexMessage());
+  firstIndex();
   replay(host.open('run=')[0], GOLDEN());
   host.advance(100);
   // A summary of no shape, as the server never sends one: the rail and needs attention read it, the open run doesn't.
@@ -1172,15 +1201,15 @@ test("a region whose draw throws shows that it couldn't be drawn, and every othe
   host.renders = [];
   host.push(host.open('index')[0], broken);
   expect(() => host.advance(100)).not.toThrow();
-  expect(host.renders.sort()).toEqual(['attention', 'rail']);
-  expect(host.regions.rail).toContain('this part of the page could not be drawn');
+  expect(host.renders.sort()).toEqual(['attention', 'list', 'sidebar']);
+  expect(host.regions.list).toContain('this part of the page could not be drawn');
   expect(cards(host.regions.main)).toHaveLength(8);
 });
 
 test("a corrective try's end reads the call's result.json again though the first try's was loaded (review R2-2)", async () => {
   const { dir, rest } = runningCopy(m, 1);
   page = boot(host);
-  host.push(host.open('index')[0], indexMessage());
+  firstIndex();
   const socket = host.open('run=')[0];
   replay(socket, dir, false);
   const lines = rest.map((line) => JSON.parse(line));
@@ -1206,7 +1235,7 @@ test("a corrective try's end reads the call's result.json again though the first
 test('a resumed open run is followed again when the index saying it runs arrives before its old stream ends (review R2-3)', () => {
   const beta = join(m.beta.clone, '.sail-runs', FAKE_3_ID);
   page = boot(host);
-  host.push(host.open('index')[0], indexMessage());
+  firstIndex();
   host.click({ action: 'select-run', repo: 'beta', run: FAKE_3_ID });
   const first = host.open('run=')[0];
   replay(first, beta, false);
@@ -1227,6 +1256,7 @@ test('a run whose stream ended while an older index still said running is not op
   page = boot(host);
   const running = indexMessage();
   host.push(host.open('index')[0], running);
+  host.click({ action: 'select-run', repo: 'alpha', run: RUNNING_ID });
   const first = host.open('run=')[0];
   expect(first?.query).toBe(runQuery('alpha', RUNNING_ID));
   replay(first, dir, false);
@@ -1261,7 +1291,7 @@ test('a run whose stream ended while an older index still said running is not op
 test('a suspended open run that is resumed and ends between two polls, as completed, is followed again (review R3-1)', () => {
   const beta = join(m.beta.clone, '.sail-runs', FAKE_3_ID);
   page = boot(host);
-  host.push(host.open('index')[0], indexMessage());
+  firstIndex();
   host.click({ action: 'select-run', repo: 'beta', run: FAKE_3_ID });
   const first = host.open('run=')[0];
   replay(first, beta);
@@ -1275,9 +1305,90 @@ test('a suspended open run that is resumed and ends between two polls, as comple
   expect(host.sockets.filter((socket) => socket.query.startsWith('run=beta'))).toHaveLength(2);
 });
 
+test('a click on a list row opens the run beside the list, the host is told, and Escape with no card selected closes it and tells the host again (ADW-522)', () => {
+  page = boot(host);
+  plainIndex();
+  host.advance(100);
+  host.click({ action: 'select-run', repo: 'alpha', run: FAKE_2_ID });
+  replay(host.open('run=')[0], fake2Dir(m));
+  host.advance(100);
+  expect(host.details).toEqual([false, true]);
+  expect(cards(host.regions.main)).toHaveLength(3);
+  host.press('Escape');
+  host.advance(100);
+  expect(host.details).toEqual([false, true, false]);
+  expect([page.ui.runId, page.ui.repo]).toEqual([undefined, undefined]);
+  expect(host.open('run=')).toEqual([]);
+  expect(host.regions.main).toContain('no run selected');
+});
+
+test('Escape steps back through a selected card before it closes the run (ADW-522)', () => {
+  page = boot(host);
+  plainIndex();
+  host.click({ action: 'select-run', repo: 'alpha', run: FAKE_2_ID });
+  replay(host.open('run=')[0], fake2Dir(m));
+  host.click({ action: 'select-card', key: 'implement#1' });
+  host.press('Escape');
+  expect([page.ui.timeline, page.ui.key, page.ui.runId]).toEqual([false, 'implement#1', FAKE_2_ID]);
+  host.press('Escape');
+  expect([page.ui.key, page.ui.runId]).toEqual([undefined, FAKE_2_ID]);
+  host.advance(100);
+  expect(host.details.at(-1)).toBe(true);
+  host.press('Escape');
+  host.advance(100);
+  expect([page.ui.runId, host.details.at(-1)]).toEqual([undefined, false]);
+});
+
+test('Escape closes an open queue and gives the list the centre back (ADW-522)', () => {
+  page = boot(host);
+  plainIndex();
+  host.click({ action: 'select-view', view: 'queues' });
+  host.click({ action: 'select-queue', queue: `beta/${QUEUE_WORKFLOW}` });
+  host.advance(100);
+  expect(host.details.at(-1)).toBe(true);
+  host.press('Escape');
+  host.advance(100);
+  expect([page.ui.queue, host.details.at(-1)]).toEqual([undefined, false]);
+});
+
+test('select-view redraws the list with History and Queues rows, and filter-repo narrows the list and the sidebar counts to a repository until a second click (ADW-522)', () => {
+  page = boot(host);
+  plainIndex();
+  host.advance(100);
+  const counts = () =>
+    [
+      ...(host.regions.sidebar ?? '').matchAll(
+        /data-view="(\w+)"[^>]*><span class="nm">\w+<\/span><span class="c">(\d+)<\/span>/g,
+      ),
+    ].map(([, view, n]) => `${view} ${n}`);
+  expect(counts()).toEqual(['active 1', 'queues 1', 'history 3']);
+  host.click({ action: 'select-view', view: 'history' });
+  host.advance(100);
+  expect(host.regions.list).toContain('<span class="lh-t">History</span><span class="c">3</span>');
+  expect(host.regions.list).toContain(`data-run="${FAKE_2_ID}"`);
+  host.click({ action: 'select-view', view: 'queues' });
+  host.advance(100);
+  expect(host.regions.list).toContain(`data-queue="beta/${QUEUE_WORKFLOW}"`);
+  host.click({ action: 'filter-repo', repo: 'alpha' });
+  host.advance(100);
+  expect(counts()).toEqual(['active 0', 'queues 0', 'history 2']);
+  expect(host.regions.sidebar).toContain('data-repo="alpha" aria-pressed="true"');
+  expect(host.regions.list).not.toContain('data-queue=');
+  host.click({ action: 'select-view', view: 'history' });
+  host.advance(100);
+  expect(host.regions.list).toContain('<span class="lh-t">History</span><span class="c">2</span>');
+  host.click({ action: 'filter-repo', repo: 'beta' });
+  host.advance(100);
+  expect(host.regions.list).not.toContain(`data-run="${FAKE_2_ID}"`);
+  host.click({ action: 'filter-repo', repo: 'beta' });
+  host.advance(100);
+  expect(host.regions.sidebar).not.toContain('aria-pressed="true"');
+  expect(host.regions.list).toContain(`data-run="${FAKE_2_ID}"`);
+});
+
 test('the needs attention button opens its pane, a and Escape toggle and close it, and opening an item closes it and leaves an open queue', () => {
   page = boot(host);
-  host.push(host.open('index')[0], indexMessage());
+  firstIndex();
   replay(host.open('run=')[0], GOLDEN());
   host.advance(100);
   host.click({ action: 'toggle-attention' });
@@ -1305,54 +1416,52 @@ test('the needs attention button opens its pane, a and Escape toggle and close i
   expect(host.regions.attention).not.toContain('att-pane');
 });
 
-test('a repository or workflow opens and folds again from its header, remembered across a boot, and opening the open run from the rail gives the centre back from a queue', () => {
+test('a group folds and opens again from its header, remembered across a boot, and opening a run from the list gives the centre back from a queue', () => {
   page = boot(host);
-  host.push(host.open('index')[0], indexMessage());
-  replay(host.open('run=')[0], GOLDEN());
+  plainIndex();
+  host.click({ action: 'select-view', view: 'queues' });
   host.advance(100);
-  expect(page.ui.expanded).toEqual([]);
-  expect(host.regions.rail).not.toContain('data-group="beta/');
-  host.click({ action: 'toggle-group', group: 'beta' });
-  host.click({ action: 'toggle-group', group: `beta/${QUEUE_WORKFLOW}` });
+  expect(page.ui.listFolded).toEqual([]);
+  expect(host.regions.list).toContain(`data-queue="beta/${QUEUE_WORKFLOW}"`);
+  host.click({ action: 'toggle-list-group', group: 'queues:beta' });
   host.advance(100);
-  expect(page.ui.expanded).toEqual(['beta', `beta/${QUEUE_WORKFLOW}`]);
-  expect(host.storage.get(RAIL_KEY)).toBe(JSON.stringify(['beta', `beta/${QUEUE_WORKFLOW}`]));
-  expect(host.regions.rail).toContain(
-    '<button class="lgrp-h open" title="https://example.com/beta.git" data-action="toggle-group" data-group="beta" aria-expanded="true">',
-  );
-  expect(host.regions.rail).toContain(
-    `<button class="wf-t open" data-action="toggle-group" data-group="beta/${QUEUE_WORKFLOW}" aria-expanded="true">`,
-  );
-  host.click({ action: 'toggle-group', group: 'beta' });
+  expect(page.ui.listFolded).toEqual(['queues:beta']);
+  expect(host.storage.get(LIST_KEY)).toBe(JSON.stringify(['queues:beta']));
+  expect(host.regions.list).toContain('data-action="toggle-list-group" data-group="queues:beta" aria-expanded="false"');
+  expect(host.regions.list).not.toContain(`data-queue="beta/${QUEUE_WORKFLOW}"`);
+  host.click({ action: 'toggle-list-group', group: 'queues:beta' });
   host.advance(100);
-  expect(page.ui.expanded).toEqual([`beta/${QUEUE_WORKFLOW}`]);
-  expect(host.storage.get(RAIL_KEY)).toBe(JSON.stringify([`beta/${QUEUE_WORKFLOW}`]));
+  expect(page.ui.listFolded).toEqual([]);
+  expect(host.storage.get(LIST_KEY)).toBe('[]');
+  expect(host.regions.list).toContain(`data-queue="beta/${QUEUE_WORKFLOW}"`);
   host.click({ action: 'select-queue', queue: `beta/${QUEUE_WORKFLOW}` });
   host.advance(100);
   expect(cards(host.regions.main)).toEqual([]);
+  expect(host.details.at(-1)).toBe(true);
   host.click({ action: 'select-run', repo: 'alpha', run: GOLDEN_RUN_ID });
+  replay(host.open('run=')[0], GOLDEN());
   host.advance(100);
   expect([page.ui.queue, cards(host.regions.main)]).toEqual([undefined, expect.arrayContaining(['publish#1'])]);
   expect(host.sockets.filter((socket) => socket.query.startsWith('run='))).toHaveLength(1);
 });
 
-test('the rail restores the opens it saved and ignores a stored value that is not a list of names', () => {
-  host.storage.set(RAIL_KEY, JSON.stringify(['alpha', 'alpha/ticket-to-pr']));
+test('the list restores the folds it saved and ignores a stored value that is not a list of names', () => {
+  host.storage.set(LIST_KEY, JSON.stringify(['active:running', 'queues:beta']));
   const restored = boot(host);
-  expect(restored.ui.expanded).toEqual(['alpha', 'alpha/ticket-to-pr']);
+  expect(restored.ui.listFolded).toEqual(['active:running', 'queues:beta']);
   restored.stop();
   for (const bad of ['nope', '{"a":1}', '[1,"a"]']) {
-    host.storage.set(RAIL_KEY, bad);
+    host.storage.set(LIST_KEY, bad);
     const malformed = boot(host);
-    expect(malformed.ui.expanded).toEqual([]);
+    expect(malformed.ui.listFolded).toEqual([]);
     malformed.stop();
   }
-  host.storage.delete(RAIL_KEY);
+  host.storage.delete(LIST_KEY);
   page = boot(host);
-  host.click({ action: 'toggle-group', group: 'alpha' });
+  host.click({ action: 'toggle-list-group', group: 'active:waiting' });
   page.stop();
   const again = boot(host);
-  expect(again.ui.expanded).toEqual(['alpha']);
+  expect(again.ui.listFolded).toEqual(['active:waiting']);
   again.stop();
 });
 
@@ -1363,7 +1472,7 @@ test("a click on a waiting row's down button posts the move to the queue's move 
   queue.items.push({ ...waiting, dedupKey: 'ticket:FAKE-7', source: { kind: 'ticket', ticketKey: 'FAKE-7' } });
   writeFileSync(file, JSON.stringify(queue));
   page = boot(host);
-  host.push(host.open('index')[0], indexMessage());
+  firstIndex();
   host.click({ action: 'select-queue', queue: `beta/${QUEUE_WORKFLOW}` });
   host.advance(100);
   const row = { repo: 'beta', workflow: QUEUE_WORKFLOW };
@@ -1417,7 +1526,12 @@ const buttons = (region: string | undefined) =>
 /** Boots the page on `run` of `repo`, its events replayed, its actions read and its ⋯ menu open, and settled. */
 async function openOffering(repo: string, runId: string, dir: string) {
   page = boot(host);
-  host.push(host.open('index')[0], indexMessage());
+  firstIndex();
+  // The row is in the list of the view its status belongs to.
+  const status = railRepos(index(m.registryDir), host.clock)
+    .find((each) => each.name === repo)
+    ?.runs.find((run) => run.runId === runId)?.status;
+  host.click({ action: 'select-view', view: status === 'failed' || status === 'completed' ? 'history' : 'active' });
   host.click({ action: 'open', repo, run: runId });
   replay(host.open('run=')[0], dir);
   host.click({ action: 'run-menu', repo, run: runId });
@@ -1434,17 +1548,17 @@ const settleQueue = () => {
 test("a failed run's view offers Restart with its stages and the failed one chosen, and no Resume; the first click arms it and posts nothing, the second posts the stage and opens the new run", async () => {
   await openOffering('alpha', FAKE_2_ID, fake2Dir(m));
   expect(host.actionReads).toEqual([`${GOLDEN_PATH}/actions`, `${FAKE_2_PATH}/actions`]);
-  expect(buttons(host.regions.rail).filter(([, action]) => action?.endsWith('-run'))).toEqual([
+  expect(buttons(host.regions.list).filter(([, action]) => action?.endsWith('-run'))).toEqual([
     ['restart', 'restart-run', '', ''],
     ['clean', 'clean-run', '', ''],
   ]);
-  expect(host.regions.rail).toContain(
+  expect(host.regions.list).toContain(
     '<option value="implement" title="implement#1 and everything after it, in loop fix from iteration 1" selected>',
   );
   host.click({ action: 'restart-run' });
   host.advance(100);
   expect(host.posts).toEqual([]);
-  expect(buttons(host.regions.rail).find(([, action]) => action === 'restart-run')).toEqual([
+  expect(buttons(host.regions.list).find(([, action]) => action === 'restart-run')).toEqual([
     'confirm restart from implement · budget $25.00',
     'restart-run',
     'armed',
@@ -1467,14 +1581,14 @@ test('a stage chosen in the list is the one a restart is armed and posted with, 
   host.fields.stage = 'spec';
   host.click({ action: 'restart-run' });
   host.advance(100);
-  expect(buttons(host.regions.rail).find(([, action]) => action === 'restart-run')?.[0]).toBe(
+  expect(buttons(host.regions.list).find(([, action]) => action === 'restart-run')?.[0]).toBe(
     'confirm restart from spec · budget $25.00',
   );
   host.fields.stage = 'implement';
   host.click({ action: 'restart-run' });
   host.advance(100);
   expect(host.posts).toEqual([]);
-  expect(buttons(host.regions.rail).find(([, action]) => action === 'restart-run')?.[0]).toBe(
+  expect(buttons(host.regions.list).find(([, action]) => action === 'restart-run')?.[0]).toBe(
     'confirm restart from implement · budget $25.00',
   );
   host.click({ action: 'restart-run' });
@@ -1492,16 +1606,16 @@ test("a refusal is shown beside the buttons in the dashboard's words and disarms
   host.click({ action: 'restart-run' });
   await settle();
   host.advance(100);
-  expect(host.regions.rail).toContain(
+  expect(host.regions.list).toContain(
     '<span class="warnchip">sail run: branch sail/x is leased by run FAKE-9-Y</span>',
   );
-  expect(buttons(host.regions.rail).find(([, action]) => action === 'restart-run')?.[0]).toBe('restart');
+  expect(buttons(host.regions.list).find(([, action]) => action === 'restart-run')?.[0]).toBe('restart');
   host.postAnswer = { status: 0, body: '' };
   host.click({ action: 'restart-run' });
   host.click({ action: 'restart-run' });
   await settle();
   host.advance(100);
-  expect(host.regions.rail).toContain(
+  expect(host.regions.list).toContain(
     '<span class="warnchip">the restart could not be sent: the dashboard did not answer</span>',
   );
   expect(page?.ui.runId).toBe(FAKE_2_ID);
@@ -1512,10 +1626,10 @@ test('any other click disarms an armed button', async () => {
   host.click({ action: 'restart-run' });
   host.click({ action: 'toggle-theme' });
   host.advance(100);
-  expect([page?.ui.runMenu, host.regions.rail?.includes('class="r-menu"')]).toEqual([undefined, false]);
+  expect([page?.ui.runMenu, host.regions.list?.includes('class="r-menu"')]).toEqual([undefined, false]);
   host.click({ action: 'run-menu', repo: 'alpha', run: FAKE_2_ID });
   host.advance(100);
-  expect(buttons(host.regions.rail).find(([, action]) => action === 'restart-run')?.[0]).toBe('restart');
+  expect(buttons(host.regions.list).find(([, action]) => action === 'restart-run')?.[0]).toBe('restart');
   host.click({ action: 'restart-run' });
   await settle();
   expect(host.posts).toEqual([]);
@@ -1523,23 +1637,24 @@ test('any other click disarms an armed button', async () => {
 
 test("a run's ⋯ opens the run and its menu under its row, reading what it offers; its ⋯ again or Escape shuts it, and another run's ⋯ moves it there (ADW-466)", async () => {
   page = boot(host);
-  host.push(host.open('index')[0], indexMessage());
+  firstIndex();
   await settle();
   host.advance(100);
-  expect(host.regions.rail).not.toContain('class="r-menu"');
+  expect(host.regions.list).not.toContain('class="r-menu"');
+  host.click({ action: 'select-view', view: 'history' });
   host.click({ action: 'run-menu', repo: 'alpha', run: FAKE_2_ID });
   host.advance(100);
   expect([page?.ui.runId, page?.ui.runMenu]).toEqual([FAKE_2_ID, FAKE_2_ID]);
-  expect(host.regions.rail).toContain(
+  expect(host.regions.list).toContain(
     '<div class="r-menu"><span class="act-why">reading what the run offers…</span></div>',
   );
   await settle();
   host.advance(100);
-  expect(buttons(host.regions.rail).map(([label]) => label)).toEqual(['restart', 'clean']);
+  expect(buttons(host.regions.list).map(([label]) => label)).toEqual(['restart', 'clean']);
   expect(host.regions.main).not.toContain('data-action="restart-run"');
   host.click({ action: 'run-menu', repo: 'alpha', run: FAKE_2_ID });
   host.advance(100);
-  expect([page?.ui.runId, page?.ui.runMenu, host.regions.rail?.includes('class="r-menu"')]).toEqual([
+  expect([page?.ui.runId, page?.ui.runMenu, host.regions.list?.includes('class="r-menu"')]).toEqual([
     FAKE_2_ID,
     undefined,
     false,
@@ -1553,30 +1668,30 @@ test("a run's ⋯ opens the run and its menu under its row, reading what it offe
   host.click({ action: 'run-menu', repo: 'alpha', run: GOLDEN_RUN_ID });
   await settle();
   host.advance(100);
-  expect([page?.ui.runId, page?.ui.runMenu, host.regions.rail?.match(/class="r-menu"/g)?.length]).toEqual([
+  expect([page?.ui.runId, page?.ui.runMenu, host.regions.list?.match(/class="r-menu"/g)?.length]).toEqual([
     GOLDEN_RUN_ID,
     GOLDEN_RUN_ID,
     1,
   ]);
-  expect(host.regions.rail).toContain(`<div class="r-menu"><span class="act-why">run ${GOLDEN_RUN_ID} completed`);
+  expect(host.regions.list).toContain(`<div class="r-menu"><span class="act-why">run ${GOLDEN_RUN_ID} completed`);
 });
 
 test('a suspended run over its dollars offers Resume with a raise field and no Restart; with no raise typed a click gives a notice, and with one the second click posts it and reads the run again', async () => {
   settleQueue();
   await openOffering('beta', FAKE_3_ID, m.beta.runDir);
-  expect(host.regions.rail).toContain('name="raise"');
-  expect(buttons(host.regions.rail).filter(([, action]) => action?.endsWith('-run'))).toEqual([
+  expect(host.regions.list).toContain('name="raise"');
+  expect(buttons(host.regions.list).filter(([, action]) => action?.endsWith('-run'))).toEqual([
     ['resume', 'resume-run', '', ''],
     ['stop', 'stop-run', '', ''],
   ]);
   host.click({ action: 'resume-run' });
   host.advance(100);
   expect([host.posts, page?.ui.armed]).toEqual([[], undefined]);
-  expect(host.regions.rail).toContain('give the dollars to raise the budget by: at least 0.01');
+  expect(host.regions.list).toContain('give the dollars to raise the budget by: at least 0.01');
   host.fields.raise = '5';
   host.click({ action: 'resume-run' });
   host.advance(100);
-  expect(buttons(host.regions.rail).find(([, action]) => action === 'resume-run')?.[0]).toBe(
+  expect(buttons(host.regions.list).find(([, action]) => action === 'resume-run')?.[0]).toBe(
     'confirm resume · spent $1.06 of $1.00',
   );
   const before = host.open('run=')[0];
@@ -1592,12 +1707,12 @@ test('a suspended run over its dollars offers Resume with a raise field and no R
 test('a run the watcher has is offered Resume disabled with the reason, and a click posts nothing', async () => {
   await openOffering('beta', FAKE_3_ID, m.beta.runDir);
   expect(
-    buttons(host.regions.rail).filter(
+    buttons(host.regions.list).filter(
       ([, action]) => action === undefined && ['resume', 'restart'].includes(action ?? ''),
     ),
   ).toEqual([]);
-  expect(host.regions.rail).toContain('<button class="btn" disabled>resume</button>');
-  expect(host.regions.rail).toContain('ticket-to-pr&#39;s watcher has this run: ticket:FAKE-3 is dispatched');
+  expect(host.regions.list).toContain('<button class="btn" disabled>resume</button>');
+  expect(host.regions.list).toContain('ticket-to-pr&#39;s watcher has this run: ticket:FAKE-3 is dispatched');
   host.click({ action: 'resume-run' });
   host.click({ action: 'resume-run' });
   await settle();
@@ -1608,13 +1723,17 @@ test("the open run's actions are read again when the index shows its status chan
   await openOffering('alpha', FAKE_2_ID, fake2Dir(m));
   host.click({ action: 'restart-run' });
   writeFileSync(join(fake2Dir(m), 'STATUS'), 'running\n');
-  host.push(host.open('index')[0], indexMessage());
+  plainIndex();
   await settle();
   host.advance(100);
   expect(host.actionReads).toEqual([`${GOLDEN_PATH}/actions`, `${FAKE_2_PATH}/actions`, `${FAKE_2_PATH}/actions`]);
   expect(page?.ui.armed).toBeUndefined();
-  expect(host.regions.rail).toContain(`run ${FAKE_2_ID} is running`);
-  host.push(host.open('index')[0], indexMessage());
+  // The run is Active now: its row, and the menu still open under it, move to that view with the next index.
+  if (page !== undefined) page.ui.view = 'active';
+  plainIndex();
+  host.advance(100);
+  expect(host.regions.list).toContain(`run ${FAKE_2_ID} is running`);
+  plainIndex();
   await settle();
   expect(host.actionReads).toHaveLength(3);
 });
@@ -1634,7 +1753,7 @@ test("a stage chosen and a raise typed on one run don't carry over to the next o
   replay(host.open('run=')[0], fake2Dir(m));
   await settle();
   host.advance(100);
-  expect(host.regions.rail).toContain(
+  expect(host.regions.list).toContain(
     '<option value="implement" title="implement#1 and everything after it, in loop fix from iteration 1" selected>',
   );
 });
@@ -1642,7 +1761,7 @@ test("a stage chosen and a raise typed on one run don't carry over to the next o
 /** The beta queue open in the centre with its stream replayed, and the posts and renders cleared. */
 function openBetaQueue() {
   page = boot(host);
-  host.push(host.open('index')[0], indexMessage());
+  firstIndex();
   const [socket] = host.open('queue=');
   for (const event of readEvents(queueDirOf(m))) host.push(socket, { kind: 'queue-event', event });
   host.click({ action: 'select-queue', queue: `beta/${QUEUE_WORKFLOW}` });
@@ -1679,7 +1798,7 @@ test('a poll click posts an empty body to the queue poll route; a 200 shows its 
 
 test('the add form shows once the queue stream has polled tickets; add posts the typed key and force, an empty key posts nothing, and the key is kept across a draw (ADW-460)', async () => {
   page = boot(host);
-  host.push(host.open('index')[0], indexMessage());
+  firstIndex();
   const [socket] = host.open('queue=');
   host.click({ action: 'select-queue', queue: `beta/${QUEUE_WORKFLOW}` });
   host.advance(100);
@@ -1835,7 +1954,7 @@ test('Stop arms on a first click and posts { now: false } on the second, shows t
   host.click({ action: 'stop-run' });
   host.advance(100);
   expect(host.posts).toEqual([]);
-  expect(buttons(host.regions.rail).find(([, action]) => action === 'stop-run')).toEqual([
+  expect(buttons(host.regions.list).find(([, action]) => action === 'stop-run')).toEqual([
     'confirm stop · at its next call boundary',
     'stop-run',
     'armed',
@@ -1849,7 +1968,7 @@ test('Stop arms on a first click and posts { now: false } on the second, shows t
   await settle();
   host.advance(100);
   expect(host.posts).toEqual([{ path: `${FAKE_3_PATH}/stop`, body: { now: false } }]);
-  expect(host.regions.rail).toContain(
+  expect(host.regions.list).toContain(
     `<span class="warnchip">run ${FAKE_3_ID} stops at its next call boundary (pid 7)</span>`,
   );
   expect(host.actionReads.filter((path) => path === `${FAKE_3_PATH}/actions`).length).toBeGreaterThan(1);
@@ -1861,7 +1980,7 @@ test('with Stop now ticked, the confirmation says so and the post is { now: true
   host.fields.now = 'on';
   host.click({ action: 'stop-run' });
   host.advance(100);
-  expect(buttons(host.regions.rail).find(([, action]) => action === 'stop-run')?.[0]).toBe(
+  expect(buttons(host.regions.list).find(([, action]) => action === 'stop-run')?.[0]).toBe(
     'confirm stop now · ends its running call',
   );
   host.postAnswer = { status: 202, body: JSON.stringify({ message: 'run X ends its running call now (pid 7)' }) };
@@ -1879,11 +1998,11 @@ test('ticking Stop now once Stop is armed keeps it armed and makes it say so (re
   host.click({ action: 'stop-now' });
   host.advance(100);
   expect(
-    buttons(host.regions.rail)
+    buttons(host.regions.list)
       .find(([, action]) => action === 'stop-run')
       ?.slice(0, 3),
   ).toEqual(['confirm stop now · ends its running call', 'stop-run', 'armed']);
-  expect(host.regions.rail).toContain('data-action="stop-now" checked');
+  expect(host.regions.list).toContain('data-action="stop-now" checked');
   expect(host.posts).toEqual([]);
 });
 
@@ -1897,14 +2016,14 @@ test("a raise typed in the rail's run menu is read from the rail and posted with
   settleQueue();
   const dom = domHost();
   await openOffering('beta', FAKE_3_ID, m.beta.runDir);
-  dom.field('rail', 'raise').value = '5';
+  dom.field('list', 'raise').value = '5';
   host.click({ action: 'resume-run' });
   host.advance(100);
-  expect(buttons(host.regions.rail).find(([, action]) => action === 'resume-run')?.[0]).toBe(
+  expect(buttons(host.regions.list).find(([, action]) => action === 'resume-run')?.[0]).toBe(
     'confirm resume · spent $1.06 of $1.00',
   );
-  expect(host.regions.rail).not.toContain('give the dollars to raise the budget by');
-  expect(host.regions.rail).toContain('name="raise" min="0.01" step="any" value="5"');
+  expect(host.regions.list).not.toContain('give the dollars to raise the budget by');
+  expect(host.regions.list).toContain('name="raise" min="0.01" step="any" value="5"');
   host.click({ action: 'resume-run' });
   await settle();
   expect(host.posts).toEqual([{ path: `${FAKE_3_PATH}/resume`, body: { raise: { usd: 5 } } }]);
@@ -1913,10 +2032,10 @@ test("a raise typed in the rail's run menu is read from the rail and posted with
 test("a stage chosen in the rail's run menu is read from the rail, armed and posted with the restart", async () => {
   const dom = domHost();
   await openOffering('alpha', FAKE_2_ID, fake2Dir(m));
-  dom.field('rail', 'stage').value = 'spec';
+  dom.field('list', 'stage').value = 'spec';
   host.click({ action: 'restart-run' });
   host.advance(100);
-  expect(buttons(host.regions.rail).find(([, action]) => action === 'restart-run')?.[0]).toBe(
+  expect(buttons(host.regions.list).find(([, action]) => action === 'restart-run')?.[0]).toBe(
     'confirm restart from spec · budget $25.00',
   );
   host.click({ action: 'restart-run' });
@@ -1930,16 +2049,16 @@ test("stop now ticked in the rail's run menu is read from the rail, stays ticked
   await openOffering('beta', FAKE_3_ID, m.beta.runDir);
   host.click({ action: 'stop-run' });
   host.advance(100);
-  dom.field('rail', 'now').checked = true;
+  dom.field('list', 'now').checked = true;
   host.click({ action: 'stop-now' });
   host.advance(100);
-  expect(buttons(host.regions.rail).find(([, action]) => action === 'stop-run')).toEqual([
+  expect(buttons(host.regions.list).find(([, action]) => action === 'stop-run')).toEqual([
     'confirm stop now · ends its running call',
     'stop-run',
     'armed',
     '',
   ]);
-  expect(dom.field('rail', 'now').checked).toBe(true);
+  expect(dom.field('list', 'now').checked).toBe(true);
   host.click({ action: 'stop-run' });
   await settle();
   expect(host.posts).toEqual([{ path: `${FAKE_3_PATH}/stop`, body: { now: true } }]);
@@ -1950,7 +2069,7 @@ test('Clean arms with what it removes, posts {} on the second click, and leaves 
   host.click({ action: 'clean-run' });
   host.advance(100);
   expect(host.posts).toEqual([]);
-  expect(buttons(host.regions.rail).find(([, action]) => action === 'clean-run')?.[0]).toStartWith(
+  expect(buttons(host.regions.list).find(([, action]) => action === 'clean-run')?.[0]).toStartWith(
     'confirm clean · removes run ref · run directory -&gt; ',
   );
   const cleaned = `cleaned ${FAKE_2_ID}: run ref; run directory -> ~/.sail/failed-runs/2026-11-01/${FAKE_2_ID}`;
@@ -1961,10 +2080,10 @@ test('Clean arms with what it removes, posts {} on the second click, and leaves 
   host.advance(100);
   expect(host.posts).toEqual([{ path: `${FAKE_2_PATH}/clean`, body: {} }]);
   expect([before?.closed, page?.ui.indexNotice]).toEqual([true, cleaned]);
-  expect(host.regions.rail).toContain(`<span class="warnchip">${cleaned.replace('->', '-&gt;')}</span>`);
+  expect(host.regions.list).toContain(`<span class="warnchip list-notice">${cleaned.replace('->', '-&gt;')}</span>`);
   host.click({ action: 'select-run', repo: 'alpha', run: GOLDEN_RUN_ID });
   host.advance(100);
-  expect(host.regions.rail).not.toContain('cleaned ');
+  expect(host.regions.list).not.toContain('cleaned ');
 });
 
 test('a refused Stop or Clean shows its error beside the buttons and disarms, and any other click disarms an armed one', async () => {
@@ -1974,14 +2093,14 @@ test('a refused Stop or Clean shows its error beside the buttons and disarms, an
   host.click({ action: 'clean-run' });
   await settle();
   host.advance(100);
-  expect(host.regions.rail).toContain('<span class="warnchip">run X: a queue item names it</span>');
-  expect(buttons(host.regions.rail).find(([, action]) => action === 'clean-run')?.[0]).toBe('clean');
+  expect(host.regions.list).toContain('<span class="warnchip">run X: a queue item names it</span>');
+  expect(buttons(host.regions.list).find(([, action]) => action === 'clean-run')?.[0]).toBe('clean');
   expect(page?.ui.runId).toBe(FAKE_2_ID);
   host.click({ action: 'clean-run' });
   host.click({ action: 'toggle-theme' });
   host.click({ action: 'run-menu', repo: 'alpha', run: FAKE_2_ID });
   host.advance(100);
-  expect(buttons(host.regions.rail).find(([, action]) => action === 'clean-run')?.[0]).toBe('clean');
+  expect(buttons(host.regions.list).find(([, action]) => action === 'clean-run')?.[0]).toBe('clean');
   host.click({ action: 'clean-run' });
   await settle();
   expect(host.posts).toHaveLength(1);
@@ -1994,6 +2113,7 @@ function bootWatching(workflows?: string[]) {
     repo.name === 'beta' && workflows !== undefined ? { ...repo, watching: { pid: 4242, workflows } } : repo,
   );
   host.push(host.open('index')[0], { kind: 'index', repos });
+  host.click({ action: 'select-view', view: 'queues' });
   host.advance(100);
 }
 const watchClick = (op: string, workflow?: string) =>
@@ -2008,21 +2128,20 @@ test('a Watch click posts the workflow to the repository watch route at once, an
   await settle();
   expect(page?.ui.watchNotice).toEqual({ repo: 'beta', text: 'sail watch: it watches ticket-to-pr' });
   host.advance(100);
-  expect(host.regions.rail).toContain('<div class="lgrp-p">sail watch: it watches ticket-to-pr</div>');
+  expect(host.regions.list).toContain('<div class="lgrp-p">sail watch: it watches ticket-to-pr</div>');
 });
 
 test('an Unwatch click arms and posts nothing, another action disarms it, and the second click posts the workflow to the unwatch route', async () => {
   bootWatching([QUEUE_WORKFLOW]);
-  host.click({ action: 'toggle-group', group: 'beta' });
-  host.click({ action: 'toggle-group', group: `beta/${QUEUE_WORKFLOW}` });
+  host.click({ action: 'select-queue', queue: `beta/${QUEUE_WORKFLOW}` });
   watchClick('unwatch', QUEUE_WORKFLOW);
   host.advance(100);
   expect([host.posts, page?.ui.armedWatch]).toEqual([[], `beta/${QUEUE_WORKFLOW}`]);
-  expect(host.regions.rail).toContain('unwatch? click again');
-  host.click({ action: 'toggle-group', group: 'alpha' });
+  expect(host.regions.main).toContain('unwatch? click again');
+  host.click({ action: 'toggle-list-group', group: 'queues:alpha' });
   host.advance(100);
   expect(page?.ui.armedWatch).toBeUndefined();
-  expect(host.regions.rail).not.toContain('click again');
+  expect(host.regions.main).not.toContain('click again');
   watchClick('unwatch', QUEUE_WORKFLOW);
   expect(host.posts).toEqual([]);
   host.postAnswer = { status: 200, body: JSON.stringify({ message: 'sail unwatch: done' }) };
@@ -2082,11 +2201,9 @@ describe('all clear', () => {
 
   test('one click empties the list and the count, shows nothing needs attention, posts nothing and leaves the failed run in the rail', () => {
     bootOpen();
-    host.click({ action: 'toggle-group', group: 'alpha' });
-    host.click({ action: 'toggle-group', group: 'alpha/ticket-to-pr' });
-    host.click({ action: 'toggle-section', section: 'alpha/ticket-to-pr:failed' });
+    host.click({ action: 'select-view', view: 'history' });
     host.advance(100);
-    expect(host.regions.rail).toContain(`data-run="${FAKE_2_ID}"`);
+    expect(host.regions.list).toContain(`data-run="${FAKE_2_ID}"`);
     expect(badge()).toBe('4');
     expect(host.regions.attention).toContain('data-action="clear-attention">all clear</button>');
     host.click({ action: 'clear-attention' });
@@ -2095,7 +2212,7 @@ describe('all clear', () => {
     expect(host.regions.attention).toContain('nothing needs attention');
     expect(host.regions.attention).not.toContain('all clear');
     expect(host.posts).toEqual([]);
-    expect(host.regions.rail).toContain(`data-run="${FAKE_2_ID}"`);
+    expect(host.regions.list).toContain(`data-run="${FAKE_2_ID}"`);
   });
 
   test('the clear survives a reboot over the same storage', () => {

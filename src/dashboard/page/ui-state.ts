@@ -34,10 +34,6 @@ export interface UiState {
   stream?: string;
   /** The step the log tab shows for a multi-step call, when one is chosen. */
   step?: string;
-  /** The rail's open sections, as `<repo>/<workflow>:completed`. */
-  open: string[];
-  /** The rail's opened repositories and workflows, as `<repo>` and `<repo>/<workflow>`: every one starts folded. */
-  expanded: string[];
   /** The view the list shows, the repository it is narrowed to, what the filter field holds, the entry under the cursor (by id) and the folded groups (by id). */
   view: ViewName;
   repoFilter?: string;
@@ -58,12 +54,12 @@ export interface UiState {
   armedDrop?: string;
   /** The unwatch a first click has armed, as `<repo>` for every workflow or `<repo>/<workflow>`, which a second click makes. */
   armedWatch?: string;
-  /** The answer to the last change of a repository's watch set, shown under its header until the next. */
+  /** The answer to the last change of a repository's watch set, shown on its row until the next. */
   watchNotice?: { repo: string; text: string };
   /** What was typed in the queue view's add field, and whether Force is ticked, kept across a draw. */
   addTicket?: string | undefined;
   addForce?: boolean;
-  /** The open run whose ⋯ menu is open in the rail, by run id. */
+  /** The open run whose ⋯ menu is open in the list, by run id. */
   runMenu?: string;
   /** The run action a first click has armed, which a second click makes. */
   armed?: 'resume' | 'restart' | 'stop' | 'clean';
@@ -71,7 +67,7 @@ export interface UiState {
   runNotice?: string;
   /** Whether Stop now is ticked, kept across a draw. */
   stopNow?: boolean;
-  /** What the last Clean removed, shown in the rail until a run is selected. */
+  /** What the last Clean removed, shown in the list's head until a run is selected. */
   indexNotice?: string;
   /** What was typed in the raise field and chosen in the stage list, kept across a draw. */
   raise?: string | undefined;
@@ -92,8 +88,6 @@ export function initialUi(tz: number): UiState {
     timeline: false,
     opened: [],
     hidden: [],
-    open: [],
-    expanded: [],
     view: 'active',
     listFilter: '',
     listFolded: [],

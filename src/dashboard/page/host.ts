@@ -4,7 +4,7 @@
 // members the page uses, since the project's TypeScript has no DOM library.
 
 /** The page's regions, each an element id in `index.html`. */
-export const REGIONS = ['rail', 'attention', 'main', 'inspector', 'status', 'drawer'] as const;
+export const REGIONS = ['sidebar', 'list', 'attention', 'main', 'inspector', 'status', 'drawer'] as const;
 export type Region = (typeof REGIONS)[number];
 
 export interface Connection {
@@ -48,6 +48,8 @@ export interface PageHost {
   copy(text: string): Promise<boolean>;
   setTheme(theme: string): void;
   setInspector(open: boolean): void;
+  /** Whether a run or queue is open beside the list: the centre is laid out by it. */
+  setDetail(open: boolean): void;
   /** The browser's offset east of UTC, in minutes. */
   offset(): number;
   /** What the page's URL asks it to open first, from `?repo=…&run=…&key=…&tab=…`: empty when it asks nothing. */
@@ -176,7 +178,7 @@ const INPUTS = new Set(['INPUT', 'TEXTAREA', 'SELECT']);
 
 /** How wide each resizable column may be, and its CSS variable. */
 const COLUMNS: Record<string, { variable: string; min: number; max: number; start: number; sign: number }> = {
-  left: { variable: '--rail-w', min: 160, max: 480, start: 260, sign: 1 },
+  left: { variable: '--side-w', min: 140, max: 480, start: 180, sign: 1 },
   right: { variable: '--ins-w', min: 240, max: 640, start: 360, sign: -1 },
 };
 
@@ -392,6 +394,9 @@ export function browserHost(win: BrowserWindow): PageHost {
     start: () => Object.fromEntries(new URLSearchParams(win.location.search)),
     setInspector(open) {
       doc.documentElement.dataset.inspector = open ? 'open' : 'closed';
+    },
+    setDetail(open) {
+      doc.documentElement.dataset.detail = open ? 'open' : 'closed';
     },
     offset: () => -new win.Date().getTimezoneOffset(),
   };

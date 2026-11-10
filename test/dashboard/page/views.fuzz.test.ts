@@ -13,7 +13,6 @@ import { renderInspector } from '../../../src/dashboard/page/inspector-view';
 import { navCounts } from '../../../src/dashboard/page/list-model';
 import { renderList } from '../../../src/dashboard/page/list-view';
 import { renderQueue } from '../../../src/dashboard/page/queue-view';
-import { renderRail } from '../../../src/dashboard/page/rail-view';
 import { foldRun } from '../../../src/dashboard/page/run-model';
 import { renderRun, renderStatus } from '../../../src/dashboard/page/run-view';
 import { renderSidebar } from '../../../src/dashboard/page/sidebar-view';
@@ -145,15 +144,7 @@ test('the rail, needs attention and the queue view keep their structure under a 
   const events = readEvents(queueDirOf(m)) as unknown as QueueEvent[];
   const views = (input: typeof repos, queue: QueueEvent[]) => {
     const stream = { recent: queue, watch: watchState(queue) };
-    const rail = {
-      ...ui,
-      repo: 'alpha',
-      runId: FAKE_2_ID,
-      expanded: ['alpha', 'alpha/ticket-to-pr'],
-      open: ['alpha/ticket-to-pr:completed'],
-    };
     return [
-      renderRail(railRepos(input, NOW), rail, NOW).value,
       renderList('active', railRepos(input, NOW), ui, NOW).value,
       renderList('queues', railRepos(input, NOW), ui, NOW).value,
       renderSidebar(railRepos(input, NOW), navCounts(railRepos(input, NOW)), 2, ui).value,

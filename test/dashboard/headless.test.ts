@@ -7,7 +7,7 @@ import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { BrowserWindow, ElementLike, EventLike } from '../../src/dashboard/page/host';
 import { type Dashboard, startDashboard } from '../../src/dashboard/server';
-import { FAKE_2_ID, type Machine, seedFixtures } from '../helpers/dashboard';
+import { FAKE_2_ID, GOLDEN_RUN_ID, type Machine, seedFixtures } from '../helpers/dashboard';
 
 let m: Machine | undefined;
 let server: Dashboard | undefined;
@@ -89,19 +89,24 @@ async function bootHeadless(dashboard: Dashboard) {
   return { ids, text, click };
 }
 
-test("the real bundle boots headless: both repositories, the golden run's eight cards and its $1.35, then FAKE-2's denial on the permissions tab", async () => {
+test("the real bundle boots headless: both repositories, the golden run's eight cards and its $1.35 once its row is clicked, then FAKE-2's denial on the permissions tab", async () => {
   m = seedFixtures();
   const started = startDashboard({ registryDir: m.registryDir, port: 0, followPollMs: 20, indexPollMs: 50 });
   if ('refused' in started) throw new Error(started.refused);
   server = started;
   const page = await bootHeadless(server);
-  expect(page.ids).toEqual(expect.arrayContaining(['rail', 'attention', 'main', 'inspector', 'status']));
+  expect(page.ids).toEqual(expect.arrayContaining(['sidebar', 'list', 'attention', 'main', 'inspector', 'status']));
   expect(page.ids).not.toContain('queues');
-  expect(await until(() => page.text('rail').includes('<span class="nm">beta</span>'))).toBe(true);
-  expect(page.text('rail')).toContain('<span class="nm">alpha</span>');
+  expect(await until(() => page.text('sidebar').includes('<span class="nm">beta</span>'))).toBe(true);
+  expect(page.text('sidebar')).toContain('<span class="nm">alpha</span>');
+  expect(page.text('main')).toContain('no run selected');
+  page.click({ action: 'select-view', view: 'history' });
+  expect(await until(() => page.text('list').includes(`data-run="${GOLDEN_RUN_ID}"`))).toBe(true);
+  page.click({ action: 'select-run', repo: 'alpha', run: GOLDEN_RUN_ID });
   expect(await until(() => (page.text('main').match(/data-action="select-card"/g) ?? []).length === 8)).toBe(true);
   expect(page.text('main')).toContain('<div class="stat"><b>$1.35</b><span>of $25.00 (5.4%)</span></div>');
   expect(page.text('attention')).toContain('<span class="badge">4</span>');
+  page.click({ action: 'select-view', view: 'queues' });
   page.click({ action: 'select-queue', queue: 'beta/ticket-to-pr' });
   expect(await until(() => page.text('main').includes('<span class="pill p-pass">watched</span>'))).toBe(true);
   page.click({ action: 'open', repo: 'alpha', run: FAKE_2_ID, key: 'implement#1', tab: 'permissions' });
@@ -110,17 +115,18 @@ test("the real bundle boots headless: both repositories, the golden run's eight 
   expect(page.text('main')).toContain(`<span class="d-agent">${FAKE_2_ID} · ticket-to-pr@1</span>`);
 }, 30_000);
 
-test("once beta's queue/ is gone, the next index drops its queue row and gives the centre back to the run", async () => {
+test("once beta's queue/ is gone, the next index drops its queue row and gives the centre back to the list", async () => {
   m = seedFixtures();
   const started = startDashboard({ registryDir: m.registryDir, port: 0, followPollMs: 20, indexPollMs: 50 });
   if ('refused' in started) throw new Error(started.refused);
   server = started;
   const page = await bootHeadless(server);
-  expect(await until(() => page.text('rail').includes('data-action="select-queue"'))).toBe(true);
+  page.click({ action: 'select-view', view: 'queues' });
+  expect(await until(() => page.text('list').includes('data-action="select-queue"'))).toBe(true);
   page.click({ action: 'select-queue', queue: 'beta/ticket-to-pr' });
   expect(await until(() => page.text('main').includes('beta / ticket-to-pr'))).toBe(true);
   rmSync(join(m.beta.clone, '.sail-runs', 'queue'), { recursive: true });
-  expect(await until(() => !page.text('rail').includes('select-queue'))).toBe(true);
-  expect(await until(() => (page.text('main').match(/data-action="select-card"/g) ?? []).length === 8)).toBe(true);
-  expect(page.text('rail')).toContain('<span class="nm">beta</span>');
+  expect(await until(() => !page.text('list').includes('select-queue'))).toBe(true);
+  expect(await until(() => page.text('main').includes('no run selected'))).toBe(true);
+  expect(page.text('sidebar')).toContain('<span class="nm">beta</span>');
 }, 30_000);

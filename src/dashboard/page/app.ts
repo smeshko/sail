@@ -20,7 +20,7 @@ import type { UiState } from './ui-state';
 
 export { TICK_MS } from './draw';
 export { LOG_REFRESH_MS } from './reads';
-export { CLEARED_KEY, FILTER_KEY, RAIL_KEY, THEME_KEY } from './saved';
+export { CLEARED_KEY, FILTER_KEY, LIST_KEY, THEME_KEY } from './saved';
 export { FLUSH_MS } from './store';
 export { RECENT_EVENTS, RECONNECT_MS } from './streams';
 

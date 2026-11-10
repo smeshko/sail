@@ -68,7 +68,7 @@ export function startRun(store: Store, kind: 'resume' | 'restart') {
     if (ui.raise === undefined || ui.raise.trim() === '' || !Number.isFinite(amount) || amount < 0.01) {
       delete ui.armed;
       ui.runNotice = `give the ${raising === 'usd' ? 'dollars' : 'minutes'} to raise the budget by: at least 0.01`;
-      store.mark('rail');
+      store.mark('list');
       return;
     }
     body = { raise: { [raising]: amount } };
@@ -77,13 +77,13 @@ export function startRun(store: Store, kind: 'resume' | 'restart') {
     ui.armed = kind;
     store.armedStage = stage;
     delete ui.runNotice;
-    store.mark('rail');
+    store.mark('list');
     return;
   }
   delete ui.armed;
   store.starting = true;
   ui.runNotice = `${kind === 'resume' ? 'resuming' : 'restarting'} ${open.runId}…`;
-  store.mark('rail');
+  store.mark('list');
   void host
     .post(`/api/repos/${enc(open.repo)}/runs/${enc(open.runId)}/${kind}`, body)
     .then(({ status, body: answer }) => {
@@ -91,7 +91,7 @@ export function startRun(store: Store, kind: 'resume' | 'restart') {
       if (store.stopped) return;
       if (status < 200 || status >= 300) {
         ui.runNotice = refusal(status, answer, kind);
-        store.mark('rail');
+        store.mark('list');
         return;
       }
       delete ui.runNotice;
@@ -107,13 +107,13 @@ export function startRun(store: Store, kind: 'resume' | 'restart') {
       } catch {
         // An answer with no run id leaves the run open.
       }
-      store.mark('rail');
+      store.mark('list');
     });
 }
 
 /**
  * A first click arms Stop or Clean, which then names what it will do; a second click posts it. Stop posts `{ now }`
- * and reads the run again. Clean posts `{}` and, once the run is gone, leaves it and shows the answer in the rail.
+ * and reads the run again. Clean posts `{}` and, once the run is gone, leaves it and shows the answer in the list's head.
  */
 export function endRun(store: Store, kind: 'stop' | 'clean') {
   const { ui, host } = store;
@@ -124,13 +124,13 @@ export function endRun(store: Store, kind: 'stop' | 'clean') {
   if (ui.armed !== kind) {
     ui.armed = kind;
     delete ui.runNotice;
-    store.mark('rail');
+    store.mark('list');
     return;
   }
   delete ui.armed;
   store.starting = true;
   ui.runNotice = `${kind === 'stop' ? 'stopping' : 'cleaning'} ${open.runId}…`;
-  store.mark('rail');
+  store.mark('list');
   void host
     .post(
       `/api/repos/${enc(open.repo)}/runs/${enc(open.runId)}/${kind}`,
@@ -141,7 +141,7 @@ export function endRun(store: Store, kind: 'stop' | 'clean') {
       if (store.stopped) return;
       if (status < 200 || status >= 300) {
         ui.runNotice = refusal(status, answer, kind);
-        store.mark('rail');
+        store.mark('list');
         return;
       }
       delete ui.runNotice;
@@ -151,7 +151,7 @@ export function endRun(store: Store, kind: 'stop' | 'clean') {
         closeRun(store);
         if (message === undefined) delete ui.indexNotice;
         else ui.indexNotice = message;
-        store.mark('rail', 'main', 'inspector', 'status');
+        store.mark('sidebar', 'list', 'main', 'inspector', 'status');
         return;
       }
       const menu = ui.runMenu;
@@ -163,11 +163,11 @@ export function endRun(store: Store, kind: 'stop' | 'clean') {
     });
 }
 
-/** Asks the server to watch or unwatch `workflow` of `repo` (every workflow, when none), and shows its answer under the repository's header. */
+/** Asks the server to watch or unwatch `workflow` of `repo` (every workflow, when none), and shows its answer on the repository's row. */
 export function watchSet(store: Store, repo: string, op: 'watch' | 'unwatch', workflow?: string) {
   const { ui, host } = store;
   ui.watchNotice = { repo, text: op === 'watch' ? 'watching…' : 'unwatching…' };
-  store.mark('rail');
+  store.mark('list', 'main');
   void host
     .post(`/api/repos/${enc(repo)}/${op}`, { workflows: workflow === undefined ? [] : [workflow] })
     .then(({ status, body }) => {
@@ -177,6 +177,6 @@ export function watchSet(store: Store, repo: string, op: 'watch' | 'unwatch', wo
       if (said !== undefined) ui.watchNotice = { repo, text: said };
       else if (status === 200 || status === 202) delete ui.watchNotice;
       else ui.watchNotice = { repo, text: refusal(status, body, op) };
-      store.mark('rail');
+      store.mark('list', 'main');
     });
 }

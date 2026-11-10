@@ -30,15 +30,17 @@ function stale(rendered: string, stored: string): string[] {
 test('the committed dashboard views are what the fixtures render now', async () => {
   const fresh = join(temp, 'fresh');
   expect(await renderDashboardViews(fresh)).toEqual([
-    'rail.html',
-    'rail-repos.html',
+    'sidebar.html',
+    'list-active.html',
+    'list-history.html',
+    'list-queues.html',
     'attention.html',
     'queue.html',
     'run-golden.html',
     'run-fake-2.html',
-    'rail-menu-fake-2.html',
+    'list-menu-fake-2.html',
     'run-fake-3.html',
-    'rail-menu-fake-3.html',
+    'list-menu-fake-3.html',
     'run-review.html',
     'inspector-fake-2-implement-1-permissions.html',
     'inspector-golden-implement-2-overview.html',
@@ -56,8 +58,11 @@ test('a view changed by one byte is named as stale, and so is one missing', asyn
   await renderDashboardViews(fresh);
   const changed = join(temp, 'changed');
   cpSync(COMMITTED, changed, { recursive: true });
-  const rail = readFileSync(join(changed, 'rail.html'), 'utf8');
-  writeFileSync(join(changed, 'rail.html'), rail.replace('alpha', 'alphA'));
+  const rail = readFileSync(join(changed, 'sidebar.html'), 'utf8');
+  writeFileSync(join(changed, 'sidebar.html'), rail.replace('alpha', 'alphA'));
   rmSync(join(changed, 'queue.html'));
-  expect(stale(fresh, changed)).toEqual([`queue.html is missing: ${REGENERATE}`, `rail.html is stale: ${REGENERATE}`]);
+  expect(stale(fresh, changed)).toEqual([
+    `queue.html is missing: ${REGENERATE}`,
+    `sidebar.html is stale: ${REGENERATE}`,
+  ]);
 });

@@ -2,11 +2,13 @@
 // on anything but a run action disarms an armed Resume, Restart, Stop or Clean, on anything but a drop disarms an armed
 // drop, and on anything but `watch-set` an armed unwatch; an item's menu and a run's menu shut by the same rule. No
 // action opens a socket: what needs one goes through `streams.ts`, and what posts goes through `requests.ts`.
+
+import { VIEWS, type ViewName } from './list-model';
 import { closeFile, openedOutputKeys, openFile, readLog, readOutput, selectCard } from './reads';
 import { endRun, queueOp, startRun, watchSet } from './requests';
-import { FILTER_KEY, RAIL_KEY, saveCleared, storedCleared, THEME_KEY } from './saved';
+import { FILTER_KEY, LIST_KEY, saveCleared, storedCleared, THEME_KEY } from './saved';
 import type { Store } from './store';
-import { reopenQueue, selectRun } from './streams';
+import { closeDetail, reopenQueue, selectRun } from './streams';
 import { FILTERS, type InspectorTab, TABS, THEMES, type TimelineFilter } from './ui-state';
 
 export type Action = (store: Store, data: Record<string, string>) => void;
@@ -24,7 +26,7 @@ export function leaveQueue(store: Store) {
   const { ui } = store;
   if (ui.queue === undefined) return;
   delete ui.queue;
-  store.mark('rail', 'main');
+  store.mark('list', 'main');
 }
 
 export function closeAttention(store: Store) {
@@ -46,7 +48,7 @@ export const actions: Record<string, Action> = {
     reopenQueue(store, data.queue);
     store.ui.queue = data.queue;
     delete store.ui.queueNotice;
-    store.mark('rail', 'main');
+    store.mark('list', 'main');
   },
   'select-card': (store, data) => selectCard(store, data.key, undefined, true),
   open: (store, data) => {
@@ -111,14 +113,28 @@ export const actions: Record<string, Action> = {
     readLog(store);
     store.mark('inspector');
   },
-  'toggle-group': (store, data) => {
-    const group = data.group ?? '';
-    store.ui.expanded = store.ui.expanded.includes(group)
-      ? store.ui.expanded.filter((each) => each !== group)
-      : [...store.ui.expanded, group];
-    store.host.save(RAIL_KEY, JSON.stringify(store.ui.expanded));
-    store.mark('rail');
+  'select-view': (store, data) => {
+    if (!(VIEWS as readonly string[]).includes(data.view ?? '')) return;
+    store.ui.view = data.view as ViewName;
+    store.ui.listFilter = '';
+    delete store.ui.listCursor;
+    store.mark('sidebar', 'list');
   },
+  'filter-repo': (store, data) => {
+    if (data.repo === undefined) return;
+    if (store.ui.repoFilter === data.repo) delete store.ui.repoFilter;
+    else store.ui.repoFilter = data.repo;
+    store.mark('sidebar', 'list');
+  },
+  'toggle-list-group': (store, data) => {
+    const group = data.group ?? '';
+    store.ui.listFolded = store.ui.listFolded.includes(group)
+      ? store.ui.listFolded.filter((each) => each !== group)
+      : [...store.ui.listFolded, group];
+    store.host.save(LIST_KEY, JSON.stringify(store.ui.listFolded));
+    store.mark('list');
+  },
+  'close-detail': (store) => closeDetail(store),
   'move-item': (store, data) => {
     const { dir, repo, workflow, key, target } = data;
     if (repo === undefined || workflow === undefined || key === undefined || target === undefined) return;
@@ -175,7 +191,7 @@ export const actions: Record<string, Action> = {
     const id = workflow === undefined ? repo : `${repo}/${workflow}`;
     if (op === 'unwatch' && store.ui.armedWatch !== id) {
       store.ui.armedWatch = id;
-      store.mark('rail');
+      store.mark('list', 'main');
       return;
     }
     delete store.ui.armedWatch;
@@ -188,7 +204,7 @@ export const actions: Record<string, Action> = {
   // Ticking Stop now redraws an armed Stop's confirmation, which names what it will do.
   'stop-now': (store) => {
     store.ui.stopNow = store.host.value('now') === 'on';
-    store.mark('rail');
+    store.mark('list');
   },
   // A run's ⋯ opens it and its menu under its row; on the open menu's run, it shuts the menu.
   'run-menu': (store, data) => {
@@ -202,12 +218,12 @@ export const actions: Record<string, Action> = {
     ) {
       delete store.ui.runMenu;
       delete store.ui.armed;
-      store.mark('rail');
+      store.mark('list');
       return;
     }
     actions['select-run']?.(store, data);
     store.ui.runMenu = runId;
-    store.mark('rail');
+    store.mark('list');
   },
   'toggle-queue-events': (store) => {
     store.ui.queueEvents = !store.ui.queueEvents;
@@ -229,13 +245,6 @@ export const actions: Record<string, Action> = {
     store.cleared = new Set([...storedCleared(store.host), ...store.cleared, ...store.drawn]);
     saveCleared(store.host, store.cleared);
     store.mark('attention');
-  },
-  'toggle-section': (store, data) => {
-    const section = data.section ?? '';
-    store.ui.open = store.ui.open.includes(section)
-      ? store.ui.open.filter((open) => open !== section)
-      : [...store.ui.open, section];
-    store.mark('rail');
   },
   'toggle-inspector': (store) => {
     store.ui.inspector = !store.ui.inspector;
@@ -273,10 +282,10 @@ export function dispatch(store: Store, action: string, data: Record<string, stri
   if (ui.armedDrop !== undefined && action !== 'drop-item') delete ui.armedDrop;
   if (ui.armedWatch !== undefined && action !== 'watch-set') {
     delete ui.armedWatch;
-    store.mark('rail');
+    store.mark('list', 'main');
   }
   if (shuts) delete ui.itemMenu;
   if (shutsRun) delete ui.runMenu;
-  if (disarms) store.mark('main', 'rail');
+  if (disarms) store.mark('main', 'list');
   actions[action]?.(store, data);
 }

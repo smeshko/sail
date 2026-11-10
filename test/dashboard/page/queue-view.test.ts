@@ -445,3 +445,20 @@ test('a queue section, the recent events fold and an item ⋯ say whether they a
   expect(moves).toContain('aria-label="move up, before ticket:FAKE-5"');
   expect(moves).toContain('aria-label="move down, after ticket:FAKE-7"');
 });
+
+test("the queue view's header carries the workflow's watch or unwatch, which reads click again once armed, and none when it is not given (ADW-522)", () => {
+  const events = queueEvents();
+  const id = queueId('beta', QUEUE_WORKFLOW);
+  const panel = queuePanels(index(m.registryDir)).find((each) => queueId(each.repo, each.workflow) === id);
+  if (panel === undefined) throw new Error('beta has no queue');
+  const stream = { recent: events, watch: watchState(events) };
+  const header = (markup: string) => markup.match(/<div class="srcbar">.*?<\/div>/s)?.[0] ?? '';
+  expect(header(renderQueue(panel, stream, initialUi(0), NOW).value)).not.toContain('watch-set');
+  expect(header(renderQueue(panel, stream, initialUi(0), NOW, 'watch').value)).toContain(
+    `title="poll now">poll</button><button class="wf-act" data-action="watch-set" data-repo="beta" data-op="watch" data-workflow="${QUEUE_WORKFLOW}">watch</button></div>`,
+  );
+  const armed = renderQueue(panel, stream, { ...initialUi(0), armedWatch: id }, NOW, 'unwatch').value;
+  expect(header(armed)).toContain(
+    `<button class="wf-act armed" data-action="watch-set" data-repo="beta" data-op="unwatch" data-workflow="${QUEUE_WORKFLOW}">unwatch? click again</button>`,
+  );
+});

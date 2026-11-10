@@ -1,15 +1,14 @@
-// The page's sockets and the rules they follow: one index socket feeding the rail, needs attention, the queue view and
+// The page's sockets and the rules they follow: one index socket feeding the sidebar, the list, needs attention, the queue view and
 // the open run's summary; one run socket for the open run, whose events are folded into the run model; and one queue
 // socket per watched workflow in the index. A run or queue socket that closes without `end` reconnects after 2 s from an
 // empty model, unless its stream sent `error`: then the error stays, with no reconnect, until it is clicked again. The
-// index socket always reconnects. The first index opens what the URL names when it lists it, else the newest running
-// run, else the newest, and a selection is kept while its run is still listed. Nothing here knows of a click or a key.
+// index socket always reconnects. The first index opens what the URL names when it lists it, else no run, and a selection is kept while its run is still listed. Nothing here knows of a click or a key.
 import type { QueueEvent, SailEvent } from '../../events/types';
 import type { IndexRepo } from '../files';
 import type { Message } from '../streams';
 import { attention, identity } from './attention';
 import { tick } from './draw';
-import { newestFirst, railRepos, statusOf } from './index-model';
+import { statusOf } from './index-model';
 import { queueId } from './queue-view';
 import { clearCall, closeFile, offerSignature, readOffers, readResult, refreshLog, refreshOutput } from './reads';
 import { applyEvent, emptyRun } from './run-model';
@@ -151,6 +150,24 @@ export function closeRun(store: Store) {
   closing.connection?.close();
 }
 
+/** Leaves the open queue and the open run, so the list has the centre. */
+export function closeDetail(store: Store) {
+  const { ui } = store;
+  delete ui.queue;
+  closeRun(store);
+  clearCall(store);
+  closeFile(store);
+  delete ui.repo;
+  delete ui.runId;
+  delete ui.key;
+  delete ui.runMenu;
+  delete ui.armed;
+  delete ui.runNotice;
+  ui.timeline = false;
+  store.offers = undefined;
+  store.mark('list', 'main', 'inspector', 'status');
+}
+
 export function selectRun(store: Store, repo: string, runId: string) {
   const { ui } = store;
   if (store.run?.repo === repo && store.run.runId === runId && store.run.error === undefined) return;
@@ -172,10 +189,10 @@ export function selectRun(store: Store, repo: string, runId: string) {
   delete ui.restartStage;
   delete ui.stopNow;
   store.fieldsOwn = false;
-  store.fresh.add('rail');
+  store.fresh.add('list');
   openRunSocket(store, store.run);
   readOffers(store);
-  store.mark('rail', 'main', 'inspector', 'status');
+  store.mark('list', 'main', 'inspector', 'status');
 }
 
 export function onQueueMessage(store: Store, id: string, open: OpenQueue, text: string) {
@@ -236,15 +253,6 @@ export function syncQueues(store: Store, repos: readonly IndexRepo[]) {
   for (const id of wanted) if (!store.queues.has(id)) openQueueSocket(store, id);
 }
 
-/** The run to open on the first index: the newest running one, else the newest. */
-export function firstRun(store: Store, repos: readonly IndexRepo[]) {
-  const { host } = store;
-  const all = newestFirst(
-    railRepos(repos, host.now()).flatMap((repo) => repo.runs.map((entry) => ({ ...entry, repo: repo.name }))),
-  );
-  return all.find((entry) => entry.status === 'running') ?? all[0];
-}
-
 export function onIndex(store: Store, text: string, onStart: (asked: Record<string, string>) => void) {
   const { ui, host } = store;
   const message = parse(text);
@@ -262,17 +270,14 @@ export function onIndex(store: Store, text: string, onStart: (asked: Record<stri
   const asked = store.start;
   store.start = undefined;
   if (asked !== undefined && lists(asked.repo, asked.run)) onStart(asked);
-  else if (!lists(ui.repo, ui.runId)) {
-    const first = firstRun(store, repos);
-    if (first !== undefined) selectRun(store, first.repo, first.runId);
-  }
+  else if (ui.runId !== undefined && !lists(ui.repo, ui.runId)) closeDetail(store);
   if (store.run !== undefined) followAgain(store, store.run, true);
   if (store.run !== undefined && offerSignature(store, store.run) !== store.offersFor) {
     delete ui.armed;
     readOffers(store);
   }
   if (ui.queue !== undefined && openQueue(store) === undefined) delete ui.queue;
-  store.mark('rail', 'attention', 'main', 'status');
+  store.mark('sidebar', 'list', 'attention', 'main', 'status');
   tick(store);
 }
 

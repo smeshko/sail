@@ -47,7 +47,7 @@ const draw = (view: 'active' | 'queues' | 'history', fields = {}, offers = undef
 const heads = (markup: string) =>
   [
     ...markup.matchAll(
-      /data-action="toggle-list-group" data-group="([^"]+)"[^>]*><span class="caret">›<\/span><span class="nm">([^<]*)<\/span><span class="c">(\d+)/g,
+      /data-action="toggle-list-group" data-group="([^"]+)"[^>]*><span class="lcaret">›<\/span><span class="nm">([^<]*)<\/span><span class="c">(\d+)/g,
     ),
   ].map(([, id, label, n]) => `${id} ${label} ${n}`);
 

@@ -73,13 +73,13 @@ function runRow(row: RunRow, ui: UiState, offers: RunActions | undefined): SafeH
   const tip = tooltipOf(run);
   return html`<div class="run lrow${isOpen(repo, run, ui) ? ' sel' : ''}${cur(row.id, ui)}" data-row="${row.id}"><button class="r-open"${
     tip === undefined ? '' : html` title="${tip}"`
-  } data-action="select-run" data-repo="${repo}" data-run="${run.runId}"><span class="st ${pillOf(run.status)}"></span><span class="r-id">${runLabel(run)}</span><span class="r-title">${run.title}</span><span class="r-wf">${repo} › ${workflowOf(run)}</span>${
+  } data-action="select-run" data-repo="${repo}" data-run="${run.runId}"><span class="r-line"><span class="st ${pillOf(run.status)}"></span><span class="r-id">${runLabel(run)}</span><span class="r-title">${run.title}</span><span class="r-wf">${repo} › ${workflowOf(run)}</span>${
     run.status === 'running' && run.stalled !== undefined
       ? html`<span class="stalled">stalled ${run.stalled}</span>`
       : ''
   }<span class="r-el">${duration(run.durationMs)}</span><span class="r-cost">${cost(run.costUsd)}</span>${
     run.stopReason === undefined ? '' : html`<span class="why">${run.stopReason}</span>`
-  }${run.problem === undefined ? '' : html`<span class="r-problem">${run.problem}</span>`}</button>${more(repo, run, ui)}</div>${runMenu(repo, run, ui, offers)}`;
+  }</span>${run.problem === undefined ? '' : html`<span class="r-problem">${run.problem}</span>`}</button>${more(repo, run, ui)}</div>${runMenu(repo, run, ui, offers)}`;
 }
 
 function queueRow(row: QueueRow, ui: UiState, now: number): SafeHtml {
@@ -96,7 +96,7 @@ const rowOf = (row: ListRow, ui: UiState, now: number, offers: RunActions | unde
 function repoHeader(group: ListGroup, repo: RailRepo, open: boolean, ui: UiState): SafeHtml {
   return html`<div class="lgrp-row${cur(group.id, ui)}"><button class="lgh${open ? ' open' : ''}"${
     repo.remote === null ? '' : html` title="${repo.remote}"`
-  } data-action="toggle-list-group" data-group="${group.id}" aria-expanded="${open ? 'true' : 'false'}"><span class="caret">›</span><span class="nm">${group.label}</span><span class="c">${group.rows.length}</span></button>${watchButton(repo.name, 'watch', ui)}${
+  } data-action="toggle-list-group" data-group="${group.id}" aria-expanded="${open ? 'true' : 'false'}"><span class="lcaret">›</span><span class="nm">${group.label}</span><span class="c">${group.rows.length}</span></button>${watchButton(repo.name, 'watch', ui)}${
     (repo.watching ?? []).length > 0 ? watchButton(repo.name, 'unwatch', ui) : ''
   }</div>${repo.problem === undefined ? '' : html`<div class="lgrp-p">${repo.problem}</div>`}${
     ui.watchNotice?.repo === repo.name ? html`<div class="lgrp-p">${ui.watchNotice.text}</div>` : ''
@@ -107,7 +107,7 @@ function groupBlock(group: ListGroup, ui: UiState, now: number, offers: RunActio
   const open = !ui.listFolded.includes(group.id);
   const head =
     group.repo === undefined
-      ? html`<button class="lgh${open ? ' open' : ''}${cur(group.id, ui)}" data-action="toggle-list-group" data-group="${group.id}" aria-expanded="${open ? 'true' : 'false'}"><span class="caret">›</span><span class="nm">${group.label}</span><span class="c">${group.rows.length}</span></button>`
+      ? html`<button class="lgh${open ? ' open' : ''}${cur(group.id, ui)}" data-action="toggle-list-group" data-group="${group.id}" aria-expanded="${open ? 'true' : 'false'}"><span class="lcaret">›</span><span class="nm">${group.label}</span><span class="c">${group.rows.length}</span></button>`
       : repoHeader(group, group.repo, open, ui);
   return html`<div class="lgrp">${head}${open ? group.rows.map((row) => rowOf(row, ui, now, offers)) : ''}</div>`;
 }

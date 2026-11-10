@@ -1,7 +1,7 @@
-// The queue view: one watched workflow's queue, opened from its row in the rail and drawn in the centre in place of the
+// The queue view: one watched workflow's queue, opened from its row in the list and drawn in the centre in place of the
 // run, with its polling, a box of items for each state that has any, running first, each folding from its heading, and
 // its recent events from the queue's own stream, folded until the person opens them, and the error that stream sent.
-// The controls ask the watcher and change nothing themselves: the header's poll button, a field to add a ticket (for a
+// The controls ask the watcher and change nothing themselves: the header's poll button and its workflow's Watch or Unwatch, a field to add a ticket (for a
 // workflow that polls tickets), and, at a row's right, ▲ and ▼ on a waiting item to move it before or after its waiting
 // neighbour, and a ⋯ on any item but a running one, which opens its menu: requeue, on a parked item or a failed one
 // whose run has ended, and drop, which needs a second click. One menu is open at a time. The answer to any of them, a refusal or that the watcher has not taken it yet, shows
@@ -12,6 +12,7 @@ import type { QueueItemState } from '../../watch/queue-store';
 import { ago, clock } from './format';
 import { html, type SafeHtml, safeHref } from './html';
 import { type PanelItem, QUEUE_STATES, type QueuePanel, type WatchState } from './index-model';
+import { watchButton } from './list-view';
 import type { UiState } from './ui-state';
 
 /** What the shell has heard on a queue's stream: its last events and its watch state. */
@@ -149,7 +150,13 @@ function recentEvents(stream: QueueStream | undefined, ui: UiState): SafeHtml {
   )}</div>`;
 }
 
-function panelView(panel: QueuePanel, stream: QueueStream | undefined, ui: UiState, now: number): SafeHtml {
+function panelView(
+  panel: QueuePanel,
+  stream: QueueStream | undefined,
+  ui: UiState,
+  now: number,
+  toggle?: 'watch' | 'unwatch',
+): SafeHtml {
   const watch = stream?.watch ?? 'unknown';
   const polling = panel.queue?.polling;
   const paused = polling?.paused;
@@ -163,7 +170,9 @@ function panelView(panel: QueuePanel, stream: QueueStream | undefined, ui: UiSta
     held === undefined
       ? ''
       : html`<span class="warnchip">held${held.until === undefined ? '' : html` until ${clock(held.until, ui.tz)}`}: ${held.reason}</span>`
-  }${ui.queueNotice === undefined ? '' : html`<span class="warnchip">${ui.queueNotice}</span>`}<button class="btn" data-action="poll-queue" data-repo="${panel.repo}" data-workflow="${panel.workflow}" title="poll now">poll</button></div>
+  }${ui.queueNotice === undefined ? '' : html`<span class="warnchip">${ui.queueNotice}</span>`}<button class="btn" data-action="poll-queue" data-repo="${panel.repo}" data-workflow="${panel.workflow}" title="poll now">poll</button>${
+    toggle === undefined ? '' : watchButton(panel.repo, toggle, ui, panel.workflow)
+  }</div>
 ${stream?.polls === 'ticket' ? addForm(panel, ui) : ''}
 ${panel.problem === undefined ? '' : html`<div class="code bad">${panel.problem}</div>`}
 ${stream?.error === undefined ? '' : html`<div class="code bad">${stream.error}</div>`}
@@ -186,7 +195,13 @@ ${recentEvents(stream, ui)}
 }
 
 /** The queue view of `panel`, under a header naming its workflow and repository. */
-export function renderQueue(panel: QueuePanel, stream: QueueStream | undefined, ui: UiState, now: number): SafeHtml {
+export function renderQueue(
+  panel: QueuePanel,
+  stream: QueueStream | undefined,
+  ui: UiState,
+  now: number,
+  toggle?: 'watch' | 'unwatch',
+): SafeHtml {
   return html`<div class="d-h"><span class="d-title">${panel.workflow} queue</span><span class="d-agent">${panel.repo}</span></div>
-${panelView(panel, stream, ui, now)}`;
+${panelView(panel, stream, ui, now, toggle)}`;
 }

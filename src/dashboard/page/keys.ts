@@ -1,6 +1,6 @@
 // What a key does on the page: `j`, `k` and the arrows move the card cursor within the cards, `Enter` opens the card
 // under it, `Escape` shuts, in order, the run menu, the item menu, needs attention, the drawer and the timeline, then the
-// selection, `]` and `[` step to the next and previous card, and `i` and `a` toggle the inspector and needs attention. A
+// selection and, last, the open run or queue, which gives the list the centre, `]` and `[` step to the next and previous card, and `i` and `a` toggle the inspector and needs attention. A
 // key typed in an input does nothing.
 import { actions, closeAttention, step } from './actions';
 import { closeFile, selectCard } from './reads';
@@ -21,7 +21,7 @@ export const keys: Record<string, (store: Store) => void> = {
     if (ui.runMenu !== undefined) {
       delete ui.runMenu;
       delete ui.armed;
-      store.mark('rail');
+      store.mark('list');
     } else if (ui.itemMenu !== undefined) {
       delete ui.itemMenu;
       delete ui.armedDrop;
@@ -29,7 +29,8 @@ export const keys: Record<string, (store: Store) => void> = {
     } else if (ui.attention) closeAttention(store);
     else if (ui.file !== undefined) closeFile(store);
     else if (ui.timeline) actions['close-timeline']?.(store, {});
-    else selectCard(store, undefined);
+    else if (ui.key !== undefined) selectCard(store, undefined);
+    else actions['close-detail']?.(store, {});
   },
   ']': (store) => step(store, 1),
   '[': (store) => step(store, -1),
