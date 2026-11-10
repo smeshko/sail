@@ -9,7 +9,7 @@
 // `run`, the name of an effect the shell supplies, in place of a request. An answer names what the shell is to do
 // (`reopen`, `leave`, `took`, or open a run), and never does it.
 import type { RunActions } from '../actions';
-import type { IndexRepo } from '../files';
+import type { OfferedQueue, RepoOffers } from '../offers';
 import { cost } from './format';
 
 const enc = encodeURIComponent;
@@ -100,10 +100,17 @@ export type Tier = 'instant' | 'undoable' | 'confirmed';
 
 export type Values = Readonly<Record<string, string>>;
 
+/** What a repository of the index offers: its queues' offers and its own. */
+export interface OfferedRepo {
+  name: string;
+  queues: readonly { workflow: string; offers?: OfferedQueue['offers'] | undefined }[];
+  offers?: RepoOffers | undefined;
+}
+
 export interface OfferSource {
   /** What the open run offers. */
   run?: RunActions | undefined;
-  index: readonly IndexRepo[];
+  index: readonly OfferedRepo[];
 }
 
 type Offered = { enabled: boolean; why?: string };

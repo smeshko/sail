@@ -286,3 +286,101 @@ test('an index of no offers is the source an action has none to read', () => {
     offered: false,
   });
 });
+
+const BETA = { repo: 'beta', workflow: 'wf' };
+const queueIndex = [
+  {
+    name: 'beta',
+    runs: [],
+    queues: [
+      {
+        workflow: 'wf',
+        offers: {
+          poll: on,
+          add: on,
+          items: { 'ticket:FAKE-5': { drop: on, move: on }, 'ticket:FAKE-6': { drop: on, requeue: on } },
+        },
+      },
+    ],
+  },
+] as unknown as IndexRepo[];
+
+test('a first click on drop arms it, a click elsewhere disarms it, and a second posts the dedup key and shows the answer for the queue', async () => {
+  const r = rig(undefined, queueIndex);
+  r.actor.act('drop-item', { ...BETA, item: 'ticket:FAKE-5' });
+  expect([r.posts, r.actor.armed('drop-item', { ...BETA, item: 'ticket:FAKE-5' })]).toEqual([[], true]);
+  expect(r.actor.armed('drop-item', { ...BETA, item: 'ticket:FAKE-6' })).toBe(false);
+  r.actor.act('poll-queue', BETA);
+  expect([r.ui.act.pending, r.posts]).toEqual([undefined, [{ path: '/api/repos/beta/queues/wf/poll', body: {} }]]);
+  await r.answer(202, { waiting: 'the watcher has not taken it' });
+  r.actor.act('drop-item', { ...BETA, item: 'ticket:FAKE-5' });
+  r.actor.act('drop-item', { ...BETA, item: 'ticket:FAKE-5' });
+  expect(r.posts[1]).toEqual({ path: '/api/repos/beta/queues/wf/drop', body: { dedupKey: 'ticket:FAKE-5' } });
+  await r.answer(200, { message: 'ticket:FAKE-5 dropped' });
+  expect([r.ui.act.result?.text, r.ui.act.result?.place, r.effects, r.ui.act.pending]).toEqual([
+    'ticket:FAKE-5 dropped',
+    'queue',
+    ['took'],
+    undefined,
+  ]);
+});
+
+test('a move posts before for up and after for down, a requeue posts at once, and a 409 shows its error for the queue', async () => {
+  const r = rig(undefined, queueIndex);
+  r.actor.act('move-item', { ...BETA, key: 'ticket:FAKE-5', dir: 'up', target: 'ticket:FAKE-4' });
+  r.actor.act('move-item', { ...BETA, key: 'ticket:FAKE-5', dir: 'down', target: 'ticket:FAKE-7' });
+  r.actor.act('requeue-item', { ...BETA, item: 'ticket:FAKE-6' });
+  expect(r.posts).toEqual([
+    { path: '/api/repos/beta/queues/wf/move', body: { dedupKey: 'ticket:FAKE-5', before: 'ticket:FAKE-4' } },
+    { path: '/api/repos/beta/queues/wf/move', body: { dedupKey: 'ticket:FAKE-5', after: 'ticket:FAKE-7' } },
+    { path: '/api/repos/beta/queues/wf/requeue', body: { dedupKey: 'ticket:FAKE-6' } },
+  ]);
+  await r.answer(409, { error: 'no watcher is running' });
+  expect(r.ui.act.result).toEqual({
+    id: 'move-item',
+    subject: { kind: 'item', repo: 'beta', workflow: 'wf', item: 'ticket:FAKE-5' },
+    text: 'no watcher is running',
+    place: 'queue',
+  });
+});
+
+test('an add posts the ticket key, with force when ticked, and one that took empties the ticket field and keeps force ticked', async () => {
+  const r = rig(undefined, queueIndex);
+  r.actor.act('add-ticket', BETA);
+  expect(r.posts).toEqual([]);
+  r.fields['add-ticket'] = ' FAKE-9 ';
+  r.fields['add-force'] = 'on';
+  r.actor.act('add-ticket', BETA);
+  expect(r.posts).toEqual([{ path: '/api/repos/beta/queues/wf/add', body: { ticketKey: 'FAKE-9', force: true } }]);
+  await r.answer(200, { message: 'queued' });
+  expect([r.ui.act.drafts['add-ticket'], r.effects]).toEqual([{ force: 'on' }, ['took']]);
+  // The page still holds what was typed: the next keep leaves it alone, the one after reads it.
+  r.actor.keep('queue', { kind: 'workflow', ...BETA });
+  expect(r.ui.act.drafts['add-ticket']).toEqual({ force: 'on' });
+  r.fields['add-ticket'] = 'FAKE-10';
+  r.actor.keep('queue', { kind: 'workflow', ...BETA });
+  expect(r.ui.act.drafts['add-ticket']).toEqual({ ticket: 'FAKE-10', force: 'on' });
+  r.fields['add-force'] = '';
+  r.actor.act('add-ticket', BETA);
+  expect(r.posts[1]).toEqual({ path: '/api/repos/beta/queues/wf/add', body: { ticketKey: 'FAKE-10' } });
+});
+
+test('an add that was only waiting keeps what was typed, since the watcher has not taken it', async () => {
+  const r = rig(undefined, queueIndex);
+  r.fields['add-ticket'] = 'FAKE-9';
+  r.actor.act('add-ticket', BETA);
+  await r.answer(202, { waiting: 'not yet' });
+  expect([r.ui.act.drafts['add-ticket'], r.effects, r.ui.act.result?.text]).toEqual([
+    { ticket: 'FAKE-9' },
+    [],
+    'not yet',
+  ]);
+});
+
+test('an action the queue does not offer for an item is not carried out', () => {
+  const r = rig(undefined, queueIndex);
+  r.actor.act('requeue-item', { ...BETA, item: 'ticket:FAKE-5' });
+  r.actor.act('drop-item', { ...BETA, item: 'ticket:FAKE-9' });
+  r.actor.act('poll-queue', { repo: 'beta', workflow: 'other' });
+  expect([r.posts, r.ui.act.pending]).toEqual([[], undefined]);
+});

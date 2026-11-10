@@ -56,7 +56,6 @@ export interface Store {
   offersFor: string | undefined;
   /** Carries the registry's actions out: `boot()` wires it, with the effects only the shell can perform. */
   actor: Actor;
-  addFieldsOwn: boolean;
   /** The needs-attention identities a person cleared, and the identities of the rows last drawn. */
   cleared: Set<string>;
   drawn: string[];
@@ -113,7 +112,6 @@ export function createStore(host: PageHost): Store {
     offers: undefined,
     offersFor: undefined,
     actor: inertActor(),
-    addFieldsOwn: true,
     cleared,
     drawn: [],
     cursorPending: false,

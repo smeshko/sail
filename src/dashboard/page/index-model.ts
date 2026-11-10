@@ -5,6 +5,8 @@
 import type { QueueEvent } from '../../events/types';
 import type { QueueItem, QueueItemState } from '../../watch/queue-store';
 import type { IndexRepo, RunItem } from '../files';
+import type { QueueOffers } from '../offers';
+import type { OfferSource } from './action-registry';
 
 /** One run as the rail lists it. */
 export interface RailRun {
@@ -146,8 +148,8 @@ export function railRepos(index: readonly IndexRepo[], now: number): RailRepo[] 
 /** The states in the order the queue view lists them: what is running now comes first. */
 export const QUEUE_STATES: readonly QueueItemState[] = ['dispatched', 'queued', 'failed', 'parked', 'done'];
 
-/** A queue item, whether its run is one the rail lists so the queue view can open it, and whether that run has ended. */
-export type PanelItem = QueueItem & { runListed: boolean; runEnded: boolean };
+/** A queue item, and whether its run is one the rail lists so the queue view can open it. */
+export type PanelItem = QueueItem & { runListed: boolean };
 
 /** One watched workflow's queue in one repository. */
 export interface QueuePanel {
@@ -157,7 +159,14 @@ export interface QueuePanel {
   problem?: string;
   counts: Record<QueueItemState, number>;
   items: PanelItem[];
+  /** What the queue offers: its own actions and each item's. */
+  offers?: QueueOffers;
 }
+
+/** The offers of `panel`, as a source the registry reads them from. */
+export const panelSource = (panel: QueuePanel): OfferSource => ({
+  index: [{ name: panel.repo, queues: [{ workflow: panel.workflow, offers: panel.offers }] }],
+});
 
 export type QueuePanelFile = Omit<NonNullable<IndexRepo['queues'][number]['queue']>, 'items'>;
 
@@ -166,16 +175,12 @@ export function queuePanels(index: readonly IndexRepo[]): QueuePanel[] {
   return byName(index).flatMap((repo) =>
     repo.queues.map((view) => {
       const listed = new Set(repo.runs.map((run) => run.runId));
-      const live = new Set(
-        repo.runs.filter((run) => ['running', 'suspended'].includes(statusOf(run))).map((run) => run.runId),
-      );
       const items = QUEUE_STATES.flatMap((state) =>
         (view.queue?.items ?? [])
           .filter((item) => item.state === state)
           .map((item) => ({
             ...item,
             runListed: item.runId !== undefined && listed.has(item.runId),
-            runEnded: item.runId === undefined || !live.has(item.runId),
           })),
       );
       const counts = Object.fromEntries(
@@ -187,6 +192,7 @@ export function queuePanels(index: readonly IndexRepo[]): QueuePanel[] {
         panel.queue = file;
       }
       if (view.problem !== undefined) panel.problem = view.problem;
+      if (view.offers !== undefined) panel.offers = view.offers;
       return panel;
     }),
   );

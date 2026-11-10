@@ -115,31 +115,19 @@ test("queuePanels gives beta's queue with its counts and its items by state, and
     ['ticket:FAKE-6', 'parked', false],
     ['ticket:FAKE-4', 'done', false],
   ]);
-  expect(panel?.items.map((item) => [item.dedupKey, item.runEnded])).toEqual([
-    ['ticket:FAKE-3', false],
-    ['ticket:FAKE-5', true],
-    ['ticket:FAKE-6', true],
-    ['ticket:FAKE-4', true],
-  ]);
   rmSync(join(m.beta.clone, '.sail-runs', 'queue'), { recursive: true });
   expect(queuePanels(index(m.registryDir))).toEqual([]);
 });
 
-test('an item has runEnded when it has no run, its run is not listed, or its run is listed and neither running nor suspended', () => {
-  const repos = index(m.registryDir);
-  const beta = repos.find((repo) => repo.name === 'beta');
-  const dispatched = beta?.queues[0]?.queue?.items.find((item) => item.state === 'dispatched');
-  const run = beta?.runs.find((each) => each.runId === dispatched?.runId);
-  if (beta === undefined || run === undefined) throw new Error('beta has no dispatched run');
-  const ended = (status: string) => {
-    const changed = { ...run, status: { ...(run.status as object), status } } as typeof run;
-    const panel = queuePanels([{ ...beta, runs: [changed] }])[0];
-    return panel?.items.find((item) => item.state === 'dispatched')?.runEnded;
-  };
-  expect(['running', 'suspended', 'completed', 'failed'].map(ended)).toEqual([false, false, true, true]);
-  expect(queuePanels([{ ...beta, runs: [] }])[0]?.items.find((item) => item.state === 'dispatched')?.runEnded).toBe(
-    true,
+test("a panel carries its queue's offers, each item's offers keyed by its dedup key", () => {
+  const beta = index(m.registryDir).find((repo) => repo.name === 'beta');
+  const panel = queuePanels(index(m.registryDir))[0];
+  expect(panel?.offers).toEqual(beta?.queues[0]?.offers);
+  expect(Object.keys(panel?.offers?.items ?? {}).sort()).toEqual(
+    (panel?.items ?? []).map((item) => item.dedupKey).sort(),
   );
+  const bare = queuePanels([{ ...beta, queues: [{ workflow: 'ticket-to-pr' }] } as typeof beta & object])[0];
+  expect(bare?.offers).toBeUndefined();
 });
 
 test('pollKind is the kind of the last queue:polled event, and undefined with none', () => {

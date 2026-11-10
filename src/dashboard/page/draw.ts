@@ -8,7 +8,7 @@ import { REGIONS, type Region } from './host';
 import { html } from './html';
 import { railRepos, statusOf } from './index-model';
 import { renderInspector } from './inspector-view';
-import { renderQueue } from './queue-view';
+import { hasItemActions, offeredDrop, renderQueue } from './queue-view';
 import { renderRail } from './rail-view';
 import { renderRun, renderStatus } from './run-view';
 import { listed, opened, openQueue, type Store, selected, summaryOf } from './store';
@@ -36,17 +36,22 @@ export function regions(store: Store): Record<Region, () => string> {
       const panel = openQueue(store);
       if (panel !== undefined) {
         // What was typed in the add field survives the draw, but not an add that took.
-        if (store.addFieldsOwn) {
-          ui.addTicket = host.value('add-ticket') ?? ui.addTicket;
-          const forced = host.value('add-force');
-          if (forced !== undefined) ui.addForce = forced !== '';
+        store.actor.keep('queue', { kind: 'workflow', repo: panel.repo, workflow: panel.workflow });
+        // An armed drop whose item can't be dropped now (it runs, or is gone) asks again once it can, and its menu shuts.
+        const armed = ui.act.pending;
+        if (armed?.id === 'drop-item' && armed.subject.kind === 'item') {
+          const { repo, workflow, item } = armed.subject;
+          const target = panel.items.find((each) => each.dedupKey === item);
+          if (
+            repo === panel.repo &&
+            workflow === panel.workflow &&
+            (target === undefined || !offeredDrop(panel, target))
+          ) {
+            store.actor.disarm();
+          }
         }
-        store.addFieldsOwn = true;
-        // An armed drop whose item is running or gone asks again once the item can be dropped, and its menu shuts.
-        const armedItem = panel.items.find((item) => item.dedupKey === ui.armedDrop);
-        if (armedItem === undefined || armedItem.state === 'dispatched') delete ui.armedDrop;
         const menuItem = panel.items.find((item) => item.dedupKey === ui.itemMenu);
-        if (menuItem === undefined || menuItem.state === 'dispatched') delete ui.itemMenu;
+        if (menuItem === undefined || !hasItemActions(panel, menuItem)) delete ui.itemMenu;
         return renderQueue(panel, store.queues.get(ui.queue ?? '')?.stream, ui, host.now()).value;
       }
       if (store.run === undefined) return html`<div class="qempty">no run selected</div>`.value;

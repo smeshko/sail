@@ -1379,7 +1379,7 @@ test("a click on a waiting row's down button posts the move to the queue's move 
   expect({
     posts: host.posts,
     refused: refused?.includes('<span class="warnchip">no watcher is running for &#39;beta&#39;</span>'),
-    cleared: [page.ui.queueNotice, host.regions.main?.includes('no watcher is running')],
+    cleared: [page.ui.act.result?.text, host.regions.main?.includes('no watcher is running')],
   }).toEqual({
     posts: [
       {
@@ -1415,6 +1415,12 @@ const buttons = (region: string | undefined) =>
   ]);
 
 /** Boots the page on `run` of `repo`, its events replayed, its actions read and its ⋯ menu open, and settled. */
+/** The item whose drop a first click has armed. */
+const armedDrop = () => {
+  const pending = page?.ui.act.pending;
+  return pending?.id === 'drop-item' && pending.subject.kind === 'item' ? pending.subject.item : undefined;
+};
+
 async function openOffering(repo: string, runId: string, dir: string) {
   page = boot(host);
   host.push(host.open('index')[0], indexMessage());
@@ -1668,7 +1674,7 @@ test('a poll click posts an empty body to the queue poll route; a 200 shows its 
     host.click({ action: 'poll-queue', ...BETA });
     await settle();
     host.advance(100);
-    notices.push(page?.ui.queueNotice);
+    notices.push(page?.ui.act.result?.text);
   }
   expect(host.posts).toEqual(Array(4).fill({ path: `${QUEUE_PATH}/poll`, body: {} }));
   expect(notices).toEqual([
@@ -1700,7 +1706,7 @@ test('the add form shows once the queue stream has polled tickets; add posts the
   await settle();
   host.advance(100);
   expect(host.posts).toEqual([{ path: `${QUEUE_PATH}/add`, body: { ticketKey: 'FAKE-9', force: true } }]);
-  expect(page?.ui.queueNotice).toBe('sail queue: queued ticket:FAKE-9 Nine');
+  expect(page?.ui.act.result?.text).toBe('sail queue: queued ticket:FAKE-9 Nine');
   expect(host.regions.main).toContain('value=""');
   host.fields['add-force'] = '';
   host.click({ action: 'add-ticket', ...BETA });
@@ -1714,24 +1720,20 @@ test('the first click on drop arms it and posts nothing, the second posts the de
   host.click({ action: 'item-menu', item: row.item });
   host.click({ action: 'drop-item', ...row });
   host.advance(100);
-  expect([host.posts, page?.ui.armedDrop, host.regions.main?.includes('confirm drop')]).toEqual([
-    [],
-    'ticket:FAKE-6',
-    true,
-  ]);
+  expect([host.posts, armedDrop(), host.regions.main?.includes('confirm drop')]).toEqual([[], 'ticket:FAKE-6', true]);
   host.click({ action: 'toggle-queue-events' });
   host.advance(100);
-  expect([host.posts, page?.ui.armedDrop, host.regions.main?.includes('confirm drop')]).toEqual([[], undefined, false]);
+  expect([host.posts, armedDrop(), host.regions.main?.includes('confirm drop')]).toEqual([[], undefined, false]);
   host.click({ action: 'item-menu', item: row.item });
   host.click({ action: 'drop-item', ...row });
   host.click({ action: 'item-menu', item: 'ticket:FAKE-5' });
   host.click({ action: 'drop-item', ...BETA, item: 'ticket:FAKE-5' });
-  expect([host.posts, page?.ui.armedDrop, page?.ui.itemMenu]).toEqual([[], 'ticket:FAKE-5', 'ticket:FAKE-5']);
+  expect([host.posts, armedDrop(), page?.ui.itemMenu]).toEqual([[], 'ticket:FAKE-5', 'ticket:FAKE-5']);
   host.postAnswer = { status: 200, body: JSON.stringify({ message: 'sail queue: ticket:FAKE-5 dropped' }) };
   host.click({ action: 'drop-item', ...BETA, item: 'ticket:FAKE-5' });
   await settle();
   host.advance(100);
-  expect([host.posts, page?.ui.armedDrop, page?.ui.itemMenu, page?.ui.queueNotice]).toEqual([
+  expect([host.posts, armedDrop(), page?.ui.itemMenu, page?.ui.act.result?.text]).toEqual([
     [{ path: `${QUEUE_PATH}/drop`, body: { dedupKey: 'ticket:FAKE-5' } }],
     undefined,
     undefined,
@@ -1757,7 +1759,7 @@ test("an item's ⋯ opens its menu, one at a time; its ⋯ again, Escape, anothe
   host.click({ action: 'drop-item', ...BETA, item: 'ticket:FAKE-6' });
   host.press('Escape');
   host.advance(100);
-  expect([...menus(), page?.ui.armedDrop, page?.ui.queue]).toEqual([undefined, 0, undefined, 'beta/ticket-to-pr']);
+  expect([...menus(), armedDrop(), page?.ui.queue]).toEqual([undefined, 0, undefined, 'beta/ticket-to-pr']);
   host.click({ action: 'item-menu', item: 'ticket:FAKE-6' });
   host.click({ action: 'toggle-queue-events' });
   host.advance(100);
@@ -1770,6 +1772,8 @@ test("an item's ⋯ opens its menu, one at a time; its ⋯ again, Escape, anothe
         ? view
         : {
             ...view,
+            // The server gives an item that runs no drop and no requeue.
+            offers: view.offers && { ...view.offers, items: { ...view.offers.items, 'ticket:FAKE-6': {} } },
             queue: {
               ...view.queue,
               items: view.queue.items.map((item) =>
@@ -1797,6 +1801,11 @@ test('an armed drop is disarmed when its item is drawn dispatched, so it asks ag
           ? view
           : {
               ...view,
+              offers:
+                view.offers &&
+                (state === 'dispatched'
+                  ? { ...view.offers, items: { ...view.offers.items, [row.item]: {} } }
+                  : view.offers),
               queue: {
                 ...view.queue,
                 items: view.queue.items.map((item) =>
@@ -1812,7 +1821,7 @@ test('an armed drop is disarmed when its item is drawn dispatched, so it asks ag
   host.advance(100);
   host.push(host.open('index')[0], withState('parked'));
   host.advance(100);
-  expect([page?.ui.armedDrop, host.regions.main?.includes('confirm drop')]).toEqual([undefined, false]);
+  expect([armedDrop(), host.regions.main?.includes('confirm drop')]).toEqual([undefined, false]);
   host.click({ action: 'drop-item', ...row });
   expect(host.posts).toEqual([]);
 });
@@ -1826,7 +1835,7 @@ test('a requeue click posts at once with the dedup key, and a 409 shows the CLI 
   host.click({ action: 'requeue-item', ...BETA, item: 'ticket:FAKE-6' });
   await settle();
   host.advance(100);
-  expect([host.posts, page?.ui.queueNotice]).toEqual([
+  expect([host.posts, page?.ui.act.result?.text]).toEqual([
     [{ path: `${QUEUE_PATH}/requeue`, body: { dedupKey: 'ticket:FAKE-6' } }],
     'ticket:FAKE-6 is queued: only a parked or failed item is requeued',
   ]);

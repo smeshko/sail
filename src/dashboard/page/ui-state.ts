@@ -59,19 +59,12 @@ export interface UiState {
   folded: string[];
   /** Whether the queue view shows its recent events. */
   queueEvents: boolean;
-  /** The answer to the last queue change that wasn't a plain success, shown in the queue view until the next. */
-  queueNotice?: string;
   /** The item whose ⋯ menu is open, by dedup key. */
   itemMenu?: string;
-  /** The item whose drop a first click has armed, by dedup key, which a second click drops. */
-  armedDrop?: string;
   /** The unwatch a first click has armed, as `<repo>` for every workflow or `<repo>/<workflow>`, which a second click makes. */
   armedWatch?: string;
   /** The answer to the last change of a repository's watch set, shown under its header until the next. */
   watchNotice?: { repo: string; text: string };
-  /** What was typed in the queue view's add field, and whether Force is ticked, kept across a draw. */
-  addTicket?: string | undefined;
-  addForce?: boolean;
   /** The open run whose ⋯ menu is open in the rail, by run id. */
   runMenu?: string;
   theme: Theme;
