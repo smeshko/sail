@@ -9,7 +9,7 @@
 // when its hold ends and why, and its hold's events name it. An item that waits on its ticket's prerequisites names them.
 import type { QueueEvent } from '../../events/types';
 import type { QueueItemState } from '../../watch/queue-store';
-import { actionOf, type Subject } from './action-registry';
+import { ACTIONS, actionOf, type OfferSource, type Subject } from './action-registry';
 import { actionControl, resultOf } from './action-view';
 import { ago, clock } from './format';
 import { html, type SafeHtml, safeHref } from './html';
@@ -85,9 +85,18 @@ const offered = (panel: QueuePanel, item: PanelItem, id: string) =>
 /** Whether the queue offers `item` a drop. */
 export const offeredDrop = (panel: QueuePanel, item: PanelItem) => offered(panel, item, 'drop-item');
 
+/** The registry's actions a row's ⋯ menu holds, in order: those done to an item that the row supplies no value for. */
+const menuActions = (subject: Subject, source: OfferSource) =>
+  ACTIONS.filter(
+    (def) => def.appliesTo.includes('item') && def.params(subject, source).every((param) => param.given === undefined),
+  );
+
 /** Whether the queue offers the item anything its ⋯ menu holds: requeue or drop. */
-export const hasItemActions = (panel: QueuePanel, item: PanelItem) =>
-  offered(panel, item, 'requeue-item') || offered(panel, item, 'drop-item');
+export const hasItemActions = (panel: QueuePanel, item: PanelItem) => {
+  const subject = itemSubject(panel, item);
+  const source = panelSource(panel);
+  return menuActions(subject, source).some((def) => def.available(subject, source).offered);
+};
 
 /**
  * A row's ⋯ and, once opened, its menu, drawn from the registry by what the queue offers: requeue on a parked item, or a
@@ -101,9 +110,7 @@ function itemMenu(panel: QueuePanel, item: PanelItem, ui: UiState): SafeHtml | '
   if (!open) return html`<span class="qmore">${toggle}</span>`;
   const subject = itemSubject(panel, item);
   const source = panelSource(panel);
-  const buttons = ['requeue-item', 'drop-item'].map((id) => {
-    const def = actionOf(id);
-    if (def === undefined) return '';
+  const buttons = menuActions(subject, source).map((def) => {
     const title = `${def.label(subject)} ${item.dedupKey}`;
     return actionControl(def, subject, ui.act, source, { data: true, title });
   });

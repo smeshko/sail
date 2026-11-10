@@ -253,12 +253,11 @@ test('an action added as one entry is drawn, sent and answered', async () => {
   const poke: ActionDef = {
     id: 'poke-run',
     label: () => 'poke',
-    word: 'poke',
     appliesTo: ['run'],
     tier: 'instant',
     place: 'run',
     params: () => [{ name: 'note', dom: 'note', label: 'note', type: 'text' }],
-    available: () => ({ offered: true, enabled: true, offer: on }),
+    available: () => ({ offered: true, enabled: true }),
     request: (subject, values) =>
       subject.kind === 'run'
         ? { path: `/api/repos/${subject.repo}/runs/${subject.runId}/poke`, body: { note: values.note } }

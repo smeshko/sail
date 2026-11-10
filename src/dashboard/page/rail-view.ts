@@ -11,7 +11,7 @@
 // Stop and Clean.
 import type { RunActions } from '../actions';
 import type { RepoOffers } from '../offers';
-import { actionOf, type OfferSource, type Subject } from './action-registry';
+import { ACTIONS, type OfferSource, type Subject } from './action-registry';
 import { actionControl, resultOf } from './action-view';
 import { ago, cost, duration } from './format';
 import { html, type SafeHtml } from './html';
@@ -170,10 +170,9 @@ const watchSource = (repo: string, offers: RepoOffers | undefined): OfferSource 
 function watchButtons(repo: string, offers: RepoOffers | undefined, ui: UiState, workflow?: string): SafeHtml {
   const subject: Subject = workflow === undefined ? { kind: 'repo', repo } : { kind: 'workflow', repo, workflow };
   const source = watchSource(repo, offers);
-  return html`${['watch', 'unwatch'].map((id) => {
-    const def = actionOf(id);
-    return def === undefined ? '' : actionControl(def, subject, ui.act, source, { class: 'wf-act', data: true });
-  })}`;
+  return html`${ACTIONS.filter((def) => def.place === 'repo' && def.appliesTo.includes(subject.kind)).map((def) =>
+    actionControl(def, subject, ui.act, source, { class: 'wf-act', data: true }),
+  )}`;
 }
 
 function workflowHeader(

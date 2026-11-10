@@ -5,7 +5,7 @@
 // are drawn here too, by `runControls`, but shown in the rail's ⋯ menu for the open run.
 import type { Summary } from '../../events/summary';
 import type { RunActions } from '../actions';
-import { actionOf, type Subject } from './action-registry';
+import { ACTIONS, type Subject } from './action-registry';
 import { actionControl, resultOf } from './action-view';
 import { runCommands } from './commands';
 import { cost, duration, percent, tokens } from './format';
@@ -118,8 +118,8 @@ function totals(model: RunModel, summary: Summary | null | undefined, now: numbe
 </div>`;
 }
 
-/** The run actions the rail's ⋯ menu draws, in order. */
-const RUN_ACTIONS = ['resume-run', 'restart-run', 'stop-run', 'clean-run'];
+/** The run actions the rail's ⋯ menu draws, in the registry's order: every action done to a run. */
+const RUN_ACTIONS = ACTIONS.filter((def) => def.appliesTo.includes('run'));
 
 /**
  * What the run offers (Resume, Restart, Stop, Clean), whichever it does, with the notice of the last one: the body of
@@ -138,10 +138,9 @@ export function runControls(actions: RunActions | undefined, ui: UiState): SafeH
   const subject: Subject = { kind: 'run', repo: ui.repo ?? '', runId: ui.runId ?? '' };
   const source = { run: actions, index: [] };
   const notice = resultOf(ui.act, 'run');
-  return html`<div class="acts">${RUN_ACTIONS.map((id) => {
-    const def = actionOf(id);
-    return def === undefined ? '' : actionControl(def, subject, ui.act, source, { honourDisabled: true, wrap: true });
-  })}${notice === undefined ? '' : html`<span class="warnchip">${notice}</span>`}</div>`;
+  return html`<div class="acts">${RUN_ACTIONS.map((def) =>
+    actionControl(def, subject, ui.act, source, { honourDisabled: true, wrap: true }),
+  )}${notice === undefined ? '' : html`<span class="warnchip">${notice}</span>`}</div>`;
 }
 
 /** The run view. `now` is ms since the epoch, for the running cards' durations. */

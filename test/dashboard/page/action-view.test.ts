@@ -13,7 +13,6 @@ const idle: ActState = { drafts: {}, results: {} };
 const made = (state: 'on' | 'off' | 'absent'): ActionDef => ({
   id: 'poke',
   label: () => 'poke',
-  word: 'poke',
   appliesTo: ['run'],
   tier: 'confirmed',
   place: 'run',
@@ -28,7 +27,6 @@ const made = (state: 'on' | 'off' | 'absent'): ActionDef => ({
           offered: true,
           enabled: state === 'on',
           ...(state === 'off' ? { why: 'not now' } : {}),
-          offer: { enabled: state === 'on' },
         },
   confirm: (_, values) => `confirm poke ${values.note ?? ''}`,
 });

@@ -115,19 +115,14 @@ export interface OfferSource {
 
 type Offered = { enabled: boolean; why?: string };
 
-export type Availability =
-  | { offered: false; why?: string }
-  | { offered: true; enabled: boolean; why?: string; offer: Offered };
+export type Availability = { offered: false; why?: string } | { offered: true; enabled: boolean; why?: string };
 
 export type ActResult = { text?: string; place: 'run' | 'queue' | 'repo' | 'rail'; effect?: Effect; keepMenu?: true };
 export type Effect = 'reopen' | 'leave' | 'took' | { open: string };
-export type ActionResult = ActResult;
 
 export interface ActionDef {
   id: string;
   label(subject: Subject): string;
-  /** The noun a refusal names: "the <word> was refused (409)". */
-  word: string;
   appliesTo: readonly SubjectKind[];
   tier: Tier;
   /** The key that does it: declared, and no entry sets one yet. */
@@ -183,7 +178,6 @@ function availability(offer: (Offered & { why?: string | undefined }) | undefine
     offered: true,
     enabled: offer.enabled,
     ...(offer.why === undefined ? {} : { why: offer.why }),
-    offer,
   };
 }
 
@@ -277,7 +271,6 @@ function queueItemAction(id: string, op: 'requeue' | 'drop', tier: Tier, path: s
   return {
     id,
     label: () => op,
-    word: op,
     appliesTo: ['item'],
     tier,
     place: 'queue',
@@ -293,7 +286,6 @@ function watchAction(op: 'watch' | 'unwatch', path: string): ActionDef {
   return {
     id: op,
     label: (subject) => (subject.kind === 'repo' ? `${op} all` : op),
-    word: op,
     appliesTo: ['workflow', 'repo'],
     tier: op === 'unwatch' ? 'confirmed' : 'instant',
     place: 'repo',
@@ -329,7 +321,6 @@ export const ACTIONS: readonly ActionDef[] = [
   {
     id: 'resume-run',
     label: () => 'resume',
-    word: 'resume',
     appliesTo: ['run'],
     tier: 'confirmed',
     place: 'run',
@@ -372,7 +363,6 @@ export const ACTIONS: readonly ActionDef[] = [
   {
     id: 'restart-run',
     label: () => 'restart',
-    word: 'restart',
     appliesTo: ['run'],
     tier: 'confirmed',
     place: 'run',
@@ -414,7 +404,6 @@ export const ACTIONS: readonly ActionDef[] = [
   {
     id: 'stop-run',
     label: () => 'stop',
-    word: 'stop',
     appliesTo: ['run'],
     tier: 'confirmed',
     place: 'run',
@@ -434,7 +423,6 @@ export const ACTIONS: readonly ActionDef[] = [
   {
     id: 'clean-run',
     label: () => 'clean',
-    word: 'clean',
     appliesTo: ['run'],
     tier: 'confirmed',
     place: 'run',
@@ -455,12 +443,11 @@ export const ACTIONS: readonly ActionDef[] = [
       return { place: 'rail', effect: 'leave', ...(text === undefined ? {} : { text }) };
     },
   },
-  queueItemAction('drop-item', 'drop', 'confirmed', '/drop'),
   queueItemAction('requeue-item', 'requeue', 'instant', '/requeue'),
+  queueItemAction('drop-item', 'drop', 'confirmed', '/drop'),
   {
     id: 'move-item',
     label: () => 'move',
-    word: 'move',
     appliesTo: ['item'],
     tier: 'instant',
     place: 'queue',
@@ -481,7 +468,6 @@ export const ACTIONS: readonly ActionDef[] = [
   {
     id: 'poll-queue',
     label: () => 'poll',
-    word: 'poll',
     appliesTo: ['workflow'],
     tier: 'instant',
     place: 'queue',
@@ -493,7 +479,6 @@ export const ACTIONS: readonly ActionDef[] = [
   {
     id: 'add-ticket',
     label: () => 'add',
-    word: 'add',
     appliesTo: ['workflow'],
     tier: 'instant',
     place: 'queue',
@@ -517,12 +502,11 @@ export const ACTIONS: readonly ActionDef[] = [
   {
     id: 'clear-attention',
     label: () => 'all clear',
-    word: 'all clear',
     appliesTo: ['none'],
     tier: 'instant',
     place: 'rail',
     params: () => [],
-    available: () => ({ offered: true, enabled: true, offer: { enabled: true } }),
+    available: () => ({ offered: true, enabled: true }),
     run: 'clear-attention',
   },
 ];

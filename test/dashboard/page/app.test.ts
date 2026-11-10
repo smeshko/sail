@@ -1414,13 +1414,13 @@ const buttons = (region: string | undefined) =>
     disabled === undefined ? '' : 'disabled',
   ]);
 
-/** Boots the page on `run` of `repo`, its events replayed, its actions read and its ⋯ menu open, and settled. */
 /** The item whose drop a first click has armed. */
 const armedDrop = () => {
   const pending = page?.ui.act.pending;
   return pending?.id === 'drop-item' && pending.subject.kind === 'item' ? pending.subject.item : undefined;
 };
 
+/** Boots the page on `run` of `repo`, its events replayed, its actions read and its ⋯ menu open, and settled. */
 async function openOffering(repo: string, runId: string, dir: string) {
   page = boot(host);
   host.push(host.open('index')[0], indexMessage());
