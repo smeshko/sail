@@ -14,6 +14,8 @@ Write `$STAGE_OUT/pr-body.md`, never a path in the repository, with these sectio
 - **Follow-ups**: each follow-up you submit, one bullet each, or leave the section out when there is none. Each is
   filed as a ticket once the pull request is open.
 
+Write no Verification section: the workflow adds it itself, before the `Closes` line, when a task changed no file.
+
 End the body with `Closes <ticket key>` on its own line. The repository is public: name only sail and its `ADW-<n>`
 issues, never another project or tracker.
 
