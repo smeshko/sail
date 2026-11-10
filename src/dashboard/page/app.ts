@@ -1,8 +1,18 @@
-import { actions, closeAttention, dispatch, step } from './actions';
+// The page's shell. `boot(host)` makes the store and wires the modules to the host, and returns the page:
+//
+// - `store.ts` holds what is on screen, and `saved.ts` what the browser keeps between visits.
+// - `draw.ts` draws the regions marked dirty, coalesced into one flush at most every 100 ms, and draws the running
+//   times again each second while anything runs.
+// - `streams.ts` keeps the index, run and queue sockets, and `reads.ts` reads over REST what the selection shows.
+// - `actions.ts` does what a click asks, its POSTs in `requests.ts`; `keys.ts` does what a key asks.
+//
+// The rules each module follows are in its own header.
+import { actions, dispatch } from './actions';
 import { startDraw } from './draw';
 import type { PageHost } from './host';
 import { REGIONS } from './host';
-import { closeFile, selectCard, stopReads } from './reads';
+import { onKey } from './keys';
+import { stopReads } from './reads';
 import { createStore } from './store';
 import { openIndex, stopStreams } from './streams';
 import type { UiState } from './ui-state';
@@ -19,56 +29,16 @@ export interface Page {
   readonly ui: UiState;
 }
 
-/** The keys that move the card cursor, and by how much. */
-const MOVES: Record<string, number> = { j: 1, ArrowDown: 1, ArrowRight: 1, k: -1, ArrowUp: -1, ArrowLeft: -1 };
-
 export function boot(host: PageHost): Page {
   const store = createStore(host);
-  const ui = store.ui;
-
   startDraw(store);
-
-  const keys: Record<string, () => void> = {
-    Enter: () => {
-      const card = store.run?.model.cards[ui.cursor];
-      if (card !== undefined) selectCard(store, card.key, undefined, true);
-    },
-    // Needs attention and the drawer shut first; then back to the cards from a timeline, keeping the selection; from
-    // the cards, no selection.
-    Escape: () => {
-      if (ui.runMenu !== undefined) {
-        delete ui.runMenu;
-        delete ui.armed;
-        store.mark('rail');
-      } else if (ui.itemMenu !== undefined) {
-        delete ui.itemMenu;
-        delete ui.armedDrop;
-        store.mark('main');
-      } else if (ui.attention) closeAttention(store);
-      else if (ui.file !== undefined) closeFile(store);
-      else if (ui.timeline) actions['close-timeline']?.(store, {});
-      else selectCard(store, undefined);
-    },
-    ']': () => step(store, 1),
-    '[': () => step(store, -1),
-    i: () => actions['toggle-inspector']?.(store, {}),
-    a: () => actions['toggle-attention']?.(store, {}),
-  };
-
   host.onAction((action, data) => dispatch(store, action, data));
-  host.onKey((key, inInput) => {
-    if (inInput) return;
-    const by = MOVES[key];
-    if (by === undefined) return keys[key]?.();
-    const last = (store.run?.model.cards.length ?? 0) - 1;
-    ui.cursor = Math.max(0, Math.min(last, ui.cursor + by));
-    store.mark('main');
-  });
+  host.onKey((key, inInput) => onKey(store, key, inInput));
   openIndex(store, (asked) => actions.open?.(store, asked));
   store.mark(...REGIONS);
 
   return {
-    ui,
+    ui: store.ui,
     stop() {
       store.stopped = true;
       stopStreams(store);

@@ -5,6 +5,7 @@ import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { actions } from '../../../src/dashboard/page/actions';
+import * as app from '../../../src/dashboard/page/app';
 import type { PageHost } from '../../../src/dashboard/page/host';
 import { CLEARED_KEY, FILTER_KEY, RAIL_KEY, THEME_KEY } from '../../../src/dashboard/page/saved';
 import { createStore, FLUSH_MS } from '../../../src/dashboard/page/store';
@@ -16,7 +17,17 @@ const source = (module: string) => readFileSync(join(PAGE, module), 'utf8');
 const lines = (text: string) => text.replace(/\n$/, '').split('\n').length;
 
 /** The modules split from `app.ts` so far. */
-const SPLIT = ['store.ts', 'saved.ts', 'draw.ts', 'reads.ts', 'streams.ts', 'actions.ts', 'requests.ts'];
+const SPLIT = [
+  'store.ts',
+  'saved.ts',
+  'draw.ts',
+  'reads.ts',
+  'streams.ts',
+  'actions.ts',
+  'requests.ts',
+  'keys.ts',
+  'app.ts',
+];
 
 test('the line counter counts a made-up source, and it is over the limit', () => {
   expect(lines('a\nb\nc\n')).toBe(3);
@@ -156,6 +167,23 @@ test('the actions are exactly the data-actions the page had', () => {
       'toggle-theme',
       'toggle-follow',
       'copy',
+    ].sort(),
+  );
+});
+
+test('app.ts exports boot and the nine constants, and nothing else at runtime', () => {
+  expect(Object.keys(app).sort()).toEqual(
+    [
+      'boot',
+      'THEME_KEY',
+      'RAIL_KEY',
+      'FILTER_KEY',
+      'CLEARED_KEY',
+      'RECONNECT_MS',
+      'FLUSH_MS',
+      'LOG_REFRESH_MS',
+      'TICK_MS',
+      'RECENT_EVENTS',
     ].sort(),
   );
 });
