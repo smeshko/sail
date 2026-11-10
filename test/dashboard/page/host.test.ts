@@ -15,6 +15,7 @@ import { renderTimeline } from '../../../src/dashboard/page/timeline-view';
 import { initialUi } from '../../../src/dashboard/page/ui-state';
 import { readEvents } from '../../../src/events/consumers/ndjson';
 import { GOLDEN_RUN, QUEUE_WORKFLOW, queueDirOf, runningCopy, seedFixtures } from '../../helpers/dashboard';
+import { markupWindow } from '../../helpers/dashboard-dom';
 
 interface FakeSocket {
   url: string;
@@ -551,33 +552,36 @@ test('post sends the method, the client header, a JSON content type and the JSON
   expect(await browserHost(fakeWindow({ fetch: 'fails' }).win).post('/x', {})).toEqual({ status: 0, body: '' });
 });
 
-test('value() reads the named field of the main region, and answers undefined for a field it lacks and for no main region', () => {
+test('value() reads a named field from whichever region holds it, the rail before the main region, and answers undefined for a name no region holds', () => {
+  const { win, field } = markupWindow();
+  const host = browserHost(win);
+  expect(host.value('raise')).toBeUndefined();
+  host.render('rail', '<input class="num" type="number" name="raise" value="2.5">');
+  host.render('main', '<input class="txt" type="text" name="add-ticket" value="FAKE-9">');
+  expect([host.value('raise'), host.value('add-ticket'), host.value('stage')]).toEqual(['2.5', 'FAKE-9', undefined]);
+  host.render('main', '<input class="num" type="number" name="raise" value="9">');
+  expect(host.value('raise')).toBe('2.5');
+  host.render(
+    'rail',
+    '<select name="stage"><option value="spec">spec</option><option value="implement" title="a selected b" selected>implement</option></select>',
+  );
+  expect(host.value('stage')).toBe('implement');
+  expect(field('rail', 'stage').value).toBe('implement');
+  expect(() => field('rail', 'nothing')).toThrow('no field "nothing" in #rail');
   const fake = fakeWindow();
-  const host = browserHost(fake.win);
-  expect(host.value('raise')).toBeUndefined();
-  const asked: string[] = [];
-  fake.elements.main = element({
-    querySelector: (selectors: string) => {
-      asked.push(selectors);
-      return selectors === '[name="raise"]' ? element({ value: '2.5' }) : null;
-    },
-  });
-  expect([host.value('raise'), host.value('stage')]).toEqual(['2.5', undefined]);
-  expect(asked).toEqual(['[name="raise"]', '[name="stage"]']);
   fake.elements.main = element();
-  expect(host.value('raise')).toBeUndefined();
+  expect(browserHost(fake.win).value('raise')).toBeUndefined();
 });
 
 test("value() of a checkbox is 'on' while it is ticked and empty while it is not, whatever its value attribute says", () => {
-  const fake = fakeWindow();
-  const host = browserHost(fake.win);
-  fake.elements.main = element({
-    querySelector: (selectors: string) =>
-      selectors === '[name="add-force"]'
-        ? element({ type: 'checkbox', value: 'on', checked: false })
-        : element({ type: 'checkbox', checked: true }),
-  });
-  expect([host.value('add-force'), host.value('other')]).toEqual(['', 'on']);
+  const { win, field } = markupWindow();
+  const host = browserHost(win);
+  host.render('rail', '<input type="checkbox" name="now" data-action="stop-now">');
+  expect(host.value('now')).toBe('');
+  field('rail', 'now').checked = true;
+  expect(host.value('now')).toBe('on');
+  host.render('main', '<input type="checkbox" name="add-force" value="on">');
+  expect(host.value('add-force')).toBe('');
 });
 
 const row = (run: string) => `<button data-action="select-run" data-repo="alpha" data-run="${run}">${run}</button>`;

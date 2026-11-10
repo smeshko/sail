@@ -33,7 +33,7 @@ export interface PageHost {
   get(path: string): Promise<{ status: number; body: string }>;
   /** A POST of `body` as JSON to `path`, with the client header. A failed request answers status 0. */
   post(path: string, body: unknown): Promise<{ status: number; body: string }>;
-  /** The current value of the field named `name` in the main region, or undefined when there is none. */
+  /** The current value of the field named `name`, in whichever region draws it, or undefined when none does. A checkbox is 'on' while ticked and '' while not. */
   value(name: string): string | undefined;
   /** A WebSocket on `/ws?<query>`. */
   connect(query: string, handlers: ConnectHandlers): Connection;
@@ -325,9 +325,13 @@ export function browserHost(win: BrowserWindow): PageHost {
       }
     },
     value(name) {
-      const field = doc.getElementById('main')?.querySelector?.(`[name="${name}"]`);
-      if (field?.type === 'checkbox') return field.checked === true ? 'on' : '';
-      return field?.value ?? undefined;
+      for (const region of REGIONS) {
+        const field = doc.getElementById(region)?.querySelector?.(`[name="${name}"]`);
+        if (field === null || field === undefined) continue;
+        if (field.type === 'checkbox') return field.checked === true ? 'on' : '';
+        return field.value ?? undefined;
+      }
+      return undefined;
     },
     connect(query, handlers) {
       const socket = new win.WebSocket(`ws://${win.location.host}/ws?${query}`);

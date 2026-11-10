@@ -8,7 +8,7 @@ import { runActions } from '../../../src/dashboard/actions';
 import { callFile, findRepo, findRunDir, index } from '../../../src/dashboard/files';
 import { boot, CLEARED_KEY, FILTER_KEY, type Page, RAIL_KEY, THEME_KEY } from '../../../src/dashboard/page/app';
 import { attention, identity } from '../../../src/dashboard/page/attention';
-import type { ConnectHandlers, PageHost, Region } from '../../../src/dashboard/page/host';
+import { browserHost, type ConnectHandlers, type PageHost, type Region } from '../../../src/dashboard/page/host';
 import { readEvents } from '../../../src/events/consumers/ndjson';
 import {
   FAKE_2_ID,
@@ -23,6 +23,7 @@ import {
   runningCopy,
   seedFixtures,
 } from '../../helpers/dashboard';
+import { markupWindow } from '../../helpers/dashboard-dom';
 
 interface FakeSocket {
   query: string;
@@ -203,6 +204,22 @@ class FakeHost implements PageHost {
     if (socket === undefined || socket.closed) return;
     socket.closed = true;
     socket.handlers.close();
+  }
+}
+
+/** A host that also draws into a window whose regions hold fields by name, and reads them through the real `browserHost`. */
+class DomHost extends FakeHost {
+  private readonly dom = markupWindow();
+  private readonly real = browserHost(this.dom.win);
+  override render(region: Region, html: string) {
+    super.render(region, html);
+    this.real.render(region, html);
+  }
+  override value(name: string) {
+    return this.real.value(name);
+  }
+  field(region: string, name: string) {
+    return this.dom.field(region, name);
   }
 }
 
@@ -1860,6 +1877,64 @@ test('ticking Stop now once Stop is armed keeps it armed and makes it say so (re
   ).toEqual(['confirm stop now · ends its running call', 'stop-run', 'armed']);
   expect(host.regions.rail).toContain('data-action="stop-now" checked');
   expect(host.posts).toEqual([]);
+});
+
+const domHost = () => {
+  const dom = new DomHost(m);
+  host = dom;
+  return dom;
+};
+
+test("a raise typed in the rail's run menu is read from the rail and posted with the resume", async () => {
+  settleQueue();
+  const dom = domHost();
+  await openOffering('beta', FAKE_3_ID, m.beta.runDir);
+  dom.field('rail', 'raise').value = '5';
+  host.click({ action: 'resume-run' });
+  host.advance(100);
+  expect(buttons(host.regions.rail).find(([, action]) => action === 'resume-run')?.[0]).toBe(
+    'confirm resume · spent $1.06 of $1.00',
+  );
+  expect(host.regions.rail).not.toContain('give the dollars to raise the budget by');
+  expect(host.regions.rail).toContain('name="raise" min="0.01" step="any" value="5"');
+  host.click({ action: 'resume-run' });
+  await settle();
+  expect(host.posts).toEqual([{ path: `${FAKE_3_PATH}/resume`, body: { raise: { usd: 5 } } }]);
+});
+
+test("a stage chosen in the rail's run menu is read from the rail, armed and posted with the restart", async () => {
+  const dom = domHost();
+  await openOffering('alpha', FAKE_2_ID, fake2Dir(m));
+  dom.field('rail', 'stage').value = 'spec';
+  host.click({ action: 'restart-run' });
+  host.advance(100);
+  expect(buttons(host.regions.rail).find(([, action]) => action === 'restart-run')?.[0]).toBe(
+    'confirm restart from spec · budget $25.00',
+  );
+  host.click({ action: 'restart-run' });
+  await settle();
+  expect(host.posts).toEqual([{ path: `${FAKE_2_PATH}/restart`, body: { stage: 'spec' } }]);
+});
+
+test("stop now ticked in the rail's run menu is read from the rail, stays ticked across the draw, and posts { now: true }", async () => {
+  settleQueue();
+  const dom = domHost();
+  await openOffering('beta', FAKE_3_ID, m.beta.runDir);
+  host.click({ action: 'stop-run' });
+  host.advance(100);
+  dom.field('rail', 'now').checked = true;
+  host.click({ action: 'stop-now' });
+  host.advance(100);
+  expect(buttons(host.regions.rail).find(([, action]) => action === 'stop-run')).toEqual([
+    'confirm stop now · ends its running call',
+    'stop-run',
+    'armed',
+    '',
+  ]);
+  expect(dom.field('rail', 'now').checked).toBe(true);
+  host.click({ action: 'stop-run' });
+  await settle();
+  expect(host.posts).toEqual([{ path: `${FAKE_3_PATH}/stop`, body: { now: true } }]);
 });
 
 test('Clean arms with what it removes, posts {} on the second click, and leaves the run for the index with the cleaned line until a run is selected', async () => {
