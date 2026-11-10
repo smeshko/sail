@@ -61,7 +61,7 @@ Usage:
   sail dashboard [--port <n>]                                Serve every repository's runs and queues on localhost
   sail watch [<workflow>...]                                 Watch these workflows, or every watched one: start this repository's watcher, or add them to it
   sail watch --release-hold <harness>                        Release the usage-limit hold on a harness key, such as claude-code or pi:openai-codex, on every watcher
-  sail unwatch [<workflow>...]                               Stop watching them, or every watched one. The watcher exits when it watches none
+  sail unwatch [<workflow>...]                               Stop watching them, or every watched one. Their runs keep running: sail stop ends one. The watcher exits when it watches none
   sail queue ls|poll <workflow>                              List a watched workflow's queue, or have its watcher poll it now
   sail queue add <workflow> <ticket> [--force]               Queue a ticket through the watcher: --force skips its checks
   sail queue requeue|drop <workflow> <item>                  Queue a parked item again, or drop it, through the watcher

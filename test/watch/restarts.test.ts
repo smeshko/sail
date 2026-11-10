@@ -287,6 +287,49 @@ test(
 );
 
 test(
+  'a restarted watcher adopts a live run, sail unwatch then leaves it running and its process alive, and the run ends completed by itself',
+  async () => {
+    await withTempRepo(async (repo) => {
+      const { env, runs } = repository(repo, { a: 1, b: 1 }, [{ key: 'FAKE-1', labels: ['sail-a'] }]);
+      const first = sailProcess(repo.dir, env, ['watch', 'a']);
+      let second: SailProcess | undefined;
+      try {
+        expect(await until('the run held', () => heldRuns(repo.dir).length === 1)).toBe('the run held');
+        killOne(first.pid, 'SIGTERM');
+        expect(await gone(first.pid)).toBe(true);
+        const [item] = queueOf(runs, 'a').items;
+        const runId = item?.runId ?? '';
+        second = sailProcess(repo.dir, env, ['watch', 'a']);
+        expect(await until('the run adopted', () => eventsOf(runs, 'a', 'run:adopted').length === 1)).toBe(
+          'the run adopted',
+        );
+        const unwatched = await sail(repo.dir, env, ['unwatch', 'a']);
+        expect(await exitOf(second)).toBe(0);
+        const after = {
+          unwatched: unwatched.code,
+          status: runsIn(runs).find((run) => run.runId === runId)?.status,
+          processAlive: item?.pid !== undefined && alive(item.pid),
+        };
+        releaseHeld(repo.dir);
+        expect(await until('the run completed', () => completed(runs) === 1)).toBe('the run completed');
+        expect({
+          after,
+          adopted: eventsOf(runs, 'a', 'run:adopted').map(({ run }) => run),
+          issues: issues(runs, ['a']),
+        }).toEqual({
+          after: { unwatched: 0, status: 'running', processAlive: true },
+          adopted: [runId],
+          issues: [],
+        });
+      } finally {
+        cleanUp(repo.dir, [first, second]);
+      }
+    });
+  },
+  TIMEOUT_MS,
+);
+
+test(
   'a watcher leaves a held interrupted run suspended across polls, and the run ends completed once sail resume runs it',
   async () => {
     await withTempRepo(async (repo) => {
