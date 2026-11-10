@@ -1,12 +1,13 @@
 // pi's bash tool, run by sail: pi's own operations are replaced by these, so that each command's `/bin/bash` is spawned
 // detached and leads a process group of its own, in an environment scrubbed of credentials. An abort or a timeout
 // stops the command's group; reap() stops every group still alive, so the harness returns only after none is left.
+// Each command's group is also registered with the engine, so sail's exit waits for its stop.
 // POSIX process groups only. A descendant that calls `setsid` leaves the group, and survives the stop; the gate
 // refuses a command that sends a job to the background.
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { allowlisted, isCredential } from '../../engine/env-allowlist';
-import { DEFAULT_GRACE_MS, stopGroup } from '../../engine/process';
+import { DEFAULT_GRACE_MS, stopGroup, trackGroup, untrackGroup } from '../../engine/process';
 
 /** How long the output of a command that has exited has to arrive, when a descendant still holds its pipes. */
 const FLUSH_MS = 200;
@@ -51,7 +52,10 @@ export function createBashRunner(options: { env: Readonly<Record<string, string>
   const stopping = new Set<Promise<void>>();
 
   const stop = (pid: number): Promise<void> => {
-    const stopped = stopGroup(pid, DEFAULT_GRACE_MS).finally(() => stopping.delete(stopped));
+    const stopped = stopGroup(pid, DEFAULT_GRACE_MS).finally(() => {
+      stopping.delete(stopped);
+      untrackGroup(pid);
+    });
     stopping.add(stopped);
     return stopped;
   };
@@ -78,6 +82,7 @@ export function createBashRunner(options: { env: Readonly<Record<string, string>
         return;
       }
       live.add(pid);
+      trackGroup(pid);
       let timedOut = false;
       const timer =
         timeout !== undefined && timeout > 0
@@ -94,7 +99,10 @@ export function createBashRunner(options: { env: Readonly<Record<string, string>
         clearTimeout(timer);
         signal?.removeEventListener('abort', onAbort);
         // A group that still holds a descendant stays tracked, for reap() to stop.
-        if (!groupAlive(pid)) live.delete(pid);
+        if (!groupAlive(pid)) {
+          live.delete(pid);
+          untrackGroup(pid);
+        }
         end();
       };
       child.once('error', (error) => finish(() => reject(error)));
