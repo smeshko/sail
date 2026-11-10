@@ -11,7 +11,15 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { type ProcessEnd, type ProcessOptions, runProcess, stopGroup, stopLiveGroups } from '../../src/engine/process';
+import {
+  type ProcessEnd,
+  type ProcessOptions,
+  runProcess,
+  stopGroup,
+  stopLiveGroups,
+  trackGroup,
+  untrackGroup,
+} from '../../src/engine/process';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -240,4 +248,71 @@ test('stopLiveGroups ends a group whose command is still running', async () => {
   await stopLiveGroups(500);
   expect(await running).toMatchObject({ started: true, signal: 'SIGTERM' });
   expect(alive(pid)).toBe(false);
+});
+
+test('stopLiveGroups ends a group a harness registered, though its leader ignores SIGTERM', async () => {
+  const s = scratch();
+  const pidFile = join(s.dir, 'pids');
+  const leader = Bun.spawn(['/bin/sh', '-c', `trap "" TERM; sleep 30 & echo $$ $! > "${pidFile}"; wait`], {
+    detached: true,
+    stdin: 'ignore',
+    stdout: 'ignore',
+    stderr: 'ignore',
+  });
+  let pids: number[] = [];
+  try {
+    while (!existsSync(pidFile) || readFileSync(pidFile, 'utf8').trim().split(' ').length < 2) await Bun.sleep(20);
+    pids = readFileSync(pidFile, 'utf8').trim().split(' ').map(Number);
+    trackGroup(leader.pid);
+    await stopLiveGroups(300);
+    const deadline = performance.now() + 3_000;
+    while (pids.some(alive) && performance.now() < deadline) await Bun.sleep(20);
+    for (const pid of pids) expect(alive(pid)).toBe(false);
+  } finally {
+    untrackGroup(leader.pid);
+    for (const pid of pids) {
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch {}
+    }
+  }
+});
+
+test('stopLiveGroups leaves a group alone once it is untracked', async () => {
+  const child = Bun.spawn(['sleep', '30'], { detached: true, stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' });
+  try {
+    trackGroup(child.pid);
+    untrackGroup(child.pid);
+    await stopLiveGroups(300);
+    expect(alive(child.pid)).toBe(true);
+  } finally {
+    child.kill('SIGKILL');
+    await child.exited;
+  }
+});
+
+test('stopLiveGroups also ends a group registered while it waits out another', async () => {
+  const stubborn = Bun.spawn(['/bin/sh', '-c', 'trap "" TERM; while :; do sleep 0.05; done'], {
+    detached: true,
+    stdin: 'ignore',
+    stdout: 'ignore',
+    stderr: 'ignore',
+  });
+  const late = Bun.spawn(['sleep', '30'], { detached: true, stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' });
+  try {
+    await Bun.sleep(100);
+    trackGroup(stubborn.pid);
+    const stopping = stopLiveGroups(400);
+    await Bun.sleep(100);
+    trackGroup(late.pid);
+    await stopping;
+    const deadline = performance.now() + 3_000;
+    while (alive(late.pid) && performance.now() < deadline) await Bun.sleep(20);
+    expect(alive(late.pid)).toBe(false);
+  } finally {
+    untrackGroup(stubborn.pid);
+    untrackGroup(late.pid);
+    stubborn.kill('SIGKILL');
+    late.kill('SIGKILL');
+  }
 });

@@ -2,6 +2,7 @@
 // scrubbed of credentials, and reap() returns only after every group it started is gone.
 import { expect, test } from 'bun:test';
 import { bashEnv, createBashRunner } from '../../../src/adapters/pi/process';
+import { liveGroups, stopLiveGroups } from '../../../src/engine/process';
 import { withTempRepo } from '../../helpers/temp-repo';
 
 const alive = (pid: number): boolean => {
@@ -165,3 +166,50 @@ test('the scrubbed environment reaches the shell: the key is unset there', async
 test('the preamble wins over a name the environment also has', () => {
   expect(bashEnv({ HOME: '/preamble' }, { HOME: '/home/x' }).HOME).toBe('/preamble');
 });
+
+test('an aborted command that ignores SIGTERM is ended by stopLiveGroups, its child with it', async () => {
+  await withTempRepo(async (repo) => {
+    const runner = createBashRunner({ env: { PATH: repo.env.PATH ?? '/usr/bin:/bin' } });
+    const out = collect();
+    const abort = new AbortController();
+    const settled = runner.operations
+      .exec('trap "" TERM; sleep 30 & echo $$ $!; wait', repo.dir, { onData: out.onData, signal: abort.signal })
+      .then(
+        () => 'resolved',
+        (error: Error) => error.message,
+      );
+    const deadline = Date.now() + 5_000;
+    while (!/\d+ \d+\n/.test(out.text()) && Date.now() < deadline) await Bun.sleep(10);
+    const pids = out.text().trim().split(' ').map(Number);
+    try {
+      expect(pids.map(alive)).toEqual([true, true]);
+      abort.abort();
+      await stopLiveGroups(300);
+      const gone = Date.now() + 3_000;
+      while (pids.some(alive) && Date.now() < gone) await Bun.sleep(20);
+      expect({ alive: pids.map(alive), settled: await settled }).toEqual({
+        alive: [false, false],
+        settled: 'aborted',
+      });
+    } finally {
+      for (const pid of pids) {
+        try {
+          process.kill(pid, 'SIGKILL');
+        } catch {}
+      }
+    }
+  });
+}, 30_000);
+
+test('a reaped runner leaves no group registered', async () => {
+  await withTempRepo(async (repo) => {
+    const runner = createBashRunner({ env: { PATH: repo.env.PATH ?? '/usr/bin:/bin' } });
+    const out = collect();
+    await runner.operations.exec('sleep 30 >/dev/null 2>&1 & echo $$', repo.dir, { onData: out.onData });
+    await runner.reap();
+    expect(liveGroups()).not.toContain(Number(out.text().trim()));
+    const at = performance.now();
+    await stopLiveGroups(5_000);
+    expect(performance.now() - at).toBeLessThan(500);
+  });
+}, 30_000);

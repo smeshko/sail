@@ -3,6 +3,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import type { SpawnedProcess } from '@anthropic-ai/claude-agent-sdk';
 import { createSpawner } from '../../../src/adapters/claude-code/process';
+import { liveGroups, stopLiveGroups } from '../../../src/engine/process';
 
 const ENV = { PATH: '/usr/bin:/bin' };
 const started: number[] = [];
@@ -161,5 +162,87 @@ test("the SDK's abort stops the leader's detached shells with its group", async 
   const before = group(shell);
   controller.abort();
   expect({ before, shell: await settled(shell) }).toEqual({ before: true, shell: 'ESRCH' });
+  await spawner.reap(500);
+}, 30_000);
+
+// A leader and a detached shell that both ignore SIGTERM, each with a child: only SIGKILL ends them.
+const STUBBORN_LEADER = [
+  "process.on('SIGTERM', () => {});",
+  "const shell = require('node:child_process').spawn('/bin/sh', ['-c', 'trap \"\" TERM; sleep 30 & wait'],",
+  "  { detached: true, stdio: 'ignore' });",
+  'console.log(shell.pid);',
+  'setInterval(() => {}, 1000);',
+].join('\n');
+
+test("an abort's stop of the leader's groups is finished by stopLiveGroups before sail would exit", async () => {
+  const spawner = createSpawner({ trackMs: 60_000 });
+  const controller = new AbortController();
+  const spawned = spawner.spawn({
+    command: process.execPath,
+    args: ['-e', STUBBORN_LEADER],
+    cwd: process.cwd(),
+    env: ENV,
+    signal: controller.signal,
+  });
+  const pid = pidOf(spawned);
+  const said = await new Promise<string>((done) =>
+    (spawned.stdout as NodeJS.ReadableStream).once('data', (chunk) => done(String(chunk))),
+  );
+  const shell = Number(said.trim());
+  started.push(shell);
+  await Bun.sleep(300);
+  const before = { leader: group(pid), shell: group(shell) };
+  controller.abort();
+  await stopLiveGroups(300);
+  expect({ before, leader: await settled(pid, 1_500), shell: await settled(shell, 1_500) }).toEqual({
+    before: { leader: true, shell: true },
+    leader: 'ESRCH',
+    shell: 'ESRCH',
+  });
+}, 30_000);
+
+test('a reaped spawner leaves no group registered', async () => {
+  const spawner = createSpawner();
+  const spawned = spawner.spawn({
+    command: '/bin/sh',
+    args: ['-c', 'sleep 30 & exit 0'],
+    cwd: process.cwd(),
+    env: ENV,
+    signal: new AbortController().signal,
+  });
+  const pid = pidOf(spawned);
+  await new Promise((done) => spawned.once('exit', done));
+  await spawner.reap(500);
+  expect(liveGroups()).not.toContain(pid);
+  const at = performance.now();
+  await stopLiveGroups(5_000);
+  expect(performance.now() - at).toBeLessThan(500);
+}, 30_000);
+
+test("a request's abort registers the groups the leader's descendants are in, before the SDK's own abort", async () => {
+  const request = new AbortController();
+  const spawner = createSpawner({ trackMs: 60_000, signal: request.signal });
+  const spawned = spawner.spawn({
+    command: process.execPath,
+    args: ['-e', STUBBORN_LEADER],
+    cwd: process.cwd(),
+    env: ENV,
+    signal: new AbortController().signal,
+  });
+  const pid = pidOf(spawned);
+  const said = await new Promise<string>((done) =>
+    (spawned.stdout as NodeJS.ReadableStream).once('data', (chunk) => done(String(chunk))),
+  );
+  const shell = Number(said.trim());
+  started.push(shell);
+  await Bun.sleep(300);
+  const before = { leader: group(pid), shell: group(shell) };
+  request.abort();
+  await stopLiveGroups(300);
+  expect({ before, leader: await settled(pid, 1_500), shell: await settled(shell, 1_500) }).toEqual({
+    before: { leader: true, shell: true },
+    leader: 'ESRCH',
+    shell: 'ESRCH',
+  });
   await spawner.reap(500);
 }, 30_000);
