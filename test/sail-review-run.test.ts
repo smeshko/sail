@@ -615,7 +615,11 @@ test('a check still red after its rerun goes to fix as a finding, then validate,
         severity: 'high',
         file: '',
         title: 'Check verify fails',
-        detail: '(fail) a timing test\n 1 fail',
+        // The log holds a failing test, so merge leads it with what reproduces it, then keeps its tail.
+        detail:
+          'Failing tests:\n(file unknown): a timing test\n\n1 failing test:\n\n(fail) a timing test\n\n' +
+          "The first ones, with their errors:\n\n\n(fail) a timing test\n\n 1 fail\n\nThe log's tail:\n" +
+          '(fail) a timing test\n 1 fail',
       },
     ]);
     expect(readEvents(dir).filter((event) => event.type === 'codehost:checks_rerun')).toHaveLength(1);
