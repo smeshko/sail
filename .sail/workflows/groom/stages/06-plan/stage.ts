@@ -17,7 +17,7 @@ export const plan = agent('plan', {
     ]),
   },
   output: Planned,
-  model: 'deep',
+  model: 'frontier',
   permissions: withTools(readonly, ['WebFetch']),
-  budget: { maxTurns: 80, maxUsd: 3, maxMinutes: 45 },
+  budget: { maxTurns: 80, maxUsd: 6, maxMinutes: 45 },
 });

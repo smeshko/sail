@@ -16,7 +16,7 @@ export const decide = agent('decide', {
     ]),
   },
   output: Decision,
-  model: 'deep',
+  model: 'frontier',
   permissions: readonly,
-  budget: { maxTurns: 40, maxUsd: 2, maxMinutes: 20 },
+  budget: { maxTurns: 40, maxUsd: 4, maxMinutes: 20 },
 });
