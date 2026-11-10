@@ -1042,9 +1042,9 @@ test('a tick that changes no markup writes no region and scrolls nothing, and on
   host.renders = [];
   host.scrolls = [];
   // A value typed between two unchanged ticks is still read by the draw whose write is skipped.
-  host.fields.raise = '7';
+  host.fields.now = 'on';
   host.advance(2500);
-  expect([host.renders, host.scrolls, page.ui.raise]).toEqual([[], [], '7']);
+  expect([host.renders, host.scrolls, page.ui.act.drafts['stop-run']?.now]).toEqual([[], [], 'on']);
   host.advance(60_000);
   expect(host.renders).toContain('main');
   expect(host.renders).toContain('rail');
@@ -1455,7 +1455,7 @@ test("a failed run's view offers Restart with its stages and the failed one chos
   await settle();
   host.advance(100);
   expect(host.posts).toEqual([{ path: `${FAKE_2_PATH}/restart`, body: { stage: 'implement' } }]);
-  expect([host.open('run=').map((socket) => socket.query), page?.ui.runId, page?.ui.armed]).toEqual([
+  expect([host.open('run=').map((socket) => socket.query), page?.ui.runId, page?.ui.act.pending]).toEqual([
     [runQuery('alpha', NEW_ID)],
     NEW_ID,
     undefined,
@@ -1548,7 +1548,7 @@ test("a run's ⋯ opens the run and its menu under its row, reading what it offe
   host.click({ action: 'restart-run' });
   host.press('Escape');
   host.advance(100);
-  expect([page?.ui.runId, page?.ui.runMenu, page?.ui.armed]).toEqual([FAKE_2_ID, undefined, undefined]);
+  expect([page?.ui.runId, page?.ui.runMenu, page?.ui.act.pending]).toEqual([FAKE_2_ID, undefined, undefined]);
   host.click({ action: 'run-menu', repo: 'alpha', run: FAKE_2_ID });
   host.click({ action: 'run-menu', repo: 'alpha', run: GOLDEN_RUN_ID });
   await settle();
@@ -1571,7 +1571,7 @@ test('a suspended run over its dollars offers Resume with a raise field and no R
   ]);
   host.click({ action: 'resume-run' });
   host.advance(100);
-  expect([host.posts, page?.ui.armed]).toEqual([[], undefined]);
+  expect([host.posts, page?.ui.act.pending]).toEqual([[], undefined]);
   expect(host.regions.rail).toContain('give the dollars to raise the budget by: at least 0.01');
   host.fields.raise = '5';
   host.click({ action: 'resume-run' });
@@ -1612,7 +1612,7 @@ test("the open run's actions are read again when the index shows its status chan
   await settle();
   host.advance(100);
   expect(host.actionReads).toEqual([`${GOLDEN_PATH}/actions`, `${FAKE_2_PATH}/actions`, `${FAKE_2_PATH}/actions`]);
-  expect(page?.ui.armed).toBeUndefined();
+  expect(page?.ui.act.pending).toBeUndefined();
   expect(host.regions.rail).toContain(`run ${FAKE_2_ID} is running`);
   host.push(host.open('index')[0], indexMessage());
   await settle();
@@ -1624,11 +1624,14 @@ test("a stage chosen and a raise typed on one run don't carry over to the next o
   host.fields = { stage: 'spec', raise: '7' };
   host.click({ action: 'restart-run' });
   host.advance(100);
-  expect(page?.ui.restartStage).toBe('spec');
+  expect(page?.ui.act.drafts['restart-run']?.stage).toBe('spec');
   // The first draw after the switch still finds the fields of the run left behind.
   host.click({ action: 'select-run', repo: 'alpha', run: GOLDEN_RUN_ID });
   host.advance(100);
-  expect([page?.ui.restartStage, page?.ui.raise]).toEqual([undefined, undefined]);
+  expect([page?.ui.act.drafts['restart-run']?.stage, page?.ui.act.drafts['resume-run']?.raise]).toEqual([
+    undefined,
+    undefined,
+  ]);
   host.fields = {};
   host.click({ action: 'run-menu', repo: 'alpha', run: FAKE_2_ID });
   replay(host.open('run=')[0], fake2Dir(m));
@@ -1960,7 +1963,7 @@ test('Clean arms with what it removes, posts {} on the second click, and leaves 
   await settle();
   host.advance(100);
   expect(host.posts).toEqual([{ path: `${FAKE_2_PATH}/clean`, body: {} }]);
-  expect([before?.closed, page?.ui.indexNotice]).toEqual([true, cleaned]);
+  expect([before?.closed, page?.ui.act.result?.text]).toEqual([true, cleaned]);
   expect(host.regions.rail).toContain(`<span class="warnchip">${cleaned.replace('->', '-&gt;')}</span>`);
   host.click({ action: 'select-run', repo: 'alpha', run: GOLDEN_RUN_ID });
   host.advance(100);

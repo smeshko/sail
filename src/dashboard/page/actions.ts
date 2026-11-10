@@ -1,9 +1,11 @@
 // What each `data-action` does, as one function of the store apiece, and `dispatch()`, the delegated click's rule: a click
-// on anything but a run action disarms an armed Resume, Restart, Stop or Clean, on anything but a drop disarms an armed
+// on anything but a run action disarms an armed Resume, Restart, Stop or Clean (a registry action the actor carries out), on anything but a drop disarms an armed
 // drop, and on anything but `watch-set` an armed unwatch; an item's menu and a run's menu shut by the same rule. No
 // action opens a socket: what needs one goes through `streams.ts`, and what posts goes through `requests.ts`.
+
+import { actionOf } from './action-registry';
 import { closeFile, openedOutputKeys, openFile, readLog, readOutput, selectCard } from './reads';
-import { endRun, queueOp, startRun, watchSet } from './requests';
+import { queueOp, watchSet } from './requests';
 import { FILTER_KEY, RAIL_KEY, saveCleared, storedCleared, THEME_KEY } from './saved';
 import type { Store } from './store';
 import { reopenQueue, selectRun } from './streams';
@@ -37,7 +39,7 @@ export function closeAttention(store: Store) {
 export const actions: Record<string, Action> = {
   'select-run': (store, data) => {
     if (data.repo === undefined || data.run === undefined) return;
-    delete store.ui.indexNotice;
+    store.actor.clearResult('rail');
     leaveQueue(store);
     selectRun(store, data.repo, data.run);
   },
@@ -181,13 +183,12 @@ export const actions: Record<string, Action> = {
     delete store.ui.armedWatch;
     watchSet(store, repo, op, workflow);
   },
-  'resume-run': (store) => startRun(store, 'resume'),
-  'restart-run': (store) => startRun(store, 'restart'),
-  'stop-run': (store) => endRun(store, 'stop'),
-  'clean-run': (store) => endRun(store, 'clean'),
   // Ticking Stop now redraws an armed Stop's confirmation, which names what it will do.
   'stop-now': (store) => {
-    store.ui.stopNow = store.host.value('now') === 'on';
+    store.ui.act.drafts['stop-run'] = {
+      ...store.ui.act.drafts['stop-run'],
+      now: store.host.value('now') === 'on' ? 'on' : '',
+    };
     store.mark('rail');
   },
   // A run's ⋯ opens it and its menu under its row; on the open menu's run, it shuts the menu.
@@ -201,7 +202,7 @@ export const actions: Record<string, Action> = {
       store.run.runId === runId
     ) {
       delete store.ui.runMenu;
-      delete store.ui.armed;
+      store.actor.disarm();
       store.mark('rail');
       return;
     }
@@ -260,16 +261,12 @@ export function dispatch(store: Store, action: string, data: Record<string, stri
   // A click on anything but a run action disarms it, and on anything but a drop disarms that. An item's menu shuts on
   // any click but its ⋯, which toggles it, and the drop that arms. A run's menu shuts on any click but a run action
   // and a run's ⋯, which handles its own.
-  const runAction = ['resume-run', 'restart-run', 'stop-run', 'stop-now', 'clean-run'].includes(action);
+  const runAction = action === 'stop-now' || (actionOf(action)?.appliesTo.includes('run') ?? false);
   const shuts =
     ui.itemMenu !== undefined && action !== 'item-menu' && !(action === 'drop-item' && ui.armedDrop !== data.item);
   const shutsRun = ui.runMenu !== undefined && !runAction && action !== 'run-menu';
-  const disarms =
-    (ui.armed !== undefined && !runAction) ||
-    (ui.armedDrop !== undefined && action !== 'drop-item') ||
-    shuts ||
-    shutsRun;
-  if (ui.armed !== undefined && !runAction) delete ui.armed;
+  const disarmed = !runAction && store.actor.disarm();
+  const disarms = disarmed || (ui.armedDrop !== undefined && action !== 'drop-item') || shuts || shutsRun;
   if (ui.armedDrop !== undefined && action !== 'drop-item') delete ui.armedDrop;
   if (ui.armedWatch !== undefined && action !== 'watch-set') {
     delete ui.armedWatch;
@@ -278,5 +275,6 @@ export function dispatch(store: Store, action: string, data: Record<string, stri
   if (shuts) delete ui.itemMenu;
   if (shutsRun) delete ui.runMenu;
   if (disarms) store.mark('main', 'rail');
-  actions[action]?.(store, data);
+  if (runAction && action !== 'stop-now') store.actor.act(action, data);
+  else actions[action]?.(store, data);
 }

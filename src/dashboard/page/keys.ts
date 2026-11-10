@@ -20,7 +20,7 @@ export const keys: Record<string, (store: Store) => void> = {
     const { ui } = store;
     if (ui.runMenu !== undefined) {
       delete ui.runMenu;
-      delete ui.armed;
+      store.actor.disarm();
       store.mark('rail');
     } else if (ui.itemMenu !== undefined) {
       delete ui.itemMenu;

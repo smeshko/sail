@@ -10,6 +10,7 @@
 // a completed run, a ⋯ of its own that opens the run and, under the row, a menu of what it offers: Resume, Restart,
 // Stop and Clean.
 import type { RunActions } from '../actions';
+import { resultOf } from './action-view';
 import { ago, cost, duration } from './format';
 import { html, type SafeHtml } from './html';
 import { newestFirst, type RailRepo, type RailRun, type RailWorkflow, workflowOf } from './index-model';
@@ -229,8 +230,8 @@ export function renderRail(
   offers?: RunActions | undefined,
 ): SafeHtml {
   const runs = repos.reduce((sum, repo) => sum + repo.runs.length, 0);
-  const notice =
-    ui.indexNotice === undefined ? '' : html`<div class="act"><span class="warnchip">${ui.indexNotice}</span></div>`;
+  const left = resultOf(ui.act, 'rail');
+  const notice = left === undefined ? '' : html`<div class="act"><span class="warnchip">${left}</span></div>`;
   return html`${notice}${runningBlock(repos, ui, offers)}${queuedBlock(repos, ui, now)}<div class="rail-h"><span>repositories</span><span class="c">${runs} runs</span></div>
 ${repos.length === 0 ? html`<div class="qempty">no repository is registered yet: run sail watch in one</div>` : ''}${repos.map((repo) => repoGroup(repo, ui, now, offers))}`;
 }

@@ -24,13 +24,7 @@ export function regions(store: Store): Record<Region, () => string> {
     rail: () => {
       if (store.index === undefined) return html`<div class="qempty">connecting…</div>`.value;
       // A raise typed and a stage chosen in the open run's menu survive the draw, but not a switch of run.
-      if (store.fieldsOwn) {
-        ui.raise = host.value('raise') ?? ui.raise;
-        ui.restartStage = host.value('stage') ?? ui.restartStage;
-        const now = host.value('now');
-        if (now !== undefined) ui.stopNow = now !== '';
-      }
-      store.fieldsOwn = true;
+      store.actor.keep('run');
       return renderRail(railRepos(store.index, host.now()), ui, host.now(), store.offers).value;
     },
     attention: () => {
