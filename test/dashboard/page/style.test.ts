@@ -89,3 +89,48 @@ test('the theme and inspector buttons carry an aria-label beside their title (AD
   expect(html).toContain('data-action="toggle-theme" aria-label="switch theme" title="theme"');
   expect(html).toContain('data-action="toggle-inspector" aria-label="toggle inspector" title="inspector (i)"');
 });
+
+test('--focus is at least 3:1 on every surface in each theme block (ADW-508)', () => {
+  const low: string[] = [];
+  for (const [name, read] of THEMES) {
+    const props = read();
+    expect(props['--focus'], `${name} defines --focus`).toBeDefined();
+    for (const surface of SURFACES) {
+      const r = ratio(props['--focus'] as string, props[surface] as string);
+      if (r < 3) low.push(`${name}: --focus on ${surface} is ${r.toFixed(2)}`);
+    }
+  }
+  expect(low).toEqual([]);
+});
+
+test('one :focus-visible rule draws a 2px --focus outline, and no declaration removes an outline (ADW-508)', () => {
+  const ring = rules().filter(([sel]) => sel === ':focus-visible');
+  expect(ring).toHaveLength(1);
+  expect(ring[0]?.[1]).toContain('outline: 2px solid var(--focus);');
+  expect(style).not.toMatch(/outline(-width)?:\s*(none|0)\b/);
+});
+
+test('buttons, selects, text inputs and role=button have a 24px minimum height in one rule (ADW-508)', () => {
+  const target = rules().filter(([sel]) => sel.split(',').some((each) => each.trim() === '[role="button"]'));
+  expect(target).toHaveLength(1);
+  const [selector, body] = target[0] as [string, string];
+  const list = selector.split(',').map((each) => each.trim());
+  expect(list).toContain('button');
+  expect(list).toContain('select');
+  expect(list.some((each) => each.startsWith('input:not([type="checkbox"]):not([type="radio"])'))).toBe(true);
+  expect(body).toContain('min-height: 24px;');
+});
+
+test('no control class is given a height under 24px (ADW-508)', () => {
+  const controls =
+    /\.(btn|wf-act|qbadge|hist-t|r-more|r-open|tab|tog|run-link|art-open|q-row|trow|qsec|qrecent-h|lgrp-h|wf-t|sig)\b/;
+  const small: string[] = [];
+  for (const [selector, body] of rules()) {
+    // A decoration inside a control (`.q-row .qd`) is no target: only a selector that ends on the control counts.
+    if (!selector.split(',').some((each) => controls.test(each.trim().split(/\s+/).pop() ?? ''))) continue;
+    for (const m of body.matchAll(/(?<![\w-])(height|max-height|min-height):\s*(\d+(?:\.\d+)?)px/g)) {
+      if (Number(m[2]) < 24) small.push(`${selector} { ${m[1]}: ${m[2]}px }`);
+    }
+  }
+  expect(small).toEqual([]);
+});

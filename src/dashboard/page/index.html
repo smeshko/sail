@@ -18,6 +18,7 @@
         --fg-2: #b4b4c8;
         --fg-3: #9a9ab0;
         --fg-4: #85859b;
+        --focus: #6ea4ff;
         --add: #6ee7b7;
         --del: #fda4af;
       }
@@ -33,6 +34,7 @@
         --fg-2: #42425a;
         --fg-3: #5c5c74;
         --fg-4: #68687f;
+        --focus: #1d5fd6;
         --add: #15803d;
         --del: #b91c1c;
       }
@@ -49,6 +51,7 @@
           --fg-2: #42425a;
           --fg-3: #5c5c74;
           --fg-4: #68687f;
+        --focus: #1d5fd6;
           --add: #15803d;
           --del: #b91c1c;
         }
@@ -86,6 +89,46 @@
       }
       a {
         color: var(--run);
+      }
+      :focus-visible {
+        outline: 2px solid var(--focus);
+        outline-offset: 1px;
+      }
+      .r-open:focus-visible,
+      .lgrp-h:focus-visible,
+      .wf-t:focus-visible,
+      .q-row:focus-visible,
+      .qsec:focus-visible,
+      .qrecent-h:focus-visible,
+      .trow:focus-visible,
+      .sig:focus-visible {
+        outline-offset: -2px;
+      }
+      button,
+      select,
+      input:not([type="checkbox"]):not([type="radio"]),
+      [role="button"] {
+        min-height: 24px;
+      }
+      .r-more,
+      .btn.mv {
+        min-width: 24px;
+      }
+      label {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        min-height: 24px;
+      }
+      a.c-t {
+        min-height: 24px;
+      }
+      .wf-act,
+      .qbadge,
+      .hist-t,
+      .r-more {
+        display: inline-flex;
+        align-items: center;
       }
       code,
       pre {
