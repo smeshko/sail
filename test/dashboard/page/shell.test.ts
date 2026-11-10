@@ -15,7 +15,7 @@ const source = (module: string) => readFileSync(join(PAGE, module), 'utf8');
 const lines = (text: string) => text.replace(/\n$/, '').split('\n').length;
 
 /** The modules split from `app.ts` so far. */
-const SPLIT = ['store.ts', 'saved.ts', 'draw.ts'];
+const SPLIT = ['store.ts', 'saved.ts', 'draw.ts', 'reads.ts'];
 
 test('the line counter counts a made-up source, and it is over the limit', () => {
   expect(lines('a\nb\nc\n')).toBe(3);

@@ -41,28 +41,39 @@
 // shows its answer beside the buttons and reads the run again, and a clean leaves the run and shows its answer in the
 // rail until a run is selected. The other actions change what is shown, and `copy` puts a CLI command on the clipboard.
 import type { QueueEvent, SailEvent } from '../../events/types';
-import type { RunActions } from '../actions';
 import type { IndexRepo } from '../files';
 import type { Message } from '../streams';
 import { attention, identity } from './attention';
 import { startDraw, tick } from './draw';
-import { isMarkdown } from './drawer-view';
 import type { PageHost } from './host';
 import { REGIONS } from './host';
 import { newestFirst, railRepos, statusOf } from './index-model';
-import { logTarget } from './inspector-view';
 import { queueId } from './queue-view';
+import {
+  clearCall,
+  closeFile,
+  offerSignature,
+  openedOutputKeys,
+  openFile,
+  readLog,
+  readOffers,
+  readOutput,
+  readResult,
+  refreshLog,
+  refreshOutput,
+  selectCard,
+  stopReads,
+} from './reads';
 import { applyEvent, emptyRun } from './run-model';
 import { FILTER_KEY, RAIL_KEY, saveCleared, storedCleared, THEME_KEY } from './saved';
 import { createStore, type OpenQueue, type OpenRun, openQueue } from './store';
-import { outputKey, scriptId } from './timeline-view';
 import { FILTERS, type InspectorTab, TABS, THEMES, type TimelineFilter, type UiState } from './ui-state';
 
 export { TICK_MS } from './draw';
 export { CLEARED_KEY, FILTER_KEY, RAIL_KEY, THEME_KEY } from './saved';
 export { FLUSH_MS } from './store';
 export const RECONNECT_MS = 2000;
-export const LOG_REFRESH_MS = 1000;
+export { LOG_REFRESH_MS } from './reads';
 
 /** How many of a queue's events its panel lists. */
 export const RECENT_EVENTS = 20;
@@ -112,146 +123,8 @@ function parse(text: string): Message | undefined {
 export function boot(host: PageHost): Page {
   const store = createStore(host);
   const ui = store.ui;
-  const { mark } = store;
 
   startDraw(store);
-
-  const callPath = (open: OpenRun, key: string) =>
-    `/api/repos/${enc(open.repo)}/runs/${enc(open.runId)}/calls/${enc(key)}`;
-
-  const readResult = () => {
-    const open = store.run;
-    const key = ui.key;
-    if (open === undefined || key === undefined) return;
-    const asked = ++store.resultRead;
-    const forSelection = store.selection;
-    store.result = { state: 'loading' };
-    void host.get(`${callPath(open, key)}/result`).then((answer) => {
-      if (asked !== store.resultRead || forSelection !== store.selection) return;
-      if (answer.status === 200) {
-        try {
-          store.result = { state: 'loaded', value: JSON.parse(answer.body) as unknown };
-        } catch {
-          store.result = { state: 'missing', message: 'result.json is not JSON' };
-        }
-      } else store.result = { state: 'missing' };
-      mark('inspector');
-    });
-  };
-
-  const readLog = () => {
-    const open = store.run;
-    const key = ui.key;
-    const card = open?.model.cards.find((entry) => entry.key === key);
-    if (open === undefined || key === undefined || card === undefined) return;
-    const target = logTarget(card, ui);
-    const stream = ui.stream !== undefined && target.streams.includes(ui.stream) ? ui.stream : target.streams[0];
-    if (stream === undefined) return;
-    const asked = ++store.logRead;
-    const forSelection = store.selection;
-    store.lastLogRead = host.now();
-    if (target.key !== store.logFor) store.log = undefined;
-    store.logFor = target.key;
-    if (store.log === undefined) store.log = { state: 'loading' };
-    void host.get(`${callPath(open, target.key)}/log?stream=${enc(stream)}`).then((answer) => {
-      if (asked !== store.logRead || forSelection !== store.selection) return;
-      store.log = answer.status === 200 ? { state: 'loaded', value: answer.body } : { state: 'missing' };
-      mark('inspector');
-    });
-  };
-
-  /** Reads a running call's log again, at most once a second, and at once when the log tab has moved to its next step. */
-  const refreshLog = () => {
-    const card = store.run?.model.cards.find((entry) => entry.key === ui.key);
-    if (card !== undefined && logTarget(card, ui).key !== store.logFor) {
-      if (store.logTimer !== undefined) host.cancel(store.logTimer);
-      store.logTimer = undefined;
-      return readLog();
-    }
-    if (store.logTimer !== undefined) return;
-    const wait = Math.max(0, store.lastLogRead + LOG_REFRESH_MS - host.now());
-    if (wait === 0) return readLog();
-    store.logTimer = host.later(() => {
-      store.logTimer = undefined;
-      readLog();
-    }, wait);
-  };
-
-  /** The read keys of the selected call's opened script rows. */
-  const openedOutputKeys = (): string[] => {
-    const card = store.run?.model.cards.find((entry) => entry.key === ui.key);
-    if (card === undefined) return [];
-    return card.timeline
-      .filter((entry) => entry.kind === 'script')
-      .filter((_, index) => ui.opened.includes(scriptId(index)))
-      .map((entry) => outputKey(card, entry));
-  };
-
-  /** Reads stdout and stderr for opened script rows and keys already read. */
-  const readOutput = () => {
-    const open = store.run;
-    const key = ui.key;
-    if (open === undefined || key === undefined) return;
-    const asked = ++store.outputRead;
-    const forSelection = store.selection;
-    store.lastOutputRead = host.now();
-    store.outputs ??= {};
-    const keys = new Set([...Object.keys(store.outputs), ...openedOutputKeys()]);
-    for (const key of keys) {
-      store.outputs[key] ??= { stdout: { state: 'loading' }, stderr: { state: 'loading' } };
-      const output = store.outputs[key];
-      for (const stream of ['stdout', 'stderr'] as const) {
-        void host.get(`${callPath(open, key)}/log?stream=${stream}`).then((answer) => {
-          if (asked !== store.outputRead || forSelection !== store.selection || store.outputs === undefined) return;
-          output[stream] = answer.status === 200 ? { state: 'loaded', value: answer.body } : { state: 'missing' };
-          mark('main');
-        });
-      }
-    }
-  };
-
-  /** Reads a running call's output again, at most once a second. */
-  const refreshOutput = () => {
-    if (store.outputTimer !== undefined) return;
-    const wait = Math.max(0, store.lastOutputRead + LOG_REFRESH_MS - host.now());
-    if (wait === 0) return readOutput();
-    store.outputTimer = host.later(() => {
-      store.outputTimer = undefined;
-      readOutput();
-    }, wait);
-  };
-
-  const clearCall = () => {
-    store.selection++;
-    store.result = undefined;
-    store.log = undefined;
-    store.outputs = undefined;
-    if (store.logTimer !== undefined) host.cancel(store.logTimer);
-    store.logTimer = undefined;
-    if (store.outputTimer !== undefined) host.cancel(store.outputTimer);
-    store.outputTimer = undefined;
-  };
-
-  /** Selects the call `key`, or none. `timeline` opens its timeline, or goes back to the cards; left out, keeps either. */
-  const selectCard = (key: string | undefined, tab?: InspectorTab, timeline?: boolean) => {
-    clearCall();
-    if (key === undefined) delete ui.key;
-    else ui.key = key;
-    delete ui.stream;
-    delete ui.step;
-    ui.opened = [];
-    if (tab !== undefined) ui.tab = tab;
-    if (timeline !== undefined) ui.timeline = timeline;
-    if (key === undefined) ui.timeline = false;
-    const place = store.run?.model.cards.findIndex((entry) => entry.key === key) ?? -1;
-    if (place >= 0) ui.cursor = place;
-    store.cursorPending = key !== undefined && place < 0;
-    if (key !== undefined) {
-      readResult();
-      if (ui.tab === 'log') readLog();
-    }
-    mark('main', 'inspector');
-  };
 
   const onRunMessage = (open: OpenRun, text: string) => {
     if (open !== store.run) return;
@@ -259,7 +132,7 @@ export function boot(host: PageHost): Page {
     if (message?.kind === 'event') {
       const event = message.event as SailEvent & { key?: unknown };
       applyEvent(open.model, event);
-      mark('main', 'status');
+      store.mark('main', 'status');
       tick(store);
       const place = store.cursorPending ? open.model.cards.findIndex((entry) => entry.key === ui.key) : -1;
       if (place >= 0) {
@@ -268,19 +141,19 @@ export function boot(host: PageHost): Page {
       }
       const key = typeof event.key === 'string' ? event.key.split('/')[0] : undefined;
       if (key !== undefined && key === ui.key) {
-        mark('inspector');
+        store.mark('inspector');
         const card = open.model.cards.find((entry) => entry.key === key);
         // The call's end: its result.json is written now, and its log has its last lines (review R1-3). Each try ends,
         // and a corrective try writes its own result.json, so even a loaded one is read again (review R2-2).
         const ended = (event.type === 'stage:end' || event.type === 'intake:end') && event.key === key;
-        if (ended) readResult();
-        if (ui.tab === 'log' && (card?.state === 'running' || ended)) refreshLog();
-        if (ui.timeline && store.outputs !== undefined && (card?.state === 'running' || ended)) refreshOutput();
+        if (ended) readResult(store);
+        if (ui.tab === 'log' && (card?.state === 'running' || ended)) refreshLog(store);
+        if (ui.timeline && store.outputs !== undefined && (card?.state === 'running' || ended)) refreshOutput(store);
       }
     } else if (message?.kind === 'end') {
       open.ended = true;
       open.endSeen = host.now();
-      mark('main', 'status');
+      store.mark('main', 'status');
       // An index saying the run runs again may have come before this end: look again once the index has caught up
       // (review R2-3).
       open.retry = host.later(() => {
@@ -289,7 +162,7 @@ export function boot(host: PageHost): Page {
       }, RECONNECT_MS);
     } else if (message?.kind === 'error') {
       open.error = message.message;
-      mark('main');
+      store.mark('main');
     }
   };
 
@@ -316,7 +189,7 @@ export function boot(host: PageHost): Page {
           open.model = emptyRun();
           delete open.error;
           openRunSocket(open);
-          mark('main', 'status', 'inspector');
+          store.mark('main', 'status', 'inspector');
         },
       ),
     });
@@ -350,7 +223,7 @@ export function boot(host: PageHost): Page {
     open.model = emptyRun();
     delete open.error;
     openRunSocket(open);
-    mark('main', 'status', 'inspector');
+    store.mark('main', 'status', 'inspector');
   }
 
   const closeRun = () => {
@@ -361,67 +234,13 @@ export function boot(host: PageHost): Page {
     closing.connection?.close();
   };
 
-  const closeFile = () => {
-    if (ui.file === undefined) return;
-    delete ui.file;
-    store.doc = undefined;
-    store.docRead++;
-    mark('drawer');
-  };
-
-  const openFile = (name: string, path: string) => {
-    const open = store.run;
-    if (open === undefined) return;
-    ui.file = { name, path };
-    store.doc = { state: 'loading' };
-    const asked = ++store.docRead;
-    const as = isMarkdown(path) ? '&as=html' : '';
-    void host.get(`/api/repos/${enc(open.repo)}/runs/${enc(open.runId)}/file?path=${enc(path)}${as}`).then((answer) => {
-      if (asked !== store.docRead) return;
-      store.doc = answer.status === 200 ? { state: 'loaded', value: answer.body } : { state: 'missing' };
-      mark('drawer');
-    });
-    mark('drawer');
-  };
-
-  /** The open run's status and its queue items' states: what its actions depend on that the index shows. */
-  const offerSignature = (open: OpenRun) => {
-    const repo = store.index?.find((each) => each.name === open.repo);
-    const item = repo?.runs.find((each) => each.runId === open.runId);
-    const queued = (repo?.queues ?? []).flatMap((view) =>
-      (view.queue?.items ?? [])
-        .filter((each) => each.runId === open.runId)
-        .map((each) => `${view.workflow}:${each.state}:${each.retryAt ?? ''}`),
-    );
-    return `${item === undefined ? '' : statusOf(item)}|${queued.join(',')}`;
-  };
-
-  const readOffers = () => {
-    const open = store.run;
-    if (open === undefined) return;
-    const asked = ++store.offersRead;
-    store.offersFor = offerSignature(open);
-    void host.get(`/api/repos/${enc(open.repo)}/runs/${enc(open.runId)}/actions`).then((answer) => {
-      if (asked !== store.offersRead || store.stopped) return;
-      store.offers = undefined;
-      if (answer.status === 200) {
-        try {
-          store.offers = JSON.parse(answer.body) as RunActions;
-        } catch {
-          // An answer that isn't JSON offers nothing.
-        }
-      }
-      mark('rail');
-    });
-  };
-
   const selectRun = (repo: string, runId: string) => {
     if (store.run?.repo === repo && store.run.runId === runId && store.run.error === undefined) return;
     closeRun();
-    clearCall();
+    clearCall(store);
     ui.repo = repo;
     ui.runId = runId;
-    closeFile();
+    closeFile(store);
     delete ui.key;
     ui.timeline = false;
     ui.opened = [];
@@ -437,15 +256,15 @@ export function boot(host: PageHost): Page {
     store.fieldsOwn = false;
     store.fresh.add('rail');
     openRunSocket(store.run);
-    readOffers();
-    mark('rail', 'main', 'inspector', 'status');
+    readOffers(store);
+    store.mark('rail', 'main', 'inspector', 'status');
   };
 
   const onQueueMessage = (id: string, open: OpenQueue, text: string) => {
     const message = parse(text);
     if (message?.kind === 'error') {
       open.stream = { ...open.stream, error: message.message };
-      if (ui.queue === id) mark('main');
+      if (ui.queue === id) store.mark('main');
       return;
     }
     if (message?.kind !== 'queue-event') return;
@@ -456,7 +275,7 @@ export function boot(host: PageHost): Page {
     const polls =
       event.type === 'queue:polled' ? (event as Extract<QueueEvent, { type: 'queue:polled' }>).kind : open.stream.polls;
     open.stream = { recent, watch, ...(polls === undefined ? {} : { polls }) };
-    if (ui.queue === id) mark('main');
+    if (ui.queue === id) store.mark('main');
   };
 
   const connectQueue = (id: string, open: OpenQueue) => {
@@ -470,7 +289,7 @@ export function boot(host: PageHost): Page {
         () => {
           open.stream = { recent: [], watch: 'unknown' };
           connectQueue(id, open);
-          if (ui.queue === id) mark('main');
+          if (ui.queue === id) store.mark('main');
         },
       ),
     });
@@ -524,12 +343,12 @@ export function boot(host: PageHost): Page {
       if (first !== undefined) selectRun(first.repo, first.runId);
     }
     if (store.run !== undefined) followAgain(store.run, true);
-    if (store.run !== undefined && offerSignature(store.run) !== store.offersFor) {
+    if (store.run !== undefined && offerSignature(store, store.run) !== store.offersFor) {
       delete ui.armed;
-      readOffers();
+      readOffers(store);
     }
     if (ui.queue !== undefined && openQueue(store) === undefined) delete ui.queue;
-    mark('rail', 'attention', 'main', 'status');
+    store.mark('rail', 'attention', 'main', 'status');
     tick(store);
   };
 
@@ -550,7 +369,7 @@ export function boot(host: PageHost): Page {
     const cards = store.run?.model.cards ?? [];
     const at = cards.findIndex((entry) => entry.key === ui.key);
     const next = cards[at < 0 ? 0 : at + by];
-    if (next !== undefined) selectCard(next.key);
+    if (next !== undefined) selectCard(store, next.key);
   };
 
   /** Gives the centre back to the run, from the queue it showed. */
@@ -568,20 +387,20 @@ export function boot(host: PageHost): Page {
         else ui.queueNotice = notice;
         if (status === 200) took?.();
       } else ui.queueNotice = refusal(status, answer, what);
-      mark('main');
+      store.mark('main');
     });
   };
 
   const leaveQueue = () => {
     if (ui.queue === undefined) return;
     delete ui.queue;
-    mark('rail', 'main');
+    store.mark('rail', 'main');
   };
 
   const closeAttention = () => {
     if (!ui.attention) return;
     ui.attention = false;
-    mark('attention');
+    store.mark('attention');
   };
 
   /**
@@ -603,7 +422,7 @@ export function boot(host: PageHost): Page {
       if (ui.raise === undefined || ui.raise.trim() === '' || !Number.isFinite(amount) || amount < 0.01) {
         delete ui.armed;
         ui.runNotice = `give the ${raising === 'usd' ? 'dollars' : 'minutes'} to raise the budget by: at least 0.01`;
-        mark('rail');
+        store.mark('rail');
         return;
       }
       body = { raise: { [raising]: amount } };
@@ -612,13 +431,13 @@ export function boot(host: PageHost): Page {
       ui.armed = kind;
       store.armedStage = stage;
       delete ui.runNotice;
-      mark('rail');
+      store.mark('rail');
       return;
     }
     delete ui.armed;
     store.starting = true;
     ui.runNotice = `${kind === 'resume' ? 'resuming' : 'restarting'} ${open.runId}…`;
-    mark('rail');
+    store.mark('rail');
     void host
       .post(`/api/repos/${enc(open.repo)}/runs/${enc(open.runId)}/${kind}`, body)
       .then(({ status, body: answer }) => {
@@ -626,7 +445,7 @@ export function boot(host: PageHost): Page {
         if (store.stopped) return;
         if (status < 200 || status >= 300) {
           ui.runNotice = refusal(status, answer, kind);
-          mark('rail');
+          store.mark('rail');
           return;
         }
         delete ui.runNotice;
@@ -642,7 +461,7 @@ export function boot(host: PageHost): Page {
         } catch {
           // An answer with no run id leaves the run open.
         }
-        mark('rail');
+        store.mark('rail');
       });
   };
 
@@ -658,13 +477,13 @@ export function boot(host: PageHost): Page {
     if (ui.armed !== kind) {
       ui.armed = kind;
       delete ui.runNotice;
-      mark('rail');
+      store.mark('rail');
       return;
     }
     delete ui.armed;
     store.starting = true;
     ui.runNotice = `${kind === 'stop' ? 'stopping' : 'cleaning'} ${open.runId}…`;
-    mark('rail');
+    store.mark('rail');
     void host
       .post(
         `/api/repos/${enc(open.repo)}/runs/${enc(open.runId)}/${kind}`,
@@ -675,7 +494,7 @@ export function boot(host: PageHost): Page {
         if (store.stopped) return;
         if (status < 200 || status >= 300) {
           ui.runNotice = refusal(status, answer, kind);
-          mark('rail');
+          store.mark('rail');
           return;
         }
         delete ui.runNotice;
@@ -685,7 +504,7 @@ export function boot(host: PageHost): Page {
           closeRun();
           if (message === undefined) delete ui.indexNotice;
           else ui.indexNotice = message;
-          mark('rail', 'main', 'inspector', 'status');
+          store.mark('rail', 'main', 'inspector', 'status');
           return;
         }
         const menu = ui.runMenu;
@@ -713,32 +532,32 @@ export function boot(host: PageHost): Page {
       }
       ui.queue = data.queue;
       delete ui.queueNotice;
-      mark('rail', 'main');
+      store.mark('rail', 'main');
     },
-    'select-card': (data) => selectCard(data.key, undefined, true),
+    'select-card': (data) => selectCard(store, data.key, undefined, true),
     open: (data) => {
       if (data.repo === undefined || data.run === undefined) return;
       closeAttention();
       leaveQueue();
       selectRun(data.repo, data.run);
       const tab = (TABS as readonly string[]).includes(data.tab ?? '') ? (data.tab as InspectorTab) : 'overview';
-      if (data.key !== undefined) selectCard(data.key, tab, false);
+      if (data.key !== undefined) selectCard(store, data.key, tab, false);
     },
     'close-timeline': () => {
       ui.timeline = false;
-      mark('main');
+      store.mark('main');
     },
     'open-file': (data) => {
-      if (data.name !== undefined && data.path !== undefined) openFile(data.name, data.path);
+      if (data.name !== undefined && data.path !== undefined) openFile(store, data.name, data.path);
     },
-    'close-file': () => closeFile(),
+    'close-file': () => closeFile(store),
     'step-card': (data) => step(Number(data.by) < 0 ? -1 : 1),
     'toggle-tool': (data) => {
       const call = data.call;
       if (call === undefined) return;
       ui.opened = ui.opened.includes(call) ? ui.opened.filter((each) => each !== call) : [...ui.opened, call];
-      if (openedOutputKeys().some((key) => store.outputs?.[key] === undefined)) readOutput();
-      mark('main');
+      if (openedOutputKeys(store).some((key) => store.outputs?.[key] === undefined)) readOutput(store);
+      store.mark('main');
     },
     'toggle-filter': (data) => {
       if (!(FILTERS as readonly string[]).includes(data.filter ?? '')) return;
@@ -746,33 +565,33 @@ export function boot(host: PageHost): Page {
       const hidden = ui.hidden.includes(kind) ? ui.hidden.filter((each) => each !== kind) : [...ui.hidden, kind];
       ui.hidden = FILTERS.filter((each) => hidden.includes(each));
       host.save(FILTER_KEY, ui.hidden.join(','));
-      mark('main');
+      store.mark('main');
     },
     'show-all': () => {
       ui.hidden = [];
       host.save(FILTER_KEY, '');
-      mark('main');
+      store.mark('main');
     },
     tab: (data) => {
       if (!(TABS as readonly string[]).includes(data.tab ?? '')) return;
       ui.tab = data.tab as InspectorTab;
-      if (ui.tab === 'log') readLog();
-      mark('inspector');
+      if (ui.tab === 'log') readLog(store);
+      store.mark('inspector');
     },
     stream: (data) => {
       if (data.stream === undefined) return;
       ui.stream = data.stream;
       store.log = undefined;
-      readLog();
-      mark('inspector');
+      readLog(store);
+      store.mark('inspector');
     },
     'log-step': (data) => {
       if (data.step === undefined) return;
       ui.step = data.step;
       delete ui.stream;
       store.log = undefined;
-      readLog();
-      mark('inspector');
+      readLog(store);
+      store.mark('inspector');
     },
     'toggle-group': (data) => {
       const group = data.group ?? '';
@@ -780,7 +599,7 @@ export function boot(host: PageHost): Page {
         ? ui.expanded.filter((each) => each !== group)
         : [...ui.expanded, group];
       host.save(RAIL_KEY, JSON.stringify(ui.expanded));
-      mark('rail');
+      store.mark('rail');
     },
     'move-item': (data) => {
       const { dir, repo, workflow, key, target } = data;
@@ -809,7 +628,7 @@ export function boot(host: PageHost): Page {
     'item-menu': (data) => {
       if (ui.itemMenu === data.item || data.item === undefined) delete ui.itemMenu;
       else ui.itemMenu = data.item;
-      mark('main');
+      store.mark('main');
     },
     'requeue-item': (data) => {
       if (data.repo === undefined || data.workflow === undefined || data.item === undefined) return;
@@ -819,7 +638,7 @@ export function boot(host: PageHost): Page {
       if (data.repo === undefined || data.workflow === undefined || data.item === undefined) return;
       if (ui.armedDrop !== data.item) {
         ui.armedDrop = data.item;
-        mark('main');
+        store.mark('main');
         return;
       }
       delete ui.armedDrop;
@@ -831,12 +650,12 @@ export function boot(host: PageHost): Page {
       const id = workflow === undefined ? repo : `${repo}/${workflow}`;
       if (op === 'unwatch' && ui.armedWatch !== id) {
         ui.armedWatch = id;
-        mark('rail');
+        store.mark('rail');
         return;
       }
       delete ui.armedWatch;
       ui.watchNotice = { repo, text: op === 'watch' ? 'watching…' : 'unwatching…' };
-      mark('rail');
+      store.mark('rail');
       void host
         .post(`/api/repos/${enc(repo)}/${op}`, { workflows: workflow === undefined ? [] : [workflow] })
         .then(({ status, body }) => {
@@ -848,7 +667,7 @@ export function boot(host: PageHost): Page {
           if (said !== undefined) ui.watchNotice = { repo, text: said };
           else if (status === 200 || status === 202) delete ui.watchNotice;
           else ui.watchNotice = { repo, text: refusal(status, body, op) };
-          mark('rail');
+          store.mark('rail');
         });
     },
     'resume-run': () => startRun('resume'),
@@ -858,7 +677,7 @@ export function boot(host: PageHost): Page {
     // Ticking Stop now redraws an armed Stop's confirmation, which names what it will do.
     'stop-now': () => {
       ui.stopNow = host.value('now') === 'on';
-      mark('rail');
+      store.mark('rail');
     },
     // A run's ⋯ opens it and its menu under its row; on the open menu's run, it shuts the menu.
     'run-menu': (data) => {
@@ -867,36 +686,36 @@ export function boot(host: PageHost): Page {
       if (ui.runMenu === runId && ui.queue === undefined && store.run?.repo === repo && store.run.runId === runId) {
         delete ui.runMenu;
         delete ui.armed;
-        mark('rail');
+        store.mark('rail');
         return;
       }
       actions['select-run']?.(data);
       ui.runMenu = runId;
-      mark('rail');
+      store.mark('rail');
     },
     'toggle-queue-events': () => {
       ui.queueEvents = !ui.queueEvents;
-      mark('main');
+      store.mark('main');
     },
     'toggle-queue-section': (data) => {
       const section = data.section;
       if (!section) return;
       ui.folded = ui.folded.includes(section) ? ui.folded.filter((id) => id !== section) : [...ui.folded, section];
-      mark('main');
+      store.mark('main');
     },
     'toggle-attention': () => {
       ui.attention = !ui.attention;
-      mark('attention');
+      store.mark('attention');
     },
     'clear-attention': () => {
       store.cleared = new Set([...storedCleared(host), ...store.cleared, ...store.drawn]);
       saveCleared(host, store.cleared);
-      mark('attention');
+      store.mark('attention');
     },
     'toggle-section': (data) => {
       const section = data.section ?? '';
       ui.open = ui.open.includes(section) ? ui.open.filter((open) => open !== section) : [...ui.open, section];
-      mark('rail');
+      store.mark('rail');
     },
     'toggle-inspector': () => {
       ui.inspector = !ui.inspector;
@@ -909,7 +728,7 @@ export function boot(host: PageHost): Page {
     },
     'toggle-follow': () => {
       ui.follow = !ui.follow;
-      mark('main', 'inspector');
+      store.mark('main', 'inspector');
     },
     copy: (data) => {
       if (data.text !== undefined) void host.copy(data.text);
@@ -919,7 +738,7 @@ export function boot(host: PageHost): Page {
   const keys: Record<string, () => void> = {
     Enter: () => {
       const card = store.run?.model.cards[ui.cursor];
-      if (card !== undefined) selectCard(card.key, undefined, true);
+      if (card !== undefined) selectCard(store, card.key, undefined, true);
     },
     // Needs attention and the drawer shut first; then back to the cards from a timeline, keeping the selection; from
     // the cards, no selection.
@@ -927,15 +746,15 @@ export function boot(host: PageHost): Page {
       if (ui.runMenu !== undefined) {
         delete ui.runMenu;
         delete ui.armed;
-        mark('rail');
+        store.mark('rail');
       } else if (ui.itemMenu !== undefined) {
         delete ui.itemMenu;
         delete ui.armedDrop;
-        mark('main');
+        store.mark('main');
       } else if (ui.attention) closeAttention();
-      else if (ui.file !== undefined) closeFile();
+      else if (ui.file !== undefined) closeFile(store);
       else if (ui.timeline) actions['close-timeline']?.({});
-      else selectCard(undefined);
+      else selectCard(store, undefined);
     },
     ']': () => step(1),
     '[': () => step(-1),
@@ -960,11 +779,11 @@ export function boot(host: PageHost): Page {
     if (ui.armedDrop !== undefined && action !== 'drop-item') delete ui.armedDrop;
     if (ui.armedWatch !== undefined && action !== 'watch-set') {
       delete ui.armedWatch;
-      mark('rail');
+      store.mark('rail');
     }
     if (shuts) delete ui.itemMenu;
     if (shutsRun) delete ui.runMenu;
-    if (disarms) mark('main', 'rail');
+    if (disarms) store.mark('main', 'rail');
     actions[action]?.(data);
   });
   host.onKey((key, inInput) => {
@@ -973,10 +792,10 @@ export function boot(host: PageHost): Page {
     if (by === undefined) return keys[key]?.();
     const last = (store.run?.model.cards.length ?? 0) - 1;
     ui.cursor = Math.max(0, Math.min(last, ui.cursor + by));
-    mark('main');
+    store.mark('main');
   });
   openIndex();
-  mark(...REGIONS);
+  store.mark(...REGIONS);
 
   return {
     ui,
@@ -991,8 +810,7 @@ export function boot(host: PageHost): Page {
       }
       store.queues.clear();
       if (store.flushTimer !== undefined) host.cancel(store.flushTimer);
-      if (store.logTimer !== undefined) host.cancel(store.logTimer);
-      if (store.outputTimer !== undefined) host.cancel(store.outputTimer);
+      stopReads(store);
       if (store.tickTimer !== undefined) host.cancel(store.tickTimer);
     },
   };
