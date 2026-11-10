@@ -394,7 +394,7 @@ export function createClaudeCodeHarness(options: ClaudeCodeHarnessOptions): Harn
       const progress: Progress = { said: [], deaf: false, started: false, ended: false };
       let onAbort: (() => void) | undefined;
       // Each session's process leads a group of its own, gone before run() returns (D7).
-      const spawner = createSpawner();
+      const spawner = createSpawner(request.signal === undefined ? {} : { signal: request.signal });
       try {
         const sessionAt = {
           ...sessionOptions(request, options.env, (toolUseId, denial) => reader.markDenied(toolUseId, denial)),

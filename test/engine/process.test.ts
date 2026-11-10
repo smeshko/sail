@@ -290,3 +290,29 @@ test('stopLiveGroups leaves a group alone once it is untracked', async () => {
     await child.exited;
   }
 });
+
+test('stopLiveGroups also ends a group registered while it waits out another', async () => {
+  const stubborn = Bun.spawn(['/bin/sh', '-c', 'trap "" TERM; while :; do sleep 0.05; done'], {
+    detached: true,
+    stdin: 'ignore',
+    stdout: 'ignore',
+    stderr: 'ignore',
+  });
+  const late = Bun.spawn(['sleep', '30'], { detached: true, stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' });
+  try {
+    await Bun.sleep(100);
+    trackGroup(stubborn.pid);
+    const stopping = stopLiveGroups(400);
+    await Bun.sleep(100);
+    trackGroup(late.pid);
+    await stopping;
+    const deadline = performance.now() + 3_000;
+    while (alive(late.pid) && performance.now() < deadline) await Bun.sleep(20);
+    expect(alive(late.pid)).toBe(false);
+  } finally {
+    untrackGroup(stubborn.pid);
+    untrackGroup(late.pid);
+    stubborn.kill('SIGKILL');
+    late.kill('SIGKILL');
+  }
+});

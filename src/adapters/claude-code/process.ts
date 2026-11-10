@@ -4,8 +4,8 @@
 // whatever is left of the group; the harness returns only after it has.
 //
 // The CLI starts each Bash command's shell detached too, in a group of its own the leader's never holds. So while the
-// leader runs, the spawner looks up its descendants every `trackMs`, and once more before an abort's stop, and stops
-// every group it saw one in along with the leader's. A shell that starts and ends between two looks, leaving a job
+// leader runs, the spawner looks up its descendants every `trackMs`, once more when the request aborts, and once more
+// before an abort's stop, and stops every group it saw one in along with the leader's. A shell that starts and ends between two looks, leaving a job
 // behind, goes unseen: the gate refuses a command that sends one to the background.
 //
 // Every group is also registered with the engine, so sail's exit waits for its stop.
@@ -25,6 +25,11 @@ export const TRACK_MS = 1_000;
 export interface SpawnerOptions {
   /** Milliseconds between two looks at the leader's descendants: TRACK_MS when left out. */
   readonly trackMs?: number;
+  /**
+   * The request's signal. Its abort looks up the leader's descendants at once, so `stopLiveGroups` reaches their groups
+   * while the session is still given time to end in order, before the SDK's own abort.
+   */
+  readonly signal?: AbortSignal;
 }
 
 export interface Spawner {
@@ -113,7 +118,12 @@ export function createSpawner(options: SpawnerOptions = {}): Spawner {
         trackGroup(pid);
         tracker = setInterval(() => look(pid), options.trackMs ?? TRACK_MS);
         tracker.unref();
-        spawned.once('exit', () => clearInterval(tracker));
+        const lookNow = () => look(pid);
+        options.signal?.addEventListener('abort', lookNow, { once: true });
+        spawned.once('exit', () => {
+          clearInterval(tracker);
+          options.signal?.removeEventListener('abort', lookNow);
+        });
         if (spawnOptions.signal.aborted) void stop(pid);
         else spawnOptions.signal.addEventListener('abort', () => void stop(pid), { once: true });
       }

@@ -75,9 +75,16 @@ export async function stopGroup(pgid: number, graceMs: number): Promise<void> {
   signalGroup(pgid, 'SIGKILL');
 }
 
-/** Stops every group a `runProcess` still has running, so none outlives the sail process. */
+/**
+ * Stops every group still registered, so none outlives the sail process: those registered while it waits too, as a
+ * harness that looks up its groups on a timer may.
+ */
 export async function stopLiveGroups(graceMs: number = DEFAULT_GRACE_MS): Promise<void> {
-  await Promise.all([...live].map((pgid) => stopGroup(pgid, graceMs)));
+  const stopped = new Set<number>();
+  for (let fresh = [...live]; fresh.length > 0; fresh = [...live].filter((pgid) => !stopped.has(pgid))) {
+    for (const pgid of fresh) stopped.add(pgid);
+    await Promise.all(fresh.map((pgid) => stopGroup(pgid, graceMs)));
+  }
 }
 
 export async function runProcess(options: ProcessOptions): Promise<ProcessEnd> {

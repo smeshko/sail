@@ -217,3 +217,31 @@ test('a reaped spawner leaves no group registered', async () => {
   await stopLiveGroups(5_000);
   expect(performance.now() - at).toBeLessThan(500);
 }, 30_000);
+
+test("a request's abort registers the groups the leader's descendants are in, before the SDK's own abort", async () => {
+  const request = new AbortController();
+  const spawner = createSpawner({ trackMs: 60_000, signal: request.signal });
+  const spawned = spawner.spawn({
+    command: process.execPath,
+    args: ['-e', STUBBORN_LEADER],
+    cwd: process.cwd(),
+    env: ENV,
+    signal: new AbortController().signal,
+  });
+  const pid = pidOf(spawned);
+  const said = await new Promise<string>((done) =>
+    (spawned.stdout as NodeJS.ReadableStream).once('data', (chunk) => done(String(chunk))),
+  );
+  const shell = Number(said.trim());
+  started.push(shell);
+  await Bun.sleep(300);
+  const before = { leader: group(pid), shell: group(shell) };
+  request.abort();
+  await stopLiveGroups(300);
+  expect({ before, leader: await settled(pid, 1_500), shell: await settled(shell, 1_500) }).toEqual({
+    before: { leader: true, shell: true },
+    leader: 'ESRCH',
+    shell: 'ESRCH',
+  });
+  await spawner.reap(500);
+}, 30_000);
