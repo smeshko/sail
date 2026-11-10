@@ -61,9 +61,12 @@ class FakeHost implements PageHost {
 
   constructor(private readonly machine: Machine) {}
 
-  render(region: Region, html: string) {
+  /** The regions written as fresh: the shell gave up their fields. */
+  freshes: Region[] = [];
+  render(region: Region, html: string, fresh?: boolean) {
     this.regions[region] = html;
     this.renders.push(region);
+    if (fresh === true) this.freshes.push(region);
   }
   /** The regions scrolled to their end, in order. */
   scrolls: Region[] = [];
@@ -1036,9 +1039,30 @@ test('an add that took writes main though its markup is what was last drawn (ADW
   host.click({ action: 'add-ticket', ...BETA });
   await settle();
   host.renders = [];
+  host.freshes = [];
   host.advance(100);
   expect(host.renders).toContain('main');
+  expect(host.freshes).toEqual(['main']);
   expect(host.regions.main).toContain('name="add-ticket" placeholder="ticket key" value=""');
+});
+
+test('a switch of run draws the rail fresh, and a tick does not (ADW-504)', () => {
+  const { dir, rest } = runningCopy(m, 1);
+  const start = rest.map((line) => JSON.parse(line)).find((event) => event.type === 'stage:start');
+  host.clock = Date.parse(start.ts) + 1000;
+  page = boot(host);
+  host.push(host.open('index')[0], indexMessage());
+  replay(host.open('run=')[0], dir, false);
+  host.advance(100);
+  expect(host.freshes).toEqual(['rail']);
+  host.renders = [];
+  host.freshes = [];
+  host.advance(2500);
+  expect(host.renders).toContain('rail');
+  expect(host.freshes).toEqual([]);
+  host.click({ action: 'select-run', repo: 'alpha', run: GOLDEN_RUN_ID });
+  host.advance(100);
+  expect(host.freshes).toEqual(['rail']);
 });
 
 test('the open run, once ended, opens its stream again when the index says it runs again, folds past its old run:end as live, and leaves one socket (review R1-2)', () => {

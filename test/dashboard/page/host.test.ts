@@ -14,7 +14,7 @@ import { foldRun, type StageCard } from '../../../src/dashboard/page/run-model';
 import { renderTimeline } from '../../../src/dashboard/page/timeline-view';
 import { initialUi } from '../../../src/dashboard/page/ui-state';
 import { readEvents } from '../../../src/events/consumers/ndjson';
-import { GOLDEN_RUN, runningCopy, seedFixtures } from '../../helpers/dashboard';
+import { GOLDEN_RUN, QUEUE_WORKFLOW, queueDirOf, runningCopy, seedFixtures } from '../../helpers/dashboard';
 
 interface FakeSocket {
   url: string;
@@ -87,7 +87,12 @@ function attributesOf(text: string): Record<string, string> {
 
 const camel = (name: string) => name.replace(/-([a-z])/g, (_, letter: string) => letter.toUpperCase());
 
-type LiveElement = ElementLike & { attributes: Record<string, string>; focusable: boolean };
+type LiveElement = ElementLike & {
+  attributes: Record<string, string>;
+  focusable: boolean;
+  /** How many times `setSelectionRange` was called on it. */
+  selectionCalls: number;
+};
 
 /**
  * A region whose elements are new objects each time its innerHTML is set, made from the markup's `input`, `select`,
@@ -101,6 +106,7 @@ function liveRegion(focus: Focus): ReturnType<typeof element> & { els: LiveEleme
     contains: (other: ElementLike) => els.includes(other as LiveElement),
     querySelectorAll: (selectors: string) => {
       if (selectors === '[data-scroll]') return els.filter((el) => el.dataset.scroll !== undefined);
+      if (selectors === '[name]') return els.filter((el) => el.attributes.name !== undefined);
       if (selectors === '[name], [data-action], a[href]')
         return els.filter(
           (el) =>
@@ -115,7 +121,8 @@ function liveRegion(focus: Focus): ReturnType<typeof element> & { els: LiveEleme
       if (focus.active !== null && els.includes(focus.active as LiveElement)) focus.active = null;
       markup = next;
       els = [];
-      for (const [, tag, text] of next.matchAll(/<(\w+)(?=[\s>/])([^>]*)>/g)) {
+      for (const match of next.matchAll(/<(\w+)(?=[\s>/])([^>]*)>/g)) {
+        const [, tag, text] = match;
         const attributes = attributesOf(text as string);
         const focusable =
           ['input', 'select', 'button'].includes(tag as string) || (tag === 'a' && attributes.href !== undefined);
@@ -123,12 +130,55 @@ function liveRegion(focus: Focus): ReturnType<typeof element> & { els: LiveEleme
         const dataset: Record<string, string | undefined> = {};
         for (const [name, value] of Object.entries(attributes))
           if (name.startsWith('data-')) dataset[camel(name.slice(5))] = value;
+        // A select keeps only a value among its markup's options, and a number field has no selection, as in a browser.
+        const options =
+          tag === 'select'
+            ? [
+                ...next
+                  .slice((match.index ?? 0) + match[0].length)
+                  .split('</select>', 1)
+                  .join('')
+                  .matchAll(/<option([^>]*)>/g),
+              ].map(([, optionText]) => attributesOf(optionText as string))
+            : [];
+        let value =
+          tag === 'select'
+            ? ((options.find((option) => 'selected' in option) ?? options[0])?.value ?? '')
+            : (attributes.value ?? '');
+        let start: number | null = attributes.type === 'number' ? null : value.length;
+        let end: number | null = start;
+        let direction: string | null = 'none';
         const el: LiveElement = {
           ...element({ dataset, parentElement: region }),
           attributes,
           focusable,
+          selectionCalls: 0,
           tagName: String(tag).toUpperCase(),
           scrollTop: 0,
+          get value() {
+            return value;
+          },
+          set value(next: string) {
+            value = tag === 'select' && !options.some((option) => option.value === next) ? '' : next;
+            start = end = attributes.type === 'number' ? null : value.length;
+          },
+          checked: 'checked' in attributes,
+          get selectionStart() {
+            return start;
+          },
+          get selectionEnd() {
+            return end;
+          },
+          get selectionDirection() {
+            return direction;
+          },
+          setSelectionRange: (from: number, to: number, how?: string) => {
+            el.selectionCalls++;
+            if (attributes.type === 'number') throw new Error('InvalidStateError');
+            start = from;
+            end = to;
+            direction = how ?? 'none';
+          },
           contains: (other: ElementLike) => other === el,
           focus: (options) => {
             focus.active = el;
@@ -137,6 +187,8 @@ function liveRegion(focus: Focus): ReturnType<typeof element> & { els: LiveEleme
           getAttribute: (name: string) => attributes[name] ?? null,
         };
         if (attributes.name !== undefined) el.name = attributes.name;
+        if (attributes.type !== undefined) el.type = attributes.type;
+        if (tag === 'select') el.type = 'select-one';
         els.push(el);
       }
     },
@@ -650,6 +702,124 @@ test('across a tick the rail is rewritten, the focused row stays focused and Tab
     expect(fake.focus.active).toBe(after[at + 1] as ElementLike);
   } finally {
     page.stop();
+    m.remove();
+  }
+});
+
+const field = (region: ReturnType<typeof liveRegion>, name: string) =>
+  region.els.find((el) => el.attributes.name === name) as LiveElement;
+
+const FORM = `<input name="add-ticket" type="text" value=""><input name="add-force" type="checkbox"><input name="raise" type="text" value="1"><button data-action="add-ticket" data-repo="beta">add</button>`;
+
+test("render keeps a typed value, a ticked box and the focused field's caret across a changed draw", () => {
+  const fake = fakeWindow();
+  const main = fake.live('main');
+  const host = browserHost(fake.win);
+  host.render('main', FORM);
+  field(main, 'add-ticket').value = 'FAKE-9';
+  field(main, 'add-force').checked = true;
+  fake.tab();
+  field(main, 'add-ticket').setSelectionRange?.(2, 4, 'forward');
+  const before = field(main, 'add-ticket');
+  host.render('main', `${FORM}<i>more</i>`);
+  const after = field(main, 'add-ticket');
+  expect(after).not.toBe(before);
+  expect([after.value, field(main, 'add-force').checked, field(main, 'raise').value]).toEqual(['FAKE-9', true, '1']);
+  expect(fake.focus.active).toBe(after as ElementLike);
+  expect([after.selectionStart, after.selectionEnd, after.selectionDirection]).toEqual([2, 4, 'forward']);
+});
+
+test("a fresh render gives the fields the markup's values and still keeps the focus", () => {
+  const fake = fakeWindow();
+  const main = fake.live('main');
+  const host = browserHost(fake.win);
+  host.render('main', FORM);
+  field(main, 'add-ticket').value = 'FAKE-9';
+  field(main, 'add-force').checked = true;
+  fake.tab();
+  host.render('main', FORM, true);
+  const after = field(main, 'add-ticket');
+  expect([after.value, field(main, 'add-force').checked]).toEqual(['', false]);
+  expect(fake.focus.active).toBe(after as ElementLike);
+  expect([after.selectionStart, after.selectionCalls]).toEqual([0, 0]);
+});
+
+test("a select whose option is gone keeps the markup's choice, and one whose option is still there keeps the person's", () => {
+  const fake = fakeWindow();
+  const rail = fake.live('rail');
+  const host = browserHost(fake.win);
+  const select = (options: string) => `<select name="stage">${options}</select>`;
+  host.render('rail', select('<option value="a">a</option><option value="b" selected>b</option>'));
+  field(rail, 'stage').value = 'a';
+  host.render(
+    'rail',
+    select('<option value="a">a</option><option value="b" selected>b</option><option value="c">c</option>'),
+  );
+  expect(field(rail, 'stage').value).toBe('a');
+  host.render('rail', select('<option value="b">b</option><option value="c" selected>c</option>'));
+  expect(field(rail, 'stage').value).toBe('c');
+});
+
+test('a focused number field keeps its value and takes no selection call that throws', () => {
+  const fake = fakeWindow();
+  const rail = fake.live('rail');
+  const host = browserHost(fake.win);
+  const form = '<input name="raise" type="number" value="">';
+  host.render('rail', form);
+  fake.tab();
+  field(rail, 'raise').value = '2.5';
+  expect(field(rail, 'raise').selectionStart).toBeNull();
+  expect(() => host.render('rail', `${form}<i>x</i>`)).not.toThrow();
+  const after = field(rail, 'raise');
+  expect([after.value, after.selectionCalls]).toEqual(['2.5', 0]);
+  expect(fake.focus.active).toBe(after as ElementLike);
+});
+
+test('across a tick and a changed queue, the add field keeps its focus, its typed ticket key and its caret', () => {
+  const m = seedFixtures();
+  const fake = fakeWindow();
+  const queueId = `beta/${QUEUE_WORKFLOW}`;
+  let page: ReturnType<typeof boot> | undefined;
+  try {
+    const { dir, rest } = runningCopy(m, 1);
+    const lines = rest.map((line) => JSON.parse(line));
+    const start = lines.find((event) => event.type === 'stage:start' && event.key === 'implement#1');
+    for (const id of REGIONS) fake.live(id);
+    fake.setClock(Date.parse(start.ts) + 1000);
+    page = boot(browserHost(fake.win));
+    const socketOf = (part: string) => fake.sockets.find((socket) => socket.url.includes(part));
+    socketOf('index=')?.onmessage?.({ data: JSON.stringify({ kind: 'index', repos: index(m.registryDir) }) });
+    for (const event of [...readEvents(dir), ...lines.slice(0, lines.indexOf(start) + 1)])
+      socketOf('run=')?.onmessage?.({ data: JSON.stringify({ kind: 'event', event }) });
+    const queue = socketOf('queue=');
+    for (const event of readEvents(queueDirOf(m)))
+      queue?.onmessage?.({ data: JSON.stringify({ kind: 'queue-event', event }) });
+    fake.fire('click', { target: element({ dataset: { action: 'select-queue', queue: queueId } }) });
+    fake.advance(100);
+    const main = fake.elements.main as ReturnType<typeof liveRegion>;
+    const typed = field(main, 'add-ticket');
+    for (let step = 0; step < 50 && fake.focus.active !== typed; step++) fake.tab();
+    expect(fake.focus.active).toBe(typed as ElementLike);
+    typed.value = 'FAKE-9';
+    typed.setSelectionRange?.(3, 3);
+    fake.advance(1000);
+    expect(field(main, 'add-ticket')).toBe(typed);
+    expect([fake.focus.active, typed.value]).toEqual([typed as ElementLike, 'FAKE-9']);
+
+    queue?.onmessage?.({
+      data: JSON.stringify({
+        kind: 'queue-event',
+        event: { seq: 99, ts: '2026-09-24T11:09:00.000Z', type: 'watch:removed', workflow: QUEUE_WORKFLOW },
+      }),
+    });
+    fake.advance(100);
+    const again = field(main, 'add-ticket');
+    expect(again).not.toBe(typed);
+    expect(fake.focus.active).toBe(again as ElementLike);
+    expect([again.value, again.selectionStart, again.selectionEnd]).toEqual(['FAKE-9', 3, 3]);
+    expect(main.innerHTML).toContain('not watched');
+  } finally {
+    page?.stop();
     m.remove();
   }
 });

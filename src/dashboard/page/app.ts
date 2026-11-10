@@ -303,7 +303,7 @@ export function boot(host: PageHost): Page {
       const isFresh = fresh.delete(region);
       if (!isFresh && written.get(region) === markup) continue;
       written.set(region, markup);
-      host.render(region, markup);
+      host.render(region, markup, isFresh);
       // A running call's timeline, followed, shows its newest entry: not while the queue holds the centre.
       if (region === 'main' && ui.follow && openQueue() === undefined && opened()?.state === 'running')
         host.scrollToEnd(region);
