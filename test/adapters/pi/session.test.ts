@@ -35,7 +35,9 @@ const catalog = Bun.serve({
       contextWindow: 131072,
       maxTokens: 32768,
     };
-    return Response.json([model], { headers: { 'last-modified': new Date().toUTCString() } });
+    return Response.json([model, { ...model, id: 'served-reasoner', name: 'Served reasoner', reasoning: true }], {
+      headers: { 'last-modified': new Date().toUTCString() },
+    });
   },
 });
 afterAll(() => catalog.stop(true));
@@ -76,6 +78,16 @@ test("a model only the provider's pi.dev catalog lists is found there, and one t
     served: true,
     requests: ['/api/models/providers/groq'],
   });
+});
+
+test('a session runs at the thinking level of its effort, and at medium when it has none', async () => {
+  const levels: (string | undefined)[] = [];
+  for (const extra of [{ effort: 'high' }, { effort: 'low' }, {}] as const) {
+    const session = await createPiSession(params({ model: 'groq/served-reasoner', ...extra }));
+    levels.push(session.thinkingLevel);
+    await session.dispose();
+  }
+  expect(levels).toEqual(['high', 'low', 'medium']);
 });
 
 test("a provider's catalog that cannot be fetched leaves its model refused by name", async () => {

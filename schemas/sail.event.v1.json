@@ -585,6 +585,7 @@
         "origin": { "$ref": "#/$defs/origin" },
         "model": { "type": "string" },
         "harness": { "type": "string" },
+        "effort": { "enum": ["low", "medium", "high", "xhigh", "max"] },
         "output": { "type": "string" },
         "produces": { "type": "array", "items": { "type": "string" } },
         "network": { "type": "array", "items": { "type": "string" } },
@@ -601,6 +602,7 @@
               "kind": { "enum": ["agent", "script"] },
               "model": { "type": "string" },
               "harness": { "type": "string" },
+              "effort": { "enum": ["low", "medium", "high", "xhigh", "max"] },
               "output": { "type": "string" },
               "produces": { "type": "array", "items": { "type": "string" } },
               "permissions": { "$ref": "#/$defs/permissions" },
@@ -827,6 +829,7 @@
         "consumed": { "$ref": "#/$defs/consumed" },
         "model": { "type": "string" },
         "harness": { "type": "string", "description": "the named harness the call ran on, left out for the default" },
+        "effort": { "enum": ["low", "medium", "high", "xhigh", "max"] },
         "permissions": { "$ref": "#/$defs/permissions" },
         "budget": { "$ref": "#/$defs/budget" },
         "steps": { "type": "array", "minItems": 2, "items": { "type": "string" } }
@@ -870,6 +873,7 @@
         "try": { "type": "integer", "minimum": 1 },
         "model": { "type": "string" },
         "harness": { "type": "string", "description": "the named harness the step ran on, left out for the default" },
+        "effort": { "enum": ["low", "medium", "high", "xhigh", "max"] },
         "command": { "type": "string" }
       },
       "required": ["stage", "step", "index", "of", "kind", "try"],
@@ -1468,6 +1472,7 @@
         "path": { "type": "string" },
         "branch": { "type": "string" },
         "baseSha": { "$ref": "#/$defs/sha" },
+        "startSha": { "$ref": "#/$defs/sha" },
         "durationMs": { "type": "number", "minimum": 0 }
       },
       "required": ["path", "branch", "baseSha", "durationMs"],

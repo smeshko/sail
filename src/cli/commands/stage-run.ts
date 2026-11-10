@@ -20,7 +20,7 @@ import { type AgentExecution, callProblems, runCall } from '../../engine/call';
 import { aliasOf, type ProjectConfig, readConfig } from '../../engine/config';
 import { loadStageFile, stageFileProblem, stageFolder } from '../../engine/definitions';
 import { systemKeepAwake } from '../../engine/keep-awake';
-import { modelProblemsOf } from '../../engine/roster';
+import { effortProblemsOf, modelProblemsOf } from '../../engine/roster';
 import { runsDir } from '../../engine/run-dir';
 import { newRunId } from '../../engine/run-id';
 import { findSailDir } from '../../engine/sail-dir';
@@ -85,7 +85,10 @@ async function executionOf(
   config: ProjectConfig,
   env: Io['env'],
 ): Promise<AgentExecution | { refused: string } | { issues: SchemaIssue[] }> {
-  const undefinedAlias = modelProblemsOf(`stage '${definition.name}'`, definition, config);
+  const undefinedAlias = [
+    ...modelProblemsOf(`stage '${definition.name}'`, definition, config),
+    ...effortProblemsOf(`stage '${definition.name}'`, definition),
+  ];
   if (undefinedAlias.length > 0) return { refused: undefinedAlias.join('\n') };
   const steps: readonly Step[] = definition.kind === 'stage' ? definition.steps : [definition];
   const agents = steps.filter((step): step is AgentStep => step.kind === 'agent');

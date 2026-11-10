@@ -17,7 +17,9 @@
 // - A hand-off file (`engine/control.ts`) the run never took is deleted when its item settles: done, failed or parked.
 //   A failure with a `stopped` hand-off, a start refused after `sail stop` reached it, parks the item instead.
 // - **A held dispatch**: a run `suspended usage_limit` holds the workflow's dispatch (`queue:held`) until its reset time,
-//   or the back-off after it hit the limit. While held, nothing starts and no run is resumed, and no item's attempt is
+//   or the back-off after it hit the limit, and the limit is machine-wide per harness key (`holds.ts`): the dispatch
+//   writes the hold of the run's key, and each tick holds the workflow too while a hold on a key it reaches, written by
+//   any watcher on the machine, is active. While held, nothing starts and no run is resumed, and no item's attempt is
 //   counted, failed or parked. A tick past the hold releases it (`queue:released`), and the run is resumed with the
 //   rest of the dispatch; a run that hits the limit again is held again.
 // - **A held item**: a run `suspended port_unavailable` holds only its own item (`queue:held` with the item's
@@ -76,6 +78,7 @@ import { holdsLabel } from '../ports/labels';
 import { getTicket, openPrerequisites, type TicketSource, waitingOnText } from '../ports/ticket-source';
 import type { Ticket } from '../ports/types';
 import type { WorkspacePort } from '../ports/workspace';
+import { activeHolds, releasedAt, writeHold } from './holds';
 import type { QueueItem, QueueStore } from './queue-store';
 import { type Reconciled, reconcileItem } from './reconcile';
 import type { SpawnedRun, SpawnResumeOptions, SpawnRunOptions } from './spawn';
@@ -138,6 +141,12 @@ export interface DispatcherOptions {
   waitingRecheckMs?: number;
   /** Whether the workflow declares `ignorePrerequisites`, so no item of it waits. */
   ignorePrerequisites?: boolean;
+  /** The machine directory whose `holds/` keep the usage-limit holds shared by every watcher. None: the hold is this workflow's alone. */
+  machineDir?: string;
+  /** The harness keys the workflow reaches now: a usage-limit hold on one holds its dispatch. */
+  harnessKeys?: () => readonly string[];
+  /** The registry entry this dispatcher's repository is recorded under, named in the holds it writes. */
+  repository?: string;
 }
 
 export interface Dispatcher {
@@ -186,6 +195,8 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
   const resumeStartedAt = new Map<string, Date>();
   /** When this dispatcher first saw each run on its usage limit or an unavailable port, until it resumes the run. */
   const limitedAt = new Map<string, Date>();
+  /** When each item was last reconciled, by dedup key: a hold its answer asks for is not written over a later release. */
+  const reconciledAt = new Map<string, number>();
   /** When each waiting item's ticket was last read, by dedup key: it is read again only after `waitingRecheckMs`. */
   const waitingReadAt = new Map<string, number>();
   let waitingRecheckMs = options.waitingRecheckMs ?? 60_000;
@@ -295,12 +306,17 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
     const exited = exits.get(item.dedupKey);
     const logFrom = logFroms.get(item.dedupKey);
     try {
+      const at = now();
+      reconciledAt.set(item.dedupKey, at.getTime());
       const answer = await reconcileItem(item, {
         runsDir: options.runsDir,
         workflow,
         isAlive,
         workspace,
-        now: now(),
+        now: at,
+        ...(options.machineDir === undefined
+          ? {}
+          : { releasedAt: (key: string) => releasedAt(options.machineDir as string, key) }),
         backoffMs: options.usageLimitBackoffMs,
         portBackoffMs: options.portUnavailableBackoffMs,
         ...(limitedAt.has(runId) ? { limitedAt: limitedAt.get(runId) as Date } : {}),
@@ -372,8 +388,18 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
         resumed.delete(runId);
         resumedAt.delete(runId);
         limitedAt.set(runId, limitedAt.get(runId) ?? now());
-        if (answer.stopReason === 'usage_limit') store.hold(answer.until, runId, answer.reason);
-        else store.holdItem(item.dedupKey, answer.until, answer.reason);
+        if (answer.stopReason === 'usage_limit') {
+          if (options.machineDir !== undefined && answer.harnessKey !== undefined) {
+            writeHold(
+              options.machineDir,
+              answer.harnessKey,
+              { until: answer.until, reason: answer.reason, runId, repository: options.repository ?? workflow },
+              now(),
+              reconciledAt.get(item.dedupKey),
+            );
+          }
+          store.hold(answer.until, runId, answer.reason, answer.harnessKey);
+        } else store.holdItem(item.dedupKey, answer.until, answer.reason);
         break;
       case 'resume':
         if (holding() || options.paused?.() === true) break;
@@ -556,8 +582,27 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
     }
   };
 
+  /** Holds the workflow on each active machine hold on a harness key it reaches that its own runs did not make. */
+  const mirrorHolds = () => {
+    if (options.machineDir === undefined) return;
+    const own = new Set(dispatchedItems().map((item) => item.runId));
+    for (const { key, hold } of activeHolds(options.machineDir, options.harnessKeys?.() ?? [], now())) {
+      if (own.has(hold.runId)) continue;
+      store.hold(hold.until, hold.runId, `${key} hit the usage limit in ${hold.repository}: ${hold.reason}`, key);
+    }
+  };
+
+  /** Whether the key the local usage-limit hold was set on was released after it was set. */
+  const releasedSinceHold = (): boolean => {
+    const { held } = store.snapshot();
+    if (held?.harnessKey === undefined || options.machineDir === undefined) return false;
+    return (releasedAt(options.machineDir, held.harnessKey) ?? 0) > Date.parse(held.at);
+  };
+
   return {
     async tick() {
+      if (releasedSinceHold()) store.release();
+      mirrorHolds();
       if (store.snapshot().held !== undefined && !holding()) store.release();
       for (const item of store.snapshot().items) {
         if (item.held !== undefined && Date.parse(item.held.until) <= now().getTime()) store.releaseItem(item.dedupKey);

@@ -1811,3 +1811,43 @@ test("a start whose definitions can't be copied leaves no run directory and rele
     }
   });
 });
+
+const HUGE =
+  ".sail/workflows/ticket-to-pr/stages/spec/stage.ts: stage 'spec' sets effort 'huge', which is not one of low, medium, high, xhigh, max";
+
+test('openRun refuses an agent step whose effort is none of the five levels, naming the stage, and makes no run directory', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = copyFixture(repo.dir);
+    const adapters = await fakeAdapters(repo.dir);
+    edit(
+      sail,
+      'workflows/ticket-to-pr/stages/spec/stage.ts',
+      "model: 'deep',",
+      "model: 'deep', effort: 'huge' as never,",
+    );
+    const run = await openRun({ cwd: repo.dir, workflow: 'ticket-to-pr', ticket: 'FAKE-1', adapters });
+    expect(run).toEqual({ refused: HUGE });
+    expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
+  });
+});
+
+test('a pull-request start refuses an agent step whose effort is none of the five levels, and makes no run directory', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = writeStub(repo.dir);
+    writePrWorkflow(sail, 'review-pr');
+    commitBranch(repo, 'sail/FAKE-1-add-a-greeting', 'greet.txt');
+    seedPullRequests(sail, repo, [{ number: 1, head: 'sail/FAKE-1-add-a-greeting', ticketKey: 'FAKE-1' }]);
+    edit(
+      sail,
+      'workflows/review-pr/stages/review/stage.ts',
+      'permissions:',
+      "effort: 'huge' as never,\n  permissions:",
+    );
+    const run = await openStub(repo.dir, { ticket: '#1', workflow: 'review-pr' });
+    expect(run).toEqual({
+      refused:
+        ".sail/workflows/review-pr/stages/review/stage.ts: stage 'review' sets effort 'huge', which is not one of low, medium, high, xhigh, max",
+    });
+    expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
+  });
+});

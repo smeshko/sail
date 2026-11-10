@@ -258,6 +258,17 @@ test('--dry-run prints a harness field under the model of a stage whose alias na
   );
 }, 60_000);
 
+test('--dry-run prints an effort field under the model of the agent step that sets one, and none for the others', async () => {
+  const { code, stdout } = await dryIn(['FAKE-1', '--dry-run'], (repo) => {
+    const sail = join(repo.dir, '.sail');
+    edit(sail, 'workflows/ticket-to-pr/stages/spec/stage.ts', "model: 'deep',", "model: 'deep', effort: 'medium',");
+  });
+  expect(code).toBe(EXIT_OK);
+  const specModel = 'stage spec  agent  repo:.sail/workflows/ticket-to-pr/stages/spec\n  model     claude-opus-5-5\n';
+  expect(ROSTER).toContain(specModel);
+  expect(stdout).toBe(ROSTER.replace(specModel, `${specModel}  effort    medium\n`));
+}, 60_000);
+
 const waitOnFake2 = (repo: TempRepo) => patchTicket(join(repo.dir, '.sail'), 'FAKE-1', { prerequisites: ['FAKE-2'] });
 
 test('--dry-run on a ticket with an open prerequisite exits 5 naming it, and writes nothing', async () => {

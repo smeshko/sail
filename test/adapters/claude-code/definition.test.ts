@@ -52,7 +52,7 @@ test('harness: { use: claude-code } resolves to the built-in, with its SDK versi
     name: resolved.ports.harness.name,
     permissions: resolved.ports.harness.capabilities().permissions,
   }).toEqual({
-    entry: { use: 'claude-code', origin: 'builtin', versions: { '@anthropic-ai/claude-agent-sdk': '0.3.282' } },
+    entry: { use: 'claude-code', origin: 'builtin', versions: { '@anthropic-ai/claude-agent-sdk': '0.3.322' } },
     name: 'claude-code',
     permissions: true,
   });

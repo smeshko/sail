@@ -59,6 +59,11 @@ export interface ExitCodes {
 /** What nothing consumed or produced looks like. It admits no keys, where `{}` would admit any. */
 type None = Record<never, never>;
 
+/** The reasoning efforts an agent step may run at, lowest first. */
+export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
+
+export type Effort = (typeof EFFORTS)[number];
+
 export interface AgentOptions<C extends Consumes, P extends AgentProduces, O extends z.ZodType> {
   /** The step's instructions, relative to its stage directory. */
   readonly prompt: string;
@@ -68,6 +73,8 @@ export interface AgentOptions<C extends Consumes, P extends AgentProduces, O ext
   readonly output: O;
   /** A model alias from project.yaml's `models`. The engine defaults to `default`. */
   readonly model?: string;
+  /** The reasoning effort the harness runs the session at. Left out, the harness's own default (pi's `medium`). */
+  readonly effort?: Effort;
   readonly permissions: Permissions;
   readonly budget: Budget;
   /**

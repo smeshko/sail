@@ -108,10 +108,11 @@ export function formatSize(bytes: number): string {
   return `${(Math.round((bytes / 1048576) * 10) / 10).toFixed(1)} MB`;
 }
 
-/** A start line's model, then the named harness it ran on: ` · <model> on <harness>`. */
-function modelOn(event: { model?: string; harness?: string }): string {
+/** A start line's model, its effort, then the named harness it ran on: ` · <model> at <effort> effort on <harness>`. */
+function modelOn(event: { model?: string; effort?: string; harness?: string }): string {
   if (event.model === undefined) return '';
-  return ` · ${event.model}${event.harness === undefined ? '' : ` on ${event.harness}`}`;
+  const effort = event.effort === undefined ? '' : ` at ${event.effort} effort`;
+  return ` · ${event.model}${effort}${event.harness === undefined ? '' : ` on ${event.harness}`}`;
 }
 
 /** `text`'s lines, cleaned and without trailing whitespace, the blank ones after the first left out. */

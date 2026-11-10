@@ -92,7 +92,7 @@ test('sail FAKE-1 --until spec on claude-code suspends after spec with spec.md, 
   expect(run.header.adapters.harness).toEqual({
     use: SCRIPTED_ADAPTER,
     origin: 'repo:.sail/adapters/claude-code-scripted.ts',
-    versions: { '@anthropic-ai/claude-agent-sdk': '0.3.282' },
+    versions: { '@anthropic-ai/claude-agent-sdk': '0.3.322' },
   });
   expect({ spec: run.spec, outcome: run.result.outcome, output: run.result.output }).toEqual({
     spec: SPEC_DOCUMENT,

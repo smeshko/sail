@@ -1,6 +1,10 @@
 // A run's control file, `<run dir>/CONTROL`: a request, from outside the run's process, to stop at its next call
 // boundary, or end the running call with `stopped now`. It holds a request and a newline:
 // - `stopped`, which `sail stop` writes, fails the run: its workspace and lease are released, as for any failed run.
+// - `suspended`, which `sail stop --suspend` writes, ends the running call at once and suspends the run `interrupted`,
+//   keeping its workspace and lease (`requestSuspend()`). It comes with the run's hold: a `HOLD` file in the run directory
+//   (`holdRun()`), which the watcher honours by never resuming the run. `sail resume` removes it (`releaseHold()`), with
+//   a suspend request the run never took.
 //
 // A stop replaces whatever is there (`requestStop()`). The engine takes the file before the intake and before each call
 // (`takeControl()`): it moves the file aside under a name only this process uses, reads it, and removes it. So each
@@ -21,8 +25,10 @@ import { replaceFile } from './durable';
 
 export const CONTROL_FILE = 'CONTROL';
 
-/** What a control file asks of its run: `stopped` fails it. */
-export type ControlRequest = 'stopped';
+export const HOLD_FILE = 'HOLD';
+
+/** What a control file asks of its run: `stopped` fails it, `suspended` suspends it. */
+export type ControlRequest = 'stopped' | 'suspended';
 
 /** A name in `runDir` only this process uses, for a temp file or a taken one. */
 const own = (runDir: string, suffix: string) =>
@@ -36,6 +42,40 @@ export function requestStop(runDir: string): void {
 /** Asks the run to end its running call now, replacing any earlier request. */
 export function requestStopNow(runDir: string): void {
   replaceFile(join(runDir, CONTROL_FILE), 'stopped now\n', own(runDir, 'tmp'));
+}
+
+/** Asks the run to end its running call now and suspend, replacing any earlier request. */
+export function requestSuspend(runDir: string): void {
+  replaceFile(join(runDir, CONTROL_FILE), 'suspended\n', own(runDir, 'tmp'));
+}
+
+/** Reads a suspend request without taking it: the boundary still consumes the request. */
+export function suspendRequested(runDir: string): boolean {
+  try {
+    return readFileSync(join(runDir, CONTROL_FILE), 'utf8') === 'suspended\n';
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
+/** Marks the run in `runDir` held: the watcher leaves it to a person. */
+export function holdRun(runDir: string): void {
+  replaceFile(join(runDir, HOLD_FILE), 'held\n', own(runDir, 'hold'));
+}
+
+/** Whether the run in `runDir` is held. */
+export function isHeld(runDir: string): boolean {
+  return existsSync(join(runDir, HOLD_FILE));
+}
+
+/**
+ * Removes the run's hold, if it has one, and a suspend request still in `CONTROL`: one the run never took, as it
+ * suspended on its own first, would otherwise suspend the resume again with no hold.
+ */
+export function releaseHold(runDir: string): void {
+  if (suspendRequested(runDir)) takeControl(runDir);
+  rmSync(join(runDir, HOLD_FILE), { force: true });
 }
 
 /** Reads an immediate stop without taking it: the boundary still consumes the request. */
@@ -58,6 +98,7 @@ function takeFile(file: string, taken: string): ControlRequest | undefined {
   }
   try {
     const text = readFileSync(taken, 'utf8');
+    if (text === 'suspended\n') return 'suspended';
     return text === 'stopped\n' || text === 'stopped now\n' ? 'stopped' : undefined;
   } finally {
     rmSync(taken, { force: true });

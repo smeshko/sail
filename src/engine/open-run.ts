@@ -77,7 +77,7 @@ import { type LoadedWorkflow, loadWorkflow } from './load-workflow';
 import { type ResolvedPullRequest, resolvePullRequest, resolveRef } from './pr-source';
 import { isAlive } from './process';
 import { credentialValues, type Redactor, redactor } from './redact';
-import { buildRoster, harnessesReached, modelProblems } from './roster';
+import { buildRoster, effortProblems, harnessesReached, modelProblems } from './roster';
 import {
   copyDefinitions,
   createRunDir,
@@ -404,11 +404,13 @@ export async function startWorkspace(options: {
   branch: string;
   base?: string;
   fallback?: string;
+  /** The run whose commits the workspace starts from: see `WorkspacePort.create()`. */
+  carry?: RunRef;
   signal: AbortSignal | undefined;
   /** Fills the new run directory before the workspace is made. A throw undoes the start and is rethrown. */
   copy?: (runDir: string) => void;
 }): Promise<{ made: Made } | { refused: string }> {
-  const { port, run, sailDir, workflow, branch, base, fallback, signal, copy } = options;
+  const { port, run, sailDir, workflow, branch, base, fallback, carry, signal, copy } = options;
   let repository: Repository;
   try {
     repository = await port.repository();
@@ -440,6 +442,7 @@ export async function startWorkspace(options: {
       branch,
       ...(base === undefined ? {} : { base }),
       ...(fallback === undefined ? {} : { fallback }),
+      ...(carry === undefined ? {} : { carry }),
       ...(signal === undefined ? {} : { signal }),
     });
   } catch (error) {
@@ -532,7 +535,7 @@ export async function preflightRun(options: OpenRunOptions): Promise<Preflight |
   claim(found.dir);
   const loaded = await loadWorkflow(found.dir, workflow);
   if ('refused' in loaded) return loaded;
-  const models = modelProblems(loaded, config);
+  const models = [...modelProblems(loaded, config), ...effortProblems(loaded)];
   if (models.length > 0) return { refused: models.join('\n') };
   const named = await resolveNamed(options.adapters, found.dir, harnessesReached(loaded, config));
   if ('refused' in named) return named;

@@ -1,4 +1,4 @@
-// `sail run --from-run <run> --stage <stage> [--continue] [--run-id <id>] [-q|-v|-vv]`: starts a seeded run in the repository sail is
+// `sail run --from-run <run> --stage <stage> [--continue] [--from-base] [--run-id <id>] [-q|-v|-vv]`: starts a seeded run in the repository sail is
 // run from. It reuses the calls the source run made before the stage, runs the stage, and stops after its first call,
 // suspended, so `sail resume` takes it on. With `--continue` it runs the rest of the workflow too. It takes `sail
 // resume`'s steps: the source's workflow is type-checked first, and every refusal is one `sail run: <message>` line with
@@ -47,7 +47,7 @@ export async function fromRun(args: Parsed, io: Io): Promise<ExitCode> {
   const source = args.values['from-run'];
   const { stage } = args.values;
   if (typeof source !== 'string' || typeof stage !== 'string') {
-    return refuse('usage: sail run --from-run <run> --stage <stage> [--continue] [--run-id <id>]');
+    return refuse('usage: sail run --from-run <run> --stage <stage> [--continue] [--from-base] [--run-id <id>]');
   }
   const verbosity = verbosityOf(args, io, COMMAND);
   if (typeof verbosity === 'number') return verbosity;
@@ -73,6 +73,7 @@ export async function fromRun(args: Parsed, io: Io): Promise<ExitCode> {
       fromRun: source,
       stage,
       continue: args.values.continue === true,
+      fromBase: args.values['from-base'] === true,
       ...(typeof args.values['run-id'] === 'string' ? { runId: args.values['run-id'] } : {}),
       adapters: project.adapters,
       signal,

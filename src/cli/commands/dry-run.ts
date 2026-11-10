@@ -35,6 +35,7 @@ function entryLines(entry: RosterEntry | StepRosterEntry, indent: string): strin
     if (values !== undefined && values.length > 0) lines.push(field(indent, label, values.join(', ')));
   };
   if (entry.model !== undefined) lines.push(field(indent, 'model', entry.model));
+  if (entry.effort !== undefined) lines.push(field(indent, 'effort', entry.effort));
   if (entry.harness !== undefined) lines.push(field(indent, 'harness', entry.harness));
   if (entry.budget !== undefined) lines.push(field(indent, 'budget', budgetOf(entry.budget)));
   list('produces', entry.produces);

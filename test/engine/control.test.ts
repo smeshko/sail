@@ -8,9 +8,14 @@ import {
   askToStop,
   CONTROL_FILE,
   handOffFile,
+  holdRun,
+  isHeld,
+  releaseHold,
   requestStop,
   requestStopNow,
+  requestSuspend,
   stopNowRequested,
+  suspendRequested,
   takeControl,
   takeHandOff,
 } from '../../src/engine/control';
@@ -136,4 +141,25 @@ test('a hand-off written before the directory is taken into CONTROL by the run',
   mkdirSync(run);
   takeHandOff(runs, ID);
   expect([control(run), handOff(runs)]).toEqual(['stopped\n', undefined]);
+});
+
+test('a suspend is peeked without taking, taken as suspended, and replaced by a later stop', () => {
+  const dir = runDir();
+  expect(suspendRequested(dir)).toBe(false);
+  requestSuspend(dir);
+  expect([held(dir), suspendRequested(dir), stopNowRequested(dir)]).toEqual([['CONTROL: suspended\n'], true, false]);
+  expect([takeControl(dir), held(dir), suspendRequested(dir)]).toEqual(['suspended', [], false]);
+  requestSuspend(dir);
+  requestStop(dir);
+  expect([held(dir), suspendRequested(dir)]).toEqual([['CONTROL: stopped\n'], false]);
+});
+
+test('a hold is written, seen, and removed, and removing none is harmless', () => {
+  const dir = runDir();
+  expect(isHeld(dir)).toBe(false);
+  holdRun(dir);
+  expect([isHeld(dir), held(dir)]).toEqual([true, ['HOLD: held\n']]);
+  releaseHold(dir);
+  releaseHold(dir);
+  expect([isHeld(dir), held(dir)]).toEqual([false, []]);
 });

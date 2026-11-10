@@ -34,6 +34,7 @@ function client(answer: (init: RequestInit) => Response | Promise<Response>, tim
     owner: 'o',
     repo: 'r',
     fetch,
+    retryDelayMs: 1,
     ...(timeoutMs === undefined ? {} : { timeoutMs }),
   });
   return { github, sent };
@@ -214,4 +215,33 @@ test('a text answer that holds the token across the cut at 200 characters leaves
   // The token's first 12 characters, `ghp_MARKER_c`, are long enough to be a fragment of it and of nothing else.
   expect(messages.map((message) => message.includes(TOKEN.slice(0, 12)))).toEqual([false, false, false]);
   expect(messages.map((message) => message.endsWith('[redacted]'))).toEqual([true, true, true]);
+});
+
+test('a GET that gets no answer is sent once more, and the second answer counts', async () => {
+  let calls = 0;
+  const { github, sent } = client(() => {
+    calls += 1;
+    if (calls === 1) throw new TypeError('The socket connection was closed unexpectedly.');
+    return json(200, { number: 7 });
+  });
+  const pull = await github.request<{ number: number }>('getPullRequest', 'GET', github.repoPath('pulls', 7));
+  expect(pull).toEqual({ number: 7 });
+  expect(sent.map((each) => each.method)).toEqual(['GET', 'GET']);
+});
+
+test('a write that gets no answer is not sent again: it may have landed', async () => {
+  const { github, sent } = client(() => {
+    throw new TypeError('The socket connection was closed unexpectedly.');
+  });
+  const error = await rejection(
+    github.request('comment', 'POST', github.repoPath('issues', 7, 'comments'), { body: 'x' }),
+  );
+  expect(failure(error)).toMatchObject({ code: 'unavailable' });
+  expect(sent.map((each) => each.method)).toEqual(['POST']);
+});
+
+test('a GET answered with an error is not sent again', async () => {
+  const { github, sent } = client(() => json(500, { message: 'boom' }));
+  await rejection(github.request('getPullRequest', 'GET', github.repoPath('pulls', 7)));
+  expect(sent).toHaveLength(1);
 });

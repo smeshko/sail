@@ -120,6 +120,8 @@ export interface StageCard {
   model?: string;
   /** The named harness it ran on; absent for the default. */
   harness?: string;
+  /** The reasoning effort it ran at; absent when its step sets none. */
+  effort?: string;
   startedAt: string;
   durationMs?: number;
   costUsd?: number;
@@ -153,6 +155,7 @@ export interface PendingCard {
   kind: 'agent' | 'script' | 'stage';
   model?: string;
   harness?: string;
+  effort?: string;
 }
 
 export interface Roster {
@@ -339,9 +342,11 @@ function pendingOf(model: RunModel): PendingCard[] {
       const kind = given !== undefined && STAGE_KINDS.has(given) ? (given as PendingCard['kind']) : 'stage';
       const stageModel = str(entry.model);
       const stageHarness = str(entry.harness);
+      const stageEffort = str(entry.effort);
       return {
         stage,
         kind,
+        ...(stageEffort === undefined ? {} : { effort: stageEffort }),
         ...(stageModel === undefined ? {} : { model: stageModel }),
         ...(stageHarness === undefined ? {} : { harness: stageHarness }),
       };
@@ -454,6 +459,8 @@ function fold(model: RunModel, e: Fields, type: string, ts: string, key?: string
       if (stageModel !== undefined) started.model = stageModel;
       const stageHarness = str(e.harness) ?? str(model.roster?.stages[stage]?.harness);
       if (stageHarness !== undefined) started.harness = stageHarness;
+      const stageEffort = str(e.effort) ?? str(model.roster?.stages[stage]?.effort);
+      if (stageEffort !== undefined) started.effort = stageEffort;
       return true;
     }
     case 'intake:end':

@@ -243,7 +243,13 @@ export type Released = z.infer<typeof Released>;
 
 // Workspaces
 
-export const Workspace = z.object({ path: z.string(), branch: z.string(), baseSha: z.string(), raw: Raw });
+export const Workspace = z.object({
+  path: z.string(),
+  branch: z.string(),
+  baseSha: z.string(),
+  startSha: z.string().optional(),
+  raw: Raw,
+});
 export type Workspace = z.infer<typeof Workspace>;
 
 /** The repository a Workspace adapter works for: `url` keys its leases, and a run starts from `defaultBranch`. */

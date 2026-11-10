@@ -8,6 +8,9 @@
 // stdout and stderr go straight to files, never through pipes: a descendant that inherits a pipe keeps it open after
 // the leader exits, and a read waiting for it to close would hang until that descendant ends.
 //
+// Every live group is also kept in a process-wide set, so `stopLiveGroups` can end what a call left before sail exits.
+// A harness adapter registers the groups it spawns there too, with `trackGroup`.
+//
 // POSIX process groups only. A descendant that calls `setsid` leaves the group, and survives the stop.
 import { closeSync, openSync } from 'node:fs';
 
@@ -35,27 +38,58 @@ export type ProcessEnd =
   | { started: false; message: string }
   | { started: true; code: number | null; signal: string | null; timedOut: boolean; aborted: boolean };
 
-/** Sends `signal` to the group. False when the group is gone, or holds nothing sail can signal: macOS answers EPERM for a group whose last members are exiting. */
-function signalGroup(pgid: number, signal: NodeJS.Signals | 0): boolean {
+/** Every group a `runProcess` or a harness adapter started that hasn't been stopped or found empty. */
+const live = new Set<number>();
+
+/** Registers a group a harness spawned, so `stopLiveGroups` ends it before sail exits. */
+export function trackGroup(pgid: number): void {
+  live.add(pgid);
+}
+
+/** Forgets a group once it is stopped or known empty. */
+export function untrackGroup(pgid: number): void {
+  live.delete(pgid);
+}
+
+/** The groups registered now, for a test to see what is left. */
+export function liveGroups(): number[] {
+  return [...live];
+}
+
+/** Sends `signal` to the group: `gone` when nothing is left, `unknown` when macOS answers EPERM for a group that still holds an exiting member, so only SIGKILL settles it. */
+function signalGroup(pgid: number, signal: NodeJS.Signals | 0): 'gone' | 'sent' | 'unknown' {
   try {
     process.kill(-pgid, signal);
-    return true;
+    return 'sent';
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
-    if (code === 'ESRCH' || code === 'EPERM') return false;
+    if (code === 'ESRCH') return 'gone';
+    if (code === 'EPERM') return 'unknown';
     throw error;
   }
 }
 
 /** SIGTERM to the group, a wait of up to `graceMs` for it to empty, then SIGKILL to whatever is left. */
 export async function stopGroup(pgid: number, graceMs: number): Promise<void> {
-  if (!signalGroup(pgid, 'SIGTERM')) return;
+  if (signalGroup(pgid, 'SIGTERM') === 'gone') return;
   const deadline = performance.now() + graceMs;
   while (performance.now() < deadline) {
     await Bun.sleep(POLL_MS);
-    if (!signalGroup(pgid, 0)) return;
+    if (signalGroup(pgid, 0) === 'gone') return;
   }
   signalGroup(pgid, 'SIGKILL');
+}
+
+/**
+ * Stops every group still registered, so none outlives the sail process: those registered while it waits too, as a
+ * harness that looks up its groups on a timer may.
+ */
+export async function stopLiveGroups(graceMs: number = DEFAULT_GRACE_MS): Promise<void> {
+  const stopped = new Set<number>();
+  for (let fresh = [...live]; fresh.length > 0; fresh = [...live].filter((pgid) => !stopped.has(pgid))) {
+    for (const pgid of fresh) stopped.add(pgid);
+    await Promise.all(fresh.map((pgid) => stopGroup(pgid, graceMs)));
+  }
 }
 
 export async function runProcess(options: ProcessOptions): Promise<ProcessEnd> {
@@ -85,6 +119,7 @@ export async function runProcess(options: ProcessOptions): Promise<ProcessEnd> {
   }
 
   const pgid = child.pid;
+  trackGroup(pgid);
   let timedOut = false;
   let aborted = false;
   let stopping: Promise<void> | undefined;
@@ -108,8 +143,12 @@ export async function runProcess(options: ProcessOptions): Promise<ProcessEnd> {
     clearTimeout(timer);
     options.signal?.removeEventListener('abort', onAbort);
   }
-  await stopping;
-  await stopGroup(pgid, graceMs); // whatever the leader left running
+  try {
+    await stopping;
+    await stopGroup(pgid, graceMs); // whatever the leader left running
+  } finally {
+    untrackGroup(pgid);
+  }
   return { started: true, code: child.exitCode, signal: child.signalCode ?? null, timedOut, aborted };
 }
 

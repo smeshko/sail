@@ -2,7 +2,8 @@
 // cap, skipping a leased branch without a slot or an attempt, and dropping an item no longer eligible. On the stub's
 // file-backed fakes in a temp repository, a hand-moved clock and a fake spawner.
 import { afterAll, expect, test } from 'bun:test';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { createFakeTicketSource } from '../../src/adapters/fake/ticket-source';
 import { branchFor } from '../../src/engine/branch';
@@ -16,6 +17,7 @@ import type { TicketSource } from '../../src/ports/ticket-source';
 import type { PullRequestDetails } from '../../src/ports/types';
 import type { WorkspacePort } from '../../src/ports/workspace';
 import { createDispatcher, type Settled } from '../../src/watch/dispatch';
+import { readHold, releaseHold } from '../../src/watch/holds';
 import { openQueue, type QueueStore, queueDir } from '../../src/watch/queue-store';
 import { dispatchLog, spawnResume, spawnRun } from '../../src/watch/spawn';
 import { fakeAdapters } from '../helpers/adapters';
@@ -66,6 +68,7 @@ async function world(
     pullBlocked?: () => string | undefined;
     onHeld?: () => void;
     ignorePrerequisites?: boolean;
+    machine?: { dir: string; keys: string[]; repository: string };
   } = {},
 ): Promise<World> {
   writeTickets(writeStub(repo.dir), designated(count));
@@ -111,6 +114,13 @@ async function world(
       ...(options.pullBlocked === undefined ? {} : { pullBlocked: options.pullBlocked }),
       ...(options.onHeld === undefined ? {} : { onHeld: options.onHeld }),
       ...(options.ignorePrerequisites === undefined ? {} : { ignorePrerequisites: options.ignorePrerequisites }),
+      ...(options.machine === undefined
+        ? {}
+        : {
+            machineDir: options.machine.dir,
+            harnessKeys: () => options.machine?.keys ?? [],
+            repository: options.machine.repository,
+          }),
     });
   return { runs, clock, store, ticketSource, adapters, spawner, settled, errors, dispatcher };
 }
@@ -2033,5 +2043,136 @@ test('a start refused as waiting after its workflow stopped ignoring prerequisit
     w.clock.advance(FIVE_MINUTES);
     await dispatcher.tick();
     expect(spawnedKeys(w.spawner)).toEqual(['FAKE-1']);
+  });
+});
+
+/**
+ * Two registry entries on one machine: `a`'s dispatcher (entry `alpha`) has run FAKE-1 suspended on the usage limit of
+ * `claude-code` until two hours on, and `b`'s (entry `beta`, reaching `keys`) has FAKE-3 queued. Neither has ticked since.
+ */
+async function twoEntries(repo: TempRepo, keys: string[]) {
+  const machine = mkdtempSync(join(tmpdir(), 'sail-machine-'));
+  const w = await world(repo, 3, 2, { machine: { dir: machine, keys: ['claude-code'], repository: 'alpha' } });
+  const a = w.dispatcher();
+  await a.tick();
+  await w.spawner.end('FAKE-1', { status: 'suspended', stopReason: 'usage_limit' });
+  const run1 = w.spawner.run('FAKE-1').runId;
+  const adapter = (use: string) => ({ use, origin: 'builtin' });
+  writeFileSync(
+    join(w.runs, run1, 'run.json'),
+    JSON.stringify({
+      adapters: { harness: adapter('claude-code') },
+      intake: { name: 'ticket', origin: 'builtin' },
+      stages: { spec: { kind: 'agent', origin: 'repo:spec', model: 'claude-opus-5-5' } },
+    }),
+  );
+  const resetsAt = new Date(Date.parse(START) + 2 * 3_600_000).toISOString();
+  writeFileSync(
+    join(w.runs, run1, 'events.ndjson'),
+    `${JSON.stringify({ seq: 1, ts: START, runId: run1, type: 'run:suspended', stopReason: 'usage_limit', key: 'spec#1', resetsAt })}\n`,
+  );
+  const other = openQueue({ runsDir: w.runs, workflow: 'b', label: 'sail', now: w.clock });
+  if ('refused' in other) throw new Error(other.refused);
+  other.add([ticket('FAKE-3')]);
+  const b = createDispatcher({
+    workflow: 'b',
+    label: 'sail',
+    maxConcurrentRuns: 1,
+    branchPrefix: 'sail/',
+    runsDir: w.runs,
+    root: repo.dir,
+    store: other,
+    ticketSource: w.ticketSource,
+    codeHost: w.adapters.ports.codeHost,
+    workspace: w.adapters.ports.workspace,
+    env: repo.env,
+    now: w.clock,
+    usageLimitBackoffMs: BACKOFF,
+    portUnavailableBackoffMs: PORT_BACKOFF,
+    spawn: w.spawner.spawn,
+    resume: w.spawner.resume,
+    isAlive: w.spawner.isAlive,
+    machineDir: machine,
+    harnessKeys: () => keys,
+    repository: 'beta',
+  });
+  const bEvents = (type: string) => queueEvents(queueDir(w.runs, 'b')).filter((event) => event.type === type);
+  return { w, a, b, run1, machine, bEvents, cleanup: () => rmSync(machine, { recursive: true, force: true }) };
+}
+
+test("a usage limit in one registry entry holds another's dispatch on the same harness key", async () => {
+  await withTempRepo(async (repo) => {
+    const t = await twoEntries(repo, ['claude-code']);
+    await t.a.tick();
+    await t.b.tick();
+    await t.b.tick();
+    expect(spawnedKeys(t.w.spawner)).toEqual(['FAKE-1', 'FAKE-2']);
+    expect(t.bEvents('queue:held').map((event) => event.run)).toEqual([t.run1]);
+    expect(t.bEvents('queue:held')[0]?.reason).toBe(
+      'claude-code hit the usage limit in alpha: spec#1 hit the usage limit',
+    );
+    t.cleanup();
+  });
+});
+
+test('a workflow on another harness key keeps dispatching', async () => {
+  await withTempRepo(async (repo) => {
+    const t = await twoEntries(repo, ['pi:openai-codex']);
+    await t.a.tick();
+    await t.b.tick();
+    expect(spawnedKeys(t.w.spawner)).toEqual(['FAKE-1', 'FAKE-2', 'FAKE-3']);
+    expect(t.bEvents('queue:held')).toEqual([]);
+    t.cleanup();
+  });
+});
+
+test('the hold ends at its reset', async () => {
+  await withTempRepo(async (repo) => {
+    const t = await twoEntries(repo, ['claude-code']);
+    await t.a.tick();
+    await t.b.tick();
+    expect(spawnedKeys(t.w.spawner)).toEqual(['FAKE-1', 'FAKE-2']);
+    t.w.clock.advance(3 * 3_600_000);
+    await t.b.tick();
+    expect(t.bEvents('queue:released').length).toBe(1);
+    expect(spawnedKeys(t.w.spawner)).toEqual(['FAKE-1', 'FAKE-2', 'FAKE-3']);
+    t.cleanup();
+  });
+});
+
+test('a release resumes the held runs in both entries on the next tick, and the hold is not put back', async () => {
+  await withTempRepo(async (repo) => {
+    const t = await twoEntries(repo, ['claude-code']);
+    await t.a.tick();
+    await t.b.tick();
+    expect(t.w.spawner.resumes).toEqual([]);
+    expect(readHold(t.machine, 'claude-code')).toBeDefined();
+    t.w.clock.advance(60_000);
+    expect(releaseHold(t.machine, 'claude-code', t.w.clock())).toBe(true);
+    await t.a.tick();
+    await t.b.tick();
+    expect(t.w.spawner.resumes.length).toBe(1);
+    expect(t.bEvents('queue:released').length).toBe(1);
+    expect(spawnedKeys(t.w.spawner)).toEqual(['FAKE-1', 'FAKE-2', 'FAKE-3']);
+    await t.a.tick();
+    await t.b.tick();
+    expect(readHold(t.machine, 'claude-code')).toBeUndefined();
+    expect(t.bEvents('queue:held').length).toBe(1);
+    t.cleanup();
+  });
+});
+
+test('a release of another key the workflow reaches leaves its hold on the limited key as it is (review R3)', async () => {
+  await withTempRepo(async (repo) => {
+    const t = await twoEntries(repo, ['claude-code', 'pi:openai-codex']);
+    await t.a.tick();
+    await t.b.tick();
+    t.w.clock.advance(60_000);
+    expect(releaseHold(t.machine, 'pi:openai-codex', t.w.clock())).toBe(false);
+    await t.b.tick();
+    expect(t.bEvents('queue:released')).toEqual([]);
+    expect(t.bEvents('queue:held').length).toBe(1);
+    expect(spawnedKeys(t.w.spawner)).toEqual(['FAKE-1', 'FAKE-2']);
+    t.cleanup();
   });
 });

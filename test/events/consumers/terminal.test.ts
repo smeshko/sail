@@ -1296,6 +1296,28 @@ test('a call and a step on a named harness end their start line with on <harness
   ]);
 });
 
+test('a start line puts the effort after the model and before the harness, and a call with none prints as before', () => {
+  const lines = render(
+    stream([
+      stageStart('spec#1', 'agent', { model: 'claude-opus-5-5', effort: 'medium', harness: 'second' }),
+      stageStart('plan#1', 'agent', { model: 'claude-opus-5-5', effort: 'max' }),
+      stageStart('implement#1', 'agent', { model: 'claude-sonnet-5' }),
+      { ...(TWO_STEP_CALL[2] as object), effort: 'high' } as unknown as NewEvent,
+    ]),
+    'normal',
+    { runsDir: runsWith({}) },
+  )
+    .trimEnd()
+    .split('\n');
+  const texts = lines.filter((line) => line.includes('▶')).map((line) => line.slice(line.indexOf('▶')));
+  expect(texts).toEqual([
+    '▶ spec · agent · claude-opus-5-5 at medium effort on second',
+    '▶ plan · agent · claude-opus-5-5 at max effort',
+    '▶ implement · agent · claude-sonnet-5',
+    '▶ describe · step 1/2 · agent · claude-sonnet-5 at high effort',
+  ]);
+});
+
 test('at normal, a repository intake of several steps prints its start as intake <name> · stage', () => {
   const lines = render(
     stream([

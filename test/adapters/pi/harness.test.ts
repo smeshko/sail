@@ -399,6 +399,13 @@ test('a session whose abort and dispose reject is still aborted, ends with sessi
   });
 });
 
+test('pi is asked for a session at the request effort, and with none when the request has none', async () => {
+  const high = await play('done', { effort: 'high' });
+  const plain = await play('done');
+  expect(high.scripted.calls[0]?.params.effort).toBe('high');
+  expect(plain.scripted.calls[0]?.params).not.toHaveProperty('effort');
+});
+
 test('a command gets the preamble and the environment without the provider credential', async () => {
   const { scripted } = await play(
     'env',

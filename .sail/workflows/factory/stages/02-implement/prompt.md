@@ -1,6 +1,9 @@
 Implement the plan at `{{plan}}`: walk its tasks in order, test first, and make exactly one commit per task. Read the
 plan end to end first: its Goal, Scope, Decisions and Acceptance Criteria bound everything you do.
 
+Before the first task, run `git log --oneline origin/staging..HEAD`. A task already committed there, an earlier
+run's work this run continues, is done: skip it, and report its existing commit sha.
+
 {{#if feedback}}
 {{#if feedback.validation}}
 ## The last pass failed validation

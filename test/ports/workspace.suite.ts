@@ -433,6 +433,103 @@ export function workspaceSuite(label: string, make: MakeWorkspace): void {
     expect('baseSha' in workspace ? workspace.baseSha : workspace).toBe(world.baseSha);
   });
 
+  /** Commits `n` empty commits one after another on `world.baseSha`, in the repository itself, and returns their shas. */
+  const commitsPastBase = (world: WorkspaceWorld, n: number): string[] => {
+    const tree = world.git(world.repoDir, 'rev-parse', `${world.baseSha}^{tree}`).stdout;
+    const shas: string[] = [];
+    let parent = world.baseSha;
+    for (let index = 1; index <= n; index++) {
+      parent = world.git(world.repoDir, 'commit-tree', tree, '-p', parent, '-m', `task ${index}`).stdout;
+      shas.push(parent);
+    }
+    return shas;
+  };
+
+  test(`${label}: create with carry starts from the carried run's run ref and keeps the base as baseSha`, async () => {
+    const { adapter, world, capture } = await start();
+    const [, tip = ''] = commitsPastBase(world, 2);
+    expect(world.git(world.repoDir, 'update-ref', 'refs/sail/runs/source', tip).code).toBe(0);
+    const source = await world.run('source', 'failed');
+    const r1 = await world.run('r1');
+    const workspace = await adapter.create(r1, { base: world.base, branch: BRANCH, carry: source });
+    expect(parseIssues(Workspace, workspace)).toEqual([]);
+    expect({
+      workspace: { baseSha: workspace.baseSha, startSha: workspace.startSha },
+      head: world.git(workspace.path, 'rev-parse', 'HEAD').stdout,
+      log: world.git(workspace.path, 'log', '--format=%s', `${world.baseSha}..HEAD`).stdout,
+      created: timed(capture.events).filter((event) => event.type === 'workspace:created'),
+    }).toEqual({
+      workspace: { baseSha: world.baseSha, startSha: tip },
+      head: tip,
+      log: 'task 2\ntask 1',
+      created: [
+        {
+          type: 'workspace:created',
+          path: workspace.path,
+          branch: BRANCH,
+          baseSha: world.baseSha,
+          startSha: tip,
+          durationMs: 'ms',
+        },
+      ],
+    });
+    expectValidEvents(capture);
+  });
+
+  test(`${label}: create with carry starts from the carried run's live workspace's HEAD`, async () => {
+    const { adapter, world } = await start();
+    const source = await world.run('source');
+    const made = await adapter.create(source, { base: world.base, branch: BRANCH });
+    expect(world.git(made.path, 'commit', '-q', '--allow-empty', '-m', 'in the workspace').code).toBe(0);
+    const head = world.git(made.path, 'rev-parse', 'HEAD').stdout;
+    // A run ref older than the workspace's HEAD loses to it.
+    const [older = ''] = commitsPastBase(world, 1);
+    world.git(world.repoDir, 'update-ref', 'refs/sail/runs/source', older);
+    const workspace = await adapter.create(await world.run('r1'), { base: world.base, branch: BRANCH, carry: source });
+    expect({
+      baseSha: workspace.baseSha,
+      startSha: workspace.startSha,
+      head: world.git(workspace.path, 'rev-parse', 'HEAD').stdout,
+    }).toEqual({ baseSha: world.baseSha, startSha: head, head });
+  });
+
+  test(`${label}: create with carry starts at the base when the carried run has nothing past it`, async () => {
+    const { adapter, world, capture } = await start();
+    const none = await world.run('none', 'failed');
+    const atBase = await world.run('at-base');
+    await adapter.create(atBase, { base: world.base, branch: BRANCH });
+    const results = [];
+    for (const [id, carry] of [
+      ['r1', none],
+      ['r2', atBase],
+    ] as const) {
+      const workspace = await adapter.create(await world.run(id), { base: world.base, branch: BRANCH, carry });
+      results.push({
+        startSha: workspace.startSha,
+        head: world.git(workspace.path, 'rev-parse', 'HEAD').stdout,
+      });
+    }
+    expect(results).toEqual([
+      { startSha: undefined, head: world.baseSha },
+      { startSha: undefined, head: world.baseSha },
+    ]);
+    expect(
+      capture.events.filter((event) => event.type === 'workspace:created').map((event) => 'startSha' in event),
+    ).toEqual([false, false, false]);
+  });
+
+  test(`${label}: create with carry refuses as invalid a run ref that does not descend from the base`, async () => {
+    const { adapter, world } = await start();
+    const tree = world.git(world.repoDir, 'rev-parse', `${world.baseSha}^{tree}`).stdout;
+    const orphan = world.git(world.repoDir, 'commit-tree', tree, '-m', 'unrelated').stdout;
+    world.git(world.repoDir, 'update-ref', 'refs/sail/runs/source', orphan);
+    const source = await world.run('source', 'failed');
+    const r1 = await world.run('r1');
+    const rejected = await settle(adapter.create(r1, { base: world.base, branch: BRANCH, carry: source }));
+    expect(rejected).toEqual({ rejected: { port: 'workspace', op: 'create', code: 'invalid' } });
+    expect(existsSync(join(r1.runDir, 'workspace'))).toBe(false);
+  });
+
   test(`${label}: a fallback is where a branch the remote lacks starts, and the branch's tip wins over it (review V2)`, async () => {
     const { adapter, world } = await start();
     const fallback = world.publishBranch('sail/FAKE-79-elsewhere');

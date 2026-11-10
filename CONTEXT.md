@@ -103,8 +103,12 @@ What a step is. v1 ships two kinds: `agent` and `script`. Kinds belong to steps;
 _Avoid_: type, mode, flavour
 
 **Agent step**:
-A step a harness runs. It has a prompt, the workspace, permissions, a budget, and a schema the agent submits its output against.
+A step a harness runs. It has a prompt, the workspace, permissions, a budget, an optional `effort`, and a schema the agent submits its output against.
 _Avoid_: LLM step, AI step, prompt step, non-deterministic stage
+
+**Effort**:
+How hard an agent step's model reasons: `low`, `medium`, `high`, `xhigh` or `max`, declared as the step's `effort`. The roster records it, and the harness runs the session at it; left out, the harness's default.
+_Avoid_: thinking level, reasoning budget
 
 **Script step**:
 A step that runs a command: bindings in, files and an output out, exit code as outcome. No model is involved. Its script environment includes the variables its `env` names and the credentials of the ports its `ports` names.
@@ -291,16 +295,20 @@ The hold a run's process takes against the machine's sleep, from its start or re
 _Avoid_: wake lock, caffeinate, sleep assertion
 
 **Suspended**:
-The status of a run that has exited with nothing running and a resume expected, for example because the run budget was exceeded, it hit the provider's usage limit, a step of it ended on a provider that was unavailable, a script step of it was ended by a signal sail didn't send (SIGTERM, SIGKILL, SIGHUP or SIGINT), it crashed on an exception inside sail, or it was interrupted by Ctrl-C or SIGTERM. It keeps its workspace and its branch lease.
+The status of a run that has exited with nothing running and a resume expected, for example because the run budget was exceeded, it hit the provider's usage limit, a step of it ended on a provider that was unavailable, a script step of it was ended by a signal sail didn't send (SIGTERM, SIGKILL, SIGHUP or SIGINT), it crashed on an exception inside sail, it was interrupted by Ctrl-C or SIGTERM, or a person suspended it with `sail stop --suspend`. It keeps its workspace and its branch lease.
 _Avoid_: paused, waiting, blocked, pending
 
 **Control file**:
-A run's `CONTROL` file in its run directory, a request to stop at its next call boundary: `stopped`, which `sail stop` writes and which fails it. `sail stop --now` writes `stopped now`, ending the running call through its abort signal rather than waiting for the boundary. The run takes the request before its intake and before each call. A dispatched run with no run directory yet gets its request as a hand-off file, which it moves in as `CONTROL` once its run directory exists.
+A run's `CONTROL` file in its run directory, a request to stop at its next call boundary: `stopped`, which `sail stop` writes and which fails it. `sail stop --now` writes `stopped now`, ending the running call through its abort signal rather than waiting for the boundary. `sail stop --suspend` writes `suspended`, which ends the running call the same way and suspends the run `interrupted`, keeping its workspace and lease, along with the run's hold. The run takes the request before its intake and before each call. A dispatched run with no run directory yet gets its request as a hand-off file, which it moves in as `CONTROL` once its run directory exists.
 _Avoid_: signal file, kill file, flag
 
 **Hand-off file**:
 `.sail-runs/<run id>.control`, a control file's request for a dispatched run that has no run directory yet. The run moves it in as `CONTROL` once its run directory exists, and the watcher deletes one the run never took when it settles the item.
 _Avoid_: pending control, mailbox
+
+**Held run**:
+A run a person marked with `sail stop --suspend`: a `HOLD` file in its run directory. The watcher never resumes it, whatever made it resumable (`interrupted`, `crashed`, a dead process, `usage_limit`, `port_unavailable`), though it still adopts one a live process holds. A live run is suspended `interrupted` as well, and a run nothing runs keeps its status. `sail resume`, and the dashboard's Resume, remove the hold once they take the run.
+_Avoid_: paused run, frozen run
 
 **Resume**:
 Continuing a suspended or interrupted run from its journal. Every journaled call is replayed, and the first one that is not journaled runs. A resume runs the run's own copy of `.sail/` in its `definition/`, never the checkout's, so a workflow edited since the run started changes nothing for it.
@@ -311,7 +319,7 @@ What is added to a suspended run's budget, in dollars or minutes, given to `sail
 _Avoid_: top-up, extension, bump
 
 **Seeded run**:
-A new run whose journal starts with another run's calls, those before a named stage, so they aren't paid for again. `sail run --from-run <run> --stage <stage>` starts one. It runs that stage and stops, suspended with `until`, unless `--continue`. Its run header records the run it came from as `fromRun` and how many journal lines it reused as `reused`, and a resume restores the reports of reused calls its events lost. It claims nothing, and works on a branch of its own. Its copy of `.sail/` is the clone's as it reads at its start.
+A new run whose journal starts with another run's calls, those before a named stage, so they aren't paid for again. `sail run --from-run <run> --stage <stage>` starts one. It runs that stage and stops, suspended with `until`, unless `--continue`. Its run header records the run it came from as `fromRun` and how many journal lines it reused as `reused`, and a resume restores the reports of reused calls its events lost. It claims nothing, and works on a branch of its own. Its workspace starts from the commits the source made, its workspace's `HEAD` while that exists, else its run ref, recorded as `repository.startSha`; with `--from-base`, or when the source made none, it starts at the source's base. Its copy of `.sail/` is the clone's as it reads at its start.
 _Avoid_: rerun, fork, clone, replay
 
 **Reused call**:
@@ -323,11 +331,11 @@ The checkout a run works in, on its own branch. How it is made (a branch in the 
 _Avoid_: worktree (one mechanism), checkout, sandbox, working copy
 
 **Workspace setup**:
-The shell command the `git-worktree` adapter runs in each workspace it makes, before any stage runs: its `setup` option, such as `bun install --frozen-lockfile`. Every run gets it, a seeded run included, whose reused calls left nothing in its new workspace. A setup that fails refuses the run.
+The shell command the `git-worktree` adapter runs in each workspace it makes, before any stage runs: its `setup` option, such as `bun install --frozen-lockfile`. Every run gets it, a seeded run included, whose new workspace holds the commits it carried but none of what the setup installed. A setup that fails refuses the run.
 _Avoid_: bootstrap, install step, setup stage
 
 **Base**:
-The commit a run's workspace starts from: the default branch's tip on the remote after a fetch, or, when the run's branch is already on the remote, that branch's tip, recorded as `baseSha`. For a pull-request source it is the pull request's head.
+The commit a run's workspace starts from: the default branch's tip on the remote after a fetch, or, when the run's branch is already on the remote, that branch's tip, recorded as `baseSha`. For a pull-request source it is the pull request's head. A seeded run keeps its source's base, so the commits it carries count as its own work.
 _Avoid_: start point, fork point
 
 **Run ref**:
@@ -480,8 +488,12 @@ An agent step's budget also names its idle limit, which warns rather than ends i
 _Avoid_: limit, quota, cap, allowance
 
 **Usage limit**:
-The provider refusing more sessions until a reset time. A harness reports it as the error reason `usage_limit`, with `resetsAt` when the provider says when. It is a limit on the account, not a budget of the run.
+The provider refusing more sessions until a reset time. A harness reports it as the error reason `usage_limit`, with `resetsAt` when the provider says when. It is a limit on the account, not a budget of the run. A watcher that finds one holds every watched workflow on the machine that reaches the same harness key, in `holds/` in the machine directory, not only the workflow whose run hit it.
 _Avoid_: rate limit, quota, session limit
+
+**Harness key**:
+The account a usage limit counts against, named by the adapter a call's harness ran on, and for pi by its provider too: `claude-code`, `pi:openai-codex`. A suspended call's key comes from its run header and roster, and a workflow reaches the keys of its agent steps' model aliases. A call the roster can't place has the default harness's key.
+_Avoid_: harness name, account id
 
 ### Ports
 
@@ -598,7 +610,7 @@ A run's exclusive hold on its git branch, from workspace creation to release, ke
 _Avoid_: lock, branch lock, reservation
 
 **Adoption**:
-A restarted watcher taking charge again of a run that is still alive, counting it against its cap. A run whose process died is resumed from its journal instead, once, as a detached `sail resume` of its own; a resume that leaves the run unended parks its item with the reason. A run suspended on the usage limit is the exception: it is held until the limit resets, then resumed, and again each time a resume hits the limit anew; only a resume that leaves it on the same limit parks its item. So is a run suspended on an unavailable port: its item is held for a growing back-off, then resumed, and parked only after a bounded run of resumes that all hit an unavailable port again. A stopped run's item is parked too.
+A restarted watcher taking charge again of a run that is still alive, counting it against its cap. A run whose process died is resumed from its journal instead, once, as a detached `sail resume` of its own; a resume that leaves the run unended parks its item with the reason. A run suspended on the usage limit is the exception: it is held until the limit resets, which holds the dispatch of every watched workflow on the machine that reaches its harness key, then resumed, and again each time a resume hits the limit anew; only a resume that leaves it on the same limit parks its item. So is a run suspended on an unavailable port: its item is held for a growing back-off, then resumed, and parked only after a bounded run of resumes that all hit an unavailable port again. A stopped run's item is parked too. A held run is neither adopted past a live holder nor resumed: the watcher leaves it to a person.
 _Avoid_: reattach, recovery, takeover
 
 **Poll**:
@@ -622,7 +634,7 @@ The key a queue item is known by, minted from its source: `ticket:<ticket key>`,
 _Avoid_: item id, queue key
 
 **Held dispatch**:
-A watched workflow's dispatch stopped until a time, because one of its runs hit the usage limit, or because two or more of its items are held on an unavailable port at the same time, which is an outage of the provider. It is kept in `queue.json`, and the queue is not changed: nothing starts or resumes until the reset, or a back-off when the provider gave none, or, for an outage, the later of the items' holds, and no item's attempt is counted. A start refused because the `.sail/` committed at the default branch needs a newer sail holds it too, with no time: until the running sail's SDK changes, which the watcher's next tick finds.
+A watched workflow's dispatch stopped until a time, because one of its runs, or a run of any watched workflow on the machine that reaches the same harness key, hit the usage limit, or because two or more of its items are held on an unavailable port at the same time, which is an outage of the provider. It is kept in `queue.json`, and the queue is not changed: nothing starts or resumes until the reset, or a back-off when the provider gave none, or, for an outage, the later of the items' holds, and no item's attempt is counted. A start refused because the `.sail/` committed at the default branch needs a newer sail holds it too, with no time: until the running sail's SDK changes, which the watcher's next tick finds. A usage-limit hold ends at its reset or at `sail watch --release-hold <harness key>`; after a release every watcher resumes its held runs on its next tick, and the hold is not put back unless the limit is hit again.
 _Avoid_: paused (the poll's word), throttled, frozen
 
 **Held item**:

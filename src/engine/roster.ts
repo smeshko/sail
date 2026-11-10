@@ -5,7 +5,15 @@
 import { relative, sep } from 'node:path';
 import { exitCodeMap } from '../kinds/script';
 import type { Intake } from '../sdk/intake';
-import type { Budget, Permissions, ScriptStep, StageDefinition, Step } from '../sdk/steps';
+import {
+  type Budget,
+  EFFORTS,
+  type Effort,
+  type Permissions,
+  type ScriptStep,
+  type StageDefinition,
+  type Step,
+} from '../sdk/steps';
 import { aliasOf, type ProjectConfig } from './config';
 import type { LoadedWorkflow } from './load-workflow';
 
@@ -16,6 +24,8 @@ export interface StepRosterEntry {
   model?: string;
   /** The named harness the step's model alias names. Left out for the default harness. */
   harness?: string;
+  /** An agent step's reasoning effort, when it sets one. */
+  effort?: Effort;
   output?: string;
   produces?: string[];
   network?: readonly string[];
@@ -32,6 +42,8 @@ export interface RosterEntry {
   model?: string;
   /** The named harness the step's model alias names. Left out for the default harness. */
   harness?: string;
+  /** An agent step's reasoning effort, when it sets one. */
+  effort?: Effort;
   output?: string;
   produces?: string[];
   network?: readonly string[];
@@ -107,6 +119,27 @@ export function modelProblems(loaded: LoadedWorkflow, config: ProjectConfig): st
   ];
 }
 
+/** The agent steps of `definition` whose `effort` is none of the five levels, as one line each. */
+export function effortProblemsOf(where: string, definition: StageDefinition | Intake): string[] {
+  const steps: readonly Step[] =
+    definition.kind === 'agent' || definition.kind === 'script' ? [definition] : (definition.steps ?? []);
+  return steps.flatMap((step) => {
+    if (step.kind !== 'agent' || step.effort === undefined || EFFORTS.includes(step.effort)) return [];
+    const at = steps.length > 1 ? `${where} step '${step.name}'` : where;
+    return [`${at} sets effort '${String(step.effort)}', which is not one of ${EFFORTS.join(', ')}`];
+  });
+}
+
+/** The agent steps of `loaded` whose `effort` is none of the five levels: the intake first, then the stages by name. */
+export function effortProblems(loaded: LoadedWorkflow): string[] {
+  const { definition } = loaded.intake;
+  const stages = [...loaded.stages].sort((a, b) => (a.definition.name < b.definition.name ? -1 : 1));
+  return [
+    ...effortProblemsOf(`intake '${definition.name}'`, definition),
+    ...stages.flatMap((stage) => effortProblemsOf(`stage '${stage.definition.name}'`, stage.definition)),
+  ];
+}
+
 /** The named harnesses the agent steps of `loaded` reach through their model aliases: sorted, each once. */
 export function harnessesReached(loaded: LoadedWorkflow, config: ProjectConfig): string[] {
   const definitions = [loaded.intake.definition, ...loaded.stages.map((stage) => stage.definition)];
@@ -137,6 +170,7 @@ function stepFields(
       kind: 'agent',
       ...field('model', model),
       ...field('harness', harness),
+      ...field('effort', step.effort),
       ...own,
       permissions: step.permissions,
       budget: step.budget,

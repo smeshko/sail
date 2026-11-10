@@ -355,6 +355,34 @@ test('a model alias naming a harness adapters.harnesses does not define is refus
   });
 });
 
+const SPEC_STAGE_FILE = ['workflows', 'ticket-to-pr', 'stages', 'spec', 'stage.ts'];
+
+/** A fixture whose spec stage takes `effort`, in a repository of its own: a process imports a path once. */
+function specWithEffort(repo: TempRepo, effort: string): void {
+  const stage = join(copyFixture(repo.dir), ...SPEC_STAGE_FILE);
+  writeFileSync(stage, readFileSync(stage, 'utf8').replace("model: 'deep',", `model: 'deep', effort: ${effort},`));
+}
+
+test('check accepts a stage that sets a valid effort', async () => {
+  await withTempRepo(async (repo) => {
+    specWithEffort(repo, "'medium'");
+    expect(await runCaptured(['check'], repo.dir)).toEqual({
+      code: EXIT_OK,
+      stdout: '.sail/ checked: 2 workflows, 11 stages\n',
+      stderr: '',
+    });
+  });
+});
+
+test('check refuses a stage whose effort is none of the five levels, naming the stage and the levels', async () => {
+  await withTempRepo(async (repo) => {
+    specWithEffort(repo, "'huge' as never");
+    const { code, stdout, stderr } = await runCaptured(['check'], repo.dir);
+    expect({ code, stdout }).toEqual({ code: EXIT_REFUSED, stdout: '' });
+    expect(stderr).toContain("stage 'spec' sets effort 'huge', which is not one of low, medium, high, xhigh, max");
+  });
+});
+
 // The editor declarations (D15): `sail check` rewrites the ones that are missing or stale, where a `tsconfig.json` shows
 // the repository uses them.
 

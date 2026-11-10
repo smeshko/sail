@@ -5,6 +5,7 @@ import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFile
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { heldLease, takeLease } from '../../src/adapters/leases';
+import { holdRun } from '../../src/engine/control';
 import { type Status, type StopReason, writeStatus } from '../../src/engine/run-dir';
 import type { QueueItem } from '../../src/watch/queue-store';
 import { type ReconcileContext, type Reconciled, reconcileItem } from '../../src/watch/reconcile';
@@ -503,4 +504,77 @@ test('a port_unavailable run this dispatcher resumed that was not suspended agai
   ];
   expect(first).toEqual({ kind: 'park', reason: 'its resume failed: sail resume: LINEAR_API_KEY is not set' });
   expect(second).toMatchObject({ kind: 'held', stopReason: 'port_unavailable', until: '2026-10-28T10:01:30.000Z' });
+});
+
+test('a held usage_limit answer carries the harness key of the call that hit the limit, from the run header', async () => {
+  const w = world();
+  const adapter = (use: string) => ({ use, origin: 'builtin' });
+  const dir = runDir(w.runsDir, 1, 'suspended', 'usage_limit');
+  writeFileSync(
+    join(dir, 'run.json'),
+    JSON.stringify({
+      adapters: { harness: adapter('claude-code'), harnesses: { codex: adapter('pi') } },
+      intake: { name: 'ticket', origin: 'builtin' },
+      stages: { spec: { kind: 'agent', origin: 'repo:spec', model: 'openai-codex/gpt-5', harness: 'codex' } },
+    }),
+  );
+  limitedAt(w.runsDir, 1, '2026-10-28T09:50:00.000Z', '2026-10-28T14:20:00.000Z');
+  expect(await reconcileItem(item(1, DEAD), w.context())).toEqual({
+    kind: 'held',
+    stopReason: 'usage_limit',
+    until: '2026-10-28T14:20:00.000Z',
+    reason: 'spec#1 hit the usage limit',
+    harnessKey: 'pi:openai-codex',
+  });
+});
+
+test('a held usage_limit run is resumed once its harness key was released after it hit the limit, not before', async () => {
+  const w = world();
+  const dir = runDir(w.runsDir, 1, 'suspended', 'usage_limit');
+  writeFileSync(
+    join(dir, 'run.json'),
+    JSON.stringify({
+      adapters: { harness: { use: 'claude-code', origin: 'builtin' } },
+      intake: { name: 'ticket', origin: 'builtin' },
+      stages: { spec: { kind: 'agent', origin: 'repo:spec', model: 'claude-opus-5-5' } },
+    }),
+  );
+  limitedAt(w.runsDir, 1, '2026-10-28T09:50:00.000Z', '2026-10-28T14:20:00.000Z');
+  const at = (iso: string) => (key: string) => (key === 'claude-code' ? Date.parse(iso) : undefined);
+  const before = await reconcileItem(item(1, DEAD), w.context({ releasedAt: at('2026-10-28T09:40:00.000Z') }));
+  expect(before).toMatchObject({ kind: 'held' });
+  const other = await reconcileItem(item(1, DEAD), w.context({ releasedAt: () => undefined }));
+  expect(other).toMatchObject({ kind: 'held' });
+  const after = await reconcileItem(item(1, DEAD), w.context({ releasedAt: at('2026-10-28T09:55:00.000Z') }));
+  expect(after.kind).toBe('resume');
+});
+
+test.each([
+  ['running', 'running', undefined],
+  ['suspended interrupted', 'suspended', 'interrupted'],
+  ['suspended crashed', 'suspended', 'crashed'],
+  ['suspended usage_limit', 'suspended', 'usage_limit'],
+  ['suspended port_unavailable', 'suspended', 'port_unavailable'],
+] as const)('a held %s run is left waiting, never resumed or held on a limit', async (_, status, stopReason) => {
+  const w = world();
+  holdRun(runDir(w.runsDir, 1, status, stopReason));
+  expect(await reconcileItem(item(1, DEAD), w.context())).toEqual({ kind: 'wait' });
+});
+
+test('a held run is left waiting even after this dispatcher has resumed others, while an unheld interrupted run is resumed once', async () => {
+  const w = world();
+  holdRun(runDir(w.runsDir, 1, 'suspended', 'interrupted'));
+  runDir(w.runsDir, 2, 'suspended', 'interrupted');
+  expect([
+    await reconcileItem(item(1, DEAD), w.context({ resumed: true })),
+    await reconcileItem(item(2, DEAD), w.context()),
+  ]).toEqual([{ kind: 'wait' }, { kind: 'resume', from: { status: 'suspended', stopReason: 'interrupted' } }]);
+});
+
+test('a held run whose lease a live process holds is adopted', async () => {
+  const w = world();
+  const dir = runDir(w.runsDir, 1, 'running');
+  holdRun(dir);
+  takeLease(w.leases, REMOTE, branchOf(1), { runId: runIdOf(1), runDir: dir, pid: process.pid });
+  expect(await reconcileItem(item(1, DEAD), w.context())).toEqual({ kind: 'adopt', pid: process.pid });
 });

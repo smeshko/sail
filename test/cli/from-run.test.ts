@@ -33,7 +33,7 @@ const WORKFLOW = 'workflows/ticket-to-pr/workflow.ts';
 const PROMPT = 'workflows/ticket-to-pr/stages/spec/prompt.md';
 const EDIT = 'Keep the spec to one page.';
 const SUMMARY = 'Add --shout to greet() and the CLI, upper-casing the whole line.';
-const USAGE = 'sail run: usage: sail run --from-run <run> --stage <stage> [--continue] [--run-id <id>]\n';
+const USAGE = 'sail run: usage: sail run --from-run <run> --stage <stage> [--continue] [--from-base] [--run-id <id>]\n';
 const STAGES = 'implement, publish, self-review, spec, tests';
 
 const sha256 = (path: string) => new Bun.CryptoHasher('sha256').update(readFileSync(path)).digest('hex');
@@ -268,20 +268,45 @@ test('Ctrl-C during the spec session suspends the seeded run with interrupted, a
   });
 }, 60_000);
 
-test('the usage lists sail run --from-run and what --continue does, and still lists sail <ticket> first', async () => {
+test('the usage lists sail run --from-run and what --continue and --from-base do, and still lists sail <ticket> first', async () => {
   const { stdout } = await runCaptured(['--help']);
   const commands = stdout.split('\n').filter((line) => line.startsWith('  sail '));
   expect(commands[0]).toBe(
     '  sail <ticket> [--workflow <name>] [--force] [--ignore-prerequisites] [--until <stage>] [-q|-v|-vv]',
   );
   expect(stdout).toMatch(
-    /^ {2}sail run --from-run <run> --stage <stage> \[--continue\] \[--run-id <id>\]\n {2,}Rerun one stage on another run's earlier calls: a seeded run$/m,
+    /^ {2}sail run --from-run <run> --stage <stage> \[--continue\] \[--from-base\] \[--run-id <id>\]\n {2,}Rerun one stage on another run's earlier calls: a seeded run$/m,
   );
   expect(stdout).toMatch(/^ {2}--run-id {4}Names the new run, ready to be told before it exists: /m);
   expect(stdout).toMatch(
-    /^A seeded run:\n {2}--continue {2,}Runs the rest of the workflow after the stage, not just the stage$/m,
+    /^A seeded run:\n {2}--continue {2,}Runs the rest of the workflow after the stage, not just the stage\n {2}--from-base Starts the workspace at the source run's base, not from the commits it made$/m,
   );
 });
+
+test("sail run --from-run --from-base starts at the source's base though the source left a run ref, and without it carries the ref", async () => {
+  /** The `repository` of the header of a seeded run of a source that left one commit at its run ref, and that commit. */
+  const seededWith = (flags: string[]) =>
+    withTempRepo(async (repo) => {
+      const from = await source.copyInto(repo.dir);
+      const base: string = json(from.dir, 'run.json').repository.baseSha;
+      const tip = repo.git('commit-tree', `${base}^{tree}`, '-p', base, '-m', 'task 1');
+      repo.git('update-ref', `refs/sail/runs/${from.runId}`, tip);
+      const ran = await sailRun(repo, from.runId, ['--from-run', from.runId, '--stage', 'spec', ...flags]);
+      return { code: ran.code, base, tip, repository: json(ran.dir, 'run.json').repository };
+    });
+  const carried = await seededWith([]);
+  const fromBase = await seededWith(['--from-base']);
+  expect({
+    codes: [carried.code, fromBase.code],
+    carried: carried.repository,
+    fromBase: fromBase.repository,
+  }).toEqual({
+    codes: [EXIT_SUSPENDED, EXIT_SUSPENDED],
+    carried: expect.objectContaining({ baseSha: carried.base, startSha: carried.tip }),
+    fromBase: expect.objectContaining({ baseSha: fromBase.base }),
+  });
+  expect(fromBase.repository.startSha).toBeUndefined();
+}, 90_000);
 
 // Review round 1: a source whose run.json can't be read is refused in the engine's words, not thrown on.
 test('sail run from a source whose run.json is broken is refused with exit 3, and starts no run', async () => {

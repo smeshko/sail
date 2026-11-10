@@ -10,14 +10,13 @@
 //   dropped, is a refusal with the reason.
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ProjectConfig } from '../engine/config';
 import { readStatus } from '../engine/run-dir';
 import { resolveSource } from '../engine/source';
 import { EVENTS_FILE } from '../events/consumers/ndjson';
 import { clean } from '../events/consumers/screen';
 import type { TicketSource } from '../ports/ticket-source';
 import type { Command } from './inbox';
-import { readWatch } from './poll';
+import { readWatch, type WatchConfig } from './poll';
 import { dedupKey, type QueueFile, type QueueItem, queueDir, readQueue } from './queue-store';
 import { addsNoTicket } from './watcher';
 
@@ -106,7 +105,7 @@ export interface CommandOptions {
   /** `.sail-runs/` of the clone. */
   runs: string;
   sailDir: string;
-  config: Pick<ProjectConfig, 'label'>;
+  config: WatchConfig;
   workflow: string;
   /** The label the watcher polls the workflow on. */
   label: string;

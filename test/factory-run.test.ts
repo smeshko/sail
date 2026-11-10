@@ -85,7 +85,7 @@ test('a ticket with no plan attached fails at load-plan, before implement, sayin
   });
 }, 120_000);
 
-test('with several plans attached, load-plan leaves the one attached last as plan.md and passes over a damaged one', async () => {
+test('with several plans attached, load-plan leaves the one attached last as plan.md and passes over a damaged one, and implement is told to skip tasks already committed', async () => {
   await withTempRepo(async (repo) => {
     writeOwnSail(repo);
     attachToFake1(repo, [
@@ -107,6 +107,9 @@ test('with several plans attached, load-plan leaves the one attached last as pla
     expect(plan).toStartWith('# Plan: newer\n');
     const implementIn = readFileSync(join(dir, '02-implement', 'call-1', 'in', 'commit.json'), 'utf8');
     expect(JSON.parse(implementIn)).toEqual({ ticketKey: 'FAKE-1', slug: 'newer-plan', scope: 'cli' });
+    const prompt = readFileSync(join(dir, '02-implement', 'call-1', 'prompt.md'), 'utf8');
+    expect(prompt).toContain('git log --oneline origin/staging..HEAD');
+    expect(prompt).toContain('already committed');
   });
 }, 120_000);
 

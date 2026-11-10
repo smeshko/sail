@@ -48,19 +48,20 @@ Usage:
   sail check [--list]                                        Type-check .sail/ and list its workflows and stages
   sail login codex [--device]                                Log in to a ChatGPT subscription for pi's openai-codex models
   sail resume <run> [-q|-v|-vv]                              Resume a suspended or crashed run
-  sail stop <run> [--now]                                    Stop at the next call boundary, or end the running call now
+  sail stop <run> [--now|--suspend]                          Stop at the next call boundary, end the running call now, or suspend the run and hold it
   sail clean <run>... | --failed [--all-repos] [--requeue|--drop]
                                                              Remove a failed run's worktree, branches and run ref, archive its run
                                                              directory, reset its ticket, and settle its queue item; --all-repos
                                                              does so for every registered repository
-  sail run --from-run <run> --stage <stage> [--continue] [--run-id <id>]
+  sail run --from-run <run> --stage <stage> [--continue] [--from-base] [--run-id <id>]
                                                              Rerun one stage on another run's earlier calls: a seeded run
   sail runs                                                  List the runs in .sail-runs/
   sail show <run> [--events|--follow|--rebuild] [-q|-v|-vv]  Show a run's calls, loops, routes and totals
   sail stage run <stage-dir> [--bind name=value]...          Run one stage in isolation
   sail dashboard [--port <n>]                                Serve every repository's runs and queues on localhost
   sail watch [<workflow>...]                                 Watch these workflows, or every watched one: start this repository's watcher, or add them to it
-  sail unwatch [<workflow>...]                               Stop watching them, or every watched one. The watcher exits when it watches none
+  sail watch --release-hold <harness>                        Release the usage-limit hold on a harness key, such as claude-code or pi:openai-codex, on every watcher
+  sail unwatch [<workflow>...]                               Stop watching them, or every watched one. Their runs keep running: sail stop ends one. The watcher exits when it watches none
   sail queue ls|poll <workflow>                              List a watched workflow's queue, or have its watcher poll it now
   sail queue add <workflow> <ticket> [--force]               Queue a ticket through the watcher: --force skips its checks
   sail queue requeue|drop <workflow> <item>                  Queue a parked item again, or drop it, through the watcher
@@ -103,6 +104,7 @@ Resuming a run:
 
 A seeded run:
   --continue  Runs the rest of the workflow after the stage, not just the stage
+  --from-base Starts the workspace at the source run's base, not from the commits it made
   --run-id    Names the new run, ready to be told before it exists: <ticket key>-<26 Crockford characters>, of no existing run
 
 Output of a run and a resume:
@@ -221,6 +223,7 @@ const commands = new Map<string, CommandSpec>([
         'run-id': { type: 'string' },
         stage: { type: 'string' },
         continue: { type: 'boolean' },
+        'from-base': { type: 'boolean' },
         ...VERBOSITY_OPTIONS,
       },
       positionals: 0,
@@ -272,7 +275,7 @@ const commands = new Map<string, CommandSpec>([
       command: port,
     },
   ],
-  ['watch', { options: {}, positionals: Number.POSITIVE_INFINITY, command: watch }],
+  ['watch', { options: { 'release-hold': { type: 'string' } }, positionals: Number.POSITIVE_INFINITY, command: watch }],
   ['unwatch', { options: {}, positionals: Number.POSITIVE_INFINITY, command: unwatch }],
   [
     'queue',
@@ -295,7 +298,7 @@ const commands = new Map<string, CommandSpec>([
       command: clean,
     },
   ],
-  ['stop', { options: { now: { type: 'boolean' } }, positionals: 1, command: stop }],
+  ['stop', { options: { now: { type: 'boolean' }, suspend: { type: 'boolean' } }, positionals: 1, command: stop }],
   ['--help', bare(help)],
   ['-h', bare(help)],
   ['--version', bare(version)],

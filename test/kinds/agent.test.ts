@@ -58,7 +58,7 @@ const permissions = { read: ['**'], write: ['$STAGE_OUT/**'], commands: ['git lo
 const budget = { maxTurns: 40, maxUsd: 2, maxMinutes: 10 };
 
 type Options = Partial<
-  Pick<AgentStep, 'consumes' | 'produces' | 'output' | 'budget' | 'onInvalidOutput' | 'conventions'>
+  Pick<AgentStep, 'consumes' | 'produces' | 'output' | 'budget' | 'onInvalidOutput' | 'conventions' | 'effort'>
 >;
 
 /** The `spec` step: it reads a brief, writes `spec.md` and submits a `Spec`, unless `options` say otherwise. */
@@ -297,6 +297,18 @@ const ends = (events: readonly CallEvent[]): object[] =>
 /** What a try that never reached a session records: no session id, no turns, no usage. */
 const UNSTARTED = { adapter: 'scripted', model: MODEL, turns: 0, toolCalls: 0, denials: 0 };
 
+test('problems() accepts each of the five efforts and refuses any other, naming the five', () => {
+  for (const effort of ['low', 'medium', 'high', 'xhigh', 'max'] as const) {
+    expect(agentKind.problems(spec({ effort }))).toEqual([]);
+  }
+  expect(agentKind.problems(spec({ effort: 'huge' as never }))).toEqual([
+    'effort must be one of low, medium, high, xhigh, max: huge',
+  ]);
+  expect(agentKind.problems(spec({ effort: 5 as never }))).toEqual([
+    'effort must be one of low, medium, high, xhigh, max: 5',
+  ]);
+});
+
 test('problems() refuses two produced names that differ only by case', () => {
   expect(agentKind.problems(spec({ produces: { 'Notes.md': 'file', 'notes.md': 'file' } }))).toEqual([
     "'notes.md' can't be produced: 'Notes.md' is produced too, and a file system that ignores case takes them for one",
@@ -397,6 +409,17 @@ test('the harness receives the rendered prompt with its feedback, the preamble a
   expect(s.read('prompt.md')).toBe(prompt ?? '');
   expect(run.output).toEqual({ ...VALID, points: 2, approved: true });
   expect(run.record).toMatchObject({ try: 3, validationTry: 2, validationFailed: false });
+});
+
+test('the harness request carries the step effort, and has no effort key when the step sets none', async () => {
+  const sent = async (step: AgentStep) => {
+    const s = setup(step, 'Write the spec from {{brief}}.\n');
+    const harness = scripted({ resolves: done(VALID), files: { 'spec.md': '# Spec\n' } });
+    await agentKind.run(step, s.context(harness));
+    return harness.requests[0] ?? ({} as Partial<HarnessRequest>);
+  };
+  expect((await sent(spec({ effort: 'xhigh' }))).effort).toBe('xhigh');
+  expect(await sent(spec())).not.toHaveProperty('effort');
 });
 
 test("problems() reports a step's conventions that aren't a list of distinct, non-empty paths relative to the repository", () => {

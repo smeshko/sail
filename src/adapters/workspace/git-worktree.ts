@@ -27,6 +27,7 @@ import type { WorkspacePort } from '../../ports/workspace';
 import { defaultLeasesDir, heldLease, releaseLease, takeLease } from '../leases';
 import {
   addDetached,
+  carriedHead,
   copyTree,
   deleteLocalBranch,
   deleteRunRef,
@@ -170,7 +171,7 @@ export function createGitWorktreeWorkspace(options: GitWorktreeOptions): Workspa
     async holder(leased, branch) {
       return heldLease(leasesDir(), leased, branch);
     },
-    async create(run, { branch, base, fallback, signal }) {
+    async create(run, { branch, base, fallback, carry, signal }) {
       const started = now().getTime();
       await fetchRemote(repo, remote, env, options.fetchTimeoutMs ?? FETCH_TIMEOUT_MS, signal);
       // A rerun whose branch is already on the remote continues it, so its push is a fast-forward.
@@ -182,7 +183,8 @@ export function createGitWorktreeWorkspace(options: GitWorktreeOptions): Workspa
       const baseSha = resolveCommit(repo, from, env);
       if (baseSha === undefined) throw new PortError('workspace', 'create', 'invalid', `${from} names no commit`);
       const path = join(run.runDir, WORKSPACE_DIR);
-      const added = addDetached(repo, path, baseSha, env);
+      const startSha = carry === undefined ? undefined : carriedHead(repo, carry, baseSha, env);
+      const added = addDetached(repo, path, startSha ?? baseSha, env);
       if (options.setup !== undefined) {
         try {
           await setUp(options.setup, path, env, options.setupTimeoutMs ?? SETUP_TIMEOUT_MS, signal);
@@ -194,8 +196,16 @@ export function createGitWorktreeWorkspace(options: GitWorktreeOptions): Workspa
           throw error;
         }
       }
-      emit({ type: 'workspace:created', path, branch, baseSha, durationMs: Math.max(0, now().getTime() - started) });
-      return { path, branch, baseSha, raw: added };
+      const carried = startSha === undefined ? {} : { startSha };
+      emit({
+        type: 'workspace:created',
+        path,
+        branch,
+        baseSha,
+        ...carried,
+        durationMs: Math.max(0, now().getTime() - started),
+      });
+      return { path, branch, baseSha, ...carried, raw: added };
     },
     async readTree(into, { paths, base, signal }) {
       if (base === undefined) await fetchRemote(repo, remote, env, options.fetchTimeoutMs ?? FETCH_TIMEOUT_MS, signal);

@@ -421,6 +421,7 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
     if (next.kind !== target.kind) {
       return keep(`it now polls ${next.kind === 'pr' ? 'pull requests' : 'tickets'}: unwatch and watch it again`);
     }
+    target.harnessKeys = next.harnessKeys ?? [];
     const ignorePrerequisites = next.ignorePrerequisites === true;
     const labelChanged = next.label !== target.label;
     if (
@@ -491,6 +492,9 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
       onExit: kick,
       waitingRecheckMs: target.everyMs,
       ignorePrerequisites: target.ignorePrerequisites === true,
+      machineDir: dirname(options.registryDir),
+      harnessKeys: () => target.harnessKeys ?? [],
+      repository: options.entry.name,
       paused: () => configProblem !== undefined,
       pullBlocked: () => notFastForwarded,
       onHeld: () => {

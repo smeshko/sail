@@ -27,6 +27,8 @@ adapters:
 models:
   default: claude-sonnet-5-5
   deep: claude-opus-5-5
+  # Judgment that everything downstream leans on: groom's decide and plan, review's judge. Twice deep's price.
+  frontier: claude-fable-5-2
   fast: claude-haiku-5-5
 # No dollar cap on the run: each agent stage carries its own, with its turns. Minutes are wall time, which a machine
 # busy with two runs and a gate stretches: each stage's maxMinutes, and the run's, only stop a session that hung.

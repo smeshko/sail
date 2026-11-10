@@ -13,7 +13,7 @@ import type { StopReason } from '../engine/run-dir';
 import type { RunHeader } from '../engine/run-header';
 import type { PortErrorCode } from '../ports/errors';
 import type { CheckStatus, MergeMethod, TicketMove, TicketRelation, TicketState, Usage } from '../ports/types';
-import type { Budget, Permissions } from '../sdk/steps';
+import type { Budget, Effort, Permissions } from '../sdk/steps';
 
 /** Every type a run's event stream carries, in `sail.event.v1`'s order. A queue's follow in the schema's enum. */
 export const EVENT_TYPES = [
@@ -142,6 +142,8 @@ interface Payloads {
     model?: string;
     /** The named harness the call ran on. Left out for the default harness. */
     harness?: string;
+    /** The reasoning effort the call's agent step runs at. Left out when it sets none. */
+    effort?: Effort;
     permissions?: Permissions;
     budget?: Budget;
     steps?: string[];
@@ -181,6 +183,8 @@ interface Payloads {
     model?: string;
     /** The named harness the step ran on. Left out for the default harness. */
     harness?: string;
+    /** The reasoning effort the step runs at. Left out when it sets none. */
+    effort?: Effort;
     command?: string;
   };
   'step:end': {
@@ -390,7 +394,7 @@ interface Payloads {
   /** `took` is the stale run whose lease this one replaced. */
   'workspace:leased': { remote: string; branch: string; took?: string };
   'workspace:lease_released': { remote: string; branch: string };
-  'workspace:created': { path: string; branch: string; baseSha: string; durationMs: number };
+  'workspace:created': { path: string; branch: string; baseSha: string; startSha?: string; durationMs: number };
   /** `ref` is where a removed workspace's commits are kept, at `head`, when its `HEAD` had moved past its base. */
   'workspace:released': { path: string; kept: boolean; ref?: string; head?: string };
 }

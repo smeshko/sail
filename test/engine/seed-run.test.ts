@@ -399,6 +399,24 @@ test('a seeded run reaching a named harness whose adapter needs a variable that 
   });
 }, 60_000);
 
+test('a seeded run whose spec stage sets an effort outside the five levels is refused, naming the stage, leaving no new run', async () => {
+  await withTempRepo(async (repo) => {
+    const from = await source.copyInto(repo.dir);
+    edit(
+      join(repo.dir, '.sail'),
+      'workflows/ticket-to-pr/stages/spec/stage.ts',
+      "model: 'deep',",
+      "model: 'deep', effort: 'huge' as never,",
+    );
+    const before = runIds(repo.dir);
+    expect(await seed(repo, { fromRun: from.runId })).toEqual({
+      refused:
+        ".sail/workflows/ticket-to-pr/stages/spec/stage.ts: stage 'spec' sets effort 'huge', which is not one of low, medium, high, xhigh, max",
+    });
+    expect(runIds(repo.dir)).toEqual(before);
+  });
+}, 60_000);
+
 /** Rewrites the first journal line of the run in `dir` so its intake failed. */
 function failIntake(dir: string): void {
   const path = join(dir, 'journal.ndjson');
