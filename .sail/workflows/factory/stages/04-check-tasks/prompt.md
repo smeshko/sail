@@ -13,6 +13,10 @@ review's.
 or why it could not be asked. Read it as a hint where to look first, a low answer being a task to examine closely. It is
 never a verdict: judge every task yourself from the commits.
 
+`$STAGE_IN/verified.json` lists the ids of tasks that changed no file. Implement reported what it ran for each, and the
+workflow accepts them on that evidence, so they are not yours to judge: submit each as implemented, with the evidence
+`no commit: accepted on implement's evidence`, and look for no commit for them.
+
 You only read. Don't change any file.
 
 ## Submit

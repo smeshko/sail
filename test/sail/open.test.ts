@@ -64,7 +64,7 @@ function runOpen(
     inputs[name] = join(out, `${name}.in`);
     writeFileSync(inputs[name], text);
   }
-  const child = Bun.spawnSync([join(repo.dir, '.sail', 'workflows', 'factory', 'stages', '06-open', 'run.sh')], {
+  const child = Bun.spawnSync([join(repo.dir, '.sail', 'workflows', 'factory', 'stages', '07-open', 'run.sh')], {
     cwd: repo.dir,
     env: env(repo, { ...inputs, BRANCH: 'sail/FAKE-1-open', RUN_ID: 'FAKE-1-RUN', STAGE_OUT: out }),
   });

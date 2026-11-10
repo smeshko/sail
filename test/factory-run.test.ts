@@ -265,3 +265,176 @@ test('a blocked implement hands the ticket over: commented, needs-human on, fact
     expect(again.stderr).toContain("carries no 'factory' label");
   });
 }, 120_000);
+
+test('implement reporting a task with no commit and blank evidence gets a corrective try, and the run goes on once the evidence is given', async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeOwnSail(repo);
+    const harness = join(sailDir, 'fake', 'harness.json');
+    const seeds = JSON.parse(readFileSync(harness, 'utf8'));
+    const answer = (evidence: string) => {
+      const copy = structuredClone(seeds.implement[0]);
+      copy.output.tasks.push({ id: 'TASK-002', commit: null, evidence });
+      return copy;
+    };
+    seeds.implement = [answer(' '), answer('bun run types: types/ is unchanged')];
+    writeFileSync(harness, JSON.stringify(seeds));
+    repo.git('add', '.sail/fake/harness.json');
+    repo.git('commit', '-q', '-m', 'seed a task with no commit');
+
+    const { code, stderr, keys, dir } = await factory(repo);
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    const invalid = readEvents(dir).filter(
+      (event) => event.type === 'output:invalid' && (event as { key?: string }).key === 'implement#1',
+    ) as { message?: string }[];
+    expect(invalid).toHaveLength(1);
+    expect(invalid[0]?.message).toContain('a task with no commit needs its evidence');
+
+    const entry = readJournal(dir).entries.find((each) => each.key === 'implement#1');
+    expect(entry?.outcome).toBe('done');
+    const tasks = ((entry?.output ?? {}) as { tasks?: { id: string; evidence: string }[] }).tasks ?? [];
+    expect(tasks.find((task) => task.id === 'TASK-002')?.evidence).toBe('bun run types: types/ is unchanged');
+    expect(keys[keys.indexOf('implement#1') + 1]).toBe('validate#1');
+  });
+}, 120_000);
+
+const CHECKLIST_TASKS = [
+  ...TASKS,
+  { id: 'TASK-002', title: 'Regenerate the types', type: 'checklist', commit: 'chore(cli): regenerate the types' },
+];
+
+/** A plan with a task that changes no file, implement reporting it with no commit, and check-tasks seeded per case. */
+function seedChecklistPlan(repo: TempRepo, sailDir: string, first: boolean[], later: boolean[]): void {
+  attachToFake1(repo, [
+    planFile(
+      1,
+      [
+        '# Plan: two tasks',
+        '',
+        '## Tasks',
+        '',
+        '- [ ] TASK-001: Print the total',
+        '- [ ] TASK-002: Regenerate the types',
+        '',
+        '## Task details',
+        '',
+        '### TASK-001: Print the total',
+        '',
+        '### TASK-002: Regenerate the types',
+      ].join('\n'),
+      { ...trailer('two-tasks', '2026-11-02T09:00:00.000Z'), tasks: CHECKLIST_TASKS },
+    ),
+  ]);
+  const harness = join(sailDir, 'fake', 'harness.json');
+  const seeds = JSON.parse(readFileSync(harness, 'utf8'));
+  seeds.implement[0].output.tasks.push({
+    id: 'TASK-002',
+    commit: null,
+    evidence: 'bun run types: types/ is unchanged',
+  });
+  const checked = (implemented: boolean[]) => [
+    {
+      ...seeds['check-tasks'][0],
+      output: {
+        tasks: implemented.map((yes, at) => ({
+          id: `TASK-00${at + 1}`,
+          implemented: yes,
+          evidence: yes ? '89541459' : 'Checklist task with no committed files',
+        })),
+      },
+    },
+  ];
+  seeds['check-tasks#1'] = checked(first);
+  seeds['check-tasks'] = checked(later);
+  writeFileSync(harness, JSON.stringify(seeds));
+  repo.git('add', '.sail/fake/harness.json');
+  repo.git('commit', '-q', '-m', 'seed a task with no commit');
+}
+
+/** The `$STAGE_IN/<name>` of a call, read as the folder of `stage` holds it. */
+function stageIn(dir: string, stage: string, call: number, name: string): unknown {
+  return JSON.parse(readFileSync(join(callDir(dir, stage), `call-${call}`, 'in', name), 'utf8'));
+}
+
+/** The folder of `stage` in a run directory, whatever number prefix it carries. */
+function callDir(dir: string, stage: string): string {
+  const folder = readdirSync(dir).find((each) => each.replace(/^\d+-/, '') === stage);
+  if (folder === undefined) throw new Error(`no ${stage} folder in ${dir}`);
+  return join(dir, folder);
+}
+
+test('a plan with a task that changes no file reaches open: check-tasks answering it false on every call sends no pass back', async () => {
+  await withTempRepo(async (repo) => {
+    seedChecklistPlan(repo, writeOwnSail(repo), [true, false], [true, false]);
+    const { code, stderr, keys, dir } = await factory(repo);
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    expect(readStatus(dir)).toEqual({ status: 'completed' });
+    expect(keys).toContain('check-tasks#1');
+    expect(keys).toContain('open#1');
+    expect(keys).not.toContain('implement#3');
+    expect(keys).not.toContain('check-tasks#2');
+    expect(stageIn(dir, 'check-tasks', 1, 'verified.json')).toEqual(['TASK-002']);
+    expect(keys.slice(keys.indexOf('describe#1'))).toEqual([
+      'describe#1',
+      'verification#1',
+      'open#1',
+      'file-follow-ups#1',
+    ]);
+    const written = readFileSync(join(callDir(dir, 'verification'), 'call-1', 'out', 'pr-body.md'), 'utf8');
+    expect(written).toContain('## Verification');
+    expect(written).toContain('**TASK-002**');
+    expect(written).toContain('bun run types: types/ is unchanged');
+    expect(written).toEndWith('Closes FAKE-1\n');
+    const prs = JSON.parse(readFileSync(join(repo.dir, '.sail-runs', 'fake', 'prs.json'), 'utf8'));
+    // The committed seed holds a pull request of its own: the one this run opened is the one that carries the section.
+    const opened = (prs.pullRequests as { body: string }[]).filter((pr) => pr.body.includes('## Verification'));
+    expect(opened).toHaveLength(1);
+    expect(opened[0]?.body).toContain('bun run types: types/ is unchanged');
+  });
+}, 120_000);
+
+test('a task with no commit is listed as implemented in the feedback of a pass another task sent back', async () => {
+  await withTempRepo(async (repo) => {
+    seedChecklistPlan(repo, writeOwnSail(repo), [false, false], [true, false]);
+    const { code, keys, dir } = await factory(repo);
+    expect(code).toBe(EXIT_OK);
+    const at = keys.indexOf('implement#3');
+    expect(at).toBeGreaterThan(-1);
+    expect(keys.slice(at)).toContain('check-tasks#2');
+    expect(keys.indexOf('check-tasks#2')).toBeLessThan(keys.indexOf('open#1'));
+    const feedback = stageIn(dir, 'implement', 3, 'feedback.json') as { tasks: { tasks: unknown[] } };
+    expect(feedback.tasks.tasks).toEqual([
+      { id: 'TASK-001', implemented: false, evidence: 'Checklist task with no committed files' },
+      { id: 'TASK-002', implemented: true, evidence: "no commit: accepted on implement's evidence" },
+    ]);
+  });
+}, 120_000);
+
+test('a task with no commit stays accepted on its first evidence when a later pass leaves it out', async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeOwnSail(repo);
+    seedChecklistPlan(repo, sailDir, [false, false], [true, false]);
+    // Only the first pass reports TASK-002: every later implement answer reports TASK-001 alone.
+    const harness = join(sailDir, 'fake', 'harness.json');
+    const seeds = JSON.parse(readFileSync(harness, 'utf8'));
+    seeds['implement#1'] = [seeds.implement[0]];
+    seeds.implement = [
+      {
+        ...seeds.implement[0],
+        output: {
+          ...seeds.implement[0].output,
+          tasks: seeds.implement[0].output.tasks.filter((task: { id: string }) => task.id !== 'TASK-002'),
+        },
+      },
+    ];
+    writeFileSync(harness, JSON.stringify(seeds));
+    repo.git('add', '.sail/fake/harness.json');
+    repo.git('commit', '-q', '-m', 'leave the task with no commit out of later passes');
+
+    const { code, stderr, keys, dir } = await factory(repo);
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    expect(stageIn(dir, 'check-tasks', 2, 'verified.json')).toEqual(['TASK-002']);
+    expect(keys).toContain('open#1');
+    const written = readFileSync(join(callDir(dir, 'verification'), 'call-1', 'out', 'pr-body.md'), 'utf8');
+    expect(written).toContain('bun run types: types/ is unchanged');
+  });
+}, 120_000);
