@@ -113,3 +113,32 @@ test("groom's plan stage carries the implement-writes check on plan.md", async (
   };
   expect(stage.produces['plan.md']?.validators.map((v) => v.check)).toContain('implement-writes');
 });
+
+test("the plan stage's Question accepts a recommend that is one of its options, and rejects one that is none or an ask with no ?", async () => {
+  const { Question } = (await import(join(ROOT, '.sail', 'workflows', 'groom', 'schemas.ts'))) as {
+    Question: {
+      safeParse(value: unknown): { success: boolean; error?: { issues: { path: PropertyKey[]; message: string }[] } };
+    };
+  };
+  const question = {
+    ask: 'Deny .github/?',
+    options: [
+      { option: 'yes', means: 'a plan naming .github/ blocks at plan' },
+      { option: 'no', means: 'implement writes .github/' },
+    ],
+    recommend: 'no',
+    why: 'review gates it',
+    cites: ['.sail/lib/permissions.ts:77'],
+  };
+  const issues = (value: unknown) =>
+    (Question.safeParse(value).error?.issues ?? []).map(({ path, message }) => `${path.join('.')}: ${message}`);
+  expect({
+    accepted: issues(question),
+    noOption: issues({ ...question, recommend: 'maybe' }),
+    noMark: issues({ ...question, ask: 'Deny .github/' }),
+  }).toEqual({
+    accepted: [],
+    noOption: ['recommend: recommend must equal one option'],
+    noMark: ['ask: ask must contain a "?"'],
+  });
+});
