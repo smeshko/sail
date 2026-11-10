@@ -55,15 +55,18 @@ import {
   fakeClonePorts,
   QUEUE_WORKFLOW,
   queueDirOf,
+  seedDense,
   seedFixtures,
 } from '../test/helpers/dashboard';
 import { FAKE_4_ID } from '../test/helpers/review-fixture';
+import { writeDenseFixture } from './dense-fixture';
 
 const root = join(import.meta.dir, '..');
 const FIXTURE_SAIL = join(root, 'test', 'fixtures', 'repo', '.sail');
 const RUNS = join(root, 'test', 'fixtures', 'runs');
 const VIEWS = join(root, 'test', 'fixtures', 'terminal');
 const DASHBOARD_VIEWS = join(root, 'test', 'fixtures', 'dashboard', 'views');
+const DENSE_FIXTURE = join(root, 'test', 'fixtures', 'dashboard', 'dense');
 /** Recordings: the scripted run's, and each real set's. A set carries the `.sail/` it was recorded on, when it has one. */
 export const SESSIONS = join(root, 'test', 'fixtures', 'sessions');
 /** The golden run directory a recorded set plays back to, one folder per set. */
@@ -243,6 +246,31 @@ const VIEWS_TZ = 0;
  * Renders every view of the dashboard's recorded fixtures into `outDir`, as fragments, and gives the files written. The
  * machine is seeded afresh, and nothing absolute of it is ever rendered, so the views are the same on every machine.
  */
+/**
+ * The dense fixture's four views: the sidebar and the Active, History and Queues lists of five repositories and 44 runs.
+ * An unreadable run's problem names the machine's temp folder, which is shown as `<machine>`.
+ */
+function renderDenseViews(): Record<string, SafeHtml> {
+  const machine = seedDense();
+  try {
+    const repos = railRepos(index(machine.registryDir), VIEWS_NOW).map((repo) => ({
+      ...repo,
+      runs: repo.runs.map((run) =>
+        run.problem === undefined ? run : { ...run, problem: run.problem.replaceAll(machine.root, '<machine>') },
+      ),
+    }));
+    const ui: UiState = { ...initialUi(VIEWS_TZ) };
+    return {
+      'dense-sidebar.html': renderSidebar(repos, navCounts(repos), 0, ui),
+      'dense-active.html': renderList('active', repos, ui, VIEWS_NOW),
+      'dense-history.html': renderList('history', repos, ui, VIEWS_NOW),
+      'dense-queues.html': renderList('queues', repos, ui, VIEWS_NOW),
+    };
+  } finally {
+    machine.remove();
+  }
+}
+
 export async function renderDashboardViews(outDir: string): Promise<string[]> {
   const machine = seedFixtures();
   try {
@@ -332,6 +360,7 @@ export async function renderDashboardViews(outDir: string): Promise<string[]> {
       const opened = card.timeline.flatMap((entry) => (entry.kind === 'tool' ? [entry.callId] : [])).slice(0, 3);
       views[file] = renderTimeline(card, ui({ key, timeline: true, opened }), VIEWS_NOW);
     }
+    Object.assign(views, renderDenseViews());
     mkdirSync(outDir, { recursive: true });
     return Object.entries(views).map(([file, view]) => {
       writeFileSync(join(outDir, file), `${view.value}\n`);
@@ -368,7 +397,9 @@ if (import.meta.main) {
     await playBack(set, played);
     for (const file of filesIn(played)) console.log(relative(root, join(played, file)));
   }
-  // Last, since a timeline is drawn from a played-back run.
+  // The dense fixture first, since its views are drawn from it; then, last, since a timeline is drawn from a played-back run.
+  rmSync(DENSE_FIXTURE, { recursive: true, force: true });
+  for (const file of writeDenseFixture(DENSE_FIXTURE)) console.log(relative(root, join(DENSE_FIXTURE, file)));
   rmSync(DASHBOARD_VIEWS, { recursive: true, force: true });
   for (const file of await renderDashboardViews(DASHBOARD_VIEWS))
     console.log(relative(root, join(DASHBOARD_VIEWS, file)));

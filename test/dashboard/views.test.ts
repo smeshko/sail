@@ -49,6 +49,10 @@ test('the committed dashboard views are what the fixtures render now', async () 
     'inspector-golden-publish-1-log.html',
     'timeline-golden-publish-1.html',
     'timeline-claude-code-implement-1.html',
+    'dense-sidebar.html',
+    'dense-active.html',
+    'dense-history.html',
+    'dense-queues.html',
   ]);
   expect(stale(fresh, COMMITTED)).toEqual([]);
 });

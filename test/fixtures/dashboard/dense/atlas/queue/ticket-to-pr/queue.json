@@ -1,0 +1,64 @@
+{
+  "version": 1,
+  "workflow": "ticket-to-pr",
+  "updatedAt": "2026-10-01T11:55:00.000Z",
+  "polling": {
+    "label": "sail",
+    "failures": 0,
+    "lastPolledAt": "2026-10-01T11:55:00.000Z"
+  },
+  "items": [
+    {
+      "dedupKey": "ticket:ATL-201",
+      "source": {
+        "kind": "ticket",
+        "ticketKey": "ATL-201"
+      },
+      "title": "Add a --json flag to every listing command",
+      "url": "fake://tickets/ATL-201",
+      "state": "queued",
+      "attempts": 0,
+      "addedAt": "2026-10-01T10:50:00.000Z",
+      "priority": "high"
+    },
+    {
+      "dedupKey": "ticket:ATL-202",
+      "source": {
+        "kind": "ticket",
+        "ticketKey": "ATL-202"
+      },
+      "title": "Fix the off-by-one in the pagination of the run list",
+      "url": "fake://tickets/ATL-202",
+      "state": "queued",
+      "attempts": 0,
+      "addedAt": "2026-10-01T10:50:00.000Z",
+      "priority": "high"
+    },
+    {
+      "dedupKey": "ticket:ATL-100",
+      "source": {
+        "kind": "ticket",
+        "ticketKey": "ATL-100"
+      },
+      "title": "Retry the fetch helper on a 503",
+      "url": "fake://tickets/ATL-100",
+      "state": "dispatched",
+      "attempts": 1,
+      "addedAt": "2026-10-01T10:50:00.000Z",
+      "runId": "ATL-100-01M7D000DENSE0000000000000"
+    },
+    {
+      "dedupKey": "ticket:OLD-1",
+      "source": {
+        "kind": "ticket",
+        "ticketKey": "OLD-1"
+      },
+      "title": "Keep the changelog in step with the releases",
+      "url": "fake://tickets/OLD-1",
+      "state": "done",
+      "attempts": 1,
+      "addedAt": "2026-10-01T10:50:00.000Z",
+      "finishedAt": "2026-10-01T10:58:00.000Z"
+    }
+  ]
+}
