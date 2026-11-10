@@ -25,6 +25,19 @@ test.each([
 });
 
 test.each([
+  [
+    ['**', '!secret/**'],
+    ['evals/a.py', 'a'],
+    ['secret/k', 'secret/'],
+  ],
+  [['src/**', '!src/gen/**'], ['src/a.ts'], ['src/gen/x.ts', 'lib/a.ts']],
+  [['!secret/**'], [], ['secret/k', 'evals/a.py']],
+  [['!a.ts', '**'], ['b.ts'], ['a.ts']],
+] as [string[], string[], string[]][])('the globs %j match %j and nothing in %j', (globs, hits, misses) => {
+  expect(outcomes((path) => matchesGlob(path, globs), hits, misses)).toEqual(expected(hits, misses));
+});
+
+test.each([
   ['git status *', ['git status', 'git status --short'], ['git statusx', 'git log', 'x git status']],
   ['npm test *', ['npm test -- a.test.ts', 'npm test'], ['npm testx', 'npm tes']],
   ['git diff *', ['git diff origin/main...HEAD'], ['git log', 'git difftool']],

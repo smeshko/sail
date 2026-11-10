@@ -33,6 +33,7 @@ export {
   type Validator,
   type Verdict,
 } from './documents';
+export { matchesGlob } from './globs';
 export { type Intake, type IntakeOptions, intake, type SourceKind } from './intake';
 export {
   type AgentOptions,

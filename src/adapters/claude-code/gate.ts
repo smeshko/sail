@@ -57,24 +57,47 @@ function subtreeOf(glob: string): string | undefined {
   return /[*?[\]{}]/.test(folder) || folder.startsWith('$') || folder.startsWith('/') ? undefined : folder;
 }
 
+/** The folder a workspace `!` read glob's matches all lie below: its segments before the first wildcard. */
+function excludedOf(glob: string): string | undefined {
+  const rest = glob.slice(1);
+  if (rest.startsWith('$') || rest.startsWith('/')) return undefined;
+  const literal: string[] = [];
+  for (const segment of rest.split('/')) {
+    if (/[*?[\]{}]/.test(segment)) break;
+    literal.push(segment);
+  }
+  return literal.join('/');
+}
+
+/** Whether one of the two relative paths is the other, or below it (`` is the workspace). */
+const overlaps = (a: string, b: string): boolean =>
+  a === '' || b === '' || a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
+
 /**
  * Why a Grep of `call`'s folders can't run, though decide() allowed each folder: it reads every file below a folder in
  * the workspace, and a read glob that matches the folder alone doesn't cover them. A folder runs only below a glob
- * that matches all of it; a file, or a folder in `$STAGE_IN` or `$STAGE_OUT`, is decide()'s alone.
+ * that matches all of it, and only when no `!` read glob may exclude a path at or below it; a file, or a folder in
+ * `$STAGE_IN` or `$STAGE_OUT`, is decide()'s alone.
  */
 export function uncoveredSearch(call: ToolCall, permissions: Permissions, ctx: DecideContext): string | undefined {
   const at = roots(ctx);
   const from = resolvePhysical(call.cwd ?? ctx.worktree, '/');
   if (!from.ok) return `${call.tool}: ${from.reason}`;
   const folders = permissions.read.map(subtreeOf).filter((folder): folder is string => folder !== undefined);
+  const excluded = permissions.read
+    .filter((glob) => glob.startsWith('!'))
+    .map(excludedOf)
+    .filter((folder): folder is string => folder !== undefined);
   for (const path of call.paths) {
     const found = resolvePhysical(path, from.path);
     if (!found.ok || place(found.path, at) !== 'worktree' || !isFolder(found.path)) continue;
     const rel = found.path === at.worktree ? '' : found.path.slice(at.worktree.length + 1);
-    if (folders.some((folder) => folder === '' || rel === folder || rel.startsWith(`${folder}/`))) continue;
+    const covered = folders.some((folder) => folder === '' || rel === folder || rel.startsWith(`${folder}/`));
+    if (covered && !excluded.some((folder) => overlaps(rel, folder))) continue;
     return (
-      `${call.tool} of ${path} reads every file below ${found.path}, and no read glob covers them all: ` +
-      'search a file, or a folder a "<folder>/**" glob covers'
+      `${call.tool} of ${path} reads every file below ${found.path}, and ` +
+      (covered ? 'a "!" read glob excludes some of them: ' : 'no read glob covers them all: ') +
+      'search a file, or a folder a "<folder>/**" glob covers and no "!" glob reaches'
     );
   }
   return undefined;

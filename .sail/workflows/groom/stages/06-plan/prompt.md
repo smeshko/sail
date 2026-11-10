@@ -60,9 +60,9 @@ Break the work into tasks, numbered `TASK-001`, `TASK-002`, … in order:
 - A task's tests are part of the task: implement writes them first, in the task's own commit. Never plan a task that
   only writes tests, or one that only makes earlier tests pass.
 - Final validation is not a task: the workflow runs `bun run gate` after the last task.
-- Implement may write only `src/`, `test/`, `types/`, `schemas/`, `bin/`, `scripts/`, `.sail/`, `.githooks/`, the root
-  configs (`package.json`, `bun.lock`, `bunfig.toml`, `tsconfig.json`, `biome.json`), `AGENTS.md` and `CONTEXT.md`.
-  If the change needs any other path, ask about it as a question, naming the path: implement would block on it.
+- Implement writes what `builder` in `.sail/lib/permissions.ts` allows. `plan.md`'s check refuses a `Files` path
+  outside it, naming the task and the path. If the change needs such a path, ask about it as a question, naming the
+  path: implement would block on it.
 - Implement may add an npm dependency with `bun add --exact <package>`, and the task that first imports it adds it.
   A program installed on the machine is not one: CI has only what `package.json` and `bun.lock` name.
 
