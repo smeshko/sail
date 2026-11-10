@@ -112,6 +112,7 @@ mkdir -p "$STUB"
 echo "$STAGE#$CALL" >>"$STUB/executions.log"
 if [ -f "$STUB/sleep-at" ] && [ "$(cat "$STUB/sleep-at")" = "$STAGE#$CALL" ]; then
   rm "$STUB/sleep-at"
+  if [ -f "$STUB/sleep-ignores-term" ]; then trap '' TERM; fi
   sleep 30 &
   echo "$$ $!" >"$STUB/sleeping.tmp"
   mv "$STUB/sleeping.tmp" "$STUB/sleeping"

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import pkg from '../../package.json' with { type: 'json' };
 import { readJournal } from '../../src/engine/journal';
@@ -8,7 +8,14 @@ import { readStatus } from '../../src/engine/run-dir';
 import { formatIssue, validateRunDir } from '../../src/engine/schemas';
 import { readEvents } from '../../src/events/consumers/ndjson';
 import { copyFixture, edit } from '../helpers/fixture';
-import { interruptWhenAsleep, STUB_SPEC_CALL, stubExecutions, writeStub } from '../helpers/stub-workflow';
+import {
+  interruptWhenAsleep,
+  isAlive,
+  STUB_SPEC_CALL,
+  stubExecutions,
+  whenSleeping,
+  writeStub,
+} from '../helpers/stub-workflow';
 import { withTempRepo } from '../helpers/temp-repo';
 
 const shim = join(import.meta.dir, '..', '..', 'src', 'cli', 'main.ts');
@@ -200,6 +207,30 @@ test('the shim exits 3 on a refused ticket when its stderr pipe is closed before
     expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
   });
 });
+
+test('a SIGINT leaves neither a script that ignores SIGTERM nor its child alive once sail has exited', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir, { sleepAt: 'implement#1' });
+    mkdirSync(join(repo.dir, '.stub'), { recursive: true });
+    writeFileSync(join(repo.dir, '.stub', 'sleep-ignores-term'), '');
+    const sail = Bun.spawn([process.execPath, shim, 'FAKE-1'], {
+      cwd: repo.dir,
+      env: repo.env,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const pids = await whenSleeping(repo.dir);
+    sail.kill('SIGINT');
+    expect(await sail.exited).toBe(2);
+    const deadline = performance.now() + 8_000;
+    while (pids.some(isAlive) && performance.now() < deadline) await Bun.sleep(50);
+    const leftover = pids.filter(isAlive);
+    for (const pid of leftover) process.kill(pid, 'SIGKILL');
+    expect(leftover).toEqual([]);
+    const dir = join(repo.dir, '.sail-runs', runIdIn(repo.dir));
+    expect(readFileSync(join(dir, 'STATUS'), 'utf8')).toBe('suspended interrupted\n');
+  });
+}, 30_000);
 
 // In a process of its own, because bun test fails a test on any unhandled rejection, whatever the process listens for.
 test("a run.fail() in a chain the workflow doesn't await, after the run has ended, changes neither its end nor its code", async () => {
