@@ -14,8 +14,8 @@ export const keys: Record<string, (store: Store) => void> = {
     const card = store.run?.model.cards[store.ui.cursor];
     if (card !== undefined) selectCard(store, card.key, undefined, true);
   },
-  // Needs attention and the drawer shut first; then back to the cards from a timeline, keeping the selection; from
-  // the cards, no selection.
+  // The run menu, the item menu, needs attention and the drawer shut first, in that order; then back to the cards
+  // from a timeline, keeping the selection; from the cards, no selection.
   Escape: (store) => {
     const { ui } = store;
     if (ui.runMenu !== undefined) {
