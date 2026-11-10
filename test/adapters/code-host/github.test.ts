@@ -1063,6 +1063,20 @@ test('checkLog answers the last 20 000 characters of the job log, and a commit s
   }).toEqual({ tail: true, status: 'not_found', unknown: 'not_found' });
 });
 
+test('checkLog with whole answers the whole job log, uncut', async () => {
+  const log = `${'a'.repeat(15_000)}${'b'.repeat(10_000)}`;
+  const on = world({
+    pullRequests: [
+      { number: 7, head: 'sail/designated', checkRuns: [failedRun(1, 'verify', 55)], jobLogs: { 1: log } },
+    ],
+  });
+  const read = await settle(host(on).checkLog(7, 'verify', { whole: true }));
+  expect('rejected' in read ? read : { length: read.log.length, whole: read.log === log }).toEqual({
+    length: 25_000,
+    whole: true,
+  });
+});
+
 test("runs of different names are each kept in GitHub's order, beside the latest of a repeated one", async () => {
   const on = checksWorld(
     [

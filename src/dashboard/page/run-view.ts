@@ -35,7 +35,7 @@ export function commandList(commands: readonly { label: string; command: string 
 function card(entry: StageCard, place: number, ui: UiState, now: number): SafeHtml {
   const state = entry.state === 'running' ? 'running' : (entry.outcome ?? 'settled');
   const classes = `card${place === ui.cursor ? ' cursor' : ''}${entry.key === ui.key ? ' sel' : ''}`;
-  return html`<div class="${classes}" data-action="select-card" data-key="${entry.key}">
+  return html`<div class="${classes}" role="button" tabindex="0" data-action="select-card" data-key="${entry.key}">
 <div class="c-top"><span class="c-n">${String(place + 1).padStart(2, '0')}</span><span class="c-name">${entry.key}</span>${
     entry.tries > 1 ? html`<span class="retry">↻${entry.tries}</span>` : ''
   }${entry.denials.length > 0 ? html`<span class="warnchip">⊘ ${entry.denials.length}</span>` : ''}<span class="pill ${pillOf(state)}">${state}</span></div>

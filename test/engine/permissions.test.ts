@@ -485,7 +485,7 @@ test('the permission engine imports nothing but node:fs, node:path, the SDK type
       ),
     ].map((match) => match[1] ?? match[2] ?? match[3]),
   );
-  const allowed = /^(?:node:fs|node:path|\.\.\/\.\.\/sdk\/steps|\.\/[a-z-]+)$/;
+  const allowed = /^(?:node:fs|node:path|\.\.\/\.\.\/sdk\/(?:steps|globs)|\.\/[a-z-]+)$/;
   expect(files.length).toBeGreaterThanOrEqual(7);
   expect(found.filter((specifier) => !allowed.test(specifier ?? ''))).toEqual([]);
 });

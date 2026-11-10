@@ -35,7 +35,7 @@ test("beta's queue view lists running first, shows its header, its four items ea
   expect(
     [
       ...markup.matchAll(
-        /<button class="qsec grp-t open" data-action="toggle-queue-section" data-section="beta\/ticket-to-pr:\w+"><span class="caret">›<\/span>([\w ·]+)<\/button><div class="qbox"><div class="qrow2[\w ]*"><span class="c-dot"><i class="(\w+)"><\/i><\/span><span class="c-ref">([\w:-]+)<\/span>/g,
+        /<button class="qsec grp-t open" data-action="toggle-queue-section" data-section="beta\/ticket-to-pr:\w+" aria-expanded="true"><span class="caret">›<\/span>([\w ·]+)<\/button><div class="qbox"><div class="qrow2[\w ]*"><span class="c-dot"><i class="(\w+)"><\/i><\/span><span class="c-ref">([\w:-]+)<\/span>/g,
       ),
     ].map(([, box, state, key]) => `${box}: ${key} ${state}`),
   ).toEqual([
@@ -53,7 +53,7 @@ test("beta's queue view lists running first, shows its header, its four items ea
   ]);
   expect(markup).toContain('<div class="qrow2 done">');
   expect(markup).toContain(
-    '<button class="qrecent-h" data-action="toggle-queue-events"><span class="caret">›</span>recent queue events<span class="n">9</span></button>\n</section>',
+    '<button class="qrecent-h" data-action="toggle-queue-events" aria-expanded="false"><span class="caret">›</span>recent queue events<span class="n">9</span></button>\n</section>',
   );
   expect(markup).toContain(
     '<span class="nm">beta / ticket-to-pr</span><span class="pill p-pass">watched</span><span class="dt">label sail · polled 5m ago · 0 failed polls</span>',
@@ -74,7 +74,7 @@ test("beta's queue view lists running first, shows its header, its four items ea
     { ...initialUi(0), queueEvents: true },
     NOW,
   ).value;
-  expect(opened).toContain('<button class="qrecent-h open" data-action="toggle-queue-events">');
+  expect(opened).toContain('<button class="qrecent-h open" data-action="toggle-queue-events" aria-expanded="true">');
   expect(opened.match(/<div class="ev">/g)?.length).toBe(9);
   expect(opened).toContain('<span class="ts">11:01:05</span><span class="tname">queue:parked</span>');
 });
@@ -85,7 +85,7 @@ test('a folded section draws only its heading and count, without its items, whil
   const ui = { ...initialUi(0), folded: [`${queueId(panel.repo, panel.workflow)}:done`] };
   const markup = renderQueue(panel, undefined, ui, NOW).value;
   expect(markup).toContain(
-    '<button class="qsec grp-t" data-action="toggle-queue-section" data-section="beta/ticket-to-pr:done"><span class="caret">›</span>done · 1</button>\n',
+    '<button class="qsec grp-t" data-action="toggle-queue-section" data-section="beta/ticket-to-pr:done" aria-expanded="false"><span class="caret">›</span>done · 1</button>\n',
   );
   expect(markup).not.toContain('ticket:FAKE-4');
   for (const key of ['ticket:FAKE-3', 'ticket:FAKE-5', 'ticket:FAKE-6'])
@@ -363,7 +363,7 @@ test('each state shows the buttons its open menu is given: queued, parked and do
   ]);
   const markup = renderQueue({ ...panel, items }, undefined, { ...initialUi(0), itemMenu: 'ticket:FAKE-6' }, NOW).value;
   expect(markup).toContain(
-    '<span class="qmore"><button class="btn mv more open" data-action="item-menu" data-item="ticket:FAKE-6" title="actions for ticket:FAKE-6">⋯</button><span class="qmenu">',
+    '<span class="qmore"><button class="btn mv more open" data-action="item-menu" data-item="ticket:FAKE-6" aria-label="actions for ticket:FAKE-6" aria-expanded="true" title="actions for ticket:FAKE-6">⋯</button><span class="qmenu">',
   );
   expect(markup).toContain(
     '<button class="btn" data-action="drop-item" data-repo="beta" data-workflow="ticket-to-pr" data-item="ticket:FAKE-6" title="drop ticket:FAKE-6">drop</button>',
@@ -421,4 +421,27 @@ test('what was typed in the add field and whether force is ticked survive a draw
   const markup = renderQueue(panel, { recent: [], watch: 'watched', polls: 'ticket' }, ui, NOW).value;
   expect(markup).toContain('name="add-ticket" placeholder="ticket key" value="FAKE-&quot;9&quot;"');
   expect(markup).toContain('<input type="checkbox" name="add-force" checked> force');
+});
+
+test('a queue section, the recent events fold and an item ⋯ say whether they are open, and the item buttons are named (ADW-508)', () => {
+  const [panel] = queuePanels(index(m.registryDir));
+  if (panel === undefined) throw new Error('beta has no queue');
+  const events = queueEvents();
+  const draw = (ui = initialUi(0)) => renderQueue(panel, { recent: events, watch: watchState(events) }, ui, NOW).value;
+  const closed = draw();
+  expect(closed).toMatch(/<button class="qsec grp-t open"[^>]*aria-expanded="true"/);
+  expect(closed).toMatch(/<button class="qrecent-h"[^>]*aria-expanded="false"/);
+  expect(closed).toContain(
+    'data-item="ticket:FAKE-6" aria-label="actions for ticket:FAKE-6" aria-expanded="false" title="actions for ticket:FAKE-6">⋯</button>',
+  );
+  const open = draw({ ...initialUi(0), queueEvents: true, itemMenu: 'ticket:FAKE-6' });
+  expect(open).toMatch(/<button class="qrecent-h open"[^>]*aria-expanded="true"/);
+  expect(open).toContain('data-item="ticket:FAKE-6" aria-label="actions for ticket:FAKE-6" aria-expanded="true"');
+  const moves = renderQueue(waiting(), undefined, initialUi(0), NOW).value;
+  const labels = [...moves.matchAll(/data-action="move-item"[^>]*aria-label="([^"]+)" title="([^"]+)"/g)];
+  expect(labels.length).toBeGreaterThan(0);
+  for (const [, label, title] of labels) expect(label).toBe(title as string);
+  expect(labels).toHaveLength(4);
+  expect(moves).toContain('aria-label="move up, before ticket:FAKE-5"');
+  expect(moves).toContain('aria-label="move down, after ticket:FAKE-7"');
 });

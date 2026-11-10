@@ -15,42 +15,55 @@
         --line: rgba(255, 255, 255, 0.08);
         --line-2: rgba(255, 255, 255, 0.18);
         --fg: #ececf4;
-        --fg-2: #9d9db4;
-        --fg-3: #66667e;
-        --fg-4: #3b3b4c;
+        --fg-2: #b4b4c8;
+        --fg-3: #9a9ab0;
+        --fg-4: #85859b;
+        --focus: #6ea4ff;
         --add: #6ee7b7;
         --del: #fda4af;
       }
       :root[data-theme="light"] {
-        --bg: #f4f4f7;
-        --panel: #fff;
-        --panel-2: #f7f7fa;
-        --hover: #ececf2;
-        --inset: #fafafc;
-        --line: rgba(0, 0, 0, 0.09);
-        --line-2: rgba(0, 0, 0, 0.2);
-        --fg: #16161f;
-        --fg-2: #50506a;
-        --fg-3: #7d7d96;
-        --fg-4: #b6b6c6;
-        --add: #15803d;
-        --del: #b91c1c;
+        --bg: #dee0e9;
+        --panel: #f2f3f7;
+        --panel-2: #e8e9f0;
+        --hover: #d6d8e4;
+        --inset: #e9eaf1;
+        --line: rgba(24, 26, 60, 0.16);
+        --line-2: rgba(24, 26, 60, 0.32);
+        --fg: #14151f;
+        --fg-2: #383a52;
+        --fg-3: #4d4f6a;
+        --fg-4: #565973;
+        --focus: #1d5fd6;
+        --add: #0c6535;
+        --del: #a31b29;
+        --ok: #055c43;
+        --warn: #7a4800;
+        --err: #9d1235;
+        --run: #1d4bb5;
+        --idle: #565973;
       }
       @media (prefers-color-scheme: light) {
         :root[data-theme="system"] {
-          --bg: #f4f4f7;
-          --panel: #fff;
-          --panel-2: #f7f7fa;
-          --hover: #ececf2;
-          --inset: #fafafc;
-          --line: rgba(0, 0, 0, 0.09);
-          --line-2: rgba(0, 0, 0, 0.2);
-          --fg: #16161f;
-          --fg-2: #50506a;
-          --fg-3: #7d7d96;
-          --fg-4: #b6b6c6;
-          --add: #15803d;
-          --del: #b91c1c;
+          --bg: #dee0e9;
+          --panel: #f2f3f7;
+          --panel-2: #e8e9f0;
+          --hover: #d6d8e4;
+          --inset: #e9eaf1;
+          --line: rgba(24, 26, 60, 0.16);
+          --line-2: rgba(24, 26, 60, 0.32);
+          --fg: #14151f;
+          --fg-2: #383a52;
+          --fg-3: #4d4f6a;
+          --fg-4: #565973;
+          --focus: #1d5fd6;
+          --add: #0c6535;
+          --del: #a31b29;
+          --ok: #055c43;
+          --warn: #7a4800;
+          --err: #9d1235;
+          --run: #1d4bb5;
+          --idle: #565973;
         }
       }
       :root {
@@ -86,6 +99,46 @@
       }
       a {
         color: var(--run);
+      }
+      :focus-visible {
+        outline: 2px solid var(--focus);
+        outline-offset: 1px;
+      }
+      .r-open:focus-visible,
+      .lgrp-h:focus-visible,
+      .wf-t:focus-visible,
+      .q-row:focus-visible,
+      .qsec:focus-visible,
+      .qrecent-h:focus-visible,
+      .trow:focus-visible,
+      .sig:focus-visible {
+        outline-offset: -2px;
+      }
+      button,
+      select,
+      input:not([type="checkbox"]):not([type="radio"]),
+      [role="button"] {
+        min-height: 24px;
+      }
+      .r-more,
+      .btn.mv {
+        min-width: 24px;
+      }
+      label {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        min-height: 24px;
+      }
+      a.c-t {
+        min-height: 24px;
+      }
+      .wf-act,
+      .qbadge,
+      .hist-t,
+      .r-more {
+        display: inline-flex;
+        align-items: center;
       }
       code,
       pre {
@@ -312,6 +365,19 @@
         font-size: 11.5px;
         color: var(--fg-2);
         border-left: 2px solid transparent;
+      }
+      .r-open {
+        flex: 1 1 auto;
+        min-width: 0;
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        text-align: left;
+        font: inherit;
+        color: inherit;
+      }
+      .hist-run .r-open {
+        align-items: center;
       }
       .run:hover {
         background: var(--hover);
@@ -575,7 +641,7 @@
       }
       .r-more {
         flex: 0 0 auto;
-        visibility: hidden;
+        opacity: 0;
         padding: 0 6px;
         border: 1px solid var(--line);
         border-radius: 5px;
@@ -583,19 +649,19 @@
         color: var(--fg-3);
         line-height: 1.4;
       }
-      .hist-run .r-more {
-        margin-left: auto;
-      }
-      .hist-run .r-more + .r-el {
-        margin-left: 0;
-      }
-      .r-line .r-more {
-        margin-left: auto;
-      }
       .run:hover .r-more,
+      .run:focus-within .r-more,
       .run.sel .r-more,
       .r-more.open {
-        visibility: visible;
+        opacity: 1;
+      }
+      @media (hover: none) {
+        .r-more {
+          opacity: 1;
+        }
+        .qbadge.idle {
+          visibility: visible;
+        }
       }
       .r-more:hover,
       .r-more.open {
@@ -1660,8 +1726,8 @@
         <div class="brand"><i></i>sail dashboard</div>
         <div class="spacer"></div>
         <div id="attention"></div>
-        <button class="btn" type="button" data-action="toggle-theme" title="theme">◐</button>
-        <button class="btn" type="button" data-action="toggle-inspector" title="inspector (i)">⇥</button>
+        <button class="btn" type="button" data-action="toggle-theme" aria-label="switch theme" title="theme">◐</button>
+        <button class="btn" type="button" data-action="toggle-inspector" aria-label="toggle inspector" title="inspector (i)">⇥</button>
       </header>
       <div class="body" id="body">
         <nav class="rail">

@@ -113,6 +113,27 @@ test.each([
   expect(verdict(checkRead(paths, perms({ read }), ctx), phraseOf(expected))).toEqual(expected);
 });
 
+const NONE: Want = ['write', "matches none of the step's write globs"];
+
+test('a write glob starting with ! excludes the paths it matches, in the worktree and in $STAGE_OUT', () => {
+  const write = perms({ write: ['**', '!secret/**', '$STAGE_OUT/**', '!$STAGE_OUT/private/**'] });
+  expect([
+    verdict(checkWrite(['evals/run.py'], write, ctx), NONE[1]),
+    verdict(checkWrite(['secret/key.txt'], write, ctx), NONE[1]),
+    verdict(checkWrite(['$STAGE_OUT/a.md'], write, ctx), NONE[1]),
+    verdict(checkWrite(['$STAGE_OUT/private/b.md'], write, ctx), NONE[1]),
+  ]).toEqual(['allow', NONE, 'allow', NONE]);
+});
+
+test('a read glob starting with ! excludes the paths it matches', () => {
+  const read = perms({ read: ['**', '!src/deep/**'] });
+  const none = "matches none of the step's read globs";
+  expect([
+    verdict(checkRead(['src/a.ts'], read, ctx), none),
+    verdict(checkRead(['src/deep/x'], read, ctx), none),
+  ]).toEqual(['allow', ['read', none]]);
+});
+
 test('a read denial names the path as given and where it resolved', () => {
   const decision = checkRead([join(clone, 'lib', 'a.dart')], perms({ read: ['**'] }), ctx);
   expect(decision).toEqual({

@@ -58,7 +58,7 @@ function port(repo: TempRepo, ...args: string[]): { labels: string[]; comments: 
 function runMerge(
   repo: TempRepo,
   options: { lastTry?: boolean; landing?: string[]; blocked?: string; head?: string } = {},
-): { code: number; stderr: string; output: Merged } {
+): { code: number; stderr: string; output: Merged; out: string } {
   const stageDir = join(repo.dir, '.sail', 'workflows', 'review', 'stages', '18-merge');
   const out = join(repo.home, `stage-out-${Date.now()}`);
   mkdirSync(out);
@@ -87,7 +87,12 @@ function runMerge(
     },
   });
   const lines = child.stdout.toString().trim().split('\n');
-  return { code: child.exitCode ?? -1, stderr: child.stderr.toString(), output: JSON.parse(lines.at(-1) ?? 'null') };
+  return {
+    code: child.exitCode ?? -1,
+    stderr: child.stderr.toString(),
+    output: JSON.parse(lines.at(-1) ?? 'null'),
+    out,
+  };
 }
 
 test('a check that fails once and passes on its rerun is merged, and the comment says it was rerun', async () => {
@@ -115,11 +120,97 @@ test('a check still red after its rerun is handed back as a checks retry with it
     const { code, output } = runMerge(repo);
     expect(code).toBe(0);
     expect(output).toMatchObject({ merged: false, retry: 'checks', rerun: ['verify'] });
+    const tail = '(fail) sail show prints a zero total\n 1 fail';
     expect(output.failed).toEqual([
-      { name: 'verify', url: null, log: '(fail) sail show prints a zero total\n 1 fail' },
+      {
+        name: 'verify',
+        url: null,
+        log: `Failing tests:\n(file unknown): sail show prints a zero total\n\n1 failing test:\n\n(fail) sail show prints a zero total\n\nThe first ones, with their errors:\n\n\n(fail) sail show prints a zero total\n\n 1 fail\n\nThe log's tail:\n${tail}`,
+      },
     ]);
     const pr = port(repo, 'get-pull-request', '7');
     expect([pr.comments, pr.labels.includes('factory')]).toEqual([[], true]);
+  });
+}, 60_000);
+
+/** A recorded CI log of a red `verify`: Actions' timestamps on every line, Bun's banner unless `banner` is false, ANSI colour on every line when `colour`, one failing test, then 25 000 characters of passing tests. */
+function ciLog(banner = true, colour = false): string {
+  const paint = (line: string) => (colour ? `\u001b[0m\u001b[31m${line}\u001b[0m` : line);
+  const stamp = (line: string) => `2026-11-04T21:00:00.1234567Z ${paint(line)}`;
+  const filler = Array.from({ length: 500 }, (_, at) => `(pass) later test ${at} ${'x'.repeat(40)} [1.00ms]`);
+  return [
+    ...(banner ? ['bun test v1.4.2 (744846f84) 10x PARALLEL'] : []),
+    'test/file-follow-ups-run.test.ts:',
+    'error: expect(received).toEqual(expected)',
+    '  Expected: 2',
+    '  Received: 3',
+    '      at <anonymous> (/home/runner/work/sail/test/file-follow-ups-run.test.ts:41:18)',
+    '(fail) file-follow-ups files each follow-up once [4.20ms]',
+    ...filler,
+    ' 1 fail',
+    ' 500 pass',
+    'Ran 501 tests across 1 file.',
+  ]
+    .map(stamp)
+    .join('\n');
+}
+
+test('a red check whose failing assertion sits before the 20 000-character cut is handed back led by the Bun version, the test, its file and the assertion, and its whole log is saved', async () => {
+  await withTempRepo(async (repo) => {
+    writeOwnSail(repo);
+    const log = ciLog();
+    expect(log.length).toBeGreaterThan(25_000);
+    seedPullRequest(repo, [{ name: 'CI / verify', statuses: ['failed'], log }]);
+    const { output, out } = runMerge(repo);
+    const handed = output.failed[0]?.log ?? '';
+    expect(
+      handed.startsWith(
+        'CI ran Bun 1.4.2 (from the log).\n\nFailing tests:\ntest/file-follow-ups-run.test.ts: file-follow-ups files each follow-up once\n',
+      ),
+    ).toBe(true);
+    expect(handed).toContain('  Expected: 2\n');
+    expect(handed).toContain('  Received: 3');
+    expect(handed.endsWith(log.slice(-20_000))).toBe(true);
+    expect(readFileSync(join(out, 'check-logs', 'CI-verify.log'), 'utf8')).toBe(log);
+  });
+}, 60_000);
+
+test('a red check whose CI log is coloured is handed back with the same test, file and assertion as a plain one', async () => {
+  await withTempRepo(async (repo) => {
+    writeOwnSail(repo);
+    seedPullRequest(repo, [{ name: 'verify', statuses: ['failed'], log: ciLog(true, true) }]);
+    const { output } = runMerge(repo);
+    const handed = output.failed[0]?.log ?? '';
+    expect(
+      handed.startsWith(
+        'CI ran Bun 1.4.2 (from the log).\n\nFailing tests:\ntest/file-follow-ups-run.test.ts: file-follow-ups files each follow-up once\n',
+      ),
+    ).toBe(true);
+    expect(handed).toContain('\n  Expected: 2\n');
+  });
+}, 60_000);
+
+test('without a bun test banner in the log, the Bun version is the pin in .github/workflows/verify.yml', async () => {
+  await withTempRepo(async (repo) => {
+    writeOwnSail(repo);
+    mkdirSync(join(repo.dir, '.github', 'workflows'), { recursive: true });
+    writeFileSync(
+      join(repo.dir, '.github', 'workflows', 'verify.yml'),
+      'steps:\n  - with:\n      bun-version: 1.4.2\n',
+    );
+    seedPullRequest(repo, [{ name: 'verify', statuses: ['failed'], log: ciLog(false) }]);
+    const { output } = runMerge(repo);
+    expect(output.failed[0]?.log.startsWith('CI ran Bun 1.4.2 (the verify.yml pin).\n\nFailing tests:\n')).toBe(true);
+  });
+}, 60_000);
+
+test('a failed check whose log has no (fail) line is handed back with the port tail unchanged', async () => {
+  await withTempRepo(async (repo) => {
+    writeOwnSail(repo);
+    const log = `${'noise\n'.repeat(5000)}src/a.ts(3,1): error TS2322: Type 'string' is not assignable to type 'number'.\n`;
+    seedPullRequest(repo, [{ name: 'verify', statuses: ['failed'], log }]);
+    const { output } = runMerge(repo);
+    expect(output.failed[0]?.log).toBe(log.slice(-20_000));
   });
 }, 60_000);
 

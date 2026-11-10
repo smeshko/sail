@@ -6,8 +6,9 @@
 // and the open queue's workflow stay in sight under it, so the selection is never hidden. A workflow's header also
 // carries its Watch or Unwatch, and an opened repository a row with Watch all and, while its watch set isn't empty,
 // Unwatch all; an Unwatch armed by a first click reads `click again`. The answer to the last change shows under the
-// repository's header. A run's row, but a completed one's, has a ⋯ that opens the run and, under its row, a menu of
-// what it offers: Resume, Restart, Stop and Clean.
+// repository's header. A run's row is a `div` holding two sibling buttons: its own, which opens the run, and, but on
+// a completed run, a ⋯ of its own that opens the run and, under the row, a menu of what it offers: Resume, Restart,
+// Stop and Clean.
 import type { RunActions } from '../actions';
 import { ago, cost, duration } from './format';
 import { html, type SafeHtml } from './html';
@@ -36,7 +37,7 @@ const isMenuOpen = (repo: string, run: RailRun, ui: UiState) => isOpen(repo, run
 /** A row's ⋯: on any run but a completed one, which offers nothing. */
 function more(repo: string, run: RailRun, ui: UiState): SafeHtml | '' {
   if (run.status === 'completed') return '';
-  return html`<span class="r-more${isMenuOpen(repo, run, ui) ? ' open' : ''}" data-action="run-menu" data-repo="${repo}" data-run="${run.runId}" title="actions for ${run.runId}">⋯</span>`;
+  return html`<button class="r-more${isMenuOpen(repo, run, ui) ? ' open' : ''}" type="button" data-action="run-menu" data-repo="${repo}" data-run="${run.runId}" aria-label="actions for ${run.runId}" aria-expanded="${isMenuOpen(repo, run, ui) ? 'true' : 'false'}" title="actions for ${run.runId}">⋯</button>`;
 }
 
 /** The open menu under `run`'s row: what the run offers, once its actions are read. */
@@ -51,18 +52,18 @@ function runMenu(repo: string, run: RailRun, ui: UiState, offers: RunActions | u
 function liveRow(repo: string, run: RailRun, ui: UiState, offers: RunActions | undefined): SafeHtml {
   const tip = tooltipOf(run);
   const facts = [duration(run.durationMs), cost(run.costUsd)].join(' · ');
-  return html`<button class="run live-run${isOpen(repo, run, ui) ? ' sel' : ''}"${
+  return html`<div class="run live-run${isOpen(repo, run, ui) ? ' sel' : ''}"><button class="r-open"${
     tip === undefined ? '' : html` title="${tip}"`
   } data-action="select-run" data-repo="${repo}" data-run="${run.runId}">
 <span class="r-main"><span class="r-line"><span class="st ${pillOf(run.status)}"></span><span class="r-id">${runLabel(run)}</span>${
     run.title === undefined ? '' : html` <span class="r-title">${run.title}</span>`
-  }${more(repo, run, ui)}</span><span class="r-sub">${repo} › ${workflowOf(run)}${
+  }</span><span class="r-sub">${repo} › ${workflowOf(run)}${
     run.status === 'running' && run.stalled !== undefined
       ? html` · <span class="stalled">stalled ${run.stalled}</span>`
       : ''
   } · ${facts}${
     run.stopReason === undefined ? '' : html` · <span class="why">${run.stopReason}</span>`
-  }</span>${run.problem === undefined ? '' : html`<span class="r-problem">${run.problem}</span>`}</span></button>${runMenu(repo, run, ui, offers)}`;
+  }</span>${run.problem === undefined ? '' : html`<span class="r-problem">${run.problem}</span>`}</span></button>${more(repo, run, ui)}</div>${runMenu(repo, run, ui, offers)}`;
 }
 
 function runningBlock(repos: readonly RailRepo[], ui: UiState, offers: RunActions | undefined): SafeHtml {
@@ -103,10 +104,10 @@ const finished = (run: RailRun) => SECTIONS.some((each) => each.holds(run));
 
 function historyRow(repo: string, run: RailRun, ui: UiState, offers: RunActions | undefined): SafeHtml {
   const tip = cost(run.costUsd);
-  return html`<button class="run hist-run${isOpen(repo, run, ui) ? ' sel' : ''}" title="${tip}" data-action="select-run" data-repo="${repo}" data-run="${run.runId}">
+  return html`<div class="run hist-run${isOpen(repo, run, ui) ? ' sel' : ''}"><button class="r-open" title="${tip}" data-action="select-run" data-repo="${repo}" data-run="${run.runId}">
 <span class="st ${pillOf(run.status)}"></span><span class="r-id">${runLabel(run)}</span>${
     run.title === undefined ? '' : html` <span class="r-title">${run.title}</span>`
-  }${more(repo, run, ui)}<span class="r-el">${duration(run.durationMs)}</span></button>${runMenu(repo, run, ui, offers)}`;
+  }<span class="r-el">${duration(run.durationMs)}</span></button>${more(repo, run, ui)}</div>${runMenu(repo, run, ui, offers)}`;
 }
 
 function historyLine(
@@ -122,7 +123,7 @@ function historyLine(
   if (parts.length === 0) return html``;
   const toggles = parts.map(({ which, held }) => {
     const id = `${group}:${which.name}`;
-    return html`<button class="hist-t${ui.open.includes(id) ? ' open' : ''}" data-action="toggle-section" data-section="${id}">${which.label(held.length)}</button>`;
+    return html`<button class="hist-t${ui.open.includes(id) ? ' open' : ''}" data-action="toggle-section" data-section="${id}" aria-expanded="${ui.open.includes(id) ? 'true' : 'false'}">${which.label(held.length)}</button>`;
   });
   const rows = parts.flatMap(({ which, held }) =>
     (ui.open.includes(`${group}:${which.name}`) ? held : held.filter((run) => isOpen(repo, run, ui))).map((run) =>
@@ -172,7 +173,7 @@ function workflowHeader(
   ui: UiState,
   now: number,
 ): SafeHtml {
-  return html`<div class="wf-h"><button class="wf-t${open ? ' open' : ''}" data-action="toggle-group" data-group="${group}"><span class="caret">›</span><span class="nm">${workflow.name}</span></button>${
+  return html`<div class="wf-h"><button class="wf-t${open ? ' open' : ''}" data-action="toggle-group" data-group="${group}" aria-expanded="${open ? 'true' : 'false'}"><span class="caret">›</span><span class="nm">${workflow.name}</span></button>${
     workflow.queue === undefined ? '' : badge(group, workflow.queue, ui, now)
   }${workflow.toggle === undefined ? '' : watchButton(repo, workflow.toggle, ui, workflow.name)}${counts(workflow.runs)}</div>`;
 }
@@ -204,7 +205,7 @@ function repoGroup(repo: RailRepo, ui: UiState, now: number, offers: RunActions 
   return html`<div class="lgrp">
 <button class="lgrp-h${open ? ' open' : ''}"${
     repo.remote === null ? '' : html` title="${repo.remote}"`
-  } data-action="toggle-group" data-group="${repo.name}"><span class="caret">›</span><span class="nm">${repo.name}</span>${counts(repo.runs)}</button>
+  } data-action="toggle-group" data-group="${repo.name}" aria-expanded="${open ? 'true' : 'false'}"><span class="caret">›</span><span class="nm">${repo.name}</span>${counts(repo.runs)}</button>
 ${repo.problem === undefined ? '' : html`<div class="lgrp-p">${repo.problem}</div>`}${
   ui.watchNotice?.repo === repo.name ? html`<div class="lgrp-p">${ui.watchNotice.text}</div>` : ''
 }${

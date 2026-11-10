@@ -4,7 +4,8 @@
 // - `draw.ts` draws the regions marked dirty, coalesced into one flush at most every 100 ms, and draws the running
 //   times again each second while anything runs.
 // - `streams.ts` keeps the index, run and queue sockets, and `reads.ts` reads over REST what the selection shows.
-// - `actions.ts` does what a click asks, its POSTs in `requests.ts`; `keys.ts` does what a key asks.
+// - `actions.ts` does what a click asks, its POSTs in `requests.ts`; `keys.ts` does what a key asks. Enter and Space on
+//   a focused stage card arrive as its action, and on a focused button or link not at all.
 //
 // The rules each module follows are in its own header.
 import { actions, dispatch } from './actions';

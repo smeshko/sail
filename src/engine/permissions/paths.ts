@@ -114,11 +114,23 @@ function relativeTo(abs: string, root: string): string {
   }
 }
 
-/** The globs that apply in `region`: `$STAGE_OUT/…` and `$STAGE_IN/…` to theirs, the rest to the worktree. */
+/**
+ * The globs that apply in `region`: `$STAGE_OUT/…` and `$STAGE_IN/…` to theirs, the rest to the worktree. A leading `!`
+ * is set aside while the region is chosen and put back on each glob kept.
+ */
 function globsFor(region: Region, globs: readonly string[]): string[] {
   const prefix = region === 'stage-out' ? '$STAGE_OUT/' : region === 'stage-in' ? '$STAGE_IN/' : undefined;
-  if (prefix !== undefined) return globs.filter((g) => g.startsWith(prefix)).map((g) => g.slice(prefix.length));
-  return globs.filter((g) => !g.startsWith('$') && !isAbsolute(g));
+  const kept: string[] = [];
+  for (const glob of globs) {
+    const bang = glob.startsWith('!') ? '!' : '';
+    const bare = glob.slice(bang.length);
+    if (prefix !== undefined) {
+      if (bare.startsWith(prefix)) kept.push(bang + bare.slice(prefix.length));
+    } else if (!bare.startsWith('$') && !isAbsolute(bare)) {
+      kept.push(glob);
+    }
+  }
+  return kept;
 }
 
 /** Where `path` resolves from `cwd`, or why it can't be resolved. `cwd` must itself lie in the workspace. */

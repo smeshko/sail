@@ -452,7 +452,7 @@ Any limit the engine enforces on a run: permissions, budgets, untrusted-input wr
 _Avoid_: policy, safety prompt, rule
 
 **Permissions**:
-What a step may do, declared per step: paths it may read and write, commands it may run and those it never may though its commands match them (`deny`), tools and servers it may reach. Enforced for agents; declared and recorded for scripts. Tools and MCP servers are listed by name (`WebFetch`, `server:tool`, or `server:*` for every tool of a server), and anything not listed is denied. Reads and writes are confined to the run's workspace and the step's `$STAGE_OUT`.
+What a step may do, declared per step: paths it may read and write, commands it may run and those it never may though its commands match them (`deny`), tools and servers it may reach. Enforced for agents; declared and recorded for scripts. Tools and MCP servers are listed by name (`WebFetch`, `server:tool`, or `server:*` for every tool of a server), and anything not listed is denied. Reads and writes are confined to the run's workspace and the step's `$STAGE_OUT`. A path glob starting with `!` excludes the paths it matches, after the globs without one, in `read` and `write` alike, as in `['**', '!secret/**']`.
 _Avoid_: policy, allowlist, sandbox, scope
 
 **Deny set**:

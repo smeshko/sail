@@ -263,7 +263,7 @@ test('boot renders the rail with alpha and beta from the first index, opens the 
   expect(host.regions.rail).toContain('<span class="nm">alpha</span>');
   expect(host.regions.rail).toContain('<span class="nm">beta</span>');
   expect(host.regions.rail).toContain(
-    `<button class="run hist-run sel" title="$1.35" data-action="select-run" data-repo="alpha" data-run="${GOLDEN_RUN_ID}">`,
+    `<div class="run hist-run sel"><button class="r-open" title="$1.35" data-action="select-run" data-repo="alpha" data-run="${GOLDEN_RUN_ID}">`,
   );
   expect(cards(host.regions.main)).toEqual([
     'intake#1',
@@ -299,7 +299,9 @@ test("opening FAKE-2's denial closes the golden run's socket, opens FAKE-2's, re
   );
   expect(host.regions.inspector).toContain('<dt>command</dt><dd><code>git push --force origin HEAD</code></dd>');
   expect(host.regions.inspector).toContain('<dt>rule</dt><dd>commands</dd>');
-  expect(host.regions.main).toContain('<div class="card cursor sel" data-action="select-card" data-key="implement#1">');
+  expect(host.regions.main).toContain(
+    '<div class="card cursor sel" role="button" tabindex="0" data-action="select-card" data-key="implement#1">',
+  );
 });
 
 test("a URL naming FAKE-2's implement#1 and its permissions tab opens them on the first index, not the newest run", async () => {
@@ -316,7 +318,9 @@ test("a URL naming FAKE-2's implement#1 and its permissions tab opens them on th
   expect(host.regions.inspector).toContain(
     '<button class="tab on" data-action="tab" data-tab="permissions">permissions</button>',
   );
-  expect(host.regions.main).toContain('<div class="card cursor sel" data-action="select-card" data-key="implement#1">');
+  expect(host.regions.main).toContain(
+    '<div class="card cursor sel" role="button" tabindex="0" data-action="select-card" data-key="implement#1">',
+  );
 });
 
 test('a URL naming a run no repository lists opens the newest run instead', () => {
@@ -398,7 +402,7 @@ test('live: opening a running card shows its timeline in the centre, which grows
     '<div class="ev tht"><span class="ts">09:00:04</span><div class="col"><p>The &lt;spec&gt; asks for a flag.</p>',
   );
   expect(host.regions.main).toContain(
-    '<button class="trow" data-action="toggle-tool" data-call="c1"><span class="tname">Bash</span><span class="tdet">bun test</span><span class="tmeta"><span class="mark">…</span>',
+    '<button class="trow" data-action="toggle-tool" data-call="c1" aria-expanded="false"><span class="tname">Bash</span><span class="tdet">bun test</span><span class="tmeta"><span class="mark">…</span>',
   );
   host.click({ action: 'toggle-tool', call: 'c1' });
   push({ seq: 1003, type: 'tool:end', callId: 'c1', status: 'failed', durationMs: 1500, result: '1 fail' });
@@ -431,7 +435,9 @@ test('live: opening a running card shows its timeline in the centre, which grows
   host.click({ action: 'close-timeline' });
   host.advance(100);
   expect([page.ui.key, page.ui.timeline]).toEqual(['implement#1', false]);
-  expect(host.regions.main).toContain('<div class="card cursor sel" data-action="select-card" data-key="implement#1">');
+  expect(host.regions.main).toContain(
+    '<div class="card cursor sel" role="button" tabindex="0" data-action="select-card" data-key="implement#1">',
+  );
   expect(host.regions.inspector).toContain('<span>implement#1</span>');
   host.click({ action: 'open', repo: 'alpha', run: RUNNING_ID, key: 'spec#1', tab: 'files' });
   expect([page.ui.key, page.ui.timeline, page.ui.tab]).toEqual(['spec#1', false, 'files']);
@@ -606,7 +612,7 @@ test("with no queue the rail has no queue row and no queue socket opens; with be
   host.click({ action: 'toggle-queue-section', section: `beta/${QUEUE_WORKFLOW}:done` });
   host.advance(100);
   expect(host.regions.main).toContain(
-    'data-section="beta/ticket-to-pr:done"><span class="caret">›</span>done · 1</button>',
+    'data-section="beta/ticket-to-pr:done" aria-expanded="false"><span class="caret">›</span>done · 1</button>',
   );
   expect(host.regions.main).not.toContain('<span class="c-ref">ticket:FAKE-4</span>');
   host.renders = [];
@@ -626,7 +632,7 @@ test("with no queue the rail has no queue row and no queue socket opens; with be
   expect(host.regions.rail).toContain(
     '<button class="qbadge warn sel" title="polled 7d ago" data-action="select-queue"',
   );
-  expect(host.regions.rail).not.toMatch(/<button class="run[^"]* sel"/);
+  expect(host.regions.rail).not.toMatch(/<div class="run[^"]* sel">/);
   host.renders = [];
   host.push(sockets[0], {
     kind: 'queue-event',
@@ -689,7 +695,9 @@ test('keys move the cursor, Enter opens a timeline, ] and [ step it, Escape goes
   host.push(host.open('index')[0], indexMessage());
   replay(host.open('run=')[0], GOLDEN());
   const cursor = () =>
-    /<div class="card cursor[^"]*" data-action="select-card" data-key="([^"]+)"/.exec(host.regions.main ?? '')?.[1];
+    /<div class="card cursor[^"]*" role="button" tabindex="0" data-action="select-card" data-key="([^"]+)"/.exec(
+      host.regions.main ?? '',
+    )?.[1];
   host.press('j');
   host.press('ArrowDown');
   host.press('j', true);
@@ -1310,10 +1318,10 @@ test('a repository or workflow opens and folds again from its header, remembered
   expect(page.ui.expanded).toEqual(['beta', `beta/${QUEUE_WORKFLOW}`]);
   expect(host.storage.get(RAIL_KEY)).toBe(JSON.stringify(['beta', `beta/${QUEUE_WORKFLOW}`]));
   expect(host.regions.rail).toContain(
-    '<button class="lgrp-h open" title="https://example.com/beta.git" data-action="toggle-group" data-group="beta">',
+    '<button class="lgrp-h open" title="https://example.com/beta.git" data-action="toggle-group" data-group="beta" aria-expanded="true">',
   );
   expect(host.regions.rail).toContain(
-    `<button class="wf-t open" data-action="toggle-group" data-group="beta/${QUEUE_WORKFLOW}">`,
+    `<button class="wf-t open" data-action="toggle-group" data-group="beta/${QUEUE_WORKFLOW}" aria-expanded="true">`,
   );
   host.click({ action: 'toggle-group', group: 'beta' });
   host.advance(100);

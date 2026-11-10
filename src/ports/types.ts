@@ -173,10 +173,10 @@ export const Rerun = z.object({
 });
 export type Rerun = z.infer<typeof Rerun>;
 
-/** How many characters of a check's log `checkLog` answers: the last of them. */
+/** How many characters of a check's log `checkLog` answers: the last of them, unless it is asked for the `whole` log. */
 export const CHECK_LOG_TAIL = 20_000;
 
-/** The tail of one check's log. */
+/** One check's log: its tail, or all of it when `checkLog` was asked for the `whole` log. */
 export const CheckLog = z.object({
   number: z.number().int(),
   name: z.string(),

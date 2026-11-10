@@ -8,7 +8,7 @@
 import { script, value, z } from 'sail';
 import { PullRequestRef } from '../../../../stages/file-follow-ups/stage';
 
-/** A failed check, still red after its rerun: its log's tail, for the fix pass. */
+/** A failed check, still red after its rerun: its failing tests, their files, errors and Bun version first, then its log's tail, for the fix pass. */
 export const FailedCheck = z.object({ name: z.string(), url: z.string().nullable(), log: z.string() });
 
 export const Merged = z.object({

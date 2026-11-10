@@ -63,7 +63,7 @@ function tool(entry: TimelineTool, ui: UiState): SafeHtml {
           : html`<div class="grp-t">result</div><pre class="code${entry.status === 'failed' ? ' bad' : ''}" data-scroll="result:${entry.callId}">${entry.result}</pre>`
       }</div>`
     : '';
-  return html`<div class="tcall t-${entry.status}${open ? ' open' : ''}"><button class="trow" data-action="toggle-tool" data-call="${entry.callId}"><span class="tname">${entry.tool}</span><span class="tdet">${inputSummary(entry.input)}</span><span class="tmeta">${
+  return html`<div class="tcall t-${entry.status}${open ? ' open' : ''}"><button class="trow" data-action="toggle-tool" data-call="${entry.callId}" aria-expanded="${open ? 'true' : 'false'}"><span class="tname">${entry.tool}</span><span class="tdet">${inputSummary(entry.input)}</span><span class="tmeta">${
     entry.durationMs === undefined ? '' : duration(entry.durationMs)
   }<span class="mark">${MARKS[entry.status]}</span></span></button>${body}</div>`;
 }
@@ -131,7 +131,7 @@ function script(entry: TimelineScript, id: string, ui: UiState, output: CallOutp
       : html`${duration(entry.durationMs)}<span class="mark">${
           entry.signal ?? (entry.code === undefined ? '' : `exit ${entry.code}`)
         }</span>`;
-  return html`<div class="tcall t-${scriptStatus(entry)}${open ? ' open' : ''}"><button class="trow" data-action="toggle-tool" data-call="${id}"><span class="tname">$</span><span class="tdet">${entry.command}</span><span class="tmeta">${ended}</span></button>${
+  return html`<div class="tcall t-${scriptStatus(entry)}${open ? ' open' : ''}"><button class="trow" data-action="toggle-tool" data-call="${id}" aria-expanded="${open ? 'true' : 'false'}"><span class="tname">$</span><span class="tdet">${entry.command}</span><span class="tmeta">${ended}</span></button>${
     open ? outputOf(id, output) : ''
   }</div>`;
 }
@@ -190,7 +190,7 @@ export function renderTimeline(
     entries.some((entry) => filterOf(entry) !== undefined) && shown.every((entry) => filterOf(entry) === undefined);
   return html`<div class="tl-top"><div class="d-h tl-h"><button class="btn" data-action="close-timeline" title="back to the cards (Esc)">‹ cards</button><span class="d-title">${card.key}</span><span class="pill ${pillOf(state)}">${state}</span><span class="c-agent">${card.kind}${
     card.model === undefined ? '' : html` <span class="c-model">${card.model}</span>`
-  }</span><span class="d-agent">${facts}</span><button class="btn" data-action="step-card" data-by="-1" title="previous call ([)">‹</button><button class="btn" data-action="step-card" data-by="1" title="next call (])">›</button>${
+  }</span><span class="d-agent">${facts}</span><button class="btn" data-action="step-card" data-by="-1" aria-label="previous call" title="previous call ([)">‹</button><button class="btn" data-action="step-card" data-by="1" aria-label="next call" title="next call (])">›</button>${
     running ? html`<button class="tog${ui.follow ? ' on' : ''}" data-action="toggle-follow">follow</button>` : ''
   }</div>
 ${filters(entries, ui)}</div><div class="tl">${

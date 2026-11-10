@@ -104,11 +104,11 @@ test('thinking and messages are escaped text; a tool row shows its input, durati
     '<div class="ev msg"><span class="ts">09:00:30</span><div class="col"><p>Reading &amp; writing.</p>',
   );
   expect(closed).toContain(
-    '<div class="tcall t-denied"><button class="trow" data-action="toggle-tool" data-call="c1"><span class="tname">Bash</span><span class="tdet">git push</span><span class="tmeta">4ms<span class="mark">⊘</span></span></button></div>',
+    '<div class="tcall t-denied"><button class="trow" data-action="toggle-tool" data-call="c1" aria-expanded="false"><span class="tname">Bash</span><span class="tdet">git push</span><span class="tmeta">4ms<span class="mark">⊘</span></span></button></div>',
   );
   expect(closed).toContain('<span class="tdet">a.ts</span><span class="tmeta">12ms<span class="mark">✓</span>');
   expect(closed).toContain(
-    '<div class="tcall t-running"><button class="trow" data-action="toggle-tool" data-call="c3">',
+    '<div class="tcall t-running"><button class="trow" data-action="toggle-tool" data-call="c3" aria-expanded="false">',
   );
   expect(closed).toContain('<span class="tmeta"><span class="mark">…</span>');
   expect(closed).toContain('<span class="d-agent">28.5s · 3 tool calls · 1 denied</span>');
@@ -147,7 +147,7 @@ test('steps and tries are separators, and a script shows its command, then its d
   expect(publish).toContain('<div class="tl-sep"><span>step 1/2 · describe</span></div>');
   expect(publish).toContain('<div class="tl-sep"><span>step 2/2 · open</span></div>');
   expect(publish).toContain(
-    '<div class="tcall t-completed"><button class="trow" data-action="toggle-tool" data-call="script:0"><span class="tname">$</span><span class="tdet">.sail/workflows/ticket-to-pr/stages/publish/open.sh</span><span class="tmeta">100ms<span class="mark">exit 0</span></span></button></div>',
+    '<div class="tcall t-completed"><button class="trow" data-action="toggle-tool" data-call="script:0" aria-expanded="false"><span class="tname">$</span><span class="tdet">.sail/workflows/ticket-to-pr/stages/publish/open.sh</span><span class="tmeta">100ms<span class="mark">exit 0</span></span></button></div>',
   );
   const card = spec([
     { ...at, seq: 901, type: 'stage:start', stage: 'spec', call: 1, try: 2, kind: 'agent' },
@@ -165,10 +165,10 @@ test('steps and tries are separators, and a script shows its command, then its d
     '<span class="tdet">sleep 9</span><span class="tmeta">900ms<span class="mark">SIGTERM</span>',
   );
   expect(markup).toContain(
-    '<div class="tcall t-failed"><button class="trow" data-action="toggle-tool" data-call="script:1"><span class="tname">$</span><span class="tdet">make</span><span class="tmeta">50ms<span class="mark">exit 2</span>',
+    '<div class="tcall t-failed"><button class="trow" data-action="toggle-tool" data-call="script:1" aria-expanded="false"><span class="tname">$</span><span class="tdet">make</span><span class="tmeta">50ms<span class="mark">exit 2</span>',
   );
   expect(markup).toContain(
-    '<div class="tcall t-running"><button class="trow" data-action="toggle-tool" data-call="script:2"><span class="tname">$</span><span class="tdet">tail -f log</span><span class="tmeta"><span class="mark">…</span>',
+    '<div class="tcall t-running"><button class="trow" data-action="toggle-tool" data-call="script:2" aria-expanded="false"><span class="tname">$</span><span class="tdet">tail -f log</span><span class="tmeta"><span class="mark">…</span>',
   );
   expect(markup).toContain('<span class="tdet">odd</span><span class="tmeta">5ms<span class="mark"></span>');
 });
@@ -265,7 +265,7 @@ test("an opened script shows its step's stdout and stderr, escaped, the last lin
     },
   }).value;
   expect(both).toContain(
-    '<div class="tcall t-completed open"><button class="trow" data-action="toggle-tool" data-call="script:0">',
+    '<div class="tcall t-completed open"><button class="trow" data-action="toggle-tool" data-call="script:0" aria-expanded="true">',
   );
   expect(both).toContain(
     '</button><div class="tout"><div class="grp-t">stdout</div><pre class="code" data-scroll="stdout:script:0">{&quot;ok&quot;:&quot;&lt;yes&gt;&quot;}</pre><div class="grp-t">stderr · last 200 lines</div><pre class="code" data-scroll="stderr:script:0">line 5\n',
@@ -285,4 +285,21 @@ test("an opened script shows its step's stdout and stderr, escaped, the last lin
       'publish#1/open': { stdout: { state: 'loaded', value: '' }, stderr: { state: 'missing' } },
     }).value,
   ).toContain('<div class="tout"><div class="code">the script printed nothing</div></div>');
+});
+
+test('a tool row and a script row say whether they are open, and the previous and next buttons are named (ADW-508)', () => {
+  const card = spec([
+    { ...at, seq: 903, type: 'tool:start', callId: 'c1', tool: 'Bash', input: { command: 'git push' } },
+    { ...at, seq: 904, type: 'tool:end', callId: 'c1', status: 'completed', durationMs: 4, result: 'ok' },
+    { ...at, seq: 905, type: 'script:exec', command: 'make', cwd: '.', envKeys: [] },
+    { ...at, seq: 906, type: 'script:exit', code: 0, durationMs: 50, stdoutBytes: 0 },
+  ]);
+  const closed = renderTimeline(card, ui(), NOW).value;
+  expect(closed).toContain('data-call="c1" aria-expanded="false">');
+  expect(closed).toContain('data-call="script:0" aria-expanded="false">');
+  const opened = renderTimeline(card, ui({ opened: ['c1', 'script:0'] }), NOW).value;
+  expect(opened).toContain('data-call="c1" aria-expanded="true">');
+  expect(opened).toContain('data-call="script:0" aria-expanded="true">');
+  expect(closed).toContain('data-by="-1" aria-label="previous call" title="previous call ([)">');
+  expect(closed).toContain('data-by="1" aria-label="next call" title="next call (])">');
 });

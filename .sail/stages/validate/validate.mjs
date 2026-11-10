@@ -10,6 +10,7 @@
 // A failing test is judged before it goes back to the implementer: one that passes when its file runs again is flaky,
 // and one that also fails on the branch's merge-base is the base's. Failures that are all flaky pass; failures that are
 // all the base's, or flaky, set baseRed, which ends the run instead of another pass: no change of the branch fixes it.
+// Bun's output is read by lib/test-failures.mjs, which review's merge stage reads a CI log with too.
 import { spawn, spawnSync } from 'node:child_process';
 import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -115,6 +116,7 @@ function gate() {
 }
 
 const { HOLDER_ENV, lock } = await import(join(dirname(process.env.SAIL_CONFIG), 'lib/gate-lock.mjs'));
+const { failingTests, failures } = await import(join(dirname(process.env.SAIL_CONFIG), 'lib/test-failures.mjs'));
 const holderEnv = { ...process.env, [HOLDER_ENV]: String(process.pid) };
 await lock({ label: 'validate', waiting: (dir) => `waiting for the validation in ${dir}` });
 const { code, log } = await gate();
@@ -139,23 +141,6 @@ const verify = {
 // Failures that are all flaky pass the validation; failures that are all the base's, or flaky, are staging's to fix.
 const onlyFlaky = judged.length > 0 && flaky.length === judged.length;
 const baseRed = red.length > 0 && red.length + flaky.length === judged.length;
-
-/**
- * Each test that failed in the gate's log, once, with the file whose header Bun printed last above it: Bun prints a
- * file's name before each run of its results, and every failure again, without it, in its closing summary.
- */
-function failingTests(text) {
-  const found = new Map();
-  let file;
-  for (const line of text.split('\n')) {
-    const header = /^(test\/\S+\.test\.ts):$/.exec(line);
-    if (header) file = header[1];
-    if (!line.startsWith('(fail) ') || file === undefined) continue;
-    const test = line.slice('(fail) '.length).replace(/ \[[\d.]+m?s\]$/, '');
-    if (!found.has(test)) found.set(test, { test, file });
-  }
-  return [...found.values()];
-}
 
 /**
  * The tests that failed in a run of `files` in `cwd`, by name, or undefined when it didn't end, or failed naming no
@@ -213,38 +198,6 @@ async function classify(failing) {
     spawnSync('git', ['worktree', 'remove', '--force', dir], { cwd: root });
     rmSync(dir, { recursive: true, force: true });
   }
-}
-
-/**
- * Each failing test with the error lines Bun printed above it, then the counts: what the implementer needs, which the
- * plain tail leaves out. Undefined when no test failed, as when typecheck or lint stopped the gate.
- */
-function failures(text) {
-  const lines = text.split('\n');
-  const blocks = new Map();
-  let from = 0;
-  lines.forEach((line, at) => {
-    if (/^\((pass|skip)\)/.test(line)) from = at + 1;
-    if (!line.startsWith('(fail)')) return;
-    // Bun prints each failure again in its closing summary, without the error above it.
-    const name = line.replace(/ \[[\d.]+m?s\]$/, '');
-    if (!blocks.has(name)) blocks.set(name, lines.slice(Math.max(from, at - 20), at).join('\n'));
-    from = at + 1;
-  });
-  if (blocks.size === 0) return undefined;
-  let errors = '';
-  for (const [name, block] of blocks) {
-    if (errors.length + block.length > 5000) break;
-    errors += `${block}\n${name}\n\n`;
-  }
-  const counts = lines.filter((line) => /^ \d+ (pass|skip|fail)$|^Ran \d+ tests/.test(line)).join('\n');
-  return [
-    `${blocks.size} failing test${blocks.size === 1 ? '' : 's'}:`,
-    [...blocks.keys()].join('\n'),
-    'The first ones, with their errors:',
-    errors.trimEnd(),
-    counts,
-  ].join('\n\n');
 }
 
 const ok = uncommitted.length === 0 && (verify.ok || onlyFlaky);

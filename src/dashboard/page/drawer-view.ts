@@ -20,5 +20,5 @@ export function renderDrawer(ui: UiState, loaded: Loaded<string> | undefined): S
         : isMarkdown(file.path)
           ? html`<div class="md">${raw(loaded.value)}</div>`
           : html`<pre class="code">${loaded.value}</pre>`;
-  return html`<div class="drawer-h"><span><b>${file.name}</b><span class="d">${file.path}</span></span><button class="btn" data-action="close-file" title="close (Esc)">✕</button></div><div class="drawer-b">${body}</div>`;
+  return html`<div class="drawer-h"><span><b>${file.name}</b><span class="d">${file.path}</span></span><button class="btn" data-action="close-file" aria-label="close" title="close (Esc)">✕</button></div><div class="drawer-b">${body}</div>`;
 }

@@ -341,6 +341,17 @@ test.each<[string, string[], Record<string, unknown>, 'allow' | 'deny']>([
   ['**/* covers a folder in it', ['**/*'], { pattern: 'a', path: 'sub' }, 'allow'],
   ['sub/**/* covers a folder below sub/', ['sub/**/*'], { pattern: 'a', path: 'sub/dir' }, 'allow'],
   ['a Grep of one file is one read of it', ['src/*'], { pattern: 'a', path: 'src/a.ts' }, 'allow'],
+  // Review R3: a `!` read glob excludes files a folder's search would read.
+  ['** with !sub/dir/** does not cover the workspace', ['**', '!sub/dir/**'], { pattern: 'a' }, 'deny'],
+  [
+    '** with !sub/dir/** does not cover sub/, which holds it',
+    ['**', '!sub/dir/**'],
+    { pattern: 'a', path: 'sub' },
+    'deny',
+  ],
+  ['** with !sub/dir/** still covers src/', ['**', '!sub/dir/**'], { pattern: 'a', path: 'src' }, 'allow'],
+  ['** with !**/*.pem covers no folder', ['**', '!**/*.pem'], { pattern: 'a', path: 'src' }, 'deny'],
+  ['** with !$STAGE_OUT/x still covers the workspace', ['**', '!$STAGE_OUT/x'], { pattern: 'a' }, 'allow'],
   ['$STAGE_IN is open whatever the read globs say', ['src/*'], { pattern: 'a', path: stageIn }, 'allow'],
 ])('a Grep with read %s', async (_, read, input, expected) => {
   const g = gate({ ...STEP, read });
