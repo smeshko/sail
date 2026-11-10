@@ -1,4 +1,4 @@
-// The index message, made into what the rail and the queue view show: every repository with its workflows, each with its
+// The index message, made into what the sidebar, the list and the queue view show: every repository with its workflows, each with its
 // runs newest first and its queue's waiting count, and every watched workflow's queue. It reads only the index the server streams, which already carries each run's
 // summary and each repository's queues, so nothing here opens a run. Nothing here names a stage, a workflow or a
 // repository: they all come from the index.
