@@ -296,7 +296,9 @@ test("opening FAKE-2's denial closes the golden run's socket, opens FAKE-2's, re
   );
   expect(host.regions.inspector).toContain('<dt>command</dt><dd><code>git push --force origin HEAD</code></dd>');
   expect(host.regions.inspector).toContain('<dt>rule</dt><dd>commands</dd>');
-  expect(host.regions.main).toContain('<div class="card cursor sel" data-action="select-card" data-key="implement#1">');
+  expect(host.regions.main).toContain(
+    '<div class="card cursor sel" role="button" tabindex="0" data-action="select-card" data-key="implement#1">',
+  );
 });
 
 test("a URL naming FAKE-2's implement#1 and its permissions tab opens them on the first index, not the newest run", async () => {
@@ -313,7 +315,9 @@ test("a URL naming FAKE-2's implement#1 and its permissions tab opens them on th
   expect(host.regions.inspector).toContain(
     '<button class="tab on" data-action="tab" data-tab="permissions">permissions</button>',
   );
-  expect(host.regions.main).toContain('<div class="card cursor sel" data-action="select-card" data-key="implement#1">');
+  expect(host.regions.main).toContain(
+    '<div class="card cursor sel" role="button" tabindex="0" data-action="select-card" data-key="implement#1">',
+  );
 });
 
 test('a URL naming a run no repository lists opens the newest run instead', () => {
@@ -428,7 +432,9 @@ test('live: opening a running card shows its timeline in the centre, which grows
   host.click({ action: 'close-timeline' });
   host.advance(100);
   expect([page.ui.key, page.ui.timeline]).toEqual(['implement#1', false]);
-  expect(host.regions.main).toContain('<div class="card cursor sel" data-action="select-card" data-key="implement#1">');
+  expect(host.regions.main).toContain(
+    '<div class="card cursor sel" role="button" tabindex="0" data-action="select-card" data-key="implement#1">',
+  );
   expect(host.regions.inspector).toContain('<span>implement#1</span>');
   host.click({ action: 'open', repo: 'alpha', run: RUNNING_ID, key: 'spec#1', tab: 'files' });
   expect([page.ui.key, page.ui.timeline, page.ui.tab]).toEqual(['spec#1', false, 'files']);
@@ -686,7 +692,9 @@ test('keys move the cursor, Enter opens a timeline, ] and [ step it, Escape goes
   host.push(host.open('index')[0], indexMessage());
   replay(host.open('run=')[0], GOLDEN());
   const cursor = () =>
-    /<div class="card cursor[^"]*" data-action="select-card" data-key="([^"]+)"/.exec(host.regions.main ?? '')?.[1];
+    /<div class="card cursor[^"]*" role="button" tabindex="0" data-action="select-card" data-key="([^"]+)"/.exec(
+      host.regions.main ?? '',
+    )?.[1];
   host.press('j');
   host.press('ArrowDown');
   host.press('j', true);

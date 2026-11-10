@@ -23,8 +23,9 @@
 //   dropped, and a running call's log is read again at most once a second.
 // - While anything runs, the regions with a running time are drawn again each second, so the time counts up between
 //   events.
-// - Clicks arrive as delegated `data-action`s, and keys as keys. Renders are coalesced: a region marked dirty is drawn
-//   by one flush at most every 100 ms.
+// - Clicks arrive as delegated `data-action`s, and keys as keys; Enter and Space on a focused stage card arrive as its
+//   action, and on a focused button or link not at all. Renders are coalesced: a region marked dirty is drawn by one
+//   flush at most every 100 ms.
 //
 // It controls four things. In the rail, `watch-set` asks the dashboard's server to watch or unwatch one workflow of a
 // repository or all of them (an unwatch on a second click), and the answer, in `sail`'s own words, shows under the

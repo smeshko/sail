@@ -148,6 +148,13 @@ function installResize(win: BrowserWindow): void {
 export function browserHost(win: BrowserWindow): PageHost {
   const doc = win.document;
   installResize(win);
+  let onAction: (action: string, data: Record<string, string>) => void = () => {};
+  /** Delivers `element`'s action with its data, as a click on it would. */
+  const fire = (element: ElementLike) => {
+    const data: Record<string, string> = {};
+    for (const [name, value] of Object.entries(element.dataset)) if (value !== undefined) data[name] = value;
+    onAction(data.action ?? '', data);
+  };
   return {
     render(region, markup) {
       const element = doc.getElementById(region);
@@ -169,17 +176,26 @@ export function browserHost(win: BrowserWindow): PageHost {
       if (box !== null && box !== undefined) box.scrollTop = box.scrollHeight ?? 0;
     },
     onAction(handler) {
+      onAction = handler;
       doc.addEventListener('click', (event) => {
         const element = actionOf(event.target);
-        if (element === undefined) return;
-        const data: Record<string, string> = {};
-        for (const [name, value] of Object.entries(element.dataset)) if (value !== undefined) data[name] = value;
-        handler(data.action ?? '', data);
+        if (element !== undefined) fire(element);
       });
     },
     onKey(handler) {
       doc.addEventListener('keydown', (event) => {
-        const tag = isElement(event.target) ? event.target.tagName : undefined;
+        const target = isElement(event.target) ? event.target : undefined;
+        const tag = target?.tagName;
+        if (event.key === 'Enter' || event.key === ' ') {
+          // A native button or link is clicked by the browser; any other focused element with its own action (a
+          // stage card) is opened here, as a click would.
+          if (tag === 'BUTTON' || tag === 'A') return;
+          if (target !== undefined && target.dataset.action !== undefined && !(tag !== undefined && INPUTS.has(tag))) {
+            event.preventDefault?.();
+            fire(target);
+            return;
+          }
+        }
         handler(event.key ?? '', tag !== undefined && INPUTS.has(tag));
       });
     },

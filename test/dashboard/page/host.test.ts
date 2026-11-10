@@ -1,6 +1,6 @@
 // `browserHost()` adapting a window to the page's host (D3), driven through a fake window: regions by id, a document's
 // listeners, fetch, WebSocket, storage and the clipboard, each fake recording what the host asked of it.
-import { expect, test } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 import { type BrowserWindow, browserHost, type ElementLike, type EventLike } from '../../../src/dashboard/page/host';
 import { foldRun, type StageCard } from '../../../src/dashboard/page/run-model';
 import { renderTimeline } from '../../../src/dashboard/page/timeline-view';
@@ -376,4 +376,55 @@ test("value() of a checkbox is 'on' while it is ticked and empty while it is not
   expect(host.value('now')).toBe('on');
   host.render('main', '<input type="checkbox" name="add-force" value="on">');
   expect(host.value('add-force')).toBe('');
+});
+
+describe('Enter and Space on a focused control', () => {
+  const setup = () => {
+    const fake = fakeWindow();
+    const host = browserHost(fake.win);
+    const actions: [string, Record<string, string>][] = [];
+    const keys: [string, boolean][] = [];
+    host.onAction((action, data) => actions.push([action, data]));
+    host.onKey((key, inInput) => keys.push([key, inInput]));
+    const press = (key: string, target: unknown) => {
+      let prevented = 0;
+      fake.fire('keydown', { key, target, preventDefault: () => prevented++ });
+      return prevented;
+    };
+    return { actions, keys, press };
+  };
+  const card = () => element({ tagName: 'DIV', dataset: { action: 'select-card', key: 'spec#1' } });
+
+  for (const key of ['Enter', ' ']) {
+    test(`${JSON.stringify(key)} on a focused card delivers its action, stops the default and is no key`, () => {
+      const { actions, keys, press } = setup();
+      expect(press(key, card())).toBe(1);
+      expect(actions).toEqual([['select-card', { action: 'select-card', key: 'spec#1' }]]);
+      expect(keys).toEqual([]);
+    });
+
+    for (const tagName of ['BUTTON', 'A']) {
+      test(`${JSON.stringify(key)} on a focused ${tagName} reaches neither handler and keeps its default`, () => {
+        const { actions, keys, press } = setup();
+        const target = element({ tagName, dataset: { action: 'select-run', run: 'x' } });
+        expect(press(key, target)).toBe(0);
+        expect([actions, keys]).toEqual([[], []]);
+      });
+    }
+  }
+
+  test('Enter on the body, j on a focused card or button, and Enter in an input still reach the key handler', () => {
+    const { actions, keys, press } = setup();
+    expect(press('Enter', element({ tagName: 'BODY' }))).toBe(0);
+    press('j', card());
+    press('j', element({ tagName: 'BUTTON', dataset: { action: 'x' } }));
+    press('Enter', element({ tagName: 'INPUT', dataset: { action: 'x' } }));
+    expect(keys).toEqual([
+      ['Enter', false],
+      ['j', false],
+      ['j', false],
+      ['Enter', true],
+    ]);
+    expect(actions).toEqual([]);
+  });
 });
