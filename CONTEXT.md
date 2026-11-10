@@ -480,7 +480,7 @@ An agent step's `budget.maxIdleMinutes`, by default a quarter of `maxMinutes`: h
 _Avoid_: inactivity timeout, heartbeat
 
 **Stalled**:
-A running agent step that has emitted no event for its idle limit. It is marked, never ended by the idle limit: the dashboard marks its run in the run list until the step speaks again.
+A running agent step that has emitted no event for its idle limit. It is marked, never ended by the idle limit: the dashboard marks its run in the list until the step speaks again.
 _Avoid_: hung, stuck, frozen
 
 **Budget**:
@@ -654,8 +654,20 @@ The watcher taking the next queued source and starting an ordinary run, only whi
 _Avoid_: pickup, schedule, spawn
 
 **Dashboard**:
-The live view `sail dashboard` serves on localhost for the whole machine: every watcher in the registry, with its runs, stage cards from the roster, the inspector, what needs attention, and its queues. It reads the run directories and queue files in each registered clone. It controls four things. In the rail it watches or unwatches a repository's workflows, one or all: each posts to the local server, which runs `sail watch` or `sail unwatch` in the clone and passes its line, or its refusal, back in `sail`'s own words, shown under the repository's header; a watch with no live watcher starts one, detached, which outlives the dashboard, and an Unwatch or Unwatch all asks a second click. In a queue's view it polls the workflow, adds a ticket, requeues a parked or failed item, drops an item that is not running (after a second click) and moves a waiting one with ▲ and ▼: each posts to the local server, which checks it as `sail queue` does, drops a command file for the watcher and waits for the watcher to take it, and changes no queue itself; the answer, a refusal or that the watcher has not taken the command yet, is shown beside the queue's header, in `sail`'s own words. Resume on a suspended run and Restart on a failed one, each after a second click, post to the server, which starts `sail resume` or `sail run --from-run … --continue` itself, detached in the clone, and answers once the run has started; the page then opens that run, and a refusal is shown beside the buttons, in `sail`'s own words. Stop on a running or suspended run (`sail stop`, with Stop now for `--now`) and Clean on a failed one (`sail clean`), each after a second click, call the same engine code in the server, are refused in the same words, a refusal shown beside the buttons; a stop shows what it did there too, and a clean says first what it removes and where the run directory goes, then goes back to the index, whose rail shows what it removed. Everything else is the CLI's.
+The live view `sail dashboard` serves on localhost for the whole machine: every watcher in the registry, with its runs, stage cards from the roster, the inspector, what needs attention, and its queues. It reads the run directories and queue files in each registered clone. It controls four things. In the Queues view's repository row it watches or unwatches the repository's workflows, all at once, and in a queue view's header one workflow: each posts to the local server, which runs `sail watch` or `sail unwatch` in the clone and passes its line, or its refusal, back in `sail`'s own words, shown on the repository's row; a watch with no live watcher starts one, detached, which outlives the dashboard, and an Unwatch or Unwatch all asks a second click. In a queue's view it polls the workflow, adds a ticket, requeues a parked or failed item, drops an item that is not running (after a second click) and moves a waiting one with ▲ and ▼: each posts to the local server, which checks it as `sail queue` does, drops a command file for the watcher and waits for the watcher to take it, and changes no queue itself; the answer, a refusal or that the watcher has not taken the command yet, is shown beside the queue's header, in `sail`'s own words. A list row's ⋯ opens the run's actions: Resume on a suspended run and Restart on a failed one, each after a second click, post to the server, which starts `sail resume` or `sail run --from-run … --continue` itself, detached in the clone, and answers once the run has started; the page then opens that run, and a refusal is shown beside the buttons, in `sail`'s own words. Stop on a running or suspended run (`sail stop`, with Stop now for `--now`) and Clean on a failed one (`sail clean`), each after a second click, call the same engine code in the server, are refused in the same words, a refusal shown beside the buttons; a stop shows what it did there too, and a clean says first what it removes and where the run directory goes, then goes back to the index, whose list's head shows what it removed. Everything else is the CLI's.
 _Avoid_: UI, console, monitor, board
+
+**Sidebar**:
+The dashboard's navigation column, 180px wide and never growing with activity: Inbox, Active, Queues and History, each with a count, then every repository as a filter, with a dot for its watcher (watching, not watching or broken). It holds no run row, run menu or watch button.
+_Avoid_: rail, nav, menu
+
+**List**:
+The one component every dashboard view draws its rows on, in the centre: folding groups, one line per row, a keyboard cursor and a filter field. A selected row opens its run or queue beside it.
+_Avoid_: table, grid, feed
+
+**Active view**:
+The list of live runs: those that wait on a person, suspended or unreadable, first under `waiting on you`, then the running ones under `running`.
+_Avoid_: running block, live runs
 
 **Stage card**:
 One call's card in the dashboard's run view, with its outcome, tries, duration, cost and denials, or a pending card for a roster stage the run hasn't called yet. Cards come from the run's events and its roster alone, so a new stage shows with no dashboard change.
