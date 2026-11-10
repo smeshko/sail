@@ -9,6 +9,9 @@
 // - A dispatched run that is still starting, which a dispatched queue item names but has no run directory yet, gets a
 //   `stopped` hand-off file, and the command exits 0 saying it stops before its intake. A dead pid on that item is a
 //   refused start, which the watcher fails, so it is refused here as any unknown run.
+// - With --suspend, which --now refuses, the run is held instead (`HOLD`), so the watcher leaves it until `sail resume`:
+//   a live run ends its running call and suspends `interrupted`, and a run nothing runs keeps its status. A run that
+//   is still starting is refused.
 // - A run that has ended, and a run id that names no run, are refused with exit 3.
 //
 // It resolves only the Workspace port, so no ticket source is asked for its credentials, and loads no workflow.
@@ -26,7 +29,9 @@ const COMMAND = 'sail stop';
 export async function stop(args: Parsed, io: Io): Promise<ExitCode> {
   const refuse = refuseAs(io, COMMAND);
   const [runId] = args.positionals;
-  if (runId === undefined) return refuse('usage: sail stop <run> [--now]');
+  if (runId === undefined || (args.values.now === true && args.values.suspend === true)) {
+    return refuse('usage: sail stop <run> [--now|--suspend]');
+  }
   const project = await findProject(io, COMMAND, { ports: ['workspace'] });
   if (typeof project === 'number') return project;
   const stopped = await stopRun({
@@ -34,6 +39,7 @@ export async function stop(args: Parsed, io: Io): Promise<ExitCode> {
     runId,
     adapters: project.adapters,
     now: args.values.now === true,
+    suspend: args.values.suspend === true,
     secrets: credentialValues(io.env ?? process.env),
     starting: (id) => startingRun(runsDir(project.sailDir), id),
   });

@@ -48,7 +48,7 @@ Usage:
   sail check [--list]                                        Type-check .sail/ and list its workflows and stages
   sail login codex [--device]                                Log in to a ChatGPT subscription for pi's openai-codex models
   sail resume <run> [-q|-v|-vv]                              Resume a suspended or crashed run
-  sail stop <run> [--now]                                    Stop at the next call boundary, or end the running call now
+  sail stop <run> [--now|--suspend]                          Stop at the next call boundary, end the running call now, or suspend the run and hold it
   sail clean <run>... | --failed [--all-repos] [--requeue|--drop]
                                                              Remove a failed run's worktree, branches and run ref, archive its run
                                                              directory, reset its ticket, and settle its queue item; --all-repos
@@ -297,7 +297,7 @@ const commands = new Map<string, CommandSpec>([
       command: clean,
     },
   ],
-  ['stop', { options: { now: { type: 'boolean' } }, positionals: 1, command: stop }],
+  ['stop', { options: { now: { type: 'boolean' }, suspend: { type: 'boolean' } }, positionals: 1, command: stop }],
   ['--help', bare(help)],
   ['-h', bare(help)],
   ['--version', bare(version)],

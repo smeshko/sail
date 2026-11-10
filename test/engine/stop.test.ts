@@ -89,6 +89,75 @@ test('an immediate stop on a live run writes stopped now and returns its pid', a
   });
 });
 
+test('a suspend on a live run holds it and writes a suspended request, and returns its pid', async () => {
+  await withTempRepo(async (repo) => {
+    const end = await suspendedRun(repo);
+    const adapters = await fakeAdapters(repo.dir);
+    const lease = adapters.ports.workspace.lease.bind(adapters.ports.workspace);
+    adapters.ports.workspace.lease = async (...args) => {
+      await lease(...args);
+      return {
+        leased: false,
+        holder: {
+          runId: end.runId,
+          runDir: end.dir,
+          pid: 12345,
+          remote: args[0],
+          branch: args[1],
+          takenAt: '2026-10-01T12:00:00.000Z',
+        },
+        raw: null,
+      };
+    };
+    const stopped = await stopRun({ sailDir: join(repo.dir, '.sail'), runId: end.runId, adapters, suspend: true });
+    expect(stopped).toEqual({ requested: { pid: 12345, suspend: true } });
+    expect([readFileSync(join(end.dir, 'CONTROL'), 'utf8'), readFileSync(join(end.dir, 'HOLD'), 'utf8')]).toEqual([
+      'suspended\n',
+      'held\n',
+    ]);
+  });
+});
+
+test('a suspend on a suspended run only holds it: its STATUS, workspace and lease stay', async () => {
+  await withTempRepo(async (repo) => {
+    const end = await suspendedRun(repo);
+    const before = stoppedState(repo, end);
+    const stopped = await stopRun({
+      sailDir: join(repo.dir, '.sail'),
+      runId: end.runId,
+      adapters: await fakeAdapters(repo.dir),
+      suspend: true,
+    });
+    expect(stopped).toEqual({ held: true });
+    expect(readFileSync(join(end.dir, 'HOLD'), 'utf8')).toBe('held\n');
+    expect(existsSync(join(end.dir, 'CONTROL'))).toBe(false);
+    expect(stoppedState(repo, end)).toEqual(before);
+    expect(before.status).toBe('suspended until\n');
+    expect(before.leases).toHaveLength(1);
+  });
+});
+
+test('a suspend on a dispatched run still starting is refused and writes nothing', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const runs = join(repo.dir, '.sail-runs');
+    mkdirSync(runs, { recursive: true });
+    const stopped = await stopRun({
+      sailDir: join(repo.dir, '.sail'),
+      runId: 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N',
+      adapters: await fakeAdapters(repo.dir),
+      starting: () => true,
+      suspend: true,
+    });
+    expect([stopped, readdirSync(runs)]).toEqual([
+      {
+        refused: 'run FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N is still starting: sail stop ends it before its intake',
+      },
+      [],
+    ]);
+  });
+});
+
 test('a suspended run stopped ends failed stopped: STATUS, run:end last with the next seq, summary.json final, its worktree and lease gone, and a resume refused', async () => {
   await withTempRepo(async (repo) => {
     const end = await suspendedRun(repo);
@@ -302,10 +371,14 @@ test('stoppedMessage gives the line for each outcome sail stop prints', () => {
     stoppedMessage('R-1', { requested: { pid: 42 } }),
     stoppedMessage('R-1', { requested: { pid: 42, now: true } }),
     stoppedMessage('R-1', { ended }),
+    stoppedMessage('R-1', { requested: { pid: 42, suspend: true } }),
+    stoppedMessage('R-1', { held: true }),
   ]).toEqual([
     'run R-1 is still starting: it stops before its intake',
     'run R-1 stops at its next call boundary (pid 42)',
     'run R-1 ends its running call now (pid 42)',
     'run R-1 stopped',
+    'run R-1 suspends now, held until sail resume R-1 (pid 42)',
+    'run R-1 is held: the watcher leaves it until sail resume R-1',
   ]);
 });
