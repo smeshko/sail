@@ -313,6 +313,19 @@
         color: var(--fg-2);
         border-left: 2px solid transparent;
       }
+      .r-open {
+        flex: 1 1 auto;
+        min-width: 0;
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        text-align: left;
+        font: inherit;
+        color: inherit;
+      }
+      .hist-run .r-open {
+        align-items: center;
+      }
       .run:hover {
         background: var(--hover);
       }
@@ -575,7 +588,7 @@
       }
       .r-more {
         flex: 0 0 auto;
-        visibility: hidden;
+        opacity: 0;
         padding: 0 6px;
         border: 1px solid var(--line);
         border-radius: 5px;
@@ -583,19 +596,19 @@
         color: var(--fg-3);
         line-height: 1.4;
       }
-      .hist-run .r-more {
-        margin-left: auto;
-      }
-      .hist-run .r-more + .r-el {
-        margin-left: 0;
-      }
-      .r-line .r-more {
-        margin-left: auto;
-      }
       .run:hover .r-more,
+      .run:focus-within .r-more,
       .run.sel .r-more,
       .r-more.open {
-        visibility: visible;
+        opacity: 1;
+      }
+      @media (hover: none) {
+        .r-more {
+          opacity: 1;
+        }
+        .qbadge.idle {
+          visibility: visible;
+        }
       }
       .r-more:hover,
       .r-more.open {

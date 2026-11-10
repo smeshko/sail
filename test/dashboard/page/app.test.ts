@@ -260,7 +260,7 @@ test('boot renders the rail with alpha and beta from the first index, opens the 
   expect(host.regions.rail).toContain('<span class="nm">alpha</span>');
   expect(host.regions.rail).toContain('<span class="nm">beta</span>');
   expect(host.regions.rail).toContain(
-    `<button class="run hist-run sel" title="$1.35" data-action="select-run" data-repo="alpha" data-run="${GOLDEN_RUN_ID}">`,
+    `<div class="run hist-run sel"><button class="r-open" title="$1.35" data-action="select-run" data-repo="alpha" data-run="${GOLDEN_RUN_ID}">`,
   );
   expect(cards(host.regions.main)).toEqual([
     'intake#1',
@@ -623,7 +623,7 @@ test("with no queue the rail has no queue row and no queue socket opens; with be
   expect(host.regions.rail).toContain(
     '<button class="qbadge warn sel" title="polled 7d ago" data-action="select-queue"',
   );
-  expect(host.regions.rail).not.toMatch(/<button class="run[^"]* sel"/);
+  expect(host.regions.rail).not.toMatch(/<div class="run[^"]* sel">/);
   host.renders = [];
   host.push(sockets[0], {
     kind: 'queue-event',

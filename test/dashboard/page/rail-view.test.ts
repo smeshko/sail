@@ -33,7 +33,7 @@ const folded = (fields = {}) =>
 const shown = (markup: string) =>
   [
     ...markup.matchAll(
-      /<button class="run hist-run( sel)?" title="[^"]*" data-action="select-run" data-repo="(\w+)" data-run="([\w-]+)">/g,
+      /<div class="run hist-run( sel)?"><button class="r-open" title="[^"]*" data-action="select-run" data-repo="(\w+)" data-run="([\w-]+)">/g,
     ),
   ].map(([, sel, repo, run]) => `${repo} ${run}${sel ? ' *' : ''}`);
 
@@ -166,7 +166,7 @@ test('the selected run and the selected queue stay visible while folded', () => 
 const liveRows = (markup: string) =>
   [
     ...markup.matchAll(
-      /<button class="run live-run( sel)?"[^>]*data-action="select-run" data-repo="(\w+)" data-run="([\w-]+)"/g,
+      /<div class="run live-run( sel)?"><button class="r-open"[^>]*data-action="select-run" data-repo="(\w+)" data-run="([\w-]+)"/g,
     ),
   ].map(([, sel, repo, run]) => `${repo} ${run}${sel ? ' *' : ''}`);
 
@@ -236,7 +236,7 @@ test('a pull-request run reads PR #<n> with its run id in the tooltip', () => {
 test('a run selected from the running block is marked sel', () => {
   runningCopy(m, 5);
   const markup = rail({ repo: 'alpha', runId: RUNNING_ID });
-  expect(markup).toContain(`<button class="run live-run sel"`);
+  expect(markup).toContain(`<div class="run live-run sel"><button class="r-open"`);
   expect(liveRows(markup)).toEqual([`alpha ${RUNNING_ID} *`, `beta ${FAKE_3_ID}`]);
 });
 
@@ -314,7 +314,9 @@ test("every run but a completed one has a ⋯ in its row, and only the open run'
   const sections = { open: ['alpha/ticket-to-pr:failed', 'alpha/ticket-to-pr:completed'] };
   const mores = (markup: string) =>
     [
-      ...markup.matchAll(/<span class="r-more( open)?" data-action="run-menu" data-repo="\w+" data-run="([\w-]+)"/g),
+      ...markup.matchAll(
+        /<button class="r-more( open)?" type="button" data-action="run-menu" data-repo="\w+" data-run="([\w-]+)"/g,
+      ),
     ].map(([, open, run]) => `${run}${open ? ' open' : ''}`);
   expect(mores(rail(sections)).sort()).toEqual([FAKE_2_ID, FAKE_3_ID].sort());
   expect(rail(sections)).not.toContain('class="r-menu"');
@@ -323,7 +325,7 @@ test("every run but a completed one has a ⋯ in its row, and only the open run'
   const markup = renderRail(railRepos(index(m.registryDir), NOW), open, NOW, offers).value;
   expect(mores(markup)).toContain(`${FAKE_2_ID} open`);
   expect(markup).toContain(
-    `<span class="r-el">4.9s</span></button><div class="r-menu"><div class="acts"><span class="act"><label class="lbl">from <select name="stage"></select></label><button class="btn" data-action="restart-run">restart</button></span></div></div>`,
+    `<span class="r-el">4.9s</span></button><button class="r-more open" type="button" data-action="run-menu" data-repo="alpha" data-run="${FAKE_2_ID}" title="actions for ${FAKE_2_ID}">⋯</button></div><div class="r-menu"><div class="acts"><span class="act"><label class="lbl">from <select name="stage"></select></label><button class="btn" data-action="restart-run">restart</button></span></div></div>`,
   );
   // The menu is the open run's: a run that isn't open draws none, though the menu names it.
   const elsewhere = { ...open, runId: GOLDEN_RUN_ID };
@@ -337,4 +339,21 @@ test("every run but a completed one has a ⋯ in its row, and only the open run'
   expect(renderRail(railRepos(index(m.registryDir), NOW), { ...open }, NOW, {}).value).toContain(
     '<div class="r-menu"><span class="act-why">the run offers nothing</span></div>',
   );
+});
+
+test("a run's ⋯ is a button beside the button that opens the run, never inside it, and a completed run has none", () => {
+  runningCopy(m, 5);
+  const markup = rail({ open: ['alpha/ticket-to-pr:failed', 'alpha/ticket-to-pr:completed'] });
+  const rows = [...markup.matchAll(/<div class="run (live-run|hist-run)[^"]*">(.*?)<\/div>/gs)];
+  expect(rows.length).toBeGreaterThanOrEqual(3);
+  for (const [, kind, body] of rows) {
+    const opener = /^<button class="r-open"[^>]*data-action="select-run"[\s\S]*?<\/button>/.exec(body as string);
+    expect(`${kind}: ${opener === null}`).toBe(`${kind}: false`);
+    const rest = (body as string).slice((opener as RegExpExecArray)[0].length);
+    expect(opener?.[0]).not.toContain('r-more');
+    const done = (body as string).includes(GOLDEN_RUN_ID);
+    expect(rest.startsWith('<button class="r-more')).toBe(!done);
+    if (done) expect(rest).toBe('');
+  }
+  expect(rows.some(([, , body]) => (body as string).includes(GOLDEN_RUN_ID))).toBe(true);
 });

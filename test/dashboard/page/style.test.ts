@@ -72,3 +72,15 @@ test('the system theme copy of light holds the light block exactly', () => {
   expect(Object.keys(light()).length).toBeGreaterThan(8);
   expect(systemLight()).toEqual(light());
 });
+
+/** The rules of the stylesheet as [selector list, body] pairs, at-rule blocks flattened. */
+const rules = (): [string, string][] =>
+  [...style.matchAll(/([^{}@]+)\{([^{}]*)\}/g)].map(([, sel, body]) => [(sel as string).trim(), body as string]);
+
+test("a run's ⋯ shows on hover and on focus inside the row, and is never hidden with visibility", () => {
+  const forMore = rules().filter(([sel]) => /\.r-more/.test(sel));
+  const selectors = forMore.flatMap(([sel]) => sel.split(',').map((each) => each.trim()));
+  expect(selectors).toContain('.run:hover .r-more');
+  expect(selectors).toContain('.run:focus-within .r-more');
+  expect(forMore.filter(([, body]) => /visibility:\s*hidden/.test(body))).toEqual([]);
+});
