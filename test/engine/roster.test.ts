@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { type ProjectConfig, readConfig } from '../../src/engine/config';
 import { type LoadedWorkflow, loadWorkflow } from '../../src/engine/load-workflow';
-import { buildRoster, harnessesReached, modelProblems, origin } from '../../src/engine/roster';
+import { buildRoster, effortProblems, harnessesReached, modelProblems, origin } from '../../src/engine/roster';
 import { validateDocument } from '../../src/engine/schemas';
 import { agent, intake, type StageDefinition, script, stage, type Workflow, z } from '../../src/sdk/index';
 import * as intakes from '../../src/sdk/intakes';
@@ -349,6 +349,35 @@ test('problems come with the intake first, then the stages sorted by name', () =
     undefinedAlias("intake 'brief'", 'slow'),
     undefinedAlias("stage 'alpha'", 'a'),
     undefinedAlias("stage 'zeta'", 'z'),
+  ]);
+});
+
+const LEVELS = 'low, medium, high, xhigh, max';
+
+const effortAgent = (name: string, effort: unknown) =>
+  agent(name, { prompt: './p.md', output: Out, permissions, budget, effort: effort as never });
+
+test('effortProblems names a stage whose agent step has an effort outside the five levels, and is empty for each of them', () => {
+  expect(effortProblems(loadedOf([effortAgent('plan', 'huge')]))).toEqual([
+    `stage 'plan' sets effort 'huge', which is not one of ${LEVELS}`,
+  ]);
+  expect(effortProblems(loadedOf([effortAgent('plan', 3)]))).toEqual([
+    `stage 'plan' sets effort '3', which is not one of ${LEVELS}`,
+  ]);
+  for (const level of ['low', 'medium', 'high', 'xhigh', 'max']) {
+    expect(effortProblems(loadedOf([effortAgent('plan', level)]))).toEqual([]);
+  }
+  expect(effortProblems(loadedOf([agentOf('plain')]))).toEqual([]);
+});
+
+test('a bad effort on a step of a multi-step stage names the stage and the step, and on an intake step the intake', () => {
+  const lint = script('lint', { run: './r.sh', output: Out });
+  const two = stage('two', { output: Out, steps: [lint, effortAgent('first', 'huge')] });
+  const brief = intake('brief', { accepts: ['ticket'], output: Out, steps: [effortAgent('write', 'ultra')] });
+  const own = { definition: brief, path: '/r/.sail/workflows/unit/intake.ts', module: { Out, brief } };
+  expect(effortProblems(loadedOf([two], { Out }, own))).toEqual([
+    `intake 'brief' sets effort 'ultra', which is not one of ${LEVELS}`,
+    `stage 'two' step 'first' sets effort 'huge', which is not one of ${LEVELS}`,
   ]);
 });
 

@@ -17,7 +17,7 @@ import { preamble } from '../engine/preamble';
 import type { CallEmit } from '../events/types';
 import type { Harness, HarnessEvent, HarnessRequest } from '../ports/harness';
 import { HarnessResult, Usage } from '../ports/types';
-import type { AgentStep } from '../sdk/steps';
+import { type AgentStep, EFFORTS } from '../sdk/steps';
 import type { StepContext, StepKind, StepRun } from './index';
 
 const POLICIES = ['retry-once', 'fail'];
@@ -51,6 +51,9 @@ function problems(step: AgentStep): string[] {
   }
   if (step.onInvalidOutput !== undefined && !POLICIES.includes(step.onInvalidOutput)) {
     found.push(`onInvalidOutput must be 'retry-once' or 'fail': ${String(step.onInvalidOutput)}`);
+  }
+  if (step.effort !== undefined && !EFFORTS.includes(step.effort)) {
+    found.push(`effort must be one of ${EFFORTS.join(', ')}: ${String(step.effort)}`);
   }
   found.push(...conventionProblems(step.conventions));
   const submission = submissionSchema(step);

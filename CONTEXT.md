@@ -103,8 +103,12 @@ What a step is. v1 ships two kinds: `agent` and `script`. Kinds belong to steps;
 _Avoid_: type, mode, flavour
 
 **Agent step**:
-A step a harness runs. It has a prompt, the workspace, permissions, a budget, and a schema the agent submits its output against.
+A step a harness runs. It has a prompt, the workspace, permissions, a budget, an optional `effort`, and a schema the agent submits its output against.
 _Avoid_: LLM step, AI step, prompt step, non-deterministic stage
+
+**Effort**:
+How hard an agent step's model reasons: `low`, `medium`, `high`, `xhigh` or `max`, declared as the step's `effort`. The roster records it, and the harness runs the session at it; left out, the harness's default.
+_Avoid_: thinking level, reasoning budget
 
 **Script step**:
 A step that runs a command: bindings in, files and an output out, exit code as outcome. No model is involved. Its script environment includes the variables its `env` names and the credentials of the ports its `ports` names.

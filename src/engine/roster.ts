@@ -5,7 +5,7 @@
 import { relative, sep } from 'node:path';
 import { exitCodeMap } from '../kinds/script';
 import type { Intake } from '../sdk/intake';
-import type { Budget, Permissions, ScriptStep, StageDefinition, Step } from '../sdk/steps';
+import { type Budget, EFFORTS, type Permissions, type ScriptStep, type StageDefinition, type Step } from '../sdk/steps';
 import { aliasOf, type ProjectConfig } from './config';
 import type { LoadedWorkflow } from './load-workflow';
 
@@ -104,6 +104,27 @@ export function modelProblems(loaded: LoadedWorkflow, config: ProjectConfig): st
   return [
     ...modelProblemsOf(`intake '${definition.name}'`, definition, config),
     ...stages.flatMap((stage) => modelProblemsOf(`stage '${stage.definition.name}'`, stage.definition, config)),
+  ];
+}
+
+/** The agent steps of `definition` whose `effort` is none of the five levels, as one line each. */
+export function effortProblemsOf(where: string, definition: StageDefinition | Intake): string[] {
+  const steps: readonly Step[] =
+    definition.kind === 'agent' || definition.kind === 'script' ? [definition] : (definition.steps ?? []);
+  return steps.flatMap((step) => {
+    if (step.kind !== 'agent' || step.effort === undefined || EFFORTS.includes(step.effort)) return [];
+    const at = steps.length > 1 ? `${where} step '${step.name}'` : where;
+    return [`${at} sets effort '${String(step.effort)}', which is not one of ${EFFORTS.join(', ')}`];
+  });
+}
+
+/** The agent steps of `loaded` whose `effort` is none of the five levels: the intake first, then the stages by name. */
+export function effortProblems(loaded: LoadedWorkflow): string[] {
+  const { definition } = loaded.intake;
+  const stages = [...loaded.stages].sort((a, b) => (a.definition.name < b.definition.name ? -1 : 1));
+  return [
+    ...effortProblemsOf(`intake '${definition.name}'`, definition),
+    ...stages.flatMap((stage) => effortProblemsOf(`stage '${stage.definition.name}'`, stage.definition)),
   ];
 }
 

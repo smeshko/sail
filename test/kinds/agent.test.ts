@@ -58,7 +58,7 @@ const permissions = { read: ['**'], write: ['$STAGE_OUT/**'], commands: ['git lo
 const budget = { maxTurns: 40, maxUsd: 2, maxMinutes: 10 };
 
 type Options = Partial<
-  Pick<AgentStep, 'consumes' | 'produces' | 'output' | 'budget' | 'onInvalidOutput' | 'conventions'>
+  Pick<AgentStep, 'consumes' | 'produces' | 'output' | 'budget' | 'onInvalidOutput' | 'conventions' | 'effort'>
 >;
 
 /** The `spec` step: it reads a brief, writes `spec.md` and submits a `Spec`, unless `options` say otherwise. */
@@ -296,6 +296,18 @@ const ends = (events: readonly CallEvent[]): object[] =>
 
 /** What a try that never reached a session records: no session id, no turns, no usage. */
 const UNSTARTED = { adapter: 'scripted', model: MODEL, turns: 0, toolCalls: 0, denials: 0 };
+
+test('problems() accepts each of the five efforts and refuses any other, naming the five', () => {
+  for (const effort of ['low', 'medium', 'high', 'xhigh', 'max'] as const) {
+    expect(agentKind.problems(spec({ effort }))).toEqual([]);
+  }
+  expect(agentKind.problems(spec({ effort: 'huge' as never }))).toEqual([
+    'effort must be one of low, medium, high, xhigh, max: huge',
+  ]);
+  expect(agentKind.problems(spec({ effort: 5 as never }))).toEqual([
+    'effort must be one of low, medium, high, xhigh, max: 5',
+  ]);
+});
 
 test('problems() refuses two produced names that differ only by case', () => {
   expect(agentKind.problems(spec({ produces: { 'Notes.md': 'file', 'notes.md': 'file' } }))).toEqual([
