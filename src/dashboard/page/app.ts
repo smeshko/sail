@@ -25,7 +25,7 @@
 //   events.
 // - Clicks arrive as delegated `data-action`s, and keys as keys; Enter and Space on a focused stage card arrive as its
 //   action, and on a focused button or link not at all. Renders are coalesced: a region marked dirty is drawn by one
-//   flush at most every 100 ms.
+//   flush at most every 100 ms, and one whose markup is unchanged is not written, nor its timeline scrolled.
 //
 // It controls four things. In the rail, `watch-set` asks the dashboard's server to watch or unwatch one workflow of a
 // repository or all of them (an unwatch on a second click), and the answer, in `sail`'s own words, shows under the
@@ -217,6 +217,9 @@ export function boot(host: PageHost): Page {
   let addFieldsOwn = true;
 
   const dirty = new Set<Region>();
+  /** What each region was last written with, and the regions whose fields the shell has just given up. */
+  const written = new Map<Region, string>();
+  const fresh = new Set<Region>();
   let flushTimer: number | undefined;
 
   const summaryOf = (open: OpenRun | undefined) =>
@@ -296,7 +299,12 @@ export function boot(host: PageHost): Page {
       } catch {
         markup = html`<div class="code bad">this part of the page could not be drawn</div>`.value;
       }
-      host.render(region, markup);
+      // A region whose markup is what it was is not written, nor is its timeline scrolled, unless the shell has just
+      // given up its fields: then it is written so they hold the markup's values.
+      const isFresh = fresh.delete(region);
+      if (!isFresh && written.get(region) === markup) continue;
+      written.set(region, markup);
+      host.render(region, markup, isFresh);
       // A running call's timeline, followed, shows its newest entry: not while the queue holds the centre.
       if (region === 'main' && ui.follow && openQueue() === undefined && opened()?.state === 'running')
         host.scrollToEnd(region);
@@ -644,6 +652,7 @@ export function boot(host: PageHost): Page {
     delete ui.restartStage;
     delete ui.stopNow;
     fieldsOwn = false;
+    fresh.add('rail');
     openRunSocket(run);
     readOffers();
     mark('rail', 'main', 'inspector', 'status');
@@ -1010,6 +1019,7 @@ export function boot(host: PageHost): Page {
       queueOp(repo, workflow, 'add', ui.addForce === true ? { ticketKey, force: true } : { ticketKey }, () => {
         delete ui.addTicket;
         addFieldsOwn = false;
+        fresh.add('main');
       });
     },
     'item-menu': (data) => {

@@ -1,12 +1,20 @@
 // `browserHost()` adapting a window to the page's host (D3), driven through a fake window: regions by id, a document's
 // listeners, fetch, WebSocket, storage and the clipboard, each fake recording what the host asked of it.
 import { describe, expect, test } from 'bun:test';
-import { type BrowserWindow, browserHost, type ElementLike, type EventLike } from '../../../src/dashboard/page/host';
+import { index } from '../../../src/dashboard/files';
+import { boot } from '../../../src/dashboard/page/app';
+import {
+  type BrowserWindow,
+  browserHost,
+  type ElementLike,
+  type EventLike,
+  REGIONS,
+} from '../../../src/dashboard/page/host';
 import { foldRun, type StageCard } from '../../../src/dashboard/page/run-model';
 import { renderTimeline } from '../../../src/dashboard/page/timeline-view';
 import { initialUi } from '../../../src/dashboard/page/ui-state';
 import { readEvents } from '../../../src/events/consumers/ndjson';
-import { GOLDEN_RUN } from '../../helpers/dashboard';
+import { GOLDEN_RUN, QUEUE_WORKFLOW, queueDirOf, runningCopy, seedFixtures } from '../../helpers/dashboard';
 import { markupWindow } from '../../helpers/dashboard-dom';
 
 interface FakeSocket {
@@ -56,6 +64,140 @@ function scrollRegion(): ReturnType<typeof element> & { boxes: Map<string, Eleme
   return region as ReturnType<typeof scrollRegion>;
 }
 
+/** What a fake window's focus holds: the element a browser would report as `document.activeElement`. */
+interface Focus {
+  active: ElementLike | null;
+  /** The options each `focus()` call was given. */
+  calls: ({ preventScroll?: boolean } | undefined)[];
+}
+
+const decode = (text: string) =>
+  text
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
+
+function attributesOf(text: string): Record<string, string> {
+  const attributes: Record<string, string> = {};
+  for (const [, name, value] of text.matchAll(/([\w:-]+)(?:="([^"]*)")?/g))
+    attributes[name as string] = decode(value ?? '');
+  return attributes;
+}
+
+const camel = (name: string) => name.replace(/-([a-z])/g, (_, letter: string) => letter.toUpperCase());
+
+type LiveElement = ElementLike & {
+  attributes: Record<string, string>;
+  focusable: boolean;
+  /** How many times `setSelectionRange` was called on it. */
+  selectionCalls: number;
+};
+
+/**
+ * A region whose elements are new objects each time its innerHTML is set, made from the markup's `input`, `select`,
+ * `button` and `a` tags and its `[data-scroll]` boxes, as a browser's are. A write drops the focus an element of the
+ * region held, as a browser's does.
+ */
+function liveRegion(focus: Focus): ReturnType<typeof element> & { els: LiveElement[] } {
+  let markup = '';
+  let els: LiveElement[] = [];
+  const region = element({
+    contains: (other: ElementLike) => els.includes(other as LiveElement),
+    querySelectorAll: (selectors: string) => {
+      if (selectors === '[data-scroll]') return els.filter((el) => el.dataset.scroll !== undefined);
+      if (selectors === '[name]') return els.filter((el) => el.attributes.name !== undefined);
+      if (selectors === '[name], [data-action], a[href]')
+        return els.filter(
+          (el) =>
+            el.attributes.name !== undefined || el.dataset.action !== undefined || el.attributes.href !== undefined,
+        );
+      return [];
+    },
+  });
+  Object.defineProperty(region, 'innerHTML', {
+    get: () => markup,
+    set: (next: string) => {
+      if (focus.active !== null && els.includes(focus.active as LiveElement)) focus.active = null;
+      markup = next;
+      els = [];
+      for (const match of next.matchAll(/<(\w+)(?=[\s>/])([^>]*)>/g)) {
+        const [, tag, text] = match;
+        const attributes = attributesOf(text as string);
+        const focusable =
+          ['input', 'select', 'button'].includes(tag as string) || (tag === 'a' && attributes.href !== undefined);
+        if (!focusable && attributes['data-scroll'] === undefined && attributes['data-action'] === undefined) continue;
+        const dataset: Record<string, string | undefined> = {};
+        for (const [name, value] of Object.entries(attributes))
+          if (name.startsWith('data-')) dataset[camel(name.slice(5))] = value;
+        // A select keeps only a value among its markup's options, and a number field has no selection, as in a browser.
+        const options =
+          tag === 'select'
+            ? [
+                ...next
+                  .slice((match.index ?? 0) + match[0].length)
+                  .split('</select>', 1)
+                  .join('')
+                  .matchAll(/<option([^>]*)>/g),
+              ].map(([, optionText]) => attributesOf(optionText as string))
+            : [];
+        let value =
+          tag === 'select'
+            ? ((options.find((option) => 'selected' in option) ?? options[0])?.value ?? '')
+            : (attributes.value ?? '');
+        let start: number | null = attributes.type === 'number' ? null : value.length;
+        let end: number | null = start;
+        let direction: string | null = 'none';
+        const el: LiveElement = {
+          ...element({ dataset, parentElement: region }),
+          attributes,
+          focusable,
+          selectionCalls: 0,
+          tagName: String(tag).toUpperCase(),
+          scrollTop: 0,
+          get value() {
+            return value;
+          },
+          set value(next: string) {
+            value = tag === 'select' && !options.some((option) => option.value === next) ? '' : next;
+            start = end = attributes.type === 'number' ? null : value.length;
+          },
+          checked: 'checked' in attributes,
+          get selectionStart() {
+            return start;
+          },
+          get selectionEnd() {
+            return end;
+          },
+          get selectionDirection() {
+            return direction;
+          },
+          setSelectionRange: (from: number, to: number, how?: string) => {
+            el.selectionCalls++;
+            if (attributes.type === 'number') throw new Error('InvalidStateError');
+            start = from;
+            end = to;
+            direction = how ?? 'none';
+          },
+          contains: (other: ElementLike) => other === el,
+          focus: (options) => {
+            focus.active = el;
+            focus.calls.push(options);
+          },
+          getAttribute: (name: string) => attributes[name] ?? null,
+        };
+        if (attributes.name !== undefined) el.name = attributes.name;
+        if (attributes.type !== undefined) el.type = attributes.type;
+        if (tag === 'select') el.type = 'select-one';
+        els.push(el);
+      }
+    },
+  });
+  Object.defineProperty(region, 'els', { get: () => els });
+  return region as ReturnType<typeof liveRegion>;
+}
+
 const NOW = Date.parse('2026-09-25T09:00:31.000Z');
 const at = { ts: '2026-09-25T09:00:30.000Z', runId: 'x', key: 'spec#1' };
 
@@ -83,7 +225,12 @@ function fakeWindow(
   const fetched: { url: string; headers: Record<string, string>; method?: string; body?: string }[] = [];
   const sockets: FakeSocket[] = [];
   const timers: number[] = [];
+  const pending = new Map<number, { at: number; fn: () => void }>();
+  let clock: number | undefined;
+  const nowMs = () => clock ?? Date.now();
   const cleared: number[] = [];
+  const focus: Focus = { active: null, calls: [] };
+  const live: string[] = [];
   const root = { dataset: {} as Record<string, string | undefined> };
   const stored = new Map<string, string>();
   const copied: string[] = [];
@@ -97,6 +244,9 @@ function fakeWindow(
         listeners[type] = (listeners[type] ?? []).filter((entry) => entry !== listener);
       },
       documentElement: root,
+      get activeElement() {
+        return focus.active;
+      },
     },
     location: { host: '127.0.0.1:4100', search: options.search ?? '' },
     async fetch(url, init) {
@@ -138,18 +288,74 @@ function fakeWindow(
               },
             },
           },
-    setTimeout: () => timers.push(timers.length + 1),
-    clearTimeout: (id) => void cleared.push(id),
+    setTimeout: (fn, ms) => {
+      const id = timers.push(timers.length + 1);
+      pending.set(id, { at: nowMs() + ms, fn });
+      return id;
+    },
+    clearTimeout: (id) => {
+      cleared.push(id);
+      pending.delete(id);
+    },
     Date: class {
       getTimezoneOffset() {
         return -120;
+      }
+      static now() {
+        return nowMs();
       }
     } as unknown as BrowserWindow['Date'],
   };
   const fire = (type: string, event: EventLike) => {
     for (const listener of [...(listeners[type] ?? [])]) listener(event);
   };
-  return { win, elements, fetched, sockets, timers, cleared, root, stored, copied, fire, listeners };
+  /** A live region for `id`, after the ones made before it in document order. */
+  const addLive = (id: string) => {
+    const region = liveRegion(focus);
+    elements[id] = region;
+    live.push(id);
+    return region;
+  };
+  const focusables = () =>
+    live.flatMap((id) => (elements[id] as ReturnType<typeof liveRegion>).els.filter((el) => el.focusable));
+  return {
+    win,
+    elements,
+    fetched,
+    sockets,
+    timers,
+    cleared,
+    root,
+    stored,
+    copied,
+    fire,
+    listeners,
+    focus,
+    live: addLive,
+    focusables,
+    /** Sets the clock `Date.now()` and the timers read, until `advance` moves it. */
+    setClock: (ms: number) => {
+      clock = ms;
+    },
+    /** Moves the clock on, running every timer that falls due, in order. */
+    advance: (ms: number) => {
+      const until = nowMs() + ms;
+      for (;;) {
+        const due = [...pending].filter(([, timer]) => timer.at <= until).sort(([, a], [, b]) => a.at - b.at)[0];
+        if (due === undefined) break;
+        pending.delete(due[0]);
+        clock = due[1].at;
+        due[1].fn();
+      }
+      clock = until;
+    },
+    /** What a browser's Tab does: the next focusable element in document order, the first when none holds focus. */
+    tab: () => {
+      const all = focusables();
+      const at = focus.active === null ? -1 : all.indexOf(focus.active as LiveElement);
+      focus.active = all[at + 1] ?? all[0] ?? null;
+    },
+  };
 }
 
 test("start gives the URL's query as names and values, decoded, and nothing for a URL with none", () => {
@@ -427,4 +633,248 @@ describe('Enter and Space on a focused control', () => {
     ]);
     expect(actions).toEqual([]);
   });
+});
+
+const row = (run: string) => `<button data-action="select-run" data-repo="alpha" data-run="${run}">${run}</button>`;
+
+test('render puts the focus back on the element with the same data-action and data, a new element, so Tab goes on from it', () => {
+  const fake = fakeWindow();
+  const rail = fake.live('rail');
+  const host = browserHost(fake.win);
+  host.render('rail', `${row('r1')}${row('r2')}${row('r3')}`);
+  fake.tab();
+  fake.tab();
+  const before = fake.focus.active;
+  host.render('rail', `${row('r1')}${row('r2')}${row('r3')}<span>more</span>`);
+  expect(fake.focus.active).not.toBe(before);
+  expect(fake.focus.active).toBe(rail.els[1] as ElementLike);
+  expect(fake.focus.active?.dataset).toEqual({ action: 'select-run', repo: 'alpha', run: 'r2' });
+  expect(fake.focus.calls).toEqual([{ preventScroll: true }]);
+  fake.tab();
+  expect(fake.focus.active).toBe(rail.els[2] as ElementLike);
+});
+
+test("of two elements with one key, the one at the focused one's place is focused, and the last when one is gone", () => {
+  const fake = fakeWindow();
+  const rail = fake.live('rail');
+  const host = browserHost(fake.win);
+  const twin = (label: string) => `<button data-action="select-queue" data-queue="b/w">${label}</button>`;
+  host.render('rail', `${row('r1')}${twin('row')}${twin('badge')}`);
+  fake.tab();
+  fake.tab();
+  fake.tab();
+  expect(fake.focus.active).toBe(rail.els[2] as ElementLike);
+  host.render('rail', `${row('r1')}${twin('row')}${twin('badge')}<i>x</i>`);
+  expect(fake.focus.active).toBe(rail.els[2] as ElementLike);
+  host.render('rail', `${row('r1')}${twin('row')}`);
+  expect(fake.focus.active).toBe(rail.els[1] as ElementLike);
+});
+
+test('a focused link is found again by its href', () => {
+  const fake = fakeWindow();
+  const main = fake.live('main');
+  const host = browserHost(fake.win);
+  host.render('main', '<a href="/x?run=1">log</a><a href="/y">other</a>');
+  fake.tab();
+  fake.tab();
+  host.render('main', '<a href="/x?run=1">log</a><a href="/y">other</a><i>x</i>');
+  expect(fake.focus.active).toBe(main.els[1] as ElementLike);
+  expect(fake.focus.active?.getAttribute?.('href')).toBe('/y');
+});
+
+test('focus outside the region, on an element with no key, or on one the new markup lacks, is left alone, and a region without contains or querySelectorAll still renders', () => {
+  const fake = fakeWindow();
+  fake.live('rail');
+  const main = fake.live('main');
+  const host = browserHost(fake.win);
+  host.render('rail', row('r1'));
+  host.render('main', row('m1'));
+  fake.tab();
+  fake.tab();
+  expect(fake.focus.active).toBe(main.els[0] as ElementLike);
+  host.render('rail', `${row('r1')}<i>x</i>`);
+  expect(fake.focus.active).toBe(main.els[0] as ElementLike);
+  expect(fake.focus.calls).toEqual([]);
+
+  host.render('main', '<button>no key</button>');
+  fake.tab();
+  fake.tab();
+  expect(fake.focus.active).toBe(main.els[0] as ElementLike);
+  host.render('main', '<button>no key</button><i>x</i>');
+  expect(fake.focus.active).toBeNull();
+  expect(fake.focus.calls).toEqual([]);
+
+  host.render('main', row('m1'));
+  fake.tab();
+  fake.tab();
+  expect(fake.focus.active?.dataset.run).toBe('m1');
+  host.render('main', row('m2'));
+  expect(fake.focus.active).toBeNull();
+  expect(fake.focus.calls).toEqual([]);
+
+  fake.elements.status = element();
+  host.render('status', '<b>x</b>');
+  expect(fake.elements.status.innerHTML).toBe('<b>x</b>');
+});
+
+test('across a tick the rail is rewritten, the focused row stays focused and Tab goes to the next row', () => {
+  const m = seedFixtures();
+  const fake = fakeWindow();
+  const page = (() => {
+    try {
+      const { dir, rest } = runningCopy(m, 1);
+      const lines = rest.map((line) => JSON.parse(line));
+      const start = lines.find((event) => event.type === 'stage:start' && event.key === 'implement#1');
+      for (const id of REGIONS) fake.live(id);
+      fake.setClock(Date.parse(start.ts) + 1000);
+      const booted = boot(browserHost(fake.win));
+      const socketOf = (part: string) => fake.sockets.find((socket) => socket.url.includes(part));
+      socketOf('index=')?.onmessage?.({ data: JSON.stringify({ kind: 'index', repos: index(m.registryDir) }) });
+      const run = socketOf('run=');
+      for (const event of [...readEvents(dir), ...lines.slice(0, lines.indexOf(start) + 1)])
+        run?.onmessage?.({ data: JSON.stringify({ kind: 'event', event }) });
+      return booted;
+    } catch (error) {
+      m.remove();
+      throw error;
+    }
+  })();
+  try {
+    fake.advance(100);
+    const rail = fake.elements.rail as ReturnType<typeof liveRegion>;
+    const rows = rail.els.filter((el) => el.focusable);
+    const at = Math.min(5, rows.length - 2);
+    expect(at).toBeGreaterThan(0);
+    for (let step = 0; step <= at; step++) fake.tab();
+    const focused = fake.focus.active as ElementLike;
+    expect(focused).toBe(rows[at] as ElementLike);
+    fake.advance(1000);
+    const after = rail.els.filter((el) => el.focusable);
+    expect(after[at]).not.toBe(focused);
+    expect(fake.focus.active).toBe(after[at] as ElementLike);
+    expect(fake.focus.active?.dataset).toEqual(focused.dataset);
+    fake.tab();
+    expect(fake.focus.active).toBe(after[at + 1] as ElementLike);
+  } finally {
+    page.stop();
+    m.remove();
+  }
+});
+
+const field = (region: ReturnType<typeof liveRegion>, name: string) =>
+  region.els.find((el) => el.attributes.name === name) as LiveElement;
+
+const FORM = `<input name="add-ticket" type="text" value=""><input name="add-force" type="checkbox"><input name="raise" type="text" value="1"><button data-action="add-ticket" data-repo="beta">add</button>`;
+
+test("render keeps a typed value, a ticked box and the focused field's caret across a changed draw", () => {
+  const fake = fakeWindow();
+  const main = fake.live('main');
+  const host = browserHost(fake.win);
+  host.render('main', FORM);
+  field(main, 'add-ticket').value = 'FAKE-9';
+  field(main, 'add-force').checked = true;
+  fake.tab();
+  field(main, 'add-ticket').setSelectionRange?.(2, 4, 'forward');
+  const before = field(main, 'add-ticket');
+  host.render('main', `${FORM}<i>more</i>`);
+  const after = field(main, 'add-ticket');
+  expect(after).not.toBe(before);
+  expect([after.value, field(main, 'add-force').checked, field(main, 'raise').value]).toEqual(['FAKE-9', true, '1']);
+  expect(fake.focus.active).toBe(after as ElementLike);
+  expect([after.selectionStart, after.selectionEnd, after.selectionDirection]).toEqual([2, 4, 'forward']);
+});
+
+test("a fresh render gives the fields the markup's values and still keeps the focus", () => {
+  const fake = fakeWindow();
+  const main = fake.live('main');
+  const host = browserHost(fake.win);
+  host.render('main', FORM);
+  field(main, 'add-ticket').value = 'FAKE-9';
+  field(main, 'add-force').checked = true;
+  fake.tab();
+  host.render('main', FORM, true);
+  const after = field(main, 'add-ticket');
+  expect([after.value, field(main, 'add-force').checked]).toEqual(['', false]);
+  expect(fake.focus.active).toBe(after as ElementLike);
+  expect([after.selectionStart, after.selectionCalls]).toEqual([0, 0]);
+});
+
+test("a select whose option is gone keeps the markup's choice, and one whose option is still there keeps the person's", () => {
+  const fake = fakeWindow();
+  const rail = fake.live('rail');
+  const host = browserHost(fake.win);
+  const select = (options: string) => `<select name="stage">${options}</select>`;
+  host.render('rail', select('<option value="a">a</option><option value="b" selected>b</option>'));
+  field(rail, 'stage').value = 'a';
+  host.render(
+    'rail',
+    select('<option value="a">a</option><option value="b" selected>b</option><option value="c">c</option>'),
+  );
+  expect(field(rail, 'stage').value).toBe('a');
+  host.render('rail', select('<option value="b">b</option><option value="c" selected>c</option>'));
+  expect(field(rail, 'stage').value).toBe('c');
+});
+
+test('a focused number field keeps its value and takes no selection call that throws', () => {
+  const fake = fakeWindow();
+  const rail = fake.live('rail');
+  const host = browserHost(fake.win);
+  const form = '<input name="raise" type="number" value="">';
+  host.render('rail', form);
+  fake.tab();
+  field(rail, 'raise').value = '2.5';
+  expect(field(rail, 'raise').selectionStart).toBeNull();
+  expect(() => host.render('rail', `${form}<i>x</i>`)).not.toThrow();
+  const after = field(rail, 'raise');
+  expect([after.value, after.selectionCalls]).toEqual(['2.5', 0]);
+  expect(fake.focus.active).toBe(after as ElementLike);
+});
+
+test('across a tick and a changed queue, the add field keeps its focus, its typed ticket key and its caret', () => {
+  const m = seedFixtures();
+  const fake = fakeWindow();
+  const queueId = `beta/${QUEUE_WORKFLOW}`;
+  let page: ReturnType<typeof boot> | undefined;
+  try {
+    const { dir, rest } = runningCopy(m, 1);
+    const lines = rest.map((line) => JSON.parse(line));
+    const start = lines.find((event) => event.type === 'stage:start' && event.key === 'implement#1');
+    for (const id of REGIONS) fake.live(id);
+    fake.setClock(Date.parse(start.ts) + 1000);
+    page = boot(browserHost(fake.win));
+    const socketOf = (part: string) => fake.sockets.find((socket) => socket.url.includes(part));
+    socketOf('index=')?.onmessage?.({ data: JSON.stringify({ kind: 'index', repos: index(m.registryDir) }) });
+    for (const event of [...readEvents(dir), ...lines.slice(0, lines.indexOf(start) + 1)])
+      socketOf('run=')?.onmessage?.({ data: JSON.stringify({ kind: 'event', event }) });
+    const queue = socketOf('queue=');
+    for (const event of readEvents(queueDirOf(m)))
+      queue?.onmessage?.({ data: JSON.stringify({ kind: 'queue-event', event }) });
+    fake.fire('click', { target: element({ dataset: { action: 'select-queue', queue: queueId } }) });
+    fake.advance(100);
+    const main = fake.elements.main as ReturnType<typeof liveRegion>;
+    const typed = field(main, 'add-ticket');
+    for (let step = 0; step < 50 && fake.focus.active !== typed; step++) fake.tab();
+    expect(fake.focus.active).toBe(typed as ElementLike);
+    typed.value = 'FAKE-9';
+    typed.setSelectionRange?.(3, 3);
+    fake.advance(1000);
+    expect(field(main, 'add-ticket')).toBe(typed);
+    expect([fake.focus.active, typed.value]).toEqual([typed as ElementLike, 'FAKE-9']);
+
+    queue?.onmessage?.({
+      data: JSON.stringify({
+        kind: 'queue-event',
+        event: { seq: 99, ts: '2026-09-24T11:09:00.000Z', type: 'watch:removed', workflow: QUEUE_WORKFLOW },
+      }),
+    });
+    fake.advance(100);
+    const again = field(main, 'add-ticket');
+    expect(again).not.toBe(typed);
+    expect(fake.focus.active).toBe(again as ElementLike);
+    expect([again.value, again.selectionStart, again.selectionEnd]).toEqual(['FAKE-9', 3, 3]);
+    expect(main.innerHTML).toContain('not watched');
+  } finally {
+    page?.stop();
+    m.remove();
+  }
 });
