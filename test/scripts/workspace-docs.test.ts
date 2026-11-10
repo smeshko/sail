@@ -119,30 +119,39 @@ test("sail's own config loads, and its workspace setup runs the docs copy after 
 /** A decide context over a real workspace with its stage directories, as the engine makes them. */
 function workspaceContext() {
   const worktree = tempDir();
-  for (const dir of ['.in', '.out', 'docs/adr', 'src']) mkdirSync(join(worktree, dir), { recursive: true });
+  for (const dir of ['.in', '.out', '.git', 'docs/adr', 'src']) mkdirSync(join(worktree, dir), { recursive: true });
   writeFileSync(join(worktree, 'docs/adr/0001-x.md'), '# ADR\n');
   return { worktree, stageOut: join(worktree, '.out'), stageIn: join(worktree, '.in'), env: {} };
 }
 
-test.each([
-  ['readonly', readonly],
-  ['builder', builder],
-])(
-  'under %s, a write and an edit of docs/adr/ in the workspace are denied for matching no write glob',
-  (_name, permissions) => {
-    const ctx = workspaceContext();
-    const path = join(ctx.worktree, 'docs/adr/0001-x.md');
-    const verdicts = (['write', 'edit'] as const).map((kind) => {
-      const decision = decide({ tool: kind, kind, paths: [path] }, permissions, ctx);
-      return decision.allow
-        ? 'allowed'
-        : `${decision.rule}: ${decision.reason.includes("matches none of the step's write globs")}`;
-    });
-    expect(verdicts).toEqual(['write: true', 'write: true']);
-  },
-);
+/** Each kind's verdict on `paths` as `allowed`, or as the denying rule and whether its reason contains `reason`. */
+function verdicts(permissions: typeof builder, paths: readonly string[], reason: string): string[] {
+  const ctx = workspaceContext();
+  return paths.flatMap((path) =>
+    (['write', 'edit'] as const).map((kind) => {
+      const decision = decide({ tool: kind, kind, paths: [join(ctx.worktree, path)] }, permissions, ctx);
+      return decision.allow ? 'allowed' : `${decision.rule}: ${decision.reason.includes(reason)}`;
+    }),
+  );
+}
 
-test('under builder, a write of src/ in the workspace is allowed, so the docs/ denial is the glob and not the setup', () => {
+test('under readonly, a write and an edit of docs/adr/ in the workspace are denied for matching no write glob', () => {
+  expect(verdicts(readonly, ['docs/adr/0001-x.md'], "matches none of the step's write globs")).toEqual([
+    'write: true',
+    'write: true',
+  ]);
+});
+
+test('under builder, a write and an edit of docs/adr/ in the workspace are allowed, and of .git still denied as never written', () => {
+  expect(verdicts(builder, ['docs/adr/0001-x.md', '.git/config'], 'nothing under .git is ever written')).toEqual([
+    'allowed',
+    'allowed',
+    'write: true',
+    'write: true',
+  ]);
+});
+
+test('under builder, a write of src/ in the workspace is allowed', () => {
   const ctx = workspaceContext();
   const call = { tool: 'write', kind: 'write', paths: [join(ctx.worktree, 'src/x.ts')] } as const;
   expect(decide(call, builder, ctx)).toEqual({ allow: true });
