@@ -18,7 +18,7 @@ import { basename, join, relative } from 'node:path';
 import type { ScriptedAnswer } from '../../src/adapters/fake/harness';
 import { BUILTINS } from '../../src/adapters/index';
 import { readConfig } from '../../src/engine/config';
-import { CONTROL_FILE, requestStop, requestStopNow } from '../../src/engine/control';
+import { CONTROL_FILE, requestStop, requestStopNow, requestSuspend } from '../../src/engine/control';
 import * as durable from '../../src/engine/durable';
 import { fingerprintBindings } from '../../src/engine/fingerprint';
 import * as journalModule from '../../src/engine/journal';
@@ -1627,6 +1627,31 @@ test.each([false, true])(
   },
   20_000,
 );
+
+test('a suspend request ends a live agent call at once and suspends the run interrupted, keeping its lease and the call unjournaled', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = writeAgentFixture(repo.dir, [submits(SPEC, 0.125, { delayMs: 4000 })]);
+    edit(sail, `${SPEC_STAGE}/stage.ts`, 'maxMinutes: 10', 'maxMinutes: 10, maxIdleMinutes: 0.002');
+    const control: Consumer = {
+      name: 'suspend',
+      onEvent(event) {
+        if (event.type === 'step:stalled' && event.key === 'spec#1') requestSuspend(onlyRun(repo.dir));
+      },
+    };
+    const began = Date.now();
+    const end = await ranAgent(repo.dir, { consumers: [control] });
+    expect([end.status, end.stopReason, end.message]).toEqual([
+      'suspended',
+      'interrupted',
+      'suspended by sail stop --suspend during spec#1',
+    ]);
+    expect(journaled(end.dir)).toEqual(['intake#1 passed', 'brief#1 passed']);
+    expect(Date.now() - began).toBeLessThan(3500);
+    expect(leaseFiles(repo.dir)).toHaveLength(1);
+    expect(existsSync(join(end.dir, CONTROL_FILE))).toBe(false);
+    expect(validateRunDir(end.dir).issues.map(formatIssue)).toEqual([]);
+  });
+}, 20_000);
 
 test('an immediate stop whose control file is gone by the call boundary still fails the run stopped, with no new try (review R4)', async () => {
   await withTempRepo(async (repo) => {

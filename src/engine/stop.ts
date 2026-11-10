@@ -12,6 +12,9 @@
 // - **A dispatched run still starting:** it has no run.json yet, and `options.starting` says a dispatched run has that id.
 //   The stop waits for it in the run's hand-off file, or in its `CONTROL` once its directory exists, and the run fails
 //   `stopped` before its intake.
+// - **`suspend`:** the run is held (`HOLD` in its run directory) instead of failed. A live run is also asked to suspend
+//   now (`suspended` in its control file); a run nothing runs keeps its STATUS, lease and workspace. A dispatched run
+//   still starting is refused, since it has nothing to hold yet.
 // A run from before workspaces has no lease or workspace, and ends as above with nothing to release.
 //
 // It needs only the Workspace port, and loads no workflow: a workflow changed since the run started can't block a stop.
@@ -25,7 +28,7 @@ import { PortError } from '../ports/errors';
 import type { ResolvedAdapters } from './adapters';
 import { isPlainName } from './call-dir';
 import { type Clock, systemClock } from './clock';
-import { askToStop, requestStop, requestStopNow } from './control';
+import { askToStop, holdRun, requestStop, requestStopNow, requestSuspend } from './control';
 import { rootRelative } from './open-run';
 import { credentialValues, redactor } from './redact';
 import { type RunStatus, readStatus, runsDir, writeStatus } from './run-dir';
@@ -34,6 +37,8 @@ import type { RunEnd } from './runtime';
 
 export interface StopRunOptions {
   now?: boolean;
+  /** Hold the run instead of failing it: a live run suspends now, a run nothing runs stays as it is, and the watcher leaves it. */
+  suspend?: boolean;
   /** The `.sail/` the run belongs to: the run is found beside it. */
   sailDir: string;
   runId: string;
@@ -50,7 +55,8 @@ export interface StopRunOptions {
 /** How a stop went: the run ended now, a running or starting run was asked to stop, or the stop was refused. */
 export type Stopped =
   | { ended: RunEnd }
-  | { requested: { pid: number; now?: boolean } }
+  | { requested: { pid: number; now?: boolean; suspend?: boolean } }
+  | { held: true }
   | { starting: true }
   | { refused: string };
 
@@ -77,6 +83,7 @@ export async function stopRun(options: StopRunOptions): Promise<Stopped> {
   const dir = join(runs, runId);
   if (!existsSync(join(dir, RUN_HEADER_FILE))) {
     if (options.starting?.(runId) !== true) return { refused: `no run '${runId}' in ${relative(root, runs)}` };
+    if (options.suspend) return { refused: `run ${runId} is still starting: sail stop ends it before its intake` };
     askToStop(runs, runId);
     return { starting: true };
   }
@@ -102,6 +109,11 @@ export async function stopRun(options: StopRunOptions): Promise<Stopped> {
         return { refused: `the branch ${branch} could not be leased: ${error.message} (${error.code})` };
       }
       if (!leased.leased && leased.holder.runId === runId) {
+        if (options.suspend) {
+          holdRun(dir);
+          requestSuspend(dir);
+          return { requested: { pid: leased.holder.pid, suspend: true } };
+        }
         if (options.now) requestStopNow(dir);
         else requestStop(dir);
         return { requested: { pid: leased.holder.pid, ...(options.now ? { now: true } : {}) } };
@@ -130,6 +142,14 @@ export async function stopRun(options: StopRunOptions): Promise<Stopped> {
         // The lease is left as this stop took it; the refusal or error it leaves with says why.
       }
     };
+    if (options.suspend) {
+      try {
+        holdRun(dir);
+      } finally {
+        await restore();
+      }
+      return { held: true };
+    }
     let firstSeq: ReturnType<typeof nextSeq>;
     try {
       firstSeq = nextSeq(dir);
@@ -178,7 +198,11 @@ export async function stopRun(options: StopRunOptions): Promise<Stopped> {
 /** The line `sail stop` prints, without its `sail stop: ` prefix, for a stop that was not refused. */
 export function stoppedMessage(runId: string, stopped: Exclude<Stopped, { refused: string }>): string {
   if ('starting' in stopped) return `run ${runId} is still starting: it stops before its intake`;
+  if ('held' in stopped) return `run ${runId} is held: the watcher leaves it until sail resume ${runId}`;
   if ('requested' in stopped) {
+    if (stopped.requested.suspend) {
+      return `run ${runId} suspends now, held until sail resume ${runId} (pid ${stopped.requested.pid})`;
+    }
     return `run ${runId} ${stopped.requested.now ? 'ends its running call now' : 'stops at its next call boundary'} (pid ${stopped.requested.pid})`;
   }
   return `run ${runId} stopped`;
