@@ -29,6 +29,7 @@ export const GUARD_FILES = [
   '.sail/lib/jev-check.mjs',
   '.sail/lib/duplicates.mjs',
   '.sail/lib/gate-lock.mjs',
+  '.sail/lib/test-failures.mjs',
   '.sail/lib/play.sh',
   '.sail/lib/play.mjs',
   '.sail/workflows/review/workflow.ts',

@@ -59,10 +59,10 @@ export interface CodeHost {
    */
   rerunChecks(number: number): Promise<Rerun>;
   /**
-   * The last 20 000 characters of the log of the check `name` on the pull request's head. Emits nothing. A check the head
-   * doesn't have, or one with no log to read, is `not_found`.
+   * The last 20 000 characters of the log of the check `name` on the pull request's head, or the whole log, uncut, with
+   * `whole`. Emits nothing. A check the head doesn't have, or one with no log to read, is `not_found`.
    */
-  checkLog(number: number, name: string): Promise<CheckLog>;
+  checkLog(number: number, name: string, options?: { whole?: boolean }): Promise<CheckLog>;
   /**
    * Merges the pull request by `request.method`, only while its head is `request.expectedHeadSha`. It is `refused`, with
    * nothing sent, when the pull request is closed, a draft, or at another head. A rejection by the host is a PortError.

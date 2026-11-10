@@ -301,12 +301,17 @@ export function createFakeCodeHost(options: FakeCodeHostOptions): CodeHost {
       }
       return rerun;
     },
-    async checkLog(number, name) {
+    async checkLog(number, name, options) {
       const pr = find(store.read(), 'checkLog', number);
       const log = pr.checks.find((check) => check.name === name)?.log;
       if (log === undefined)
         throw new PortError('codeHost', 'checkLog', 'not_found', `no log of a check named ${name}`);
-      return { number, name, log: log.slice(-CHECK_LOG_TAIL), raw: structuredClone(pr) };
+      return {
+        number,
+        name,
+        log: options?.whole === true ? log : log.slice(-CHECK_LOG_TAIL),
+        raw: structuredClone(pr),
+      };
     },
     async merge(number, request) {
       // A request from outside TypeScript, such as `sail port`, is checked before anything is read.

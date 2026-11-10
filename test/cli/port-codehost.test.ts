@@ -3,7 +3,7 @@
 // positionals, a result comes out as one line of JSON, and the fake keeps what it changed in
 // `.sail-runs/fake/prs.json`, so two commands see one world, as two processes do.
 import { afterEach, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EXIT_FAILED, EXIT_OK, EXIT_REFUSED } from '../../src/cli/exit-codes';
@@ -403,7 +403,7 @@ const HEAD = {
 
 const USAGE = `${TICKET_USAGE}${UPDATE_USAGE}${CREATE_USAGE}${RELABEL_USAGE}${ATTACH_USAGE}${PUSH_USAGE}${OPEN_USAGE}       sail port codehost get-pull-request|checks|rerun-checks <pr>
        sail port codehost list-designated <label>
-       sail port codehost check-log <pr> <name>
+       sail port codehost check-log <pr> <name> [--save <path>]
        sail port codehost merge <pr> --method <merge|squash|rebase> --expected-head-sha <sha>
        sail port codehost add-label|remove-label <pr> <label>
        sail port codehost comment <pr> [--body-file <path>]
@@ -518,6 +518,45 @@ test("check-log prints the port's CheckLog of the named check, and a name the pu
       stderr: '',
       printed: { number: 4, name: 'ci', log: '(fail) sail whisper prints nothing' },
       missing: 1,
+    });
+  });
+});
+
+test('check-log --save writes the whole log to the path and prints the 20 000-character tail with the absolute path saved', async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    const log = `${'a'.repeat(15_000)}${'b'.repeat(10_000)}`;
+    edit(join(repo.dir, '.sail'), 'fake/prs.json', '(fail) sail whisper prints nothing', log);
+    const saved = await codehost(repo, ['check-log', '4', 'ci', '--save', 'out/nested/ci.log']);
+    const { raw: _raw, ...printed } = oneLine(saved.stdout);
+    const path = join(repo.dir, 'out', 'nested', 'ci.log');
+    expect({
+      code: saved.code,
+      stderr: saved.stderr,
+      printed: { ...printed, log: printed.log === log.slice(-20_000) } as Record<string, unknown>,
+      written: readFileSync(path, 'utf8') === log,
+    }).toEqual({
+      code: EXIT_OK,
+      stderr: '',
+      printed: { number: 4, name: 'ci', log: true, saved: path },
+      written: true,
+    });
+  });
+});
+
+test('check-log --save naming a directory exits 3 with the refusal, and writes nothing', async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    mkdirSync(join(repo.dir, 'out'));
+    const refused = await codehost(repo, ['check-log', '4', 'ci', '--save', 'out']);
+    expect({
+      code: refused.code,
+      stdout: refused.stdout,
+      stderr: refused.stderr.includes('--save names out, which is a directory'),
+    }).toEqual({
+      code: EXIT_REFUSED,
+      stdout: '',
+      stderr: true,
     });
   });
 });

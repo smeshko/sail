@@ -176,6 +176,15 @@ test('checkLog cuts a log over 20 000 characters to its last 20 000, and a check
   });
 });
 
+test('checkLog with whole answers the seeded log uncut', async () => {
+  const log = `${'a'.repeat(15_000)}${'b'.repeat(10_000)}`;
+  const host = createFakeCodeHost(
+    files((seed) => seed.pullRequests.push(seeded(7, { checks: [{ name: 'verify', statuses: ['failed'], log }] }))),
+  );
+  const whole = await host.checkLog(7, 'verify', { whole: true });
+  expect({ length: whole.log.length, same: whole.log === log }).toEqual({ length: 25_000, same: true });
+});
+
 test('rerunChecks names only the checks whose current status is failed, and a passed one is left alone and not announced', async () => {
   const capture = captureEvents();
   const host = createFakeCodeHost({
