@@ -15,7 +15,7 @@ const source = (module: string) => readFileSync(join(PAGE, module), 'utf8');
 const lines = (text: string) => text.replace(/\n$/, '').split('\n').length;
 
 /** The modules split from `app.ts` so far. */
-const SPLIT = ['store.ts', 'saved.ts', 'draw.ts', 'reads.ts'];
+const SPLIT = ['store.ts', 'saved.ts', 'draw.ts', 'reads.ts', 'streams.ts'];
 
 test('the line counter counts a made-up source, and it is over the limit', () => {
   expect(lines('a\nb\nc\n')).toBe(3);
@@ -89,4 +89,18 @@ test('two marks before the timer runs schedule one flush, at the flush delay, an
   other.stopped = true;
   other.mark('rail');
   expect(stopped.timers).toEqual([]);
+});
+
+/** What a source holds that a module of the sockets must not: a click, a key, or an import of an action module. */
+const handlesInput = (text: string) =>
+  [/\bonAction\b/, /\bonKey\b/, /from '\.\/(actions|requests|keys)'/].filter((rule) => rule.test(text)).length;
+
+test('the scan for input in the sockets flags a made-up source with each, and streams.ts has none', () => {
+  expect(handlesInput('host.onAction(() => {});')).toBe(1);
+  expect(handlesInput('host.onKey(() => {});')).toBe(1);
+  expect(handlesInput("import { dispatch } from './actions';")).toBe(1);
+  expect(handlesInput("import { queueOp } from './requests';")).toBe(1);
+  expect(handlesInput("import { moves } from './keys';")).toBe(1);
+  expect(handlesInput("import { tick } from './draw';")).toBe(0);
+  expect(handlesInput(source('streams.ts'))).toBe(0);
 });

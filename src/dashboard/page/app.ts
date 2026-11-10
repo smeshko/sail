@@ -1,82 +1,17 @@
-// The page's shell. `boot(host)` holds what is on screen and keeps it live:
-//
-// - One index socket feeds the rail, needs attention, the queue view and the open run's summary. The first index opens
-//   the newest running run, else the newest run, unless the URL names a run it lists, and a selection is kept while its
-//   run is still listed.
-// - One run socket is open at a time, for the open run, and its events are folded into the run model. A socket that
-//   closes without `end` reconnects after 2 s and starts the model again, since the replay sends everything, unless its
-//   stream sent `error`: then the error and the cards stay, with no reconnect, until the run is clicked again.
-// - One queue socket per watched workflow in the index feeds its recent events and its watch state, and reconnects by
-//   the same rule: a queue whose stream sent `error` shows it until its row is clicked again. A workflow's queue row in
-//   the rail opens its queue in the centre, in place of the run, until a run is opened again. A queue that leaves the
-//   index gives the centre back to the run.
-// - Needs attention is a button in the top bar with its count. It opens a pane over the page, and `a` toggles it; Esc,
-//   a click outside it, and opening one of its items close it. Its All clear button hides the items listed at the click,
-//   remembered by their identities in the browser; an index that no longer lists an identity forgets it.
-// - Opening a stage card shows its timeline in the centre, drawn from the same run model, so it grows with the run
-//   socket's events. While the call runs and the timeline is followed, each draw scrolls it to its newest entry. The
-//   kinds of entry it hides hold for every call's timeline, and are saved like the theme. An opened script command shows
-//   the call's stdout and stderr, read over REST, and read again at most once a second while the call runs.
-// - A file name in the inspector's files tab opens the file in the drawer, read over REST: a markdown file as the HTML
-//   the server built from it. Esc or the close button shuts the drawer, and so does opening another run.
-// - The inspector reads a call's `result.json` and log over REST. A response for a selection that has changed since is
-//   dropped, and a running call's log is read again at most once a second.
-// - While anything runs, the regions with a running time are drawn again each second, so the time counts up between
-//   events.
-// - Clicks arrive as delegated `data-action`s, and keys as keys. Renders are coalesced: a region marked dirty is drawn
-//   by one flush at most every 100 ms, and one whose markup is unchanged is not written, nor its timeline scrolled.
-//
-// It controls four things. In the rail, `watch-set` asks the dashboard's server to watch or unwatch one workflow of a
-// repository or all of them (an unwatch on a second click), and the answer, in `sail`'s own words, shows under the
-// repository's header. In the queue view, `move-item`, `poll-queue`, `add-ticket`, `requeue-item` and `drop-item` ask
-// the dashboard's server to have the watcher move, poll, add, requeue or drop (a drop on a second click, from the menu
-// `item-menu` opens), and the answer,
-// a refusal or that the watcher has not taken the command yet, is shown beside the queue's header. `resume-run` and
-// `restart-run` ask it to start a suspended run again or a failed
-// run as a seeded one, each on a second click: what the open run offers is read from its actions route when it opens
-// and when the index changes its status or its queue item, and the rail draws it in the menu a run's ⋯ (`run-menu`)
-// opens under its row, opening the run. A refusal is shown beside the buttons; a
-// started restart opens the new run, and a started resume reads the run again. `stop-run` and `clean-run` ask it to stop
-// a running or suspended run (with Stop now ticked, at once) or to clean a failed one, each on a second click: a stop
-// shows its answer beside the buttons and reads the run again, and a clean leaves the run and shows its answer in the
-// rail until a run is selected. The other actions change what is shown, and `copy` puts a CLI command on the clipboard.
-import type { QueueEvent, SailEvent } from '../../events/types';
-import type { IndexRepo } from '../files';
-import type { Message } from '../streams';
-import { attention, identity } from './attention';
-import { startDraw, tick } from './draw';
+import { startDraw } from './draw';
 import type { PageHost } from './host';
 import { REGIONS } from './host';
-import { newestFirst, railRepos, statusOf } from './index-model';
-import { queueId } from './queue-view';
-import {
-  clearCall,
-  closeFile,
-  offerSignature,
-  openedOutputKeys,
-  openFile,
-  readLog,
-  readOffers,
-  readOutput,
-  readResult,
-  refreshLog,
-  refreshOutput,
-  selectCard,
-  stopReads,
-} from './reads';
-import { applyEvent, emptyRun } from './run-model';
+import { closeFile, openedOutputKeys, openFile, readLog, readOutput, selectCard, stopReads } from './reads';
 import { FILTER_KEY, RAIL_KEY, saveCleared, storedCleared, THEME_KEY } from './saved';
-import { createStore, type OpenQueue, type OpenRun, openQueue } from './store';
+import { createStore } from './store';
+import { closeRun, openIndex, reopenQueue, selectRun, stopStreams } from './streams';
 import { FILTERS, type InspectorTab, TABS, THEMES, type TimelineFilter, type UiState } from './ui-state';
 
 export { TICK_MS } from './draw';
+export { LOG_REFRESH_MS } from './reads';
 export { CLEARED_KEY, FILTER_KEY, RAIL_KEY, THEME_KEY } from './saved';
 export { FLUSH_MS } from './store';
-export const RECONNECT_MS = 2000;
-export { LOG_REFRESH_MS } from './reads';
-
-/** How many of a queue's events its panel lists. */
-export const RECENT_EVENTS = 20;
+export { RECENT_EVENTS, RECONNECT_MS } from './streams';
 
 export interface Page {
   stop(): void;
@@ -111,259 +46,11 @@ function answerField(body: string, field: string): string | undefined {
   }
 }
 
-function parse(text: string): Message | undefined {
-  try {
-    const value = JSON.parse(text) as unknown;
-    return typeof value === 'object' && value !== null ? (value as Message) : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 export function boot(host: PageHost): Page {
   const store = createStore(host);
   const ui = store.ui;
 
   startDraw(store);
-
-  const onRunMessage = (open: OpenRun, text: string) => {
-    if (open !== store.run) return;
-    const message = parse(text);
-    if (message?.kind === 'event') {
-      const event = message.event as SailEvent & { key?: unknown };
-      applyEvent(open.model, event);
-      store.mark('main', 'status');
-      tick(store);
-      const place = store.cursorPending ? open.model.cards.findIndex((entry) => entry.key === ui.key) : -1;
-      if (place >= 0) {
-        ui.cursor = place;
-        store.cursorPending = false;
-      }
-      const key = typeof event.key === 'string' ? event.key.split('/')[0] : undefined;
-      if (key !== undefined && key === ui.key) {
-        store.mark('inspector');
-        const card = open.model.cards.find((entry) => entry.key === key);
-        // The call's end: its result.json is written now, and its log has its last lines (review R1-3). Each try ends,
-        // and a corrective try writes its own result.json, so even a loaded one is read again (review R2-2).
-        const ended = (event.type === 'stage:end' || event.type === 'intake:end') && event.key === key;
-        if (ended) readResult(store);
-        if (ui.tab === 'log' && (card?.state === 'running' || ended)) refreshLog(store);
-        if (ui.timeline && store.outputs !== undefined && (card?.state === 'running' || ended)) refreshOutput(store);
-      }
-    } else if (message?.kind === 'end') {
-      open.ended = true;
-      open.endSeen = host.now();
-      store.mark('main', 'status');
-      // An index saying the run runs again may have come before this end: look again once the index has caught up
-      // (review R2-3).
-      open.retry = host.later(() => {
-        delete open.retry;
-        followAgain(open);
-      }, RECONNECT_MS);
-    } else if (message?.kind === 'error') {
-      open.error = message.message;
-      store.mark('main');
-    }
-  };
-
-  /** A close handler that, unless the stream failed or is no longer live, runs `again` after the reconnect delay. */
-  const retryOnClose =
-    (holder: { retry?: number }, failed: () => boolean, live: () => boolean, again: () => void) => () => {
-      if (store.stopped || failed() || !live()) return;
-      holder.retry = host.later(() => {
-        delete holder.retry;
-        if (live()) again();
-      }, RECONNECT_MS);
-    };
-
-  const openRunSocket = (open: OpenRun) => {
-    const connection = host.connect(`run=${enc(`${open.repo}/${open.runId}`)}`, {
-      message: (text) => onRunMessage(open, text),
-      // A socket the run has since replaced, or that ended, closes without a retry, and so does one whose stream sent
-      // `error`: the error stays until the run is clicked again.
-      close: retryOnClose(
-        open,
-        () => open.error !== undefined,
-        () => !(open !== store.run || open.ended || open.connection !== connection),
-        () => {
-          open.model = emptyRun();
-          delete open.error;
-          openRunSocket(open);
-          store.mark('main', 'status', 'inspector');
-        },
-      ),
-    });
-    open.connection = connection;
-  };
-
-  /**
-   * Whether the index lists the ended run otherwise than its stream ended it: running again, as `sail resume` makes it,
-   * or ended with another status or at another time, by a resume that ran between two polls (review R3-1).
-   */
-  const movedOn = (open: OpenRun) => {
-    const item = store.index?.find((repo) => repo.name === open.repo)?.runs.find((entry) => entry.runId === open.runId);
-    if (item === undefined) return false;
-    const { end, endedAt } = open.model;
-    if (statusOf(item) !== (end?.status ?? 'running')) return true;
-    const listed = item.summary?.endedAt;
-    return listed !== undefined && endedAt !== undefined && listed !== endedAt;
-  };
-
-  /**
-   * Follows the open run's stream again, from an empty model, when its stream ended and the index has since moved on
-   * (review R1-2). Either order of the end and the index lands here. For the reconnect delay after the end, an index
-   * may still be one read before it, so only the check the end set up then decides (review R3-3).
-   */
-  function followAgain(open: OpenRun, fromIndex = false) {
-    if (open !== store.run || !open.ended || !movedOn(open)) return;
-    if (fromIndex && host.now() - (open.endSeen ?? 0) < RECONNECT_MS) return;
-    if (open.retry !== undefined) host.cancel(open.retry);
-    delete open.retry;
-    open.ended = false;
-    open.model = emptyRun();
-    delete open.error;
-    openRunSocket(open);
-    store.mark('main', 'status', 'inspector');
-  }
-
-  const closeRun = () => {
-    if (store.run === undefined) return;
-    const closing = store.run;
-    store.run = undefined;
-    if (closing.retry !== undefined) host.cancel(closing.retry);
-    closing.connection?.close();
-  };
-
-  const selectRun = (repo: string, runId: string) => {
-    if (store.run?.repo === repo && store.run.runId === runId && store.run.error === undefined) return;
-    closeRun();
-    clearCall(store);
-    ui.repo = repo;
-    ui.runId = runId;
-    closeFile(store);
-    delete ui.key;
-    ui.timeline = false;
-    ui.opened = [];
-    ui.cursor = 0;
-    store.run = { repo, runId, model: emptyRun(), ended: false };
-    store.offers = undefined;
-    delete ui.runMenu;
-    delete ui.armed;
-    delete ui.runNotice;
-    delete ui.raise;
-    delete ui.restartStage;
-    delete ui.stopNow;
-    store.fieldsOwn = false;
-    store.fresh.add('rail');
-    openRunSocket(store.run);
-    readOffers(store);
-    store.mark('rail', 'main', 'inspector', 'status');
-  };
-
-  const onQueueMessage = (id: string, open: OpenQueue, text: string) => {
-    const message = parse(text);
-    if (message?.kind === 'error') {
-      open.stream = { ...open.stream, error: message.message };
-      if (ui.queue === id) store.mark('main');
-      return;
-    }
-    if (message?.kind !== 'queue-event') return;
-    const event = message.event as QueueEvent;
-    const recent = [...open.stream.recent, event].slice(-RECENT_EVENTS);
-    const watch =
-      event.type === 'watch:added' ? 'watched' : event.type === 'watch:removed' ? 'not watched' : open.stream.watch;
-    const polls =
-      event.type === 'queue:polled' ? (event as Extract<QueueEvent, { type: 'queue:polled' }>).kind : open.stream.polls;
-    open.stream = { recent, watch, ...(polls === undefined ? {} : { polls }) };
-    if (ui.queue === id) store.mark('main');
-  };
-
-  const connectQueue = (id: string, open: OpenQueue) => {
-    const connection = host.connect(`queue=${enc(id)}`, {
-      message: (text) => onQueueMessage(id, open, text),
-      // A socket the queue has since replaced closes without a retry, like the run's.
-      close: retryOnClose(
-        open,
-        () => open.stream.error !== undefined,
-        () => store.queues.get(id) === open && open.connection === connection,
-        () => {
-          open.stream = { recent: [], watch: 'unknown' };
-          connectQueue(id, open);
-          if (ui.queue === id) store.mark('main');
-        },
-      ),
-    });
-    open.connection = connection;
-  };
-
-  const openQueueSocket = (id: string) => {
-    const open: OpenQueue = { stream: { recent: [], watch: 'unknown' } };
-    store.queues.set(id, open);
-    connectQueue(id, open);
-  };
-
-  /** Opens a queue socket for every queue in the index, and closes those no longer in it. */
-  const syncQueues = (repos: readonly IndexRepo[]) => {
-    const wanted = new Set(repos.flatMap((repo) => repo.queues.map((view) => queueId(repo.name, view.workflow))));
-    for (const [id, open] of store.queues) {
-      if (wanted.has(id)) continue;
-      store.queues.delete(id);
-      if (open.retry !== undefined) host.cancel(open.retry);
-      open.connection?.close();
-    }
-    for (const id of wanted) if (!store.queues.has(id)) openQueueSocket(id);
-  };
-
-  /** The run to open on the first index: the newest running one, else the newest. */
-  const firstRun = (repos: readonly IndexRepo[]) => {
-    const all = newestFirst(
-      railRepos(repos, host.now()).flatMap((repo) => repo.runs.map((entry) => ({ ...entry, repo: repo.name }))),
-    );
-    return all.find((entry) => entry.status === 'running') ?? all[0];
-  };
-
-  const onIndex = (text: string) => {
-    const message = parse(text);
-    if (message?.kind !== 'index') return;
-    const repos = message.repos;
-    store.index = repos;
-    const still = new Set(attention(repos).map(identity));
-    if ([...store.cleared].some((id) => !still.has(id))) {
-      store.cleared = new Set([...storedCleared(host), ...store.cleared].filter((id) => still.has(id)));
-      saveCleared(host, store.cleared);
-    }
-    syncQueues(repos);
-    const lists = (name?: string, runId?: string) =>
-      repos.some((repo) => repo.name === name && repo.runs.some((entry) => entry.runId === runId));
-    const asked = store.start;
-    store.start = undefined;
-    if (asked !== undefined && lists(asked.repo, asked.run)) actions.open?.(asked);
-    else if (!lists(ui.repo, ui.runId)) {
-      const first = firstRun(repos);
-      if (first !== undefined) selectRun(first.repo, first.runId);
-    }
-    if (store.run !== undefined) followAgain(store.run, true);
-    if (store.run !== undefined && offerSignature(store, store.run) !== store.offersFor) {
-      delete ui.armed;
-      readOffers(store);
-    }
-    if (ui.queue !== undefined && openQueue(store) === undefined) delete ui.queue;
-    store.mark('rail', 'attention', 'main', 'status');
-    tick(store);
-  };
-
-  const openIndex = () => {
-    store.indexConnection = host.connect('index=1', {
-      message: onIndex,
-      close: () => {
-        if (store.stopped) return;
-        store.indexRetry = host.later(() => {
-          store.indexRetry = undefined;
-          openIndex();
-        }, RECONNECT_MS);
-      },
-    });
-  };
 
   const step = (by: number) => {
     const cards = store.run?.model.cards ?? [];
@@ -451,13 +138,13 @@ export function boot(host: PageHost): Page {
         delete ui.runNotice;
         if (store.run !== open) return;
         if (kind === 'resume') {
-          closeRun();
-          selectRun(open.repo, open.runId);
+          closeRun(store);
+          selectRun(store, open.repo, open.runId);
           return;
         }
         try {
           const { runId } = JSON.parse(answer) as { runId?: unknown };
-          if (typeof runId === 'string') selectRun(open.repo, runId);
+          if (typeof runId === 'string') selectRun(store, open.repo, runId);
         } catch {
           // An answer with no run id leaves the run open.
         }
@@ -501,15 +188,15 @@ export function boot(host: PageHost): Page {
         if (store.run !== open) return;
         const message = answerField(answer, 'message');
         if (kind === 'clean') {
-          closeRun();
+          closeRun(store);
           if (message === undefined) delete ui.indexNotice;
           else ui.indexNotice = message;
           store.mark('rail', 'main', 'inspector', 'status');
           return;
         }
         const menu = ui.runMenu;
-        closeRun();
-        selectRun(open.repo, open.runId);
+        closeRun(store);
+        selectRun(store, open.repo, open.runId);
         // The menu the stop was made from stays open on the run read again, with the answer.
         if (menu !== undefined) ui.runMenu = menu;
         if (message !== undefined) ui.runNotice = message;
@@ -521,15 +208,11 @@ export function boot(host: PageHost): Page {
       if (data.repo === undefined || data.run === undefined) return;
       delete ui.indexNotice;
       leaveQueue();
-      selectRun(data.repo, data.run);
+      selectRun(store, data.repo, data.run);
     },
     'select-queue': (data) => {
       if (data.queue === undefined) return;
-      const failed = store.queues.get(data.queue);
-      if (failed?.stream.error !== undefined) {
-        failed.stream = { recent: [], watch: 'unknown' };
-        connectQueue(data.queue, failed);
-      }
+      reopenQueue(store, data.queue);
       ui.queue = data.queue;
       delete ui.queueNotice;
       store.mark('rail', 'main');
@@ -539,7 +222,7 @@ export function boot(host: PageHost): Page {
       if (data.repo === undefined || data.run === undefined) return;
       closeAttention();
       leaveQueue();
-      selectRun(data.repo, data.run);
+      selectRun(store, data.repo, data.run);
       const tab = (TABS as readonly string[]).includes(data.tab ?? '') ? (data.tab as InspectorTab) : 'overview';
       if (data.key !== undefined) selectCard(store, data.key, tab, false);
     },
@@ -794,21 +477,14 @@ export function boot(host: PageHost): Page {
     ui.cursor = Math.max(0, Math.min(last, ui.cursor + by));
     store.mark('main');
   });
-  openIndex();
+  openIndex(store, (asked) => actions.open?.(asked));
   store.mark(...REGIONS);
 
   return {
     ui,
     stop() {
       store.stopped = true;
-      store.indexConnection?.close();
-      if (store.indexRetry !== undefined) host.cancel(store.indexRetry);
-      closeRun();
-      for (const open of store.queues.values()) {
-        if (open.retry !== undefined) host.cancel(open.retry);
-        open.connection?.close();
-      }
-      store.queues.clear();
+      stopStreams(store);
       if (store.flushTimer !== undefined) host.cancel(store.flushTimer);
       stopReads(store);
       if (store.tickTimer !== undefined) host.cancel(store.tickTimer);
