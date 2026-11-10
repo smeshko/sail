@@ -3,7 +3,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import type { SpawnedProcess } from '@anthropic-ai/claude-agent-sdk';
 import { createSpawner } from '../../../src/adapters/claude-code/process';
-import { stopLiveGroups } from '../../../src/engine/process';
+import { liveGroups, stopLiveGroups } from '../../../src/engine/process';
 
 const ENV = { PATH: '/usr/bin:/bin' };
 const started: number[] = [];
@@ -210,9 +210,10 @@ test('a reaped spawner leaves no group registered', async () => {
     env: ENV,
     signal: new AbortController().signal,
   });
-  pidOf(spawned);
+  const pid = pidOf(spawned);
   await new Promise((done) => spawned.once('exit', done));
   await spawner.reap(500);
+  expect(liveGroups()).not.toContain(pid);
   const at = performance.now();
   await stopLiveGroups(5_000);
   expect(performance.now() - at).toBeLessThan(500);

@@ -2,7 +2,7 @@
 // scrubbed of credentials, and reap() returns only after every group it started is gone.
 import { expect, test } from 'bun:test';
 import { bashEnv, createBashRunner } from '../../../src/adapters/pi/process';
-import { stopLiveGroups } from '../../../src/engine/process';
+import { liveGroups, stopLiveGroups } from '../../../src/engine/process';
 import { withTempRepo } from '../../helpers/temp-repo';
 
 const alive = (pid: number): boolean => {
@@ -204,8 +204,10 @@ test('an aborted command that ignores SIGTERM is ended by stopLiveGroups, its ch
 test('a reaped runner leaves no group registered', async () => {
   await withTempRepo(async (repo) => {
     const runner = createBashRunner({ env: { PATH: repo.env.PATH ?? '/usr/bin:/bin' } });
-    await runner.operations.exec('sleep 30 >/dev/null 2>&1 & echo $!', repo.dir, { onData: () => {} });
+    const out = collect();
+    await runner.operations.exec('sleep 30 >/dev/null 2>&1 & echo $$', repo.dir, { onData: out.onData });
     await runner.reap();
+    expect(liveGroups()).not.toContain(Number(out.text().trim()));
     const at = performance.now();
     await stopLiveGroups(5_000);
     expect(performance.now() - at).toBeLessThan(500);

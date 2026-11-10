@@ -51,6 +51,11 @@ export function untrackGroup(pgid: number): void {
   live.delete(pgid);
 }
 
+/** The groups registered now, for a test to see what is left. */
+export function liveGroups(): number[] {
+  return [...live];
+}
+
 /** Sends `signal` to the group: `gone` when nothing is left, `unknown` when macOS answers EPERM for a group that still holds an exiting member, so only SIGKILL settles it. */
 function signalGroup(pgid: number, signal: NodeJS.Signals | 0): 'gone' | 'sent' | 'unknown' {
   try {
