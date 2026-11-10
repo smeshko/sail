@@ -324,7 +324,7 @@ test('a first click on drop arms it, a click elsewhere disarms it, and a second 
   expect([r.ui.act.results.queue?.text, r.ui.act.results.queue?.place, r.effects, r.ui.act.pending]).toEqual([
     'ticket:FAKE-5 dropped',
     'queue',
-    ['took'],
+    [],
     undefined,
   ]);
 });
@@ -469,4 +469,18 @@ test('each place keeps its own answer: a poll answered while a watch is out leav
     resultOf(r.ui.act, 'repo', { repo: 'beta' }),
     resultOf(r.ui.act, 'queue', BETA),
   ]).toEqual([undefined, 'sail watch: it watches all', 'polls wf now']);
+});
+
+test('a poll, drop, requeue or move that took leaves the add field as typed: only an add that took empties it', async () => {
+  const r = rig(undefined, queueIndex);
+  r.fields['add-ticket'] = 'FAKE-1';
+  r.actor.act('poll-queue', BETA);
+  r.actor.act('requeue-item', { ...BETA, item: 'ticket:FAKE-6' });
+  r.actor.act('move-item', { ...BETA, key: 'ticket:FAKE-5', dir: 'up', target: 'ticket:FAKE-4' });
+  r.actor.act('drop-item', { ...BETA, item: 'ticket:FAKE-5' });
+  r.actor.act('drop-item', { ...BETA, item: 'ticket:FAKE-5' });
+  for (let each = 0; each < 4; each++) await r.answer(200, { message: 'took' });
+  r.fields['add-ticket'] = 'FAKE-12';
+  r.actor.keep('queue', { kind: 'workflow', ...BETA });
+  expect([r.posts.length, r.effects, r.ui.act.drafts['add-ticket']]).toEqual([4, [], { ticket: 'FAKE-12' }]);
 });

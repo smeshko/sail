@@ -148,12 +148,17 @@ export function createActor(deps: ActorDeps): Actor {
       else if (effect === 'leave') effects.leave();
       else if (typeof effect === 'object' && subject.kind === 'run') effects.open(subject.repo, effect.open);
       else if (effect === 'took') {
-        // A change that took empties the text typed for it, and keeps what was ticked.
-        const drafts = draftsOf(def.id);
-        for (const param of def.params(subject, deps.source()))
-          if (param.type === 'text' && param.given === undefined) delete drafts[param.name];
-        stale.add(def.place === 'run' ? 'run' : 'queue');
-        effects.took();
+        // A change that took empties the text typed for it, and keeps what was ticked. One with no text of its own,
+        // such as a poll or a drop, leaves every field as it is typed.
+        const texts = def
+          .params(subject, deps.source())
+          .filter((param) => param.type === 'text' && param.given === undefined);
+        if (texts.length > 0) {
+          const drafts = draftsOf(def.id);
+          for (const param of texts) delete drafts[param.name];
+          stale.add(def.place === 'run' ? 'run' : 'queue');
+          effects.took();
+        }
       }
       clearOwn(def, subject);
       setResult(def.id, subject, answer.place, answer.text);
