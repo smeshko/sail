@@ -110,7 +110,7 @@ test('a point release of a listed model is no match: it reads at the dearest rat
   expect({
     sonnet: priceOf('claude-sonnet-5-1'),
     opus: priceOf('claude-opus-5-6'),
-    fable: priceOf('claude-fable-5-2'),
+    fable: priceOf('claude-fable-5-3'),
     pointDated: priceOf('claude-opus-5-6-20260101'),
     dated: priceOf('claude-opus-5-20260101'),
   }).toEqual({
@@ -120,4 +120,12 @@ test('a point release of a listed model is no match: it reads at the dearest rat
     pointDated: DEAREST,
     dated: entry('claude-opus-5'),
   });
+});
+
+test('claude-fable-5-2 and claude-mythos-5-2 are priced from their own rows, not the 5-1 ones', () => {
+  expect(priceOf('claude-fable-5-2')).toBe(entry('claude-fable-5-2'));
+  expect(priceOf('claude-mythos-5-2[1m]')).toBe(entry('claude-mythos-5-2'));
+  expect(entry('claude-fable-5-2')).not.toEqual(entry('claude-fable-5-1'));
+  expect(entry('claude-mythos-5-2')).not.toEqual(entry('claude-mythos-5-1'));
+  expect(entry('claude-fable-5-2')).not.toEqual(DEAREST);
 });

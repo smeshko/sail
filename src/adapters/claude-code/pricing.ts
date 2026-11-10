@@ -28,6 +28,8 @@ const p = (input: number, cacheWrite5m: number, cacheWrite1h: number, cacheRead:
 
 /** Prices by canonical model id. */
 export const PRICES: Readonly<Record<string, PriceEntry>> = {
+  'claude-fable-5-2': p(8, 10, 16, 0.2, 40),
+  'claude-mythos-5-2': p(8, 10, 16, 0.2, 40),
   'claude-fable-5-1': p(10, 12.5, 20, 0.25, 50),
   'claude-mythos-5-1': p(10, 12.5, 20, 0.25, 50),
   'claude-fable-5': p(10, 12.5, 20, 1, 50),
