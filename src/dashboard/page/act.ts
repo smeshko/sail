@@ -7,7 +7,7 @@
 // - A confirmed action is armed by a first click: `pending` is it, on its subject, unsent. A second click on the same
 //   action and subject, with every `rearm` parameter unchanged, sends it. Any other click drops the confirmation.
 // - A request the registry calls invalid arms nothing and shows why.
-// - While a run action's request is out, another run action is ignored.
+// - While a run action's request is out, another run action is ignored, until its answer, whatever took `pending` since.
 // - What was typed for a parameter is read from the page (`host.value()`), else from its draft, and kept in
 //   `ui.act.drafts`, which a draw reads back first (`keep`) so a typed field survives it.
 
@@ -85,6 +85,8 @@ export function createActor(deps: ActorDeps): Actor {
   const state = ui.act;
   /** The places whose fields the shell has just given up: the next `keep` leaves the page's stale values alone. */
   const stale = new Set<string>();
+  /** How many run actions' requests are out: until each is answered, another run action is ignored. */
+  let runsOut = 0;
 
   const draftsOf = (id: string) => {
     state.drafts[id] ??= {};
@@ -132,6 +134,7 @@ export function createActor(deps: ActorDeps): Actor {
   }
 
   function finish(def: ActionDef, subject: Subject, status: number, body: string) {
+    if (subject.kind === 'run') runsOut--;
     if (deps.stopped()) return;
     const { pending } = state;
     if (pending?.sent === true && pending.id === def.id && sameSubject(pending.subject, subject)) delete state.pending;
@@ -169,6 +172,7 @@ export function createActor(deps: ActorDeps): Actor {
 
   function send(def: ActionDef, subject: Subject, values: Values, request: { path: string; body: unknown }) {
     if (def.tier === 'confirmed') state.pending = { id: def.id, subject, values: { ...values }, sent: true };
+    if (subject.kind === 'run') runsOut++;
     if (def.sending !== undefined) setResult(def.id, subject, def.place, def.sending(subject));
     else if (subject.kind === 'run') delete state.results.run;
     mark('rail', 'main');
@@ -183,8 +187,7 @@ export function createActor(deps: ActorDeps): Actor {
       if (disarm()) mark('rail', 'main');
       return;
     }
-    const sentRun = state.pending?.sent === true && state.pending.subject.kind === 'run';
-    if (subject.kind === 'run' && sentRun) return;
+    if (subject.kind === 'run' && runsOut > 0) return;
     if (disarm({ id, subject })) mark('rail', 'main');
     if (def.run !== undefined) {
       effects.local[def.run]?.();

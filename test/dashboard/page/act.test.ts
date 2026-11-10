@@ -484,3 +484,21 @@ test('a poll, drop, requeue or move that took leaves the add field as typed: onl
   r.actor.keep('queue', { kind: 'workflow', ...BETA });
   expect([r.posts.length, r.effects, r.ui.act.drafts['add-ticket']]).toEqual([4, [], { ticket: 'FAKE-12' }]);
 });
+
+test('a run action is ignored until the run action out is answered, though an unwatch armed or the run forgotten took its pending slot', async () => {
+  const r = rig(RESTART, watchIndex);
+  r.actor.act('clean-run', {});
+  r.actor.act('clean-run', {});
+  r.actor.act('unwatch', { repo: 'beta' });
+  r.actor.disarm();
+  r.actor.act('stop-run', {});
+  r.actor.act('stop-run', {});
+  r.actor.forget('run');
+  r.actor.act('stop-run', {});
+  r.actor.act('stop-run', {});
+  expect(r.posts).toEqual([{ path: '/api/repos/alpha/runs/R1/clean', body: {} }]);
+  await r.answer(409, { error: 'no' });
+  r.actor.act('stop-run', {});
+  r.actor.act('stop-run', {});
+  expect(r.posts.at(-1)).toEqual({ path: '/api/repos/alpha/runs/R1/stop', body: { now: false } });
+});
