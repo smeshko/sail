@@ -11,6 +11,7 @@
 // | `failed stopped` | parked at once: a person stopped it, and a stopped run is never retried |
 // | `failed` otherwise | a failed attempt, retried later or parked |
 // | `running` with its pid dead, `suspended interrupted`, `suspended crashed` | adopted under its lease's pid when a live process holds its lease, else resumed, once; a resume of a crashed run that crashed again is parked with the `error:crash` message it left, and with why when it left none |
+// | held (its `HOLD` file), `running` or `suspended` | adopted when a live process holds its lease, else left until `sail resume` clears the hold |
 // | `suspended usage_limit` | adopted when a live process holds its lease; else held, and with it the whole dispatch (and, by the harness key the answer names, every watched workflow on the machine that reaches it), while now is before its reset time (or the back-off after it hit the limit), then resumed, even when this dispatcher resumed it before, or at once when its harness key was released since it hit the limit, unless its resume hit no limit since: then parked with why |
 // | `suspended port_unavailable` | adopted when a live process holds its lease; else held, as its item alone, for the back-off its suspension's place in the run of them calls for (1, 2, 5, 10 then 30 minutes), then resumed; parked with why when its resume was not suspended again, and parked with the call, the count and the last port error once it has been suspended past the schedule |
 // | anything else, such as `suspended until` or `budget_exceeded` | left: a person resumes or stops it |
@@ -29,6 +30,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { EXIT_WAITING } from '../cli/exit-codes';
+import { isHeld } from '../engine/control';
 import { isWaitingRefusal } from '../engine/open-run';
 import { type RunStatus, readStatus } from '../engine/run-dir';
 import { RUN_HEADER_FILE } from '../engine/run-header';
@@ -251,6 +253,10 @@ export async function reconcileItem(item: QueueItem, context: ReconcileContext):
   if (status.status === 'failed') {
     if (status.stopReason === 'stopped') return { kind: 'park', reason: `run ${runId} was stopped` };
     return { kind: 'failed', reason: `run ${runId} failed (${status.stopReason})` };
+  }
+  if (isHeld(runDir)) {
+    const holder = await liveHolder(runDir, runId, context);
+    return holder === undefined ? { kind: 'wait' } : { kind: 'adopt', pid: holder };
   }
   if (status.status === 'suspended' && status.stopReason === 'usage_limit') {
     const holder = await liveHolder(runDir, runId, context);

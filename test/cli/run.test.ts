@@ -159,7 +159,7 @@ test('the usage lists sail port render --each', async () => {
 test('the usage lists sail stop, saying when a run stops', async () => {
   const { stdout } = await runCaptured(['--help']);
   expect(stdout).toMatch(
-    /^ {2}sail stop <run> \[--now\] {2,}Stop at the next call boundary, or end the running call now$/m,
+    /^ {2}sail stop <run> \[--now\|--suspend\] {2,}Stop at the next call boundary, end the running call now, or suspend the run and hold it$/m,
   );
 });
 
@@ -176,7 +176,7 @@ test("the usage lists sail watch and sail unwatch, and not --dispatch, which is 
     /^ {2}sail watch \[<workflow>\.\.\.\] {2,}Watch these workflows, or every watched one: start this repository's watcher, or add them to it$/m,
   );
   expect(stdout).toMatch(
-    /^ {2}sail unwatch \[<workflow>\.\.\.\] {2,}Stop watching them, or every watched one\. The watcher exits when it watches none$/m,
+    /^ {2}sail unwatch \[<workflow>\.\.\.\] {2,}Stop watching them, or every watched one\. Their runs keep running: sail stop ends one\. The watcher exits when it watches none$/m,
   );
   expect(stdout).not.toContain('--dispatch');
 });

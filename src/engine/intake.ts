@@ -23,6 +23,7 @@ import { type ContractError, recordFiles, validateOutput } from './contract';
 import type { LoadedIntake } from './load-workflow';
 import type { Redactor } from './redact';
 import { buildResult, writeResult } from './result';
+import { effortProblemsOf } from './roster';
 import type { Source } from './run-dir';
 import { stepProblems } from './stage-call';
 
@@ -106,6 +107,7 @@ export function intakeProblems(own: Intake): string[] {
       }
     }
   }
+  found.push(...effortProblemsOf(at, own));
   return found;
 }
 

@@ -15,7 +15,7 @@ export const judge = agent('judge', {
     triage: value(Triaged),
   },
   output: Judgement,
-  model: 'deep',
+  model: 'frontier',
   permissions: readonly,
-  budget: { maxTurns: 60, maxUsd: 3, maxMinutes: 40 },
+  budget: { maxTurns: 60, maxUsd: 6, maxMinutes: 40 },
 });

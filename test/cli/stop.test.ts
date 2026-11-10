@@ -5,6 +5,7 @@ import { expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { EXIT_FAILED, EXIT_OK, EXIT_REFUSED } from '../../src/cli/exit-codes';
+import { holdRun, requestSuspend } from '../../src/engine/control';
 import { readStatus } from '../../src/engine/run-dir';
 import { runWorkflow } from '../../src/engine/runtime';
 import { validateRunDir } from '../../src/engine/schemas';
@@ -36,11 +37,18 @@ test('sail stop with no run says its usage, and a run that is unknown, completed
     const listing = () => readdirSync(runs).map((name) => `${name}: ${readdirSync(join(runs, name)).join(' ')}`);
     const before = listing();
     const results = [];
-    for (const argv of [['stop'], ['stop', UNKNOWN], ['stop', COMPLETED], ['stop', FAILED]]) {
+    for (const argv of [
+      ['stop'],
+      ['stop', UNKNOWN, '--suspend', '--now'],
+      ['stop', UNKNOWN],
+      ['stop', COMPLETED],
+      ['stop', FAILED],
+    ]) {
       results.push(await runCaptured(argv, repo.dir, { env: repo.env }));
     }
     expect(results).toEqual([
-      { code: EXIT_REFUSED, stdout: '', stderr: 'sail stop: usage: sail stop <run> [--now]\n' },
+      { code: EXIT_REFUSED, stdout: '', stderr: 'sail stop: usage: sail stop <run> [--now|--suspend]\n' },
+      { code: EXIT_REFUSED, stdout: '', stderr: 'sail stop: usage: sail stop <run> [--now|--suspend]\n' },
       { code: EXIT_REFUSED, stdout: '', stderr: `sail stop: no run '${UNKNOWN}' in .sail-runs\n` },
       {
         code: EXIT_REFUSED,
@@ -56,6 +64,58 @@ test('sail stop with no run says its usage, and a run that is unknown, completed
     expect(listing()).toEqual(before);
   });
 });
+
+test('sail stop --suspend holds a suspended run and prints the held line, and sail resume removes the hold and runs it to its end', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const end = await runWorkflow({
+      cwd: repo.dir,
+      adapters: await fakeAdapters(repo.dir),
+      workflow: 'ticket-to-pr',
+      ticket: 'FAKE-1',
+      until: 'spec',
+    });
+    if ('refused' in end) throw new Error(end.refused);
+    const held = await runCaptured(['stop', end.runId, '--suspend'], repo.dir, { env: repo.env });
+    expect({ ...held, hold: existsSync(join(end.dir, 'HOLD')), status: readStatus(end.dir) }).toEqual({
+      code: EXIT_OK,
+      stdout: `sail stop: run ${end.runId} is held: the watcher leaves it until sail resume ${end.runId}\n`,
+      stderr: '',
+      hold: true,
+      status: { status: 'suspended', stopReason: 'until' },
+    });
+    const resumed = await runCaptured(['resume', end.runId], repo.dir, { env: repo.env });
+    expect({ code: resumed.code, hold: existsSync(join(end.dir, 'HOLD')), status: readStatus(end.dir) }).toEqual({
+      code: EXIT_OK,
+      hold: false,
+      status: { status: 'completed' },
+    });
+  });
+}, 60_000);
+
+test('sail resume runs a held run to its end though a suspend request the run never took is still in CONTROL (review R5)', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const end = await runWorkflow({
+      cwd: repo.dir,
+      adapters: await fakeAdapters(repo.dir),
+      workflow: 'ticket-to-pr',
+      ticket: 'FAKE-1',
+      until: 'spec',
+    });
+    if ('refused' in end) throw new Error(end.refused);
+    // The run suspended on its own before a boundary took the suspend sail stop --suspend wrote with its hold.
+    holdRun(end.dir);
+    requestSuspend(end.dir);
+    const resumed = await runCaptured(['resume', end.runId], repo.dir, { env: repo.env });
+    expect({
+      code: resumed.code,
+      hold: existsSync(join(end.dir, 'HOLD')),
+      control: existsSync(join(end.dir, 'CONTROL')),
+      status: readStatus(end.dir),
+    }).toEqual({ code: EXIT_OK, hold: false, control: false, status: { status: 'completed' } });
+  });
+}, 60_000);
 
 test('sail stop ends a suspended run with no watcher running, and asks for no ticket source credentials', async () => {
   await withTempRepo(async (repo) => {

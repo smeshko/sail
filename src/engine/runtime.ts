@@ -123,7 +123,7 @@ import { type AgentExecution, asStep, callProblems, type Ran, runCall } from './
 import { type CallPaths, nextTry, runRelative } from './call-dir';
 import { type Clock, systemClock } from './clock';
 import type { ContractError } from './contract';
-import { stopNowRequested, takeControl } from './control';
+import { releaseHold, stopNowRequested, suspendRequested, takeControl } from './control';
 import { bindingChanges } from './fingerprint';
 import {
   INTAKE_INDEX,
@@ -679,10 +679,14 @@ async function drive(
     interrupted(`${hit.key} was ended by a signal sail didn't send: a resume runs it again`);
   const stopNow = new AbortController();
   let stoppedDuring: string | undefined;
+  let suspending = false;
   /** Poll only while a call runs; leave the request for the boundary to take. */
   const watchStop = (key: string) => {
     const poll = () => {
-      if (stopNowRequested(dir) && !stopNow.signal.aborted) {
+      if (stopNow.signal.aborted) return;
+      const suspend = suspendRequested(dir);
+      if (suspend || stopNowRequested(dir)) {
+        suspending = suspend;
         stoppedDuring = key;
         stopNow.abort();
       }
@@ -695,6 +699,12 @@ async function drive(
   /** How the run ends at the boundary before `key`, when its control file asks it to, or undefined to go on. */
   const controlled = (key: string): Promise<RunEnd> | undefined => {
     const request = takeControl(dir);
+    if (request === 'suspended')
+      return interrupted(
+        stopNow.signal.aborted
+          ? `suspended by sail stop --suspend during ${stoppedDuring ?? key}`
+          : `suspended by sail stop --suspend before ${key}`,
+      );
     if (request === 'stopped')
       return failed(
         'stopped',
@@ -706,7 +716,10 @@ async function drive(
   };
   /** How the run ends once `sail stop --now` aborted `key`: stopped, even with its control file gone by now. */
   const stoppedNow = (key: string): Promise<RunEnd> =>
-    controlled(key) ?? failed('stopped', `stopped by sail stop --now during ${stoppedDuring ?? key}`);
+    controlled(key) ??
+    (suspending
+      ? interrupted(`suspended by sail stop --suspend during ${stoppedDuring ?? key}`)
+      : failed('stopped', `stopped by sail stop --now during ${stoppedDuring ?? key}`));
   /** A call whose preconditions hold: what it is supplied with, what an agent runs on, and its steps journaled. */
   interface Ready {
     call: PendingCall;
@@ -1155,6 +1168,7 @@ export async function resumeWorkflow(options: ResumeWorkflowOptions): Promise<Ru
   return awake(options, async (hold) => {
     const opened = await reopenRun(options);
     if ('refused' in opened) return opened;
+    releaseHold(opened.dir);
     return drive(opened, options, { start: false, hold, restored: lostEvents(opened) });
   });
 }

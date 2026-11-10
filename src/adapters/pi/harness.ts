@@ -260,6 +260,7 @@ export function createPiHarness(options: PiHarnessOptions): Harness {
         session = await createSession({
           cwd: request.cwd,
           model: request.model,
+          ...(request.effort === undefined ? {} : { effort: request.effort }),
           systemPrompt: [whereYouWork(request, tools.includes('bash')), '', SUBMIT_CONTRACT].join('\n'),
           tools,
           gate: gateExtension(gate),

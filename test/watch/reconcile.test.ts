@@ -5,6 +5,7 @@ import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFile
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { heldLease, takeLease } from '../../src/adapters/leases';
+import { holdRun } from '../../src/engine/control';
 import { type Status, type StopReason, writeStatus } from '../../src/engine/run-dir';
 import type { QueueItem } from '../../src/watch/queue-store';
 import { type ReconcileContext, type Reconciled, reconcileItem } from '../../src/watch/reconcile';
@@ -546,4 +547,34 @@ test('a held usage_limit run is resumed once its harness key was released after 
   expect(other).toMatchObject({ kind: 'held' });
   const after = await reconcileItem(item(1, DEAD), w.context({ releasedAt: at('2026-10-28T09:55:00.000Z') }));
   expect(after.kind).toBe('resume');
+});
+
+test.each([
+  ['running', 'running', undefined],
+  ['suspended interrupted', 'suspended', 'interrupted'],
+  ['suspended crashed', 'suspended', 'crashed'],
+  ['suspended usage_limit', 'suspended', 'usage_limit'],
+  ['suspended port_unavailable', 'suspended', 'port_unavailable'],
+] as const)('a held %s run is left waiting, never resumed or held on a limit', async (_, status, stopReason) => {
+  const w = world();
+  holdRun(runDir(w.runsDir, 1, status, stopReason));
+  expect(await reconcileItem(item(1, DEAD), w.context())).toEqual({ kind: 'wait' });
+});
+
+test('a held run is left waiting even after this dispatcher has resumed others, while an unheld interrupted run is resumed once', async () => {
+  const w = world();
+  holdRun(runDir(w.runsDir, 1, 'suspended', 'interrupted'));
+  runDir(w.runsDir, 2, 'suspended', 'interrupted');
+  expect([
+    await reconcileItem(item(1, DEAD), w.context({ resumed: true })),
+    await reconcileItem(item(2, DEAD), w.context()),
+  ]).toEqual([{ kind: 'wait' }, { kind: 'resume', from: { status: 'suspended', stopReason: 'interrupted' } }]);
+});
+
+test('a held run whose lease a live process holds is adopted', async () => {
+  const w = world();
+  const dir = runDir(w.runsDir, 1, 'running');
+  holdRun(dir);
+  takeLease(w.leases, REMOTE, branchOf(1), { runId: runIdOf(1), runDir: dir, pid: process.pid });
+  expect(await reconcileItem(item(1, DEAD), w.context())).toEqual({ kind: 'adopt', pid: process.pid });
 });

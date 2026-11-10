@@ -5,6 +5,7 @@ import type { Intake, StageDefinition, Step, Workflow } from '../sdk/index';
 import * as sdk from '../sdk/index';
 import * as intakes from '../sdk/intakes';
 import { intakeProblems } from './intake';
+import { effortProblemsOf } from './roster';
 import { stepProblems } from './stage-call';
 import { watchProblem } from './watchable';
 
@@ -223,7 +224,10 @@ export async function loadDefinitions(dir: string): Promise<Definitions> {
     }
     for (const definition of definitions) {
       // A stage that wires its steps wrongly never runs: each problem names the stage, the step and the binding.
-      const wiring = definition.kind === 'stage' ? stepProblems(definition) : [];
+      const wiring = [
+        ...(definition.kind === 'stage' ? stepProblems(definition) : []),
+        ...effortProblemsOf(`stage '${definition.name}'`, definition),
+      ];
       if (wiring.length > 0) {
         for (const message of wiring) found.problems.push({ file, message });
         continue;

@@ -14,6 +14,8 @@ export interface LinearClientOptions {
   readonly fetch?: Fetch;
   /** How long a request may take. 30 s unless given. */
   readonly timeoutMs?: number;
+  /** The pause before a query's one retry after a transport failure. 1 s unless given. */
+  readonly retryDelayMs?: number;
 }
 
 export interface LinearClient {
@@ -79,6 +81,9 @@ const resetOf = (response: Response): string => {
   return Number.isFinite(reset.getTime()) ? `; the rate limit resets at ${reset.toISOString()}` : '';
 };
 
+/** Whether `document` is a GraphQL query, the only kind safe to send twice: anything but a mutation or subscription. */
+const isQuery = (document: string): boolean => !/^\s*(?:mutation|subscription)\b/.test(document);
+
 export function createLinearClient(options: LinearClientOptions): LinearClient {
   const host = new URL(options.endpoint).host;
   const timeoutMs = options.timeoutMs ?? 30_000;
@@ -102,25 +107,39 @@ export function createLinearClient(options: LinearClientOptions): LinearClient {
     ) {
       if (signal?.aborted) throw transport(op, signal.reason, '', signal);
       const send = options.fetch ?? fetch;
+      /** One exchange: the answer and its text, or the transport's failure. */
+      const exchange = async (): Promise<{ response: Response; text: string }> => {
+        let response: Response;
+        try {
+          response = await send(options.endpoint, {
+            method: 'POST',
+            headers: { Authorization: options.apiKey, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query, variables, operationName }),
+            signal:
+              signal === undefined
+                ? AbortSignal.timeout(timeoutMs)
+                : AbortSignal.any([AbortSignal.timeout(timeoutMs), signal]),
+          });
+        } catch (error) {
+          throw transport(op, error, `Linear is unreachable at ${host}`, signal);
+        }
+        try {
+          return { response, text: await response.text() };
+        } catch (error) {
+          throw transport(op, error, `the answer from Linear at ${host} broke off`, signal);
+        }
+      };
       let response: Response;
       let text: string;
       try {
-        response = await send(options.endpoint, {
-          method: 'POST',
-          headers: { Authorization: options.apiKey, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query, variables, operationName }),
-          signal:
-            signal === undefined
-              ? AbortSignal.timeout(timeoutMs)
-              : AbortSignal.any([AbortSignal.timeout(timeoutMs), signal]),
-        });
+        ({ response, text } = await exchange());
       } catch (error) {
-        throw transport(op, error, `Linear is unreachable at ${host}`, signal);
-      }
-      try {
-        text = await response.text();
-      } catch (error) {
-        throw transport(op, error, `the answer from Linear at ${host} broke off`, signal);
+        // A query that got no answer is sent once more: a long-lived watcher meets dropped keep-alive sockets and
+        // short network blips, and one of those shouldn't fail a dispatch. A mutation may have landed, so it isn't.
+        if (!isQuery(query) || signal?.aborted) throw error;
+        await Bun.sleep(options.retryDelayMs ?? 1_000);
+        if (signal?.aborted) throw transport(op, signal.reason, '', signal);
+        ({ response, text } = await exchange());
       }
       let body: Body;
       try {

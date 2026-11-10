@@ -1,4 +1,5 @@
 #!/usr/bin/env -S bun --no-env-file
+import { stopLiveGroups } from '../engine/process';
 import { run } from './index';
 import { quietOnClosedPipe } from './output';
 import { detectTty } from './tty';
@@ -21,6 +22,12 @@ const code = await run(process.argv.slice(2), {
   stdin: () => Bun.stdin.text(),
   ...(tty === undefined ? {} : { tty }),
 });
+
+// A second Ctrl-C or SIGTERM while a group has its grace ends it at once, rather than ending sail and leaving it.
+const hurry = () => void stopLiveGroups(0);
+process.on('SIGINT', hurry);
+process.on('SIGTERM', hurry);
+await stopLiveGroups();
 
 // Workflow code may still hold timers or I/O handles open after the command ends.
 await Promise.all(

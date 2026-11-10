@@ -346,6 +346,43 @@ test.each([
   ).toEqual(want);
 });
 
+const OPEN_ECHO = ['echo *', 'bash *'];
+const NOT_RESOLVED = ['write', "can't be resolved"] as Want;
+
+test.each([
+  ['cd lib && echo x > $PWD/a.ts', ['src/**'], ['write', 'lib/a.ts']],
+  ['cd lib && echo x > $PWD/a.ts', ['a.ts'], ['write', 'lib/a.ts']],
+  ['cd src && echo x > $PWD/a.ts', ['src/**'], 'allow'],
+  ['cd -P top/.. && echo x > $PWD/a.ts', ['src/**'], 'allow'],
+  ['cd top/.. && echo x > $PWD/a.ts', ['src/**'], ['write', 'a.ts']],
+  ['cd lib && echo x > $OLDPWD/a.ts', ['a.ts'], 'allow'],
+  ['cd lib && cd ../src && echo x > $OLDPWD/a.ts', ['lib/**'], 'allow'],
+  ['(cd lib); echo x > $PWD/a.ts', ['a.ts'], 'allow'],
+  ['echo | cd lib; echo x > $PWD/a.ts', ['a.ts'], 'allow'],
+  ['cd lib & echo x > $PWD/a.ts', ['a.ts'], 'allow'],
+  ['x=$(cd lib); echo x > $PWD/a.ts', ['a.ts'], 'allow'],
+  ["bash -c 'cd lib'; echo x > $PWD/a.ts", ['a.ts'], 'allow'],
+  ['{ cd lib; }; echo x > $PWD/a.ts', ['a.ts'], ['write', 'lib/a.ts']],
+  ['echo && cd lib; echo x > $PWD/a.ts', ['lib/**'], NOT_RESOLVED],
+  ['echo || cd lib; echo x > $OLDPWD/a.ts', ['a.ts', 'lib/**'], NOT_RESOLVED],
+  ['cd lib || echo x > $PWD/a.ts', ['lib/**'], NOT_RESOLVED],
+  ['cd lib || echo; echo x > $PWD/a.ts', ['lib/**'], NOT_RESOLVED],
+  ['echo || cd lib && echo x > $PWD/a.ts', ['a.ts', 'lib/**'], NOT_RESOLVED],
+  ['echo && cd lib && echo && echo x > $PWD/a.ts', ['src/**'], ['write', 'lib/a.ts']],
+] as [string, string[], Want][])('cd and $PWD: %j under %j is %j', (command, write, want) => {
+  const ctx = { ...layout.ctx, env: { ...layout.ctx.env, PWD: layout.worktree } };
+  const decision = decideCommand(placed(command), perms({ commands: OPEN_ECHO, write }), ctx);
+  expect(verdict(decision, want)).toEqual(want);
+});
+
+test('cd and $OLDPWD: with no PWD in the environment the path cannot be resolved', () => {
+  const decision = decideCommand('cd lib && echo x > $OLDPWD/a.ts', perms({ commands: OPEN_ECHO, write: ['a.ts'] }), {
+    ...layout.ctx,
+    env: Object.fromEntries(Object.entries(layout.ctx.env).filter(([name]) => name !== 'PWD')),
+  });
+  expect(verdict(decision, NOT_RESOLVED)).toEqual(NOT_RESOLVED);
+});
+
 test.each([
   ['for f in a; do ls; done > out.txt', { write: ['out.txt'] }, 'allow'],
   ['for f in a; do ls; done > lib/a.dart', { write: ['src/**'] }, ['write', 'lib/a.dart']],
@@ -537,3 +574,101 @@ test('a reason quotes the refused command as written, cut at 200 characters', ()
   const decision = run(long, {});
   expect(decision.allow ? '' : decision.reason).toBe(`\`${long.slice(0, 200)}…\` matches none of the step's commands`);
 });
+
+const SET_OPEN = {
+  commands: ['echo *', 'read *', 'true', 'unset *', 'mapfile *', 'export *', 'printf *', 'getopts *'],
+  write: ['$STAGE_OUT/**'],
+};
+
+test.each([
+  ['read STAGE_OUT; echo x > $STAGE_OUT/r.md', SET_OPEN, UNRESOLVED('write')],
+  ['read -r A STAGE_OUT; echo x > $STAGE_OUT/r.md', SET_OPEN, UNRESOLVED('write')],
+  ['unset STAGE_OUT; echo x > $STAGE_OUT/r.md', SET_OPEN, UNRESOLVED('write')],
+  ['mapfile STAGE_OUT; echo x > $STAGE_OUT/r.md', SET_OPEN, UNRESOLVED('write')],
+  ['export STAGE_OUT=lib; echo x > $STAGE_OUT/r.md', SET_OPEN, UNRESOLVED('write')],
+  ['printf -v STAGE_OUT x; echo x > $STAGE_OUT/r.md', SET_OPEN, UNRESOLVED('write')],
+  ['getopts ab STAGE_OUT; echo x > $STAGE_OUT/r.md', SET_OPEN, UNRESOLVED('write')],
+  ['STAGE_OUT=lib echo x > $STAGE_OUT/r.md', SET_OPEN, 'allow'],
+  ['STAGE_OUT=lib true; echo x > $STAGE_OUT/r.md', SET_OPEN, UNRESOLVED('write')],
+  ['while true; do echo x > $STAGE_OUT/r.md; STAGE_OUT=lib; done', SET_OPEN, UNRESOLVED('write')],
+  ['for f in a; do echo x > $STAGE_OUT/r.md; read STAGE_OUT; done', SET_OPEN, UNRESOLVED('write')],
+  [
+    "while true; do echo x > $STAGE_OUT/r.md; eval 'STAGE_OUT=lib'; done",
+    { ...SET_OPEN, commands: ['*'] },
+    UNRESOLVED('write'),
+  ],
+  ['echo x > $STAGE_OUT/r.md; read STAGE_OUT', SET_OPEN, 'allow'],
+  [
+    'declare -n r=STAGE_OUT; r=lib; echo x > $STAGE_OUT/r.md',
+    { ...SET_OPEN, commands: ['*'] },
+    ['commands', 'a nameref'],
+  ],
+  ['typeset -gn r=STAGE_OUT; echo x > $STAGE_OUT/r.md', { ...SET_OPEN, commands: ['*'] }, ['commands', 'a nameref']],
+  ['local -n r; echo x > $STAGE_OUT/r.md', { ...SET_OPEN, commands: ['*'] }, ['commands', 'a nameref']],
+  ['declare -r r=x; echo x > $STAGE_OUT/r.md', { ...SET_OPEN, commands: ['*'] }, 'allow'],
+  ['git ls-files | while read -r f; do git show "$f"; done', GIT_ONLY, ['commands', 'hold an expansion']],
+] as [string, Partial<Permissions>, Want][])(
+  'names a command sets shadow the environment: %j under %j is %j',
+  (command, open, want) => {
+    expect(verdict(run(command, open), want)).toEqual(want);
+  },
+);
+
+test.each([
+  ['echo x > $REPLY/r.md', 'allow'],
+  ['read; echo x > $REPLY/r.md', UNRESOLVED('write')],
+  ['read -r; echo x > $REPLY/r.md', UNRESOLVED('write')],
+  ['mapfile; echo x > $MAPFILE/r.md', UNRESOLVED('write')],
+  ['readarray; echo x > $MAPFILE/r.md', UNRESOLVED('write')],
+  ['getopts ab x; echo x > $OPTARG/r.md', UNRESOLVED('write')],
+  ['getopts ab x; echo x > $OPTIND/r.md', UNRESOLVED('write')],
+] as [string, Want][])(
+  'a name a builtin sets without being given it shadows the environment: %j is %j',
+  (command, want) => {
+    const names = ['REPLY', 'MAPFILE', 'OPTARG', 'OPTIND'];
+    const env = { ...layout.ctx.env, ...Object.fromEntries(names.map((name) => [name, layout.stageOut])) };
+    const open = {
+      commands: ['echo *', 'read *', 'read', 'mapfile', 'readarray', 'getopts *'],
+      write: ['$STAGE_OUT/**'],
+    };
+    const decision = decideCommand(command, perms(open), { ...layout.ctx, env });
+    expect(verdict(decision, want)).toEqual(want);
+  },
+);
+
+const BARE = { commands: ['echo *', 'true', 'sh *', 'eval *'], write: ['src/**'] };
+const STAGE_UNKNOWN = UNRESOLVED('write');
+
+test.each([
+  ['STAGE_OUT=lib; echo x > $STAGE_OUT/a.dart', { ...SET_OPEN, write: ['$STAGE_OUT/**'] }, ['write', 'lib/a.dart']],
+  ['STAGE_OUT=src; echo x > $STAGE_OUT/a.ts', BARE, 'allow'],
+  ['STAGE_OUT=src && echo x > $STAGE_OUT/a.ts', BARE, 'allow'],
+  ['A=src B=$A/a.ts; echo x > $B', BARE, 'allow'],
+  ['X=lib; echo x > $X/a.dart', BARE, ['write', 'lib/a.dart']],
+  ['(STAGE_OUT=src); echo x > $STAGE_OUT/a.ts', BARE, STAGE_UNKNOWN],
+  ['echo $(STAGE_OUT=src); echo x > $STAGE_OUT/a.ts', BARE, STAGE_UNKNOWN],
+  ['STAGE_OUT=src | true; echo x > $STAGE_OUT/a.ts', BARE, STAGE_UNKNOWN],
+  ['true && STAGE_OUT=src; echo x > $STAGE_OUT/a.ts', BARE, STAGE_UNKNOWN],
+  ['STAGE_OUT=src & echo x > $STAGE_OUT/a.ts', BARE, STAGE_UNKNOWN],
+  ['true && { STAGE_OUT=src; }; echo x > $STAGE_OUT/a.ts', BARE, STAGE_UNKNOWN],
+  ['if true; then STAGE_OUT=src; fi; echo x > $STAGE_OUT/a.ts', BARE, STAGE_UNKNOWN],
+  ['case a in a) STAGE_OUT=src;; esac; echo x > $STAGE_OUT/a.ts', BARE, STAGE_UNKNOWN],
+  ['if true; then STAGE_OUT=src; echo x > $STAGE_OUT/a.ts; fi', BARE, 'allow'],
+  ['{ STAGE_OUT=src; }; echo x > $STAGE_OUT/a.ts', BARE, 'allow'],
+  ['for f in a b; do X=src/$f; echo x > $X; done', BARE, 'allow'],
+  ["X=src; sh -c 'echo x > $X/a.ts'", BARE, STAGE_UNKNOWN],
+  ["STAGE_OUT=src; sh -c 'echo x > $STAGE_OUT/a.ts'", BARE, 'allow'],
+  ["sh -c 'STAGE_OUT=src'; echo x > $STAGE_OUT/a.ts", BARE, ['write', 'a.ts']],
+  ["X=src; eval 'echo x > $X/a.ts'", BARE, 'allow'],
+  ['f=a; git show $f', GIT_ONLY, 'allow'],
+  ['X=/tmp/; X+=src; echo x > $X/a.ts', BARE, STAGE_UNKNOWN],
+  ['X+=src; echo x > $X/a.ts', BARE, STAGE_UNKNOWN],
+  ['X=src; X=lib >$X/a.dart', BARE, ['write', 'lib/a.dart']],
+  ['STAGE_OUT=lib >$STAGE_OUT/a.dart', { ...SET_OPEN, write: ['$STAGE_OUT/**'] }, ['write', 'lib/a.dart']],
+  ['true && STAGE_OUT=lib >$STAGE_OUT/a.dart', { ...SET_OPEN, write: ['$STAGE_OUT/**'] }, STAGE_UNKNOWN],
+] as [string, Partial<Permissions>, Want][])(
+  'a bare assignment shadows the environment where it surely runs: %j under %j is %j',
+  (command, open, want) => {
+    expect(verdict(run(command, open), want)).toEqual(want);
+  },
+);
