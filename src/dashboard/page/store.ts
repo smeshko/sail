@@ -1,0 +1,170 @@
+// What the page's shell holds, as one object made per `boot()`: the index, the open run and its model, the open queue
+// streams, what was read for the selected call, the person's `UiState`, the armed and pending flags, and the regions
+// waiting to be drawn. Every module of the shell takes the store as its first argument. `mark()` is the one way to ask
+// for a draw: it adds regions to the dirty set and schedules the flush, at most one per `FLUSH_MS`.
+import type { RunActions } from '../actions';
+import type { IndexRepo } from '../files';
+import { attention, identity } from './attention';
+import type { PageHost, Region } from './host';
+import { queuePanels } from './index-model';
+import type { Loaded } from './inspector-view';
+import { type QueueStream, queueId } from './queue-view';
+import type { RunModel } from './run-model';
+import { savedExpanded, savedHidden, savedTheme, storedCleared } from './saved';
+import type { CallOutput } from './timeline-view';
+import { initialUi, type UiState } from './ui-state';
+
+export const FLUSH_MS = 100;
+
+export interface OpenRun {
+  repo: string;
+  runId: string;
+  model: RunModel;
+  ended: boolean;
+  /** When its stream's `end` arrived, by the host's clock. */
+  endSeen?: number;
+  error?: string;
+  connection?: { close(): void };
+  retry?: number;
+}
+
+export interface OpenQueue {
+  connection?: { close(): void };
+  stream: QueueStream;
+  retry?: number;
+}
+
+export interface Store {
+  readonly host: PageHost;
+  readonly ui: UiState;
+  index: IndexRepo[] | undefined;
+  run: OpenRun | undefined;
+  readonly queues: Map<string, OpenQueue>;
+  /** The selected call's result and log, as read. */
+  result: Loaded<unknown> | undefined;
+  log: Loaded<string> | undefined;
+  /** The key the log tab's text was read for: a call's, or one of its steps'. */
+  logFor: string | undefined;
+  /** The selected call's script output by call or step key, once a command is opened. */
+  outputs: Record<string, CallOutput> | undefined;
+  /** The drawer's file, as read. */
+  doc: Loaded<string> | undefined;
+  /** What the open run offers, as its actions route answered. */
+  offers: RunActions | undefined;
+  /** What the open run's status and queue item were when its actions were read. */
+  offersFor: string | undefined;
+  /** The stage a Restart was armed with, and whether a start is waiting for its answer. */
+  armedStage: string | undefined;
+  starting: boolean;
+  /** Whether the page's raise field and stage list are the open run's, not those of the run selected before it. */
+  fieldsOwn: boolean;
+  addFieldsOwn: boolean;
+  /** The needs-attention identities a person cleared, and the identities of the rows last drawn. */
+  cleared: Set<string>;
+  drawn: string[];
+  /** Set when a call is selected before its card exists: the cursor moves to it once it does. */
+  cursorPending: boolean;
+  /** What the URL asks to open, until the first index: then it is opened, or dropped when its run isn't listed. */
+  start: Record<string, string> | undefined;
+  stopped: boolean;
+  /** Bumped on every change of the selected call: a read made for an older one is dropped. */
+  selection: number;
+  /** Bumped on every read asked for: only the latest of each kind is shown. */
+  resultRead: number;
+  logRead: number;
+  outputRead: number;
+  docRead: number;
+  offersRead: number;
+  lastLogRead: number;
+  lastOutputRead: number;
+  flushTimer: number | undefined;
+  logTimer: number | undefined;
+  outputTimer: number | undefined;
+  tickTimer: number | undefined;
+  indexRetry: number | undefined;
+  indexConnection: { close(): void } | undefined;
+  /** The regions to draw at the next flush. */
+  readonly dirty: Set<Region>;
+  /** What each region was last written with, and the regions whose fields the shell has just given up. */
+  readonly written: Map<Region, string>;
+  readonly fresh: Set<Region>;
+  /** Draws the dirty regions: the draw loop sets it. */
+  flush: () => void;
+  mark: (...regions: Region[]) => void;
+}
+
+export function createStore(host: PageHost): Store {
+  const ui = initialUi(host.offset());
+  ui.theme = savedTheme(host) ?? ui.theme;
+  host.setTheme(ui.theme);
+  ui.hidden = savedHidden(host);
+  ui.expanded = savedExpanded(host);
+  const cleared = new Set<string>(storedCleared(host));
+  host.setInspector(ui.inspector);
+  const store: Store = {
+    host,
+    ui,
+    index: undefined,
+    run: undefined,
+    queues: new Map(),
+    result: undefined,
+    log: undefined,
+    logFor: undefined,
+    outputs: undefined,
+    doc: undefined,
+    offers: undefined,
+    offersFor: undefined,
+    armedStage: undefined,
+    starting: false,
+    fieldsOwn: false,
+    addFieldsOwn: true,
+    cleared,
+    drawn: [],
+    cursorPending: false,
+    start: host.start(),
+    stopped: false,
+    selection: 0,
+    resultRead: 0,
+    logRead: 0,
+    outputRead: 0,
+    docRead: 0,
+    offersRead: 0,
+    lastLogRead: Number.NEGATIVE_INFINITY,
+    lastOutputRead: Number.NEGATIVE_INFINITY,
+    flushTimer: undefined,
+    logTimer: undefined,
+    outputTimer: undefined,
+    tickTimer: undefined,
+    indexRetry: undefined,
+    indexConnection: undefined,
+    dirty: new Set(),
+    written: new Map(),
+    fresh: new Set(),
+    flush: () => {
+      store.flushTimer = undefined;
+    },
+    mark: (...regions) => {
+      for (const region of regions) store.dirty.add(region);
+      if (store.flushTimer === undefined && !store.stopped)
+        store.flushTimer = host.later(() => store.flush(), FLUSH_MS);
+    },
+  };
+  return store;
+}
+
+export const summaryOf = (store: Store, open: OpenRun | undefined) =>
+  store.index?.find((repo) => repo.name === open?.repo)?.runs.find((item) => item.runId === open?.runId)?.summary;
+
+export const selected = (store: Store) => store.run?.model.cards.find((entry) => entry.key === store.ui.key);
+
+/** The queue the centre shows in place of the run, while the index lists it. */
+export const openQueue = (store: Store) =>
+  store.ui.queue === undefined
+    ? undefined
+    : queuePanels(store.index ?? []).find((panel) => queueId(panel.repo, panel.workflow) === store.ui.queue);
+
+/** The card whose timeline the centre shows, when it shows one: a card selected before it exists shows the run. */
+export const opened = (store: Store) => (store.ui.timeline ? selected(store) : undefined);
+
+export const listed = (store: Store) =>
+  store.index === undefined ? [] : attention(store.index).filter((item) => !store.cleared.has(identity(item)));

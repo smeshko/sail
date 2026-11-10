@@ -50,56 +50,25 @@ import { isMarkdown, renderDrawer } from './drawer-view';
 import type { PageHost, Region } from './host';
 import { REGIONS } from './host';
 import { html } from './html';
-import { newestFirst, queuePanels, railRepos, statusOf } from './index-model';
-import { type Loaded, logTarget, renderInspector } from './inspector-view';
-import { type QueueStream, queueId, renderQueue } from './queue-view';
+import { newestFirst, railRepos, statusOf } from './index-model';
+import { logTarget, renderInspector } from './inspector-view';
+import { queueId, renderQueue } from './queue-view';
 import { renderRail } from './rail-view';
-import { applyEvent, emptyRun, type RunModel } from './run-model';
+import { applyEvent, emptyRun } from './run-model';
 import { renderRun, renderStatus } from './run-view';
-import { type CallOutput, outputKey, renderTimeline, scriptId } from './timeline-view';
-import {
-  FILTERS,
-  type InspectorTab,
-  initialUi,
-  TABS,
-  THEMES,
-  type Theme,
-  type TimelineFilter,
-  type UiState,
-} from './ui-state';
+import { FILTER_KEY, RAIL_KEY, saveCleared, storedCleared, THEME_KEY } from './saved';
+import { createStore, listed, type OpenQueue, type OpenRun, opened, openQueue, selected, summaryOf } from './store';
+import { outputKey, renderTimeline, scriptId } from './timeline-view';
+import { FILTERS, type InspectorTab, TABS, THEMES, type TimelineFilter, type UiState } from './ui-state';
 
-export const THEME_KEY = 'sail-dashboard-theme';
-/** The `localStorage` key the rail's opened repositories and workflows are kept under, as a JSON list. */
-export const RAIL_KEY = 'sail-dashboard-rail-expanded';
-/** Where the kinds of entry the timeline hides are saved, comma-separated. */
-export const FILTER_KEY = 'sail-dashboard-timeline-hidden';
-/** Where the identities of the needs-attention items a person cleared are kept, as a JSON list of strings. */
-export const CLEARED_KEY = 'sail-dashboard-attention-cleared';
+export { CLEARED_KEY, FILTER_KEY, RAIL_KEY, THEME_KEY } from './saved';
+export { FLUSH_MS } from './store';
 export const RECONNECT_MS = 2000;
-export const FLUSH_MS = 100;
 export const LOG_REFRESH_MS = 1000;
 /** How often a running time is drawn again. */
 export const TICK_MS = 1000;
 /** How many of a queue's events its panel lists. */
 export const RECENT_EVENTS = 20;
-
-interface OpenRun {
-  repo: string;
-  runId: string;
-  model: RunModel;
-  ended: boolean;
-  /** When its stream's `end` arrived, by the host's clock. */
-  endSeen?: number;
-  error?: string;
-  connection?: { close(): void };
-  retry?: number;
-}
-
-interface OpenQueue {
-  connection?: { close(): void };
-  stream: QueueStream;
-  retry?: number;
-}
 
 export interface Page {
   stop(): void;
@@ -144,152 +113,63 @@ function parse(text: string): Message | undefined {
 }
 
 export function boot(host: PageHost): Page {
-  const ui = initialUi(host.offset());
-  const saved = host.load(THEME_KEY);
-  if ((THEMES as readonly string[]).includes(saved ?? '')) ui.theme = saved as Theme;
-  host.setTheme(ui.theme);
-  ui.hidden = FILTERS.filter((kind) => (host.load(FILTER_KEY) ?? '').split(',').includes(kind));
-  const names = (() => {
-    try {
-      const stored: unknown = JSON.parse(host.load(RAIL_KEY) ?? '[]');
-      return Array.isArray(stored) && stored.every((name) => typeof name === 'string') ? (stored as string[]) : [];
-    } catch {
-      return [];
-    }
-  })();
-  ui.expanded = names;
-  /** The cleared identities in storage now: another tab may have saved some since this one read them. */
-  const storedCleared = (): string[] => {
-    try {
-      const stored: unknown = JSON.parse(host.load(CLEARED_KEY) ?? '[]');
-      return Array.isArray(stored) && stored.every((id) => typeof id === 'string') ? (stored as string[]) : [];
-    } catch {
-      return [];
-    }
-  };
-  let cleared = new Set<string>(storedCleared());
-  host.setInspector(ui.inspector);
-
-  let index: IndexRepo[] | undefined;
-  let run: OpenRun | undefined;
-  let result: Loaded<unknown> | undefined;
-  let log: Loaded<string> | undefined;
-  /** What the open run offers, as its actions route answered. */
-  let offers: RunActions | undefined;
-  /** Bumped on every read of the actions: only the latest is shown. */
-  let offersRead = 0;
-  /** What the open run's status and queue item were when its actions were read. */
-  let offersFor: string | undefined;
-  /** The stage a Restart was armed with, and whether a start is waiting for its answer. */
-  let armedStage: string | undefined;
-  let starting = false;
-  /** Whether the page's raise field and stage list are the open run's, not those of the run selected before it. */
-  let fieldsOwn = false;
-  /** The selected call's script output by call or step key, once a command is opened. */
-  let outputs: Record<string, CallOutput> | undefined;
-  let outputRead = 0;
-  let lastOutputRead = Number.NEGATIVE_INFINITY;
-  let outputTimer: number | undefined;
-  /** The drawer's file, as read. */
-  let doc: Loaded<string> | undefined;
-  /** Bumped on every file the drawer opens: only the latest read is shown. */
-  let docRead = 0;
-  /** Bumped on every change of the selected call: a read made for an older one is dropped. */
-  let selection = 0;
-  /** Bumped on every result and log read asked for: only the latest of each is shown. */
-  let resultRead = 0;
-  let logRead = 0;
-  let lastLogRead = Number.NEGATIVE_INFINITY;
-  /** The key the log tab's text was read for: a call's, or one of its steps'. */
-  let logFor: string | undefined;
-  /** Set when a call is selected before its card exists: the cursor moves to it once it does. */
-  let cursorPending = false;
-  /** What the URL asks to open, until the first index: then it is opened, or dropped when its run isn't listed. */
-  let start: Record<string, string> | undefined = host.start();
-  let logTimer: number | undefined;
-  const queues = new Map<string, OpenQueue>();
-  let indexConnection: { close(): void } | undefined;
-  let tickTimer: number | undefined;
-  let indexRetry: number | undefined;
-  let stopped = false;
-
-  let addFieldsOwn = true;
-
-  const dirty = new Set<Region>();
-  /** What each region was last written with, and the regions whose fields the shell has just given up. */
-  const written = new Map<Region, string>();
-  const fresh = new Set<Region>();
-  let flushTimer: number | undefined;
-
-  const summaryOf = (open: OpenRun | undefined) =>
-    index?.find((repo) => repo.name === open?.repo)?.runs.find((item) => item.runId === open?.runId)?.summary;
-
-  const selected = () => run?.model.cards.find((entry) => entry.key === ui.key);
-  /** The queue the centre shows in place of the run, while the index lists it. */
-  const openQueue = () =>
-    ui.queue === undefined
-      ? undefined
-      : queuePanels(index ?? []).find((panel) => queueId(panel.repo, panel.workflow) === ui.queue);
-  /** The card whose timeline the centre shows, when it shows one: a card selected before it exists shows the run. */
-  const opened = () => (ui.timeline ? selected() : undefined);
-
-  const listed = () => (index === undefined ? [] : attention(index).filter((item) => !cleared.has(identity(item))));
-  /** The identities of the rows needs attention last drew, which are what All clear clears. */
-  let drawn: string[] = [];
+  const store = createStore(host);
+  const ui = store.ui;
+  const { mark } = store;
 
   const draw: Record<Region, () => string> = {
     rail: () => {
-      if (index === undefined) return html`<div class="qempty">connecting…</div>`.value;
+      if (store.index === undefined) return html`<div class="qempty">connecting…</div>`.value;
       // A raise typed and a stage chosen in the open run's menu survive the draw, but not a switch of run.
-      if (fieldsOwn) {
+      if (store.fieldsOwn) {
         ui.raise = host.value('raise') ?? ui.raise;
         ui.restartStage = host.value('stage') ?? ui.restartStage;
         const now = host.value('now');
         if (now !== undefined) ui.stopNow = now !== '';
       }
-      fieldsOwn = true;
-      return renderRail(railRepos(index, host.now()), ui, host.now(), offers).value;
+      store.fieldsOwn = true;
+      return renderRail(railRepos(store.index, host.now()), ui, host.now(), store.offers).value;
     },
     attention: () => {
-      const items = listed();
-      drawn = items.map(identity);
+      const items = listed(store);
+      store.drawn = items.map(identity);
       return renderAttention(items, ui.attention).value;
     },
     main: () => {
-      const panel = openQueue();
+      const panel = openQueue(store);
       if (panel !== undefined) {
         // What was typed in the add field survives the draw, but not an add that took.
-        if (addFieldsOwn) {
+        if (store.addFieldsOwn) {
           ui.addTicket = host.value('add-ticket') ?? ui.addTicket;
           const forced = host.value('add-force');
           if (forced !== undefined) ui.addForce = forced !== '';
         }
-        addFieldsOwn = true;
+        store.addFieldsOwn = true;
         // An armed drop whose item is running or gone asks again once the item can be dropped, and its menu shuts.
         const armedItem = panel.items.find((item) => item.dedupKey === ui.armedDrop);
         if (armedItem === undefined || armedItem.state === 'dispatched') delete ui.armedDrop;
         const menuItem = panel.items.find((item) => item.dedupKey === ui.itemMenu);
         if (menuItem === undefined || menuItem.state === 'dispatched') delete ui.itemMenu;
-        return renderQueue(panel, queues.get(ui.queue ?? '')?.stream, ui, host.now()).value;
+        return renderQueue(panel, store.queues.get(ui.queue ?? '')?.stream, ui, host.now()).value;
       }
-      if (run === undefined) return html`<div class="qempty">no run selected</div>`.value;
-      const error = run.error === undefined ? '' : html`<div class="code bad">${run.error}</div>`;
-      const card = opened();
+      if (store.run === undefined) return html`<div class="qempty">no run selected</div>`.value;
+      const error = store.run.error === undefined ? '' : html`<div class="code bad">${store.run.error}</div>`;
+      const card = opened(store);
       const view =
         card === undefined
-          ? renderRun(run.model, summaryOf(run), ui, host.now())
-          : renderTimeline(card, ui, host.now(), outputs);
+          ? renderRun(store.run.model, summaryOf(store, store.run), ui, host.now())
+          : renderTimeline(card, ui, host.now(), store.outputs);
       return html`${error}${view}`.value;
     },
-    inspector: () => renderInspector(selected(), run?.model.roster, result, log, ui).value,
-    status: () => (run === undefined ? '' : renderStatus(run.model, summaryOf(run)).value),
-    drawer: () => renderDrawer(ui, doc).value,
+    inspector: () => renderInspector(selected(store), store.run?.model.roster, store.result, store.log, ui).value,
+    status: () => (store.run === undefined ? '' : renderStatus(store.run.model, summaryOf(store, store.run)).value),
+    drawer: () => renderDrawer(ui, store.doc).value,
   };
 
   const flush = () => {
-    flushTimer = undefined;
-    const regions = REGIONS.filter((region) => dirty.has(region));
-    dirty.clear();
+    store.flushTimer = undefined;
+    const regions = REGIONS.filter((region) => store.dirty.has(region));
+    store.dirty.clear();
     for (const region of regions) {
       // A region that can't be drawn says so, and the others are still drawn (review R2-1).
       let markup: string;
@@ -300,34 +180,33 @@ export function boot(host: PageHost): Page {
       }
       // A region whose markup is what it was is not written, nor is its timeline scrolled, unless the shell has just
       // given up its fields: then it is written so they hold the markup's values.
-      const isFresh = fresh.delete(region);
-      if (!isFresh && written.get(region) === markup) continue;
-      written.set(region, markup);
+      const isFresh = store.fresh.delete(region);
+      if (!isFresh && store.written.get(region) === markup) continue;
+      store.written.set(region, markup);
       host.render(region, markup, isFresh);
       // A running call's timeline, followed, shows its newest entry: not while the queue holds the centre.
-      if (region === 'main' && ui.follow && openQueue() === undefined && opened()?.state === 'running')
+      if (region === 'main' && ui.follow && openQueue(store) === undefined && opened(store)?.state === 'running')
         host.scrollToEnd(region);
     }
   };
 
-  const mark = (...regions: Region[]) => {
-    for (const region of regions) dirty.add(region);
-    if (flushTimer === undefined && !stopped) flushTimer = host.later(flush, FLUSH_MS);
-  };
+  store.flush = flush;
 
   /** Whether a running time is on screen: the open run's, one of its calls', or a run's in the rail. */
   const anyRunning = () =>
-    (run !== undefined && run.model.end === undefined && run.model.cards.some((card) => card.state === 'running')) ||
-    (index ?? []).some((repo) => repo.runs.some((item) => statusOf(item) === 'running'));
+    (store.run !== undefined &&
+      store.run.model.end === undefined &&
+      store.run.model.cards.some((card) => card.state === 'running')) ||
+    (store.index ?? []).some((repo) => repo.runs.some((item) => statusOf(item) === 'running'));
 
   /** Draws the running times again each second, for as long as something runs. */
   const tick = () => {
-    if (tickTimer !== undefined || stopped || !anyRunning()) return;
-    tickTimer = host.later(() => {
-      tickTimer = undefined;
+    if (store.tickTimer !== undefined || store.stopped || !anyRunning()) return;
+    store.tickTimer = host.later(() => {
+      store.tickTimer = undefined;
       if (!anyRunning()) return;
       mark('rail', 'main', 'status');
-      if (selected()?.state === 'running') mark('inspector');
+      if (selected(store)?.state === 'running') mark('inspector');
       tick();
     }, TICK_MS);
   };
@@ -336,66 +215,66 @@ export function boot(host: PageHost): Page {
     `/api/repos/${enc(open.repo)}/runs/${enc(open.runId)}/calls/${enc(key)}`;
 
   const readResult = () => {
-    const open = run;
+    const open = store.run;
     const key = ui.key;
     if (open === undefined || key === undefined) return;
-    const asked = ++resultRead;
-    const forSelection = selection;
-    result = { state: 'loading' };
+    const asked = ++store.resultRead;
+    const forSelection = store.selection;
+    store.result = { state: 'loading' };
     void host.get(`${callPath(open, key)}/result`).then((answer) => {
-      if (asked !== resultRead || forSelection !== selection) return;
+      if (asked !== store.resultRead || forSelection !== store.selection) return;
       if (answer.status === 200) {
         try {
-          result = { state: 'loaded', value: JSON.parse(answer.body) as unknown };
+          store.result = { state: 'loaded', value: JSON.parse(answer.body) as unknown };
         } catch {
-          result = { state: 'missing', message: 'result.json is not JSON' };
+          store.result = { state: 'missing', message: 'result.json is not JSON' };
         }
-      } else result = { state: 'missing' };
+      } else store.result = { state: 'missing' };
       mark('inspector');
     });
   };
 
   const readLog = () => {
-    const open = run;
+    const open = store.run;
     const key = ui.key;
     const card = open?.model.cards.find((entry) => entry.key === key);
     if (open === undefined || key === undefined || card === undefined) return;
     const target = logTarget(card, ui);
     const stream = ui.stream !== undefined && target.streams.includes(ui.stream) ? ui.stream : target.streams[0];
     if (stream === undefined) return;
-    const asked = ++logRead;
-    const forSelection = selection;
-    lastLogRead = host.now();
-    if (target.key !== logFor) log = undefined;
-    logFor = target.key;
-    if (log === undefined) log = { state: 'loading' };
+    const asked = ++store.logRead;
+    const forSelection = store.selection;
+    store.lastLogRead = host.now();
+    if (target.key !== store.logFor) store.log = undefined;
+    store.logFor = target.key;
+    if (store.log === undefined) store.log = { state: 'loading' };
     void host.get(`${callPath(open, target.key)}/log?stream=${enc(stream)}`).then((answer) => {
-      if (asked !== logRead || forSelection !== selection) return;
-      log = answer.status === 200 ? { state: 'loaded', value: answer.body } : { state: 'missing' };
+      if (asked !== store.logRead || forSelection !== store.selection) return;
+      store.log = answer.status === 200 ? { state: 'loaded', value: answer.body } : { state: 'missing' };
       mark('inspector');
     });
   };
 
   /** Reads a running call's log again, at most once a second, and at once when the log tab has moved to its next step. */
   const refreshLog = () => {
-    const card = run?.model.cards.find((entry) => entry.key === ui.key);
-    if (card !== undefined && logTarget(card, ui).key !== logFor) {
-      if (logTimer !== undefined) host.cancel(logTimer);
-      logTimer = undefined;
+    const card = store.run?.model.cards.find((entry) => entry.key === ui.key);
+    if (card !== undefined && logTarget(card, ui).key !== store.logFor) {
+      if (store.logTimer !== undefined) host.cancel(store.logTimer);
+      store.logTimer = undefined;
       return readLog();
     }
-    if (logTimer !== undefined) return;
-    const wait = Math.max(0, lastLogRead + LOG_REFRESH_MS - host.now());
+    if (store.logTimer !== undefined) return;
+    const wait = Math.max(0, store.lastLogRead + LOG_REFRESH_MS - host.now());
     if (wait === 0) return readLog();
-    logTimer = host.later(() => {
-      logTimer = undefined;
+    store.logTimer = host.later(() => {
+      store.logTimer = undefined;
       readLog();
     }, wait);
   };
 
   /** The read keys of the selected call's opened script rows. */
   const openedOutputKeys = (): string[] => {
-    const card = run?.model.cards.find((entry) => entry.key === ui.key);
+    const card = store.run?.model.cards.find((entry) => entry.key === ui.key);
     if (card === undefined) return [];
     return card.timeline
       .filter((entry) => entry.kind === 'script')
@@ -405,20 +284,20 @@ export function boot(host: PageHost): Page {
 
   /** Reads stdout and stderr for opened script rows and keys already read. */
   const readOutput = () => {
-    const open = run;
+    const open = store.run;
     const key = ui.key;
     if (open === undefined || key === undefined) return;
-    const asked = ++outputRead;
-    const forSelection = selection;
-    lastOutputRead = host.now();
-    outputs ??= {};
-    const keys = new Set([...Object.keys(outputs), ...openedOutputKeys()]);
+    const asked = ++store.outputRead;
+    const forSelection = store.selection;
+    store.lastOutputRead = host.now();
+    store.outputs ??= {};
+    const keys = new Set([...Object.keys(store.outputs), ...openedOutputKeys()]);
     for (const key of keys) {
-      outputs[key] ??= { stdout: { state: 'loading' }, stderr: { state: 'loading' } };
-      const output = outputs[key];
+      store.outputs[key] ??= { stdout: { state: 'loading' }, stderr: { state: 'loading' } };
+      const output = store.outputs[key];
       for (const stream of ['stdout', 'stderr'] as const) {
         void host.get(`${callPath(open, key)}/log?stream=${stream}`).then((answer) => {
-          if (asked !== outputRead || forSelection !== selection || outputs === undefined) return;
+          if (asked !== store.outputRead || forSelection !== store.selection || store.outputs === undefined) return;
           output[stream] = answer.status === 200 ? { state: 'loaded', value: answer.body } : { state: 'missing' };
           mark('main');
         });
@@ -428,24 +307,24 @@ export function boot(host: PageHost): Page {
 
   /** Reads a running call's output again, at most once a second. */
   const refreshOutput = () => {
-    if (outputTimer !== undefined) return;
-    const wait = Math.max(0, lastOutputRead + LOG_REFRESH_MS - host.now());
+    if (store.outputTimer !== undefined) return;
+    const wait = Math.max(0, store.lastOutputRead + LOG_REFRESH_MS - host.now());
     if (wait === 0) return readOutput();
-    outputTimer = host.later(() => {
-      outputTimer = undefined;
+    store.outputTimer = host.later(() => {
+      store.outputTimer = undefined;
       readOutput();
     }, wait);
   };
 
   const clearCall = () => {
-    selection++;
-    result = undefined;
-    log = undefined;
-    outputs = undefined;
-    if (logTimer !== undefined) host.cancel(logTimer);
-    logTimer = undefined;
-    if (outputTimer !== undefined) host.cancel(outputTimer);
-    outputTimer = undefined;
+    store.selection++;
+    store.result = undefined;
+    store.log = undefined;
+    store.outputs = undefined;
+    if (store.logTimer !== undefined) host.cancel(store.logTimer);
+    store.logTimer = undefined;
+    if (store.outputTimer !== undefined) host.cancel(store.outputTimer);
+    store.outputTimer = undefined;
   };
 
   /** Selects the call `key`, or none. `timeline` opens its timeline, or goes back to the cards; left out, keeps either. */
@@ -459,9 +338,9 @@ export function boot(host: PageHost): Page {
     if (tab !== undefined) ui.tab = tab;
     if (timeline !== undefined) ui.timeline = timeline;
     if (key === undefined) ui.timeline = false;
-    const place = run?.model.cards.findIndex((entry) => entry.key === key) ?? -1;
+    const place = store.run?.model.cards.findIndex((entry) => entry.key === key) ?? -1;
     if (place >= 0) ui.cursor = place;
-    cursorPending = key !== undefined && place < 0;
+    store.cursorPending = key !== undefined && place < 0;
     if (key !== undefined) {
       readResult();
       if (ui.tab === 'log') readLog();
@@ -470,17 +349,17 @@ export function boot(host: PageHost): Page {
   };
 
   const onRunMessage = (open: OpenRun, text: string) => {
-    if (open !== run) return;
+    if (open !== store.run) return;
     const message = parse(text);
     if (message?.kind === 'event') {
       const event = message.event as SailEvent & { key?: unknown };
       applyEvent(open.model, event);
       mark('main', 'status');
       tick();
-      const place = cursorPending ? open.model.cards.findIndex((entry) => entry.key === ui.key) : -1;
+      const place = store.cursorPending ? open.model.cards.findIndex((entry) => entry.key === ui.key) : -1;
       if (place >= 0) {
         ui.cursor = place;
-        cursorPending = false;
+        store.cursorPending = false;
       }
       const key = typeof event.key === 'string' ? event.key.split('/')[0] : undefined;
       if (key !== undefined && key === ui.key) {
@@ -491,7 +370,7 @@ export function boot(host: PageHost): Page {
         const ended = (event.type === 'stage:end' || event.type === 'intake:end') && event.key === key;
         if (ended) readResult();
         if (ui.tab === 'log' && (card?.state === 'running' || ended)) refreshLog();
-        if (ui.timeline && outputs !== undefined && (card?.state === 'running' || ended)) refreshOutput();
+        if (ui.timeline && store.outputs !== undefined && (card?.state === 'running' || ended)) refreshOutput();
       }
     } else if (message?.kind === 'end') {
       open.ended = true;
@@ -512,7 +391,7 @@ export function boot(host: PageHost): Page {
   /** A close handler that, unless the stream failed or is no longer live, runs `again` after the reconnect delay. */
   const retryOnClose =
     (holder: { retry?: number }, failed: () => boolean, live: () => boolean, again: () => void) => () => {
-      if (stopped || failed() || !live()) return;
+      if (store.stopped || failed() || !live()) return;
       holder.retry = host.later(() => {
         delete holder.retry;
         if (live()) again();
@@ -527,7 +406,7 @@ export function boot(host: PageHost): Page {
       close: retryOnClose(
         open,
         () => open.error !== undefined,
-        () => !(open !== run || open.ended || open.connection !== connection),
+        () => !(open !== store.run || open.ended || open.connection !== connection),
         () => {
           open.model = emptyRun();
           delete open.error;
@@ -544,7 +423,7 @@ export function boot(host: PageHost): Page {
    * or ended with another status or at another time, by a resume that ran between two polls (review R3-1).
    */
   const movedOn = (open: OpenRun) => {
-    const item = index?.find((repo) => repo.name === open.repo)?.runs.find((entry) => entry.runId === open.runId);
+    const item = store.index?.find((repo) => repo.name === open.repo)?.runs.find((entry) => entry.runId === open.runId);
     if (item === undefined) return false;
     const { end, endedAt } = open.model;
     if (statusOf(item) !== (end?.status ?? 'running')) return true;
@@ -558,7 +437,7 @@ export function boot(host: PageHost): Page {
    * may still be one read before it, so only the check the end set up then decides (review R3-3).
    */
   function followAgain(open: OpenRun, fromIndex = false) {
-    if (open !== run || !open.ended || !movedOn(open)) return;
+    if (open !== store.run || !open.ended || !movedOn(open)) return;
     if (fromIndex && host.now() - (open.endSeen ?? 0) < RECONNECT_MS) return;
     if (open.retry !== undefined) host.cancel(open.retry);
     delete open.retry;
@@ -570,9 +449,9 @@ export function boot(host: PageHost): Page {
   }
 
   const closeRun = () => {
-    if (run === undefined) return;
-    const closing = run;
-    run = undefined;
+    if (store.run === undefined) return;
+    const closing = store.run;
+    store.run = undefined;
     if (closing.retry !== undefined) host.cancel(closing.retry);
     closing.connection?.close();
   };
@@ -580,21 +459,21 @@ export function boot(host: PageHost): Page {
   const closeFile = () => {
     if (ui.file === undefined) return;
     delete ui.file;
-    doc = undefined;
-    docRead++;
+    store.doc = undefined;
+    store.docRead++;
     mark('drawer');
   };
 
   const openFile = (name: string, path: string) => {
-    const open = run;
+    const open = store.run;
     if (open === undefined) return;
     ui.file = { name, path };
-    doc = { state: 'loading' };
-    const asked = ++docRead;
+    store.doc = { state: 'loading' };
+    const asked = ++store.docRead;
     const as = isMarkdown(path) ? '&as=html' : '';
     void host.get(`/api/repos/${enc(open.repo)}/runs/${enc(open.runId)}/file?path=${enc(path)}${as}`).then((answer) => {
-      if (asked !== docRead) return;
-      doc = answer.status === 200 ? { state: 'loaded', value: answer.body } : { state: 'missing' };
+      if (asked !== store.docRead) return;
+      store.doc = answer.status === 200 ? { state: 'loaded', value: answer.body } : { state: 'missing' };
       mark('drawer');
     });
     mark('drawer');
@@ -602,7 +481,7 @@ export function boot(host: PageHost): Page {
 
   /** The open run's status and its queue items' states: what its actions depend on that the index shows. */
   const offerSignature = (open: OpenRun) => {
-    const repo = index?.find((each) => each.name === open.repo);
+    const repo = store.index?.find((each) => each.name === open.repo);
     const item = repo?.runs.find((each) => each.runId === open.runId);
     const queued = (repo?.queues ?? []).flatMap((view) =>
       (view.queue?.items ?? [])
@@ -613,16 +492,16 @@ export function boot(host: PageHost): Page {
   };
 
   const readOffers = () => {
-    const open = run;
+    const open = store.run;
     if (open === undefined) return;
-    const asked = ++offersRead;
-    offersFor = offerSignature(open);
+    const asked = ++store.offersRead;
+    store.offersFor = offerSignature(open);
     void host.get(`/api/repos/${enc(open.repo)}/runs/${enc(open.runId)}/actions`).then((answer) => {
-      if (asked !== offersRead || stopped) return;
-      offers = undefined;
+      if (asked !== store.offersRead || store.stopped) return;
+      store.offers = undefined;
       if (answer.status === 200) {
         try {
-          offers = JSON.parse(answer.body) as RunActions;
+          store.offers = JSON.parse(answer.body) as RunActions;
         } catch {
           // An answer that isn't JSON offers nothing.
         }
@@ -632,7 +511,7 @@ export function boot(host: PageHost): Page {
   };
 
   const selectRun = (repo: string, runId: string) => {
-    if (run?.repo === repo && run.runId === runId && run.error === undefined) return;
+    if (store.run?.repo === repo && store.run.runId === runId && store.run.error === undefined) return;
     closeRun();
     clearCall();
     ui.repo = repo;
@@ -642,17 +521,17 @@ export function boot(host: PageHost): Page {
     ui.timeline = false;
     ui.opened = [];
     ui.cursor = 0;
-    run = { repo, runId, model: emptyRun(), ended: false };
-    offers = undefined;
+    store.run = { repo, runId, model: emptyRun(), ended: false };
+    store.offers = undefined;
     delete ui.runMenu;
     delete ui.armed;
     delete ui.runNotice;
     delete ui.raise;
     delete ui.restartStage;
     delete ui.stopNow;
-    fieldsOwn = false;
-    fresh.add('rail');
-    openRunSocket(run);
+    store.fieldsOwn = false;
+    store.fresh.add('rail');
+    openRunSocket(store.run);
     readOffers();
     mark('rail', 'main', 'inspector', 'status');
   };
@@ -682,7 +561,7 @@ export function boot(host: PageHost): Page {
       close: retryOnClose(
         open,
         () => open.stream.error !== undefined,
-        () => queues.get(id) === open && open.connection === connection,
+        () => store.queues.get(id) === open && open.connection === connection,
         () => {
           open.stream = { recent: [], watch: 'unknown' };
           connectQueue(id, open);
@@ -695,20 +574,20 @@ export function boot(host: PageHost): Page {
 
   const openQueueSocket = (id: string) => {
     const open: OpenQueue = { stream: { recent: [], watch: 'unknown' } };
-    queues.set(id, open);
+    store.queues.set(id, open);
     connectQueue(id, open);
   };
 
   /** Opens a queue socket for every queue in the index, and closes those no longer in it. */
   const syncQueues = (repos: readonly IndexRepo[]) => {
     const wanted = new Set(repos.flatMap((repo) => repo.queues.map((view) => queueId(repo.name, view.workflow))));
-    for (const [id, open] of queues) {
+    for (const [id, open] of store.queues) {
       if (wanted.has(id)) continue;
-      queues.delete(id);
+      store.queues.delete(id);
       if (open.retry !== undefined) host.cancel(open.retry);
       open.connection?.close();
     }
-    for (const id of wanted) if (!queues.has(id)) openQueueSocket(id);
+    for (const id of wanted) if (!store.queues.has(id)) openQueueSocket(id);
   };
 
   /** The run to open on the first index: the newest running one, else the newest. */
@@ -723,39 +602,39 @@ export function boot(host: PageHost): Page {
     const message = parse(text);
     if (message?.kind !== 'index') return;
     const repos = message.repos;
-    index = repos;
+    store.index = repos;
     const still = new Set(attention(repos).map(identity));
-    if ([...cleared].some((id) => !still.has(id))) {
-      cleared = new Set([...storedCleared(), ...cleared].filter((id) => still.has(id)));
-      host.save(CLEARED_KEY, JSON.stringify([...cleared]));
+    if ([...store.cleared].some((id) => !still.has(id))) {
+      store.cleared = new Set([...storedCleared(host), ...store.cleared].filter((id) => still.has(id)));
+      saveCleared(host, store.cleared);
     }
     syncQueues(repos);
     const lists = (name?: string, runId?: string) =>
       repos.some((repo) => repo.name === name && repo.runs.some((entry) => entry.runId === runId));
-    const asked = start;
-    start = undefined;
+    const asked = store.start;
+    store.start = undefined;
     if (asked !== undefined && lists(asked.repo, asked.run)) actions.open?.(asked);
     else if (!lists(ui.repo, ui.runId)) {
       const first = firstRun(repos);
       if (first !== undefined) selectRun(first.repo, first.runId);
     }
-    if (run !== undefined) followAgain(run, true);
-    if (run !== undefined && offerSignature(run) !== offersFor) {
+    if (store.run !== undefined) followAgain(store.run, true);
+    if (store.run !== undefined && offerSignature(store.run) !== store.offersFor) {
       delete ui.armed;
       readOffers();
     }
-    if (ui.queue !== undefined && openQueue() === undefined) delete ui.queue;
+    if (ui.queue !== undefined && openQueue(store) === undefined) delete ui.queue;
     mark('rail', 'attention', 'main', 'status');
     tick();
   };
 
   const openIndex = () => {
-    indexConnection = host.connect('index=1', {
+    store.indexConnection = host.connect('index=1', {
       message: onIndex,
       close: () => {
-        if (stopped) return;
-        indexRetry = host.later(() => {
-          indexRetry = undefined;
+        if (store.stopped) return;
+        store.indexRetry = host.later(() => {
+          store.indexRetry = undefined;
           openIndex();
         }, RECONNECT_MS);
       },
@@ -763,7 +642,7 @@ export function boot(host: PageHost): Page {
   };
 
   const step = (by: number) => {
-    const cards = run?.model.cards ?? [];
+    const cards = store.run?.model.cards ?? [];
     const at = cards.findIndex((entry) => entry.key === ui.key);
     const next = cards[at < 0 ? 0 : at + by];
     if (next !== undefined) selectCard(next.key);
@@ -777,7 +656,7 @@ export function boot(host: PageHost): Page {
   const queueOp = (repo: string, workflow: string, what: string, body: unknown, took?: () => void) => {
     const path = `/api/repos/${enc(repo)}/queues/${enc(workflow)}/${what}`;
     void host.post(path, body).then(({ status, body: answer }) => {
-      if (stopped) return;
+      if (store.stopped) return;
       if (status === 200 || status === 202) {
         const notice = answerField(answer, status === 200 ? 'message' : 'waiting');
         if (notice === undefined) delete ui.queueNotice;
@@ -805,13 +684,14 @@ export function boot(host: PageHost): Page {
    * a positive number, or a stage changed since the arming, arms again instead.
    */
   const startRun = (kind: 'resume' | 'restart') => {
-    const open = run;
-    const offer = kind === 'resume' ? offers?.resume : offers?.restart;
-    if (open === undefined || offer === undefined || !offer.enabled || starting) return;
-    const stage = kind === 'restart' ? (host.value('stage') ?? ui.restartStage ?? offers?.restart?.stage) : undefined;
+    const open = store.run;
+    const offer = kind === 'resume' ? store.offers?.resume : store.offers?.restart;
+    if (open === undefined || offer === undefined || !offer.enabled || store.starting) return;
+    const stage =
+      kind === 'restart' ? (host.value('stage') ?? ui.restartStage ?? store.offers?.restart?.stage) : undefined;
     if (kind === 'restart') ui.restartStage = stage;
     let body: Record<string, unknown> = kind === 'restart' ? { stage } : {};
-    const raising = offers?.resume?.raise;
+    const raising = store.offers?.resume?.raise;
     if (kind === 'resume' && raising !== undefined) {
       ui.raise = host.value('raise') ?? ui.raise;
       const amount = Number(ui.raise);
@@ -823,29 +703,29 @@ export function boot(host: PageHost): Page {
       }
       body = { raise: { [raising]: amount } };
     }
-    if (ui.armed !== kind || armedStage !== stage) {
+    if (ui.armed !== kind || store.armedStage !== stage) {
       ui.armed = kind;
-      armedStage = stage;
+      store.armedStage = stage;
       delete ui.runNotice;
       mark('rail');
       return;
     }
     delete ui.armed;
-    starting = true;
+    store.starting = true;
     ui.runNotice = `${kind === 'resume' ? 'resuming' : 'restarting'} ${open.runId}…`;
     mark('rail');
     void host
       .post(`/api/repos/${enc(open.repo)}/runs/${enc(open.runId)}/${kind}`, body)
       .then(({ status, body: answer }) => {
-        starting = false;
-        if (stopped) return;
+        store.starting = false;
+        if (store.stopped) return;
         if (status < 200 || status >= 300) {
           ui.runNotice = refusal(status, answer, kind);
           mark('rail');
           return;
         }
         delete ui.runNotice;
-        if (run !== open) return;
+        if (store.run !== open) return;
         if (kind === 'resume') {
           closeRun();
           selectRun(open.repo, open.runId);
@@ -866,9 +746,9 @@ export function boot(host: PageHost): Page {
    * and reads the run again. Clean posts `{}` and, once the run is gone, leaves it and shows the answer in the rail.
    */
   const endRun = (kind: 'stop' | 'clean') => {
-    const open = run;
-    const offer = kind === 'stop' ? offers?.stop : offers?.clean;
-    if (open === undefined || offer === undefined || !offer.enabled || starting) return;
+    const open = store.run;
+    const offer = kind === 'stop' ? store.offers?.stop : store.offers?.clean;
+    if (open === undefined || offer === undefined || !offer.enabled || store.starting) return;
     if (kind === 'stop') ui.stopNow = (host.value('now') ?? (ui.stopNow === true ? 'on' : '')) !== '';
     if (ui.armed !== kind) {
       ui.armed = kind;
@@ -877,7 +757,7 @@ export function boot(host: PageHost): Page {
       return;
     }
     delete ui.armed;
-    starting = true;
+    store.starting = true;
     ui.runNotice = `${kind === 'stop' ? 'stopping' : 'cleaning'} ${open.runId}…`;
     mark('rail');
     void host
@@ -886,15 +766,15 @@ export function boot(host: PageHost): Page {
         kind === 'stop' ? { now: ui.stopNow === true } : {},
       )
       .then(({ status, body: answer }) => {
-        starting = false;
-        if (stopped) return;
+        store.starting = false;
+        if (store.stopped) return;
         if (status < 200 || status >= 300) {
           ui.runNotice = refusal(status, answer, kind);
           mark('rail');
           return;
         }
         delete ui.runNotice;
-        if (run !== open) return;
+        if (store.run !== open) return;
         const message = answerField(answer, 'message');
         if (kind === 'clean') {
           closeRun();
@@ -921,7 +801,7 @@ export function boot(host: PageHost): Page {
     },
     'select-queue': (data) => {
       if (data.queue === undefined) return;
-      const failed = queues.get(data.queue);
+      const failed = store.queues.get(data.queue);
       if (failed?.stream.error !== undefined) {
         failed.stream = { recent: [], watch: 'unknown' };
         connectQueue(data.queue, failed);
@@ -952,7 +832,7 @@ export function boot(host: PageHost): Page {
       const call = data.call;
       if (call === undefined) return;
       ui.opened = ui.opened.includes(call) ? ui.opened.filter((each) => each !== call) : [...ui.opened, call];
-      if (openedOutputKeys().some((key) => outputs?.[key] === undefined)) readOutput();
+      if (openedOutputKeys().some((key) => store.outputs?.[key] === undefined)) readOutput();
       mark('main');
     },
     'toggle-filter': (data) => {
@@ -977,7 +857,7 @@ export function boot(host: PageHost): Page {
     stream: (data) => {
       if (data.stream === undefined) return;
       ui.stream = data.stream;
-      log = undefined;
+      store.log = undefined;
       readLog();
       mark('inspector');
     },
@@ -985,7 +865,7 @@ export function boot(host: PageHost): Page {
       if (data.step === undefined) return;
       ui.step = data.step;
       delete ui.stream;
-      log = undefined;
+      store.log = undefined;
       readLog();
       mark('inspector');
     },
@@ -1017,8 +897,8 @@ export function boot(host: PageHost): Page {
       if (ticketKey === '') return;
       queueOp(repo, workflow, 'add', ui.addForce === true ? { ticketKey, force: true } : { ticketKey }, () => {
         delete ui.addTicket;
-        addFieldsOwn = false;
-        fresh.add('main');
+        store.addFieldsOwn = false;
+        store.fresh.add('main');
       });
     },
     'item-menu': (data) => {
@@ -1055,7 +935,7 @@ export function boot(host: PageHost): Page {
       void host
         .post(`/api/repos/${enc(repo)}/${op}`, { workflows: workflow === undefined ? [] : [workflow] })
         .then(({ status, body }) => {
-          if (stopped) return;
+          if (store.stopped) return;
           const said =
             status === 200 || status === 202
               ? (answerField(body, 'message') ?? answerField(body, 'waiting'))
@@ -1079,7 +959,7 @@ export function boot(host: PageHost): Page {
     'run-menu': (data) => {
       const { repo, run: runId } = data;
       if (repo === undefined || runId === undefined) return;
-      if (ui.runMenu === runId && ui.queue === undefined && run?.repo === repo && run.runId === runId) {
+      if (ui.runMenu === runId && ui.queue === undefined && store.run?.repo === repo && store.run.runId === runId) {
         delete ui.runMenu;
         delete ui.armed;
         mark('rail');
@@ -1104,8 +984,8 @@ export function boot(host: PageHost): Page {
       mark('attention');
     },
     'clear-attention': () => {
-      cleared = new Set([...storedCleared(), ...cleared, ...drawn]);
-      host.save(CLEARED_KEY, JSON.stringify([...cleared]));
+      store.cleared = new Set([...storedCleared(host), ...store.cleared, ...store.drawn]);
+      saveCleared(host, store.cleared);
       mark('attention');
     },
     'toggle-section': (data) => {
@@ -1133,7 +1013,7 @@ export function boot(host: PageHost): Page {
 
   const keys: Record<string, () => void> = {
     Enter: () => {
-      const card = run?.model.cards[ui.cursor];
+      const card = store.run?.model.cards[ui.cursor];
       if (card !== undefined) selectCard(card.key, undefined, true);
     },
     // Needs attention and the drawer shut first; then back to the cards from a timeline, keeping the selection; from
@@ -1186,7 +1066,7 @@ export function boot(host: PageHost): Page {
     if (inInput) return;
     const by = MOVES[key];
     if (by === undefined) return keys[key]?.();
-    const last = (run?.model.cards.length ?? 0) - 1;
+    const last = (store.run?.model.cards.length ?? 0) - 1;
     ui.cursor = Math.max(0, Math.min(last, ui.cursor + by));
     mark('main');
   });
@@ -1196,19 +1076,19 @@ export function boot(host: PageHost): Page {
   return {
     ui,
     stop() {
-      stopped = true;
-      indexConnection?.close();
-      if (indexRetry !== undefined) host.cancel(indexRetry);
+      store.stopped = true;
+      store.indexConnection?.close();
+      if (store.indexRetry !== undefined) host.cancel(store.indexRetry);
       closeRun();
-      for (const open of queues.values()) {
+      for (const open of store.queues.values()) {
         if (open.retry !== undefined) host.cancel(open.retry);
         open.connection?.close();
       }
-      queues.clear();
-      if (flushTimer !== undefined) host.cancel(flushTimer);
-      if (logTimer !== undefined) host.cancel(logTimer);
-      if (outputTimer !== undefined) host.cancel(outputTimer);
-      if (tickTimer !== undefined) host.cancel(tickTimer);
+      store.queues.clear();
+      if (store.flushTimer !== undefined) host.cancel(store.flushTimer);
+      if (store.logTimer !== undefined) host.cancel(store.logTimer);
+      if (store.outputTimer !== undefined) host.cancel(store.outputTimer);
+      if (store.tickTimer !== undefined) host.cancel(store.tickTimer);
     },
   };
 }
