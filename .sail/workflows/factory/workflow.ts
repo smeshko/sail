@@ -63,7 +63,13 @@ export default workflow(
       passes++;
       const impl = await run.stage(implement, { plan: planFile, commit, feedback: iteration.previous });
       if (impl.outcome === 'blocked') return handOff(`implement blocked: ${impl.reason}`);
-      verified = impl.output.tasks.filter((task) => task.commit === null).map(({ id, evidence }) => ({ id, evidence }));
+      // Kept across passes by id: a later pass that leaves such a task out keeps its earlier evidence, a later report of
+      // it replaces that evidence, and a later commit for it takes it off the list.
+      const reported = new Map(impl.output.tasks.map((task) => [task.id, task]));
+      verified = [
+        ...verified.filter((task) => !reported.has(task.id)),
+        ...impl.output.tasks.filter((task) => task.commit === null).map(({ id, evidence }) => ({ id, evidence })),
+      ];
       const v = await run.stage(validate);
       if (v.outcome === 'failed' && v.output.baseRed) return run.fail(`staging is red: ${redTests(v.output)}`);
       if (v.outcome === 'failed') {

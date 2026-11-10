@@ -408,3 +408,33 @@ test('a task with no commit is listed as implemented in the feedback of a pass a
     ]);
   });
 }, 120_000);
+
+test('a task with no commit stays accepted on its first evidence when a later pass leaves it out', async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeOwnSail(repo);
+    seedChecklistPlan(repo, sailDir, [false, false], [true, false]);
+    // Only the first pass reports TASK-002: every later implement answer reports TASK-001 alone.
+    const harness = join(sailDir, 'fake', 'harness.json');
+    const seeds = JSON.parse(readFileSync(harness, 'utf8'));
+    seeds['implement#1'] = [seeds.implement[0]];
+    seeds.implement = [
+      {
+        ...seeds.implement[0],
+        output: {
+          ...seeds.implement[0].output,
+          tasks: seeds.implement[0].output.tasks.filter((task: { id: string }) => task.id !== 'TASK-002'),
+        },
+      },
+    ];
+    writeFileSync(harness, JSON.stringify(seeds));
+    repo.git('add', '.sail/fake/harness.json');
+    repo.git('commit', '-q', '-m', 'leave the task with no commit out of later passes');
+
+    const { code, stderr, keys, dir } = await factory(repo);
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    expect(stageIn(dir, 'check-tasks', 2, 'verified.json')).toEqual(['TASK-002']);
+    expect(keys).toContain('open#1');
+    const written = readFileSync(join(callDir(dir, 'verification'), 'call-1', 'out', 'pr-body.md'), 'utf8');
+    expect(written).toContain('bun run types: types/ is unchanged');
+  });
+}, 120_000);
