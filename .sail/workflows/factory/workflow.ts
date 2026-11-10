@@ -1,6 +1,7 @@
 // factory: a planned ticket in, a pull request out, along the plan lifecycle: load the plan groom attached to the ticket,
-// implement it task by task, test first, validate it, check every task is implemented, then open the pull request. A
-// ticket with no plan attached fails the run before any work: groom plans it. A run that ends because an agent
+// implement it task by task, test first, validate it, check every task is implemented, then open the pull request, its
+// body carrying the evidence of any task that changed no file (the verification stage). A ticket with no plan attached
+// fails the run before any work: groom plans it. A run that ends because an agent
 // blocked, or because no plan is attached, hands its ticket to a person (the hand-over-ticket stage): another run
 // would end the same way, so the watcher must not retry it. The follow-ups the run found are
 // filed as tickets of their own once the pull request is open. The pull request carries the `factory` label, so the
@@ -17,7 +18,8 @@ import { implement } from './stages/02-implement/stage';
 import { jevTasks } from './stages/03-jev-tasks/stage';
 import { checkTasks } from './stages/04-check-tasks/stage';
 import { describe } from './stages/05-describe/stage';
-import { open } from './stages/06-open/stage';
+import { verification } from './stages/06-verification/stage';
+import { open } from './stages/07-open/stage';
 
 const IMPLEMENT_PASSES = 3;
 const LABEL = 'factory';
@@ -103,9 +105,12 @@ export default workflow(
     // create-pr
     const d = await run.stage(describe, { ticket: run.input, plan: planFile });
     if (d.outcome === 'blocked') return handOff(`describe blocked: ${d.reason}`);
+    // A task implement reported with no commit has its evidence copied into the body, by a script, before it is sent.
+    let body = d.files['pr-body.md'];
+    if (verified.length > 0) body = (await run.stage(verification, { body, tasks: verified })).files['pr-body.md'];
     const pr = await run.stage(open, {
       title: d.output.title,
-      body: d.files['pr-body.md'],
+      body,
       ticketKey: run.input.ticketKey,
     });
 

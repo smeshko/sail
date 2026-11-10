@@ -352,9 +352,14 @@ function seedChecklistPlan(repo: TempRepo, sailDir: string, first: boolean[], la
 
 /** The `$STAGE_IN/<name>` of a call, read as the folder of `stage` holds it. */
 function stageIn(dir: string, stage: string, call: number, name: string): unknown {
+  return JSON.parse(readFileSync(join(callDir(dir, stage), `call-${call}`, 'in', name), 'utf8'));
+}
+
+/** The folder of `stage` in a run directory, whatever number prefix it carries. */
+function callDir(dir: string, stage: string): string {
   const folder = readdirSync(dir).find((each) => each.replace(/^\d+-/, '') === stage);
   if (folder === undefined) throw new Error(`no ${stage} folder in ${dir}`);
-  return JSON.parse(readFileSync(join(dir, folder, `call-${call}`, 'in', name), 'utf8'));
+  return join(dir, folder);
 }
 
 test('a plan with a task that changes no file reaches open: check-tasks answering it false on every call sends no pass back', async () => {
@@ -368,6 +373,22 @@ test('a plan with a task that changes no file reaches open: check-tasks answerin
     expect(keys).not.toContain('implement#3');
     expect(keys).not.toContain('check-tasks#2');
     expect(stageIn(dir, 'check-tasks', 1, 'verified.json')).toEqual(['TASK-002']);
+    expect(keys.slice(keys.indexOf('describe#1'))).toEqual([
+      'describe#1',
+      'verification#1',
+      'open#1',
+      'file-follow-ups#1',
+    ]);
+    const written = readFileSync(join(callDir(dir, 'verification'), 'call-1', 'out', 'pr-body.md'), 'utf8');
+    expect(written).toContain('## Verification');
+    expect(written).toContain('**TASK-002**');
+    expect(written).toContain('bun run types: types/ is unchanged');
+    expect(written).toEndWith('Closes FAKE-1\n');
+    const prs = JSON.parse(readFileSync(join(repo.dir, '.sail-runs', 'fake', 'prs.json'), 'utf8'));
+    // The committed seed holds a pull request of its own: the one this run opened is the one that carries the section.
+    const opened = (prs.pullRequests as { body: string }[]).filter((pr) => pr.body.includes('## Verification'));
+    expect(opened).toHaveLength(1);
+    expect(opened[0]?.body).toContain('bun run types: types/ is unchanged');
   });
 }, 120_000);
 
