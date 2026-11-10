@@ -661,6 +661,10 @@ _Avoid_: UI, console, monitor, board
 What the dashboard's server says a subject (a run, a queue item, a workflow, a repository) can have done to it now: each action it gives is `enabled`, or carries a `why` it is not, and an action it leaves out is not offered. The index and the queues answer carry the offers of queues, items, workflows and repositories, and a run's actions route those of a run.
 _Avoid_: permission (a step's word), capability (an adapter's word)
 
+**Dashboard action**:
+One thing the dashboard's page can have done: stop, resume, restart, clean, drop, requeue, move, poll, add, watch, unwatch or all clear. Each is defined once in the page's registry: its id and label, the subject it applies to, its availability from the offers, its parameters, its tier (`instant`, `undoable` or `confirmed`), its key, its request and what its answer means. The page's view actions, which change what is shown and ask the server nothing, are not Dashboard actions.
+_Avoid_: command (the CLI's and the watcher's word), control, operation
+
 **Stage card**:
 One call's card in the dashboard's run view, with its outcome, tries, duration, cost and denials, or a pending card for a roster stage the run hasn't called yet. Cards come from the run's events and its roster alone, so a new stage shows with no dashboard change.
 _Avoid_: tile, step card, job

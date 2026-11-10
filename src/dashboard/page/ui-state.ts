@@ -3,6 +3,8 @@
 // sections, the rail's open sections and opened groups, whether needs attention is open, the theme, the offset their
 // clock is at, and the file open in the drawer. It holds nothing about the runs themselves.
 
+import type { Subject } from './action-registry';
+
 export const TABS = ['overview', 'files', 'permissions', 'log'] as const;
 export type InspectorTab = (typeof TABS)[number];
 
@@ -12,6 +14,20 @@ export type TimelineFilter = (typeof FILTERS)[number];
 
 export const THEMES = ['dark', 'light', 'system'] as const;
 export type Theme = (typeof THEMES)[number];
+
+/** Where an action's answer is shown: the run's menu, the queue's header, under a repository's header, or the rail's top. */
+export type ActPlace = 'run' | 'queue' | 'repo' | 'rail';
+
+/**
+ * Carrying an action out, for every action alike: the one pending, which a first click of a confirmed action arms
+ * (`sent: false`) and a second sends (`sent: true`, until its answer), the last result with where it shows and for
+ * what, and what was typed for each action's parameters, kept across a draw.
+ */
+export interface ActState {
+  pending?: { id: string; subject: Subject; values: Record<string, string>; sent: boolean };
+  result?: { id: string; subject: Subject; text: string; place: ActPlace };
+  drafts: Record<string, Record<string, string>>;
+}
 
 export interface UiState {
   repo?: string;
@@ -77,6 +93,8 @@ export interface UiState {
   follow: boolean;
   /** The clock's offset east of UTC, in minutes: times are shown at it. */
   tz: number;
+  /** The action being carried out, its last result and the parameters typed. */
+  act: ActState;
 }
 
 export function initialUi(tz: number): UiState {
@@ -95,6 +113,7 @@ export function initialUi(tz: number): UiState {
     cursor: 0,
     follow: false,
     tz,
+    act: { drafts: {} },
   };
 }
 
