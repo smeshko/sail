@@ -45,28 +45,25 @@ import type { RunActions } from '../actions';
 import type { IndexRepo } from '../files';
 import type { Message } from '../streams';
 import { attention, identity } from './attention';
-import { renderAttention } from './attention-view';
-import { isMarkdown, renderDrawer } from './drawer-view';
-import type { PageHost, Region } from './host';
+import { startDraw, tick } from './draw';
+import { isMarkdown } from './drawer-view';
+import type { PageHost } from './host';
 import { REGIONS } from './host';
-import { html } from './html';
 import { newestFirst, railRepos, statusOf } from './index-model';
-import { logTarget, renderInspector } from './inspector-view';
-import { queueId, renderQueue } from './queue-view';
-import { renderRail } from './rail-view';
+import { logTarget } from './inspector-view';
+import { queueId } from './queue-view';
 import { applyEvent, emptyRun } from './run-model';
-import { renderRun, renderStatus } from './run-view';
 import { FILTER_KEY, RAIL_KEY, saveCleared, storedCleared, THEME_KEY } from './saved';
-import { createStore, listed, type OpenQueue, type OpenRun, opened, openQueue, selected, summaryOf } from './store';
-import { outputKey, renderTimeline, scriptId } from './timeline-view';
+import { createStore, type OpenQueue, type OpenRun, openQueue } from './store';
+import { outputKey, scriptId } from './timeline-view';
 import { FILTERS, type InspectorTab, TABS, THEMES, type TimelineFilter, type UiState } from './ui-state';
 
+export { TICK_MS } from './draw';
 export { CLEARED_KEY, FILTER_KEY, RAIL_KEY, THEME_KEY } from './saved';
 export { FLUSH_MS } from './store';
 export const RECONNECT_MS = 2000;
 export const LOG_REFRESH_MS = 1000;
-/** How often a running time is drawn again. */
-export const TICK_MS = 1000;
+
 /** How many of a queue's events its panel lists. */
 export const RECENT_EVENTS = 20;
 
@@ -117,99 +114,7 @@ export function boot(host: PageHost): Page {
   const ui = store.ui;
   const { mark } = store;
 
-  const draw: Record<Region, () => string> = {
-    rail: () => {
-      if (store.index === undefined) return html`<div class="qempty">connecting…</div>`.value;
-      // A raise typed and a stage chosen in the open run's menu survive the draw, but not a switch of run.
-      if (store.fieldsOwn) {
-        ui.raise = host.value('raise') ?? ui.raise;
-        ui.restartStage = host.value('stage') ?? ui.restartStage;
-        const now = host.value('now');
-        if (now !== undefined) ui.stopNow = now !== '';
-      }
-      store.fieldsOwn = true;
-      return renderRail(railRepos(store.index, host.now()), ui, host.now(), store.offers).value;
-    },
-    attention: () => {
-      const items = listed(store);
-      store.drawn = items.map(identity);
-      return renderAttention(items, ui.attention).value;
-    },
-    main: () => {
-      const panel = openQueue(store);
-      if (panel !== undefined) {
-        // What was typed in the add field survives the draw, but not an add that took.
-        if (store.addFieldsOwn) {
-          ui.addTicket = host.value('add-ticket') ?? ui.addTicket;
-          const forced = host.value('add-force');
-          if (forced !== undefined) ui.addForce = forced !== '';
-        }
-        store.addFieldsOwn = true;
-        // An armed drop whose item is running or gone asks again once the item can be dropped, and its menu shuts.
-        const armedItem = panel.items.find((item) => item.dedupKey === ui.armedDrop);
-        if (armedItem === undefined || armedItem.state === 'dispatched') delete ui.armedDrop;
-        const menuItem = panel.items.find((item) => item.dedupKey === ui.itemMenu);
-        if (menuItem === undefined || menuItem.state === 'dispatched') delete ui.itemMenu;
-        return renderQueue(panel, store.queues.get(ui.queue ?? '')?.stream, ui, host.now()).value;
-      }
-      if (store.run === undefined) return html`<div class="qempty">no run selected</div>`.value;
-      const error = store.run.error === undefined ? '' : html`<div class="code bad">${store.run.error}</div>`;
-      const card = opened(store);
-      const view =
-        card === undefined
-          ? renderRun(store.run.model, summaryOf(store, store.run), ui, host.now())
-          : renderTimeline(card, ui, host.now(), store.outputs);
-      return html`${error}${view}`.value;
-    },
-    inspector: () => renderInspector(selected(store), store.run?.model.roster, store.result, store.log, ui).value,
-    status: () => (store.run === undefined ? '' : renderStatus(store.run.model, summaryOf(store, store.run)).value),
-    drawer: () => renderDrawer(ui, store.doc).value,
-  };
-
-  const flush = () => {
-    store.flushTimer = undefined;
-    const regions = REGIONS.filter((region) => store.dirty.has(region));
-    store.dirty.clear();
-    for (const region of regions) {
-      // A region that can't be drawn says so, and the others are still drawn (review R2-1).
-      let markup: string;
-      try {
-        markup = draw[region]();
-      } catch {
-        markup = html`<div class="code bad">this part of the page could not be drawn</div>`.value;
-      }
-      // A region whose markup is what it was is not written, nor is its timeline scrolled, unless the shell has just
-      // given up its fields: then it is written so they hold the markup's values.
-      const isFresh = store.fresh.delete(region);
-      if (!isFresh && store.written.get(region) === markup) continue;
-      store.written.set(region, markup);
-      host.render(region, markup, isFresh);
-      // A running call's timeline, followed, shows its newest entry: not while the queue holds the centre.
-      if (region === 'main' && ui.follow && openQueue(store) === undefined && opened(store)?.state === 'running')
-        host.scrollToEnd(region);
-    }
-  };
-
-  store.flush = flush;
-
-  /** Whether a running time is on screen: the open run's, one of its calls', or a run's in the rail. */
-  const anyRunning = () =>
-    (store.run !== undefined &&
-      store.run.model.end === undefined &&
-      store.run.model.cards.some((card) => card.state === 'running')) ||
-    (store.index ?? []).some((repo) => repo.runs.some((item) => statusOf(item) === 'running'));
-
-  /** Draws the running times again each second, for as long as something runs. */
-  const tick = () => {
-    if (store.tickTimer !== undefined || store.stopped || !anyRunning()) return;
-    store.tickTimer = host.later(() => {
-      store.tickTimer = undefined;
-      if (!anyRunning()) return;
-      mark('rail', 'main', 'status');
-      if (selected(store)?.state === 'running') mark('inspector');
-      tick();
-    }, TICK_MS);
-  };
+  startDraw(store);
 
   const callPath = (open: OpenRun, key: string) =>
     `/api/repos/${enc(open.repo)}/runs/${enc(open.runId)}/calls/${enc(key)}`;
@@ -355,7 +260,7 @@ export function boot(host: PageHost): Page {
       const event = message.event as SailEvent & { key?: unknown };
       applyEvent(open.model, event);
       mark('main', 'status');
-      tick();
+      tick(store);
       const place = store.cursorPending ? open.model.cards.findIndex((entry) => entry.key === ui.key) : -1;
       if (place >= 0) {
         ui.cursor = place;
@@ -625,7 +530,7 @@ export function boot(host: PageHost): Page {
     }
     if (ui.queue !== undefined && openQueue(store) === undefined) delete ui.queue;
     mark('rail', 'attention', 'main', 'status');
-    tick();
+    tick(store);
   };
 
   const openIndex = () => {
