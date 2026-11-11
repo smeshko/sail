@@ -28,3 +28,17 @@ test('the dialog draws a field per asked parameter, the first focused, and the r
   expect(renderDialog(view, { fields, values: {} }).value).not.toContain('dlg-bad');
   expect(renderDialog(view, { fields: [], values: {} }).value).toBe(renderDialog(view).value);
 });
+
+test('a dialog with a text draws it preformatted under its lines, escaped, with its white space kept', () => {
+  const view = {
+    title: 'start',
+    lines: ['stops after spec'],
+    text: 'a@1 on X: <T>\n  forced    designation',
+    verb: 'start',
+  };
+  const out = renderDialog(view).value;
+  expect(out).toContain(
+    '<ul class="dlg-lines"><li>stops after spec</li></ul><pre class="dlg-pre">a@1 on X: &lt;T&gt;\n  forced    designation</pre><div class="dlg-acts">',
+  );
+  expect(renderDialog({ ...view, text: undefined }).value).not.toContain('dlg-pre');
+});

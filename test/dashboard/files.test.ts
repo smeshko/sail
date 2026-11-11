@@ -52,7 +52,7 @@ test('two registered clones are listed side by side, each with its run, its stat
   expect(treeHash(m.root)).toBe(before);
 });
 
-const WATCH_ONLY = { watch: { enabled: true }, workflows: {} };
+const WATCH_ONLY = { watch: { enabled: true }, start: { enabled: true, workflows: [] }, workflows: {} };
 
 test('a clone whose .sail/ was deleted is listed with a problem and no runs, beside the one that still has its run', () => {
   rmSync(m.alpha.sailDir, { recursive: true });

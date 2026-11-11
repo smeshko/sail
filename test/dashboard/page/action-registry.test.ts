@@ -53,7 +53,7 @@ const def = (id: string) => {
 const request = (id: string, subject: Subject, values: Record<string, string> = {}, from = source()) =>
   def(id).request?.(subject, values, from);
 
-test('ACTIONS has exactly the eighteen ids, each with a label, appliesTo, a tier and a request and answer or a local run', () => {
+test('ACTIONS has exactly the twenty-three ids, each with a label, appliesTo, a tier and a request and answer or a local run', () => {
   expect(ACTIONS.map((each) => each.id).sort()).toEqual(
     [
       'resume-run',
@@ -75,6 +75,10 @@ test('ACTIONS has exactly the eighteen ids, each with a label, appliesTo, a tier
       'unwatch',
       'clear-attention',
       'dismiss-attention',
+      'start-run',
+      'start-run-go',
+      'start-run-force',
+      'start-run-ignore-prerequisites',
     ].sort(),
   );
   for (const each of ACTIONS) {
@@ -96,6 +100,7 @@ test('ACTIONS has exactly the eighteen ids, each with a label, appliesTo, a tier
     'drop-item',
     'release-hold',
     'add-ticket-force',
+    'start-run-go',
   ]);
   expect(ACTIONS.filter((each) => each.tier === 'undoable').map((each) => each.id)).toEqual([
     'unwatch',
@@ -420,6 +425,7 @@ test('every confirmed action has a dialog, and unwatch and all clear are the und
     'drop-item',
     'release-hold',
     'add-ticket-force',
+    'start-run-go',
   ]);
 });
 
@@ -585,6 +591,222 @@ test('a move says its rows from the waiting neighbours', () => {
   expect(rows(2, all)).toEqual([{ label: 'move up', data: { dir: 'up', target: 'ticket:FAKE-1' } }]);
   expect(rows(3, all)).toEqual([]);
   expect(move?.variants?.(WORKFLOW, source(all))).toEqual([]);
+});
+
+// Start a run (ADW-524): the command, its confirmed go, and the two "start anyway" actions.
+const START_OFFER = { enabled: true, workflows: ['review', 'ticket-to-pr'], defaultWorkflow: 'ticket-to-pr' };
+const startIndex = (start: unknown = START_OFFER) =>
+  index({ offers: { watch: on, workflows: {}, ...(start === null ? {} : { start }) } });
+const startSource = (extra: Partial<OfferSource> = {}) => source({ index: startIndex(), ...extra });
+const REFUSED = { repo: 'alpha', source: 'FAKE-3', workflow: 'ticket-to-pr', override: 'force' } as const;
+
+test('start a run is offered on a repository and on a queue by the repository offer start, disabled with its reason, and not offered without one', () => {
+  const available = (subject: Subject, from: OfferSource) => def('start-run').available(subject, from);
+  expect(available(REPO, startSource())).toEqual({ offered: true, enabled: true });
+  expect(available(WORKFLOW, startSource())).toEqual({ offered: true, enabled: true });
+  const gone = source({ index: startIndex({ enabled: false, why: '/x/.sail no longer exists', workflows: [] }) });
+  expect(available(REPO, gone)).toEqual({ offered: true, enabled: false, why: '/x/.sail no longer exists' });
+  expect(available(REPO, source({ index: startIndex(null) }))).toEqual({ offered: false });
+  expect(available(RUN, startSource())).toEqual({ offered: false });
+  expect(def('start-run').label(REPO)).toBe('start a run…');
+  expect(def('start-run').appliesTo).toEqual(['workflow', 'repo']);
+});
+
+test('start a run asks the workflow (from the repository, at its default), the ticket key or pull request, and the stage to stop after', () => {
+  const asked = (subject: Subject) =>
+    def('start-run')
+      .params(subject, startSource())
+      .map((param) => [param.name, param.label, param.type]);
+  expect(asked(REPO)).toEqual([
+    ['workflow', 'workflow', 'choice'],
+    ['source', 'ticket key or pull request', 'text'],
+    ['until', 'stop after', 'text'],
+  ]);
+  expect(asked(WORKFLOW)).toEqual([
+    ['source', 'ticket key or pull request', 'text'],
+    ['until', 'stop after', 'text'],
+  ]);
+  expect(def('start-run').params(REPO, startSource())[0]).toMatchObject({
+    options: [{ value: 'review' }, { value: 'ticket-to-pr' }],
+    initial: 'ticket-to-pr',
+  });
+});
+
+test('start a run posts the check with what was asked, leaves an empty stage out, takes a queue’s workflow, and refuses an empty source in words', () => {
+  const check = (subject: Subject, values: Record<string, string>) =>
+    request('start-run', subject, values, startSource());
+  expect(check(REPO, { workflow: 'ticket-to-pr', source: ' FAKE-1 ', until: 'spec' })).toEqual({
+    path: '/api/repos/alpha/starts/check',
+    body: { workflow: 'ticket-to-pr', source: 'FAKE-1', until: 'spec' },
+  });
+  expect(check(REPO, { workflow: 'review', source: '#12', until: '' })).toEqual({
+    path: '/api/repos/alpha/starts/check',
+    body: { workflow: 'review', source: '#12' },
+  });
+  expect(check(WORKFLOW, { source: 'FAKE-1' })).toEqual({
+    path: '/api/repos/alpha/starts/check',
+    body: { workflow: 'wf', source: 'FAKE-1' },
+  });
+  expect(check(REPO, { workflow: 'review', source: '  ' })).toEqual({
+    invalid: 'give a ticket key or a pull request, such as ADW-1 or #12',
+  });
+});
+
+test('a passed check hands its roster to the confirmed go, quietly, with the key and the checks it forced', () => {
+  const body = JSON.stringify({
+    roster: 'ticket-to-pr@1 on FAKE-1: T (Todo)\ndry run: x',
+    key: 'FAKE-1',
+    forced: ['designation'],
+    start: { source: 'FAKE-1', workflow: 'ticket-to-pr', until: 'spec', force: true },
+  });
+  expect(def('start-run').answer?.(200, body, REPO)).toEqual({
+    quiet: true,
+    next: {
+      action: 'start-run-go',
+      data: {
+        repo: 'alpha',
+        source: 'FAKE-1',
+        workflow: 'ticket-to-pr',
+        until: 'spec',
+        force: 'true',
+        key: 'FAKE-1',
+        forced: 'designation',
+        roster: 'ticket-to-pr@1 on FAKE-1: T (Todo)\ndry run: x',
+      },
+    },
+  });
+});
+
+test('a refused check is a refusal in sail’s words that remembers the start, and with an override carries the start anyway button', () => {
+  const line = 'sail FAKE-3: not designated. --force runs it anyway';
+  const body = (override?: string) =>
+    JSON.stringify({
+      error: line,
+      ...(override === undefined ? {} : { override }),
+      start: { source: 'FAKE-3', workflow: 'ticket-to-pr' },
+    });
+  expect(def('start-run').answer?.(409, body('force'), REPO)).toEqual({
+    text: line,
+    refused: true,
+    start: REFUSED,
+    button: {
+      label: 'start anyway (--force)',
+      action: 'start-run-force',
+      data: { repo: 'alpha', source: 'FAKE-3', workflow: 'ticket-to-pr', force: 'true' },
+    },
+  });
+  expect(def('start-run').answer?.(409, body('ignore-prerequisites'), REPO)).toMatchObject({
+    start: { override: 'ignore-prerequisites' },
+    button: {
+      label: 'start anyway (--ignore-prerequisites)',
+      action: 'start-run-ignore-prerequisites',
+      data: { source: 'FAKE-3', ignorePrerequisites: 'true' },
+    },
+  });
+  expect(def('start-run').answer?.(409, body(), REPO)).toEqual({ text: line, refused: true, start: 'forget' });
+  expect(def('start-run').answer?.(0, '', REPO)).toEqual({
+    text: 'the start could not be sent: the dashboard did not answer',
+    refused: true,
+  });
+  expect(def('start-run').answer?.(202, '{"waiting":"still checking"}', REPO)).toEqual({ text: 'still checking' });
+});
+
+const GO = {
+  repo: 'alpha',
+  source: 'FAKE-1',
+  workflow: 'ticket-to-pr',
+  key: 'FAKE-1',
+  roster: 'ticket-to-pr@1 on FAKE-1: T (Todo)\ndry run: x',
+};
+
+test('the go is confirmed with the roster as text: its title, what it overrides and where it stops, and its verb start', () => {
+  const go = def('start-run-go');
+  expect([go.tier, go.appliesTo]).toEqual(['confirmed', ['none']]);
+  expect(go.dialog?.(NONE, GO, source())).toEqual({
+    title: 'start a run of ticket-to-pr on FAKE-1',
+    lines: [],
+    text: GO.roster,
+    verb: 'start',
+  });
+  expect(go.dialog?.(NONE, { ...GO, until: 'spec' }, source())?.lines).toEqual(['stops after spec']);
+  expect(
+    go.dialog?.(NONE, { ...GO, source: 'FAKE-3', force: 'true', forced: 'designation,state', until: 'spec' }, source()),
+  ).toEqual({
+    title: 'start FAKE-3 anyway',
+    lines: ['overrides: designation, state (--force)', 'stops after spec'],
+    text: GO.roster,
+    verb: 'start',
+  });
+  expect(go.dialog?.(NONE, { ...GO, ignorePrerequisites: 'true' }, source())).toMatchObject({
+    title: 'start FAKE-1 anyway',
+    lines: ['overrides: its open prerequisites (--ignore-prerequisites)'],
+  });
+});
+
+test('the go posts the start with the key the check answered, opens the run it answers with, and forgets the refused start', () => {
+  expect(request('start-run-go', NONE, { ...GO, until: 'spec', force: 'true' })).toEqual({
+    path: '/api/repos/alpha/starts',
+    body: { workflow: 'ticket-to-pr', source: 'FAKE-1', until: 'spec', force: true, key: 'FAKE-1' },
+  });
+  expect(def('start-run-go').answer?.(202, '{"runId":"FAKE-1-ABC"}', NONE, GO)).toEqual({
+    effect: { open: 'FAKE-1-ABC', repo: 'alpha' },
+    text: 'started FAKE-1-ABC',
+    start: 'forget',
+  });
+});
+
+const REFUSED_SOURCE = (override: 'force' | 'ignore-prerequisites' | undefined) =>
+  source({ index: startIndex(), ...(override === undefined ? {} : { start: { ...REFUSED, override } }) });
+
+test('start anyway is offered only while the refused start’s override is its own flag, as one row naming the ticket and the flag', () => {
+  const force = def('start-run-force');
+  const ignore = def('start-run-ignore-prerequisites');
+  expect(force.available(NONE, REFUSED_SOURCE(undefined))).toEqual({ offered: false });
+  expect(force.available(NONE, REFUSED_SOURCE('force'))).toEqual({ offered: true, enabled: true });
+  expect(ignore.available(NONE, REFUSED_SOURCE('force'))).toEqual({ offered: false });
+  expect(ignore.available(NONE, REFUSED_SOURCE('ignore-prerequisites'))).toEqual({ offered: true, enabled: true });
+  expect(force.variants?.(NONE, REFUSED_SOURCE('force'))).toEqual([
+    {
+      label: 'start FAKE-3 anyway (--force)',
+      data: { repo: 'alpha', source: 'FAKE-3', workflow: 'ticket-to-pr', force: 'true' },
+    },
+  ]);
+  const both = source({
+    index: startIndex(),
+    start: { ...REFUSED, until: 'spec', force: true, override: 'ignore-prerequisites' },
+  });
+  expect(ignore.variants?.(NONE, both)).toEqual([
+    {
+      label: 'start FAKE-3 anyway (--ignore-prerequisites)',
+      data: {
+        repo: 'alpha',
+        source: 'FAKE-3',
+        workflow: 'ticket-to-pr',
+        until: 'spec',
+        force: 'true',
+        ignorePrerequisites: 'true',
+      },
+    },
+  ]);
+  expect(force.variants?.(NONE, REFUSED_SOURCE(undefined))).toEqual([]);
+});
+
+test('start anyway posts the check again with its flags, and its answer is the check’s: the go on a pass', () => {
+  const data = { repo: 'alpha', source: 'FAKE-3', workflow: 'ticket-to-pr', force: 'true' };
+  expect(request('start-run-force', NONE, data)).toEqual({
+    path: '/api/repos/alpha/starts/check',
+    body: { source: 'FAKE-3', workflow: 'ticket-to-pr', force: true },
+  });
+  const passed = JSON.stringify({
+    roster: 'r',
+    key: 'FAKE-3',
+    forced: ['designation'],
+    start: { source: 'FAKE-3', workflow: 'ticket-to-pr', force: true },
+  });
+  expect(def('start-run-force').answer?.(200, passed, NONE, data)).toMatchObject({
+    quiet: true,
+    next: { action: 'start-run-go', data: { repo: 'alpha', force: 'true', forced: 'designation', key: 'FAKE-3' } },
+  });
 });
 
 const withItem = {

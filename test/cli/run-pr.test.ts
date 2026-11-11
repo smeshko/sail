@@ -378,7 +378,7 @@ test("the usage lists sail '#<pr>' after sail <ticket>, and says what --force ov
   const { stdout } = await runCaptured(['--help']);
   const commands = stdout.split('\n').filter((line) => line.startsWith('  sail '));
   expect({
-    second: commands[1]?.startsWith("  sail '#<pr>' [--workflow <name>] [--force] [-q|-v|-vv]  "),
+    second: commands[1]?.startsWith("  sail '#<pr>' [--workflow <name>] [--force] [--run-id <id>] [-q|-v|-vv]"),
     force:
       /^ {2}--force {2,}\S.*designated.*pick-up state.*; a pull request that is unlabelled, closed or a draft$/m.test(
         stdout,
@@ -430,6 +430,34 @@ test('a dispatched pull-request start whose committed .sail/ type-checks only ag
     expect({ code, last: stderr.trimEnd().split('\n').at(-1), runs: runIds(repo.dir) }).toEqual({
       code: EXIT_REFUSED,
       last: `sail #1: definitions at ${sha.slice(0, 7)} need a newer sail: pull ${repo.dir}`,
+      runs: [],
+    });
+  });
+});
+
+test("sail '#1' --workflow review-pr --run-id pr-1-<id> opens the run under that id, via cli", async () => {
+  await withTempRepo(async (repo) => {
+    stub(repo);
+    const id = 'pr-1-01M3BWNZM08Q4T6V2XRJ5KWD3N';
+    const { code, stderr } = await runCaptured(['#1', '--workflow', 'review-pr', '--run-id', id], repo.dir);
+    const header = JSON.parse(readFileSync(join(repo.dir, '.sail-runs', id, 'run.json'), 'utf8'));
+    expect({ code, stderr, runs: runIds(repo.dir), via: header.source.via }).toEqual({
+      code: EXIT_OK,
+      stderr: '',
+      runs: [id],
+      via: 'cli',
+    });
+  });
+});
+
+test("sail '#2' --run-id is refused in the words of the same start without it: closed, with no run directory", async () => {
+  await withTempRepo(async (repo) => {
+    stub(repo);
+    const id = 'pr-2-01M3BWNZM08Q4T6V2XRJ5KWD3N';
+    const named = await runCaptured(['#2', '--workflow', 'review-pr', '--run-id', id], repo.dir);
+    expect({ code: named.code, stderr: named.stderr, runs: runIds(repo.dir) }).toEqual({
+      code: EXIT_REFUSED,
+      stderr: `sail #2: pull request #2 is closed. ${FORCE}\n`,
       runs: [],
     });
   });

@@ -11,6 +11,10 @@
 // to resume. Earlier still, during the type-check, it ends sail the default way; a dispatched start's is the same
 // refusal.
 //
+// `--run-id <id>` names the run of a start by hand, as `sail run --from-run` takes it, so a caller can tell the run
+// before it exists: the dashboard answers with it. The start is still `via: 'cli'` and runs every check; the id must be a
+// new run of the ticket.
+//
 // `--dispatch <run id>` is the watcher's, and not in the usage: the run it dispatches runs under the id it minted, as
 // a start `via` the watcher. So is `--head-sha <sha>`, which pins a run from a pull request to the head sha the watcher
 // queued: a pull request that has moved since is refused. The positional is a ref: a ticket's key or URL, or a pull
@@ -356,8 +360,11 @@ async function startRun(
   const workflowFile = findWorkflowFile(project.sailDir, workflow);
   if ('refused' in workflowFile) return refuse(workflowFile.refused);
   const { until, dispatch } = args.values;
+  const runId = args.values['run-id'];
   const headSha = args.values['head-sha'];
   const dry = args.values['dry-run'] === true;
+  if (runId !== undefined && dispatch !== undefined) return refuse("--run-id and --dispatch can't be combined");
+  if (runId !== undefined && dry) return refuse("--run-id and --dry-run can't be combined");
   if (dry && dispatch !== undefined) return refuse("--dry-run and --dispatch can't be combined");
   if (dry && headSha !== undefined) return refuse("--dry-run and --head-sha can't be combined");
   if (dry && args.values.record !== undefined) return refuse("--record and --dry-run can't be combined");
@@ -392,6 +399,7 @@ async function startRun(
       ignorePrerequisites: args.values['ignore-prerequisites'] === true,
       ...(typeof until === 'string' ? { until } : {}),
       ...(typeof dispatch === 'string' ? { dispatch: { runId: dispatch } } : {}),
+      ...(typeof runId === 'string' ? { runId } : {}),
       ...(typeof headSha === 'string' ? { headSha } : {}),
       ...(committed === undefined ? {} : { definitions: committed.definitions }),
       adapters: recording?.adapters ?? project.adapters,

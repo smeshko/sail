@@ -4,10 +4,12 @@
 // one check behind both these offers and the POSTs that change a queue, and a `.sail/` that still exists for the watch
 // set. Read-only.
 import { existsSync } from 'node:fs';
+import { readConfig } from '../engine/config';
 import type { RegistryEntry } from '../watch/registry';
 import type { Offer } from './actions';
 import { type RunItem, runItems } from './files';
 import { type QueueView, queueViews } from './queues';
+import { startableWorkflows } from './start';
 import { type RepoWatcher, repoWatcher, workflowWatch } from './watch-state';
 
 /** What one queue item offers: only the actions that apply to its state. */
@@ -29,8 +31,13 @@ export type CleanAllOffer = Offer & {
   runs: { runId: string; item?: { workflow: string; dedupKey: string; state: string } }[];
 };
 
-/** What a repository offers: its watch set, its clean of every failed run, and each workflow's watch or unwatch. */
+/**
+ * What a repository offers: its watch set, its clean of every failed run, each workflow's watch or unwatch, and a start
+ * from a ticket or a pull request.
+ */
 export interface RepoOffers {
+  /** Start a run: the workflows `.sail/workflows/` holds, and the config's `defaultWorkflow` when it reads. */
+  start?: Offer & { workflows: string[]; defaultWorkflow?: string };
   watch: Offer;
   unwatch?: Offer;
   /** Left out when the repository has no failed run. The runs are listed unchecked: the clean refuses each in its own line. */
@@ -90,6 +97,23 @@ export function offeredQueues(entry: RegistryEntry, runs?: readonly RunItem[], r
   return views.map((view) => ({ ...view, offers: queueOffers(entry, view, live, watcher) }));
 }
 
+/** The start a repository offers: `offer` for the `.sail/` it needs, with the workflows it can start. */
+function startOffer(entry: RegistryEntry, offer: Offer): NonNullable<RepoOffers['start']> {
+  if (!existsSync(entry.sailDir)) return { ...offer, workflows: [] };
+  let defaultWorkflow: string | undefined;
+  try {
+    const config = readConfig(entry.sailDir);
+    if (!('issues' in config)) defaultWorkflow = config.defaultWorkflow;
+  } catch {
+    // A config that doesn't read gives no default: the person names the workflow.
+  }
+  return {
+    ...offer,
+    workflows: startableWorkflows(entry.sailDir),
+    ...(defaultWorkflow === undefined ? {} : { defaultWorkflow }),
+  };
+}
+
 /**
  * The repository's offers: `watchingWorkflows` is the live watcher's watch set in this clone, empty when none, and
  * `runs` its runs, whose failed ones a clean of every failed run takes. The runs are not checked one by one here: a
@@ -106,7 +130,7 @@ export function repoOffers(
   const workflows: RepoOffers['workflows'] = Object.create(null) as RepoOffers['workflows'];
   for (const name of watchingWorkflows) workflows[name] = { unwatch: offer() };
   for (const view of queues) if (!(view.workflow in workflows)) workflows[view.workflow] = { watch: offer() };
-  const offers: RepoOffers = { watch: offer(), workflows };
+  const offers: RepoOffers = { watch: offer(), start: startOffer(entry, offer()), workflows };
   if (watchingWorkflows.length > 0) offers.unwatch = offer();
   const failed = runs.filter((run) => run.status?.status === 'failed');
   if (failed.length > 0) {

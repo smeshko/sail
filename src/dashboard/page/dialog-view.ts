@@ -9,6 +9,8 @@ import { html, type SafeHtml } from './html';
 export interface DialogView {
   title: string;
   lines: string[];
+  /** A preformatted text under the lines: a start's roster. */
+  text?: string | undefined;
   verb: string;
 }
 
@@ -28,7 +30,9 @@ export function renderDialogBody(view: DialogView, ask?: DialogAsk): SafeHtml {
       : html`<div class="dlg-fields">${asked.fields.map((param, at) => field(param, asked.values, at === 0))}${
           asked.error === undefined ? '' : html`<span class="dlg-bad" role="alert">${asked.error}</span>`
         }</div>`;
-  return html`<h2 id="dialog-title">${view.title}</h2>${fields}<ul class="dlg-lines">${view.lines.map((line) => html`<li>${line}</li>`)}</ul>`;
+  return html`<h2 id="dialog-title">${view.title}</h2>${fields}<ul class="dlg-lines">${view.lines.map((line) => html`<li>${line}</li>`)}</ul>${
+    view.text === undefined ? '' : html`<pre class="dlg-pre">${view.text}</pre>`
+  }`;
 }
 
 export function renderDialog(view: DialogView, ask?: DialogAsk): SafeHtml {

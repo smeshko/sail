@@ -37,6 +37,13 @@
 //    is not taken yet, or 409 with the CLI's refusal. A release of a usage-limit hold, POST to
 //    `/api/repos/<repo>/queues/<workflow>/release` (body `{ harnessKey }`), needs no watcher: it writes only `holds/` in
 //    the machine directory, as `sail watch --release-hold` does, and answers 200 `{ message }` with the line that prints.
+//    A start is checked at `/api/repos/<repo>/starts/check` (body `{ source, workflow?, until?, force?,
+//    ignorePrerequisites? }`): the route runs `sail <source> --workflow <name> --dry-run …` in the clone, its output in
+//    `.sail-runs/dashboard/start-check.log`, and answers 200 `{ roster, key, forced, start }` with what it printed, or
+//    409 `{ error, override?, start }` with what the CLI refused with and the flag that would override it. A start is
+//    POST `/api/repos/<repo>/starts` (that body and the `key` the check answered): it mints the run's id from the key,
+//    starts `sail <source> … --run-id <id>` detached in the clone, its output in `.sail-runs/dashboard/<run id>.log`,
+//    and answers 202 `{ runId }` once the run has opened, or 409 `{ error, override?, start }` with the CLI's refusal.
 // 3. A WebSocket upgrade needs a same-origin `Origin`, or no `Origin` and the client header: browsers can't set headers
 //    on an upgrade, but always send `Origin`.
 // 4. A GET of exactly `/` is the page, which a navigation fetches with no header of its own. It holds no data: all it
@@ -49,6 +56,7 @@ import { dirname, join, relative } from 'node:path';
 import type { Server, ServerWebSocket } from 'bun';
 import { z } from 'zod';
 import { BUILTINS } from '../adapters/index';
+import { rosterSource } from '../cli/commands/dry-run';
 import { resolveAdapters } from '../engine/adapters';
 import { isPlainName } from '../engine/call-dir';
 import { readConfig } from '../engine/config';
@@ -66,7 +74,7 @@ import { commandTaken, dropCommand, NOT_TAKEN } from '../watch/inbox';
 import { commandFor, itemLine, outcomeOf, streamMark } from '../watch/queue-commands';
 import { startingRun } from '../watch/queue-store';
 import { liveSet, liveWatcher } from '../watch/registry';
-import { lastLine, type SpawnedRun, spawnDetached } from '../watch/spawn';
+import { lastLine, logText, type SpawnedRun, spawnDetached } from '../watch/spawn';
 import { runActions, runAlive } from './actions';
 import { clonePorts, type ResolveClonePorts } from './clone-ports';
 import { callFile, containedFile, findRepo, findRunDir, repos, runItems } from './files';
@@ -74,6 +82,7 @@ import { renderMarkdown } from './markdown';
 import { offeredQueues, watching } from './offers';
 import { createPage } from './page';
 import { findQueueDir, readQueue } from './queues';
+import { forcedOf, overrideOf, runKeyOf, StartBody, StartRequest, startArgs } from './start';
 import { createIndexFeed, openQueueFollow, openRunStream, resolveTarget } from './streams';
 
 export interface DashboardOptions {
@@ -142,6 +151,12 @@ const STOP_PATH = /^\/api\/repos\/[^/]+\/runs\/[^/]+\/stop$/;
 const CLEAN_PATH = /^\/api\/repos\/[^/]+\/runs\/[^/]+\/clean$/;
 /** The path a run's summary is rebuilt at: `/api/repos/<repo>/runs/<run>/rebuild`. */
 const REBUILD_PATH = /^\/api\/repos\/[^/]+\/runs\/[^/]+\/rebuild$/;
+
+/** The path a start is checked at: `/api/repos/<repo>/starts/check`. */
+const START_CHECK_PATH = /^\/api\/repos\/[^/]+\/starts\/check$/;
+
+/** The path a run is started at: `/api/repos/<repo>/starts`. */
+const START_PATH = /^\/api\/repos\/[^/]+\/starts$/;
 
 /** The paths every failed run is cleaned at: `/api/repos/<repo>/clean-failed` and `/api/clean-failed`. */
 const CLEAN_FAILED_PATH = /^\/api\/(repos\/[^/]+\/)?clean-failed$/;
@@ -380,6 +395,7 @@ async function started(
   startWaitMs: number,
   has: () => boolean,
   answers: StartAnswers,
+  refusedWith?: (exit: number | null) => Response,
 ): Promise<Response> {
   let exit: number | null | undefined;
   spawned.exited.then((code) => {
@@ -392,6 +408,7 @@ async function started(
     await Promise.race([sleep(100), spawned.exited]);
   }
   if (has()) return Response.json(answers.held(), { status: 202 });
+  if (refusedWith !== undefined) return refusedWith(exit ?? null);
   return error(409, lastLine(log, spawned.logFrom) ?? `the start exited ${exit ?? 'on a signal'}`);
 }
 
@@ -521,6 +538,115 @@ async function restartRoute(starts: Starts, segments: string[], request: Request
     return await started(spawned, log, options.startWaitMs ?? 120_000, opened, runAnswers(minted));
   } finally {
     underway.delete(runId);
+  }
+}
+
+/**
+ * Starts a run by running `sail <source> … --run-id <minted>` in the clone, detached, under an id minted here so the
+ * answer can name the run. The CLI makes every check a start makes: 202 `{ runId }` once the run's `STATUS` reads, 409
+ * `{ error, override?, start }` with what it printed when it ends first.
+ */
+async function startRoute(starts: Starts, segments: string[], request: Request): Promise<Response> {
+  const { options, underway } = starts;
+  const [, , name = ''] = segments;
+  const entry = findRepo(options.registryDir, name);
+  if (entry === undefined) return error(404, `no repository '${name}'`);
+  const parsed = await bodyOf(request, StartRequest, 'a start');
+  if (parsed instanceof Response) return parsed;
+  const { key, ...body } = parsed.body;
+  const args = startArgs(body);
+  if ('invalid' in args) return error(400, args.invalid);
+  if (!existsSync(entry.sailDir)) return error(409, `${entry.sailDir} no longer exists`);
+  const underwayKey = `start ${name} ${body.source}`;
+  if (underway.has(underwayKey)) return error(409, `a start of ${body.source} in '${name}' is already under way`);
+  underway.add(underwayKey);
+  try {
+    const minted = newRunId(key);
+    const runs = runsDir(entry.sailDir);
+    const log = join(runs, 'dashboard', `${minted}.log`);
+    const spawned = spawnDetached(
+      dirname(entry.sailDir),
+      log,
+      [body.source, ...args, '--run-id', minted],
+      environmentOf(options),
+      options.cli,
+    );
+    const opened = () => {
+      if (!existsSync(join(runs, minted, RUN_HEADER_FILE))) return false;
+      try {
+        readStatus(join(runs, minted));
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    const refusedWith = (exit: number | null) => {
+      const text = logText(log, spawned.logFrom) ?? `sail exited ${exit ?? 'on a signal'}`;
+      const override = overrideOf(exit, text);
+      return Response.json(
+        { error: text, ...(override === undefined ? {} : { override }), start: body },
+        { status: 409 },
+      );
+    };
+    return await started(spawned, log, options.startWaitMs ?? 120_000, opened, runAnswers(minted), refusedWith);
+  } finally {
+    underway.delete(underwayKey);
+  }
+}
+
+/**
+ * Checks a start by running `sail <source> --workflow <name> … --dry-run` in the clone, its output in
+ * `.sail-runs/dashboard/start-check.log`: 200 `{ roster, key, forced, start }` when it exits 0, 409 `{ error, override?,
+ * start }` with what it printed otherwise, 202 `{ waiting }` when it outlasts `startWaitMs`. The CLI makes every check.
+ */
+async function startCheckRoute(starts: Starts, segments: string[], request: Request): Promise<Response> {
+  const { options, underway } = starts;
+  const [, , name = ''] = segments;
+  const entry = findRepo(options.registryDir, name);
+  if (entry === undefined) return error(404, `no repository '${name}'`);
+  const parsed = await bodyOf(request, StartBody, 'a check of a start');
+  if (parsed instanceof Response) return parsed;
+  const args = startArgs(parsed.body);
+  if ('invalid' in args) return error(400, args.invalid);
+  if (!existsSync(entry.sailDir)) return error(409, `${entry.sailDir} no longer exists`);
+  const key = `start-check ${name}`;
+  if (underway.has(key)) return error(409, `a check of a start in '${name}' is already under way`);
+  underway.add(key);
+  try {
+    const log = join(runsDir(entry.sailDir), 'dashboard', 'start-check.log');
+    const spawned = spawnDetached(
+      dirname(entry.sailDir),
+      log,
+      [parsed.body.source, ...args, '--dry-run'],
+      environmentOf(options),
+      options.cli,
+    );
+    const exit = await Promise.race([
+      spawned.exited,
+      sleep(options.startWaitMs ?? 120_000).then(() => 'late' as const),
+    ]);
+    if (exit === 'late') {
+      return Response.json(
+        {
+          waiting: `the check of the start in '${name}' is still under way: its output is in .sail-runs/dashboard/start-check.log`,
+        },
+        { status: 202 },
+      );
+    }
+    const text = logText(log, spawned.logFrom) ?? '';
+    const source = exit === 0 ? rosterSource(text) : undefined;
+    if (exit === 0 && source !== undefined) {
+      return Response.json({ roster: text, key: runKeyOf(source), forced: forcedOf(text), start: parsed.body });
+    }
+    const failure =
+      exit === 0 ? `the dry run's output names no source: ${text}` : text || `sail exited ${exit ?? 'on a signal'}`;
+    const override = exit === 0 ? undefined : overrideOf(exit, text);
+    return Response.json(
+      { error: failure, ...(override === undefined ? {} : { override }), start: parsed.body },
+      { status: 409 },
+    );
+  } finally {
+    underway.delete(key);
   }
 }
 
@@ -868,11 +994,13 @@ export function guard(request: Request, port: number): Response | undefined {
         CLEAN_FAILED_PATH,
         REBUILD_PATH,
         WATCH_PATH,
+        START_CHECK_PATH,
+        START_PATH,
       ].some((each) => each.test(path))
     ) {
       return error(
         405,
-        'the dashboard answers only GET, and POST to a queue change, a resume, a restart, a stop, a clean, a rebuild, a clean of every failed run, a watch or an unwatch',
+        'the dashboard answers only GET, and POST to a queue change, a resume, a restart, a stop, a clean, a rebuild, a clean of every failed run, a watch, an unwatch, a check of a start or a start',
         {
           Allow: 'GET',
         },
@@ -1033,6 +1161,14 @@ export function startDashboard(options: DashboardOptions): Dashboard | { refused
           if (start !== undefined) {
             self.timeout(request, 0);
             return start(starts, segments, request);
+          }
+          if (START_PATH.test(path)) {
+            self.timeout(request, 0);
+            return startRoute(starts, segments, request);
+          }
+          if (START_CHECK_PATH.test(path)) {
+            self.timeout(request, 0);
+            return startCheckRoute(starts, segments, request);
           }
           if (CLEAN_FAILED_PATH.test(path)) {
             self.timeout(request, 0);

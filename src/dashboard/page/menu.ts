@@ -204,7 +204,14 @@ function runStepRow(store: Store, menu: MenuState, row: MenuRow): void {
   const { run } = row;
   const step = openStep(menu);
   if ('value' in run && step !== undefined) answer(store, menu, step, run.value);
-  else if ('queue' in run) {
+  else if ('repo' in run) {
+    const last = menu.steps.at(-1);
+    const subject: Subject = { kind: 'repo', repo: run.repo };
+    const action = last !== undefined && 'pick' in last ? last.action : '';
+    const first = firstStep(store, action, subject, subjectData(subject));
+    if (first === undefined) carryOut(store, action, subjectData(subject));
+    else push(store, menu, first);
+  } else if ('queue' in run) {
     const last = menu.steps.at(-1);
     const subject: Subject = { kind: 'workflow', repo: run.queue.repo, workflow: run.queue.workflow };
     const action = last !== undefined && 'pick' in last ? last.action : '';
@@ -232,7 +239,7 @@ export function runRow(store: Store, n: number): void {
     if (first === undefined) carryOut(store, run.act, run.data);
     else push(store, menu, first);
   } else if ('pollAll' in run) pollAll(store);
-  else if ('pick' in run) push(store, menu, { pick: 'queue', action: run.pick });
+  else if ('pick' in run) push(store, menu, { pick: run.of ?? 'queue', action: run.pick });
   else runStepRow(store, menu, row);
 }
 

@@ -8,7 +8,7 @@ export function renderToasts(toasts: readonly Toast[]): SafeHtml {
     (toast) =>
       html`<div class="toast ${toast.kind}" role="${toast.kind === 'bad' ? 'alert' : 'status'}" data-toast="${toast.id}"><span class="toast-head">${toast.head}</span> <span class="toast-text">${toast.text}</span>${
         toast.undo === true
-          ? html` <button class="btn" data-action="undo-toast" data-toast="${toast.id}">undo</button>`
+          ? html` <button class="btn" data-action="undo-toast" data-toast="${toast.id}">${toast.undoLabel ?? 'undo'}</button>`
           : ''
       } <button class="btn" data-action="dismiss-toast" data-toast="${toast.id}" aria-label="dismiss">dismiss</button></div>`,
   )}`;

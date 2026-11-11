@@ -390,6 +390,26 @@ test("a failed run that committed in its workspace keeps its commits at refs/sai
   });
 });
 
+test('a failed run that pushed its branch keeps its commits at refs/sail/runs/<runId> all the same', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = writeStub(repo.dir, { testsPassAt: 99 });
+    before(
+      sail,
+      IMPLEMENT_SCRIPT,
+      IMPLEMENT_BODY,
+      'git -C "$WORKSPACE" commit -q --allow-empty -m "implement $CALL"\ngit -C "$WORKSPACE" update-ref refs/remotes/origin/pushed HEAD',
+    );
+    const end = await ran(repo.dir);
+    const ref = `refs/sail/runs/${end.runId}`;
+    const released = readEvents(end.dir).find((event) => event.type === 'workspace:released');
+    expect({
+      status: end.status,
+      released: released?.type === 'workspace:released' ? { ref: released.ref, head: released.head } : released,
+    }).toEqual({ status: 'failed', released: { ref, head: repo.git('rev-parse', ref) } });
+    expect(repo.git('rev-parse', 'refs/remotes/origin/pushed')).toBe(repo.git('rev-parse', ref));
+  });
+});
+
 test("a run whose workspace can't be removed still releases its lease, and its run:end says which workspace it left", async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir, { testsPassAt: 1 });

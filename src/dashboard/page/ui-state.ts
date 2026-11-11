@@ -4,7 +4,7 @@
 // clock is at, and the file open in the drawer. `act` is the one state of carrying an action out: the parameters typed. It
 // holds nothing about the runs themselves.
 
-import type { Subject } from './action-registry';
+import type { RefusedStart, Subject } from './action-registry';
 import type { DialogView } from './dialog-view';
 import type { ViewName } from './list-model';
 import type { Toast } from './toasts';
@@ -47,7 +47,7 @@ export type MenuStep =
       values: Record<string, string>;
       at: number;
     }
-  | { pick: 'queue'; action: string };
+  | { pick: 'queue' | 'repo'; action: string };
 
 /** The command menu while it is open: the subject frozen at the open, what is typed, the highlighted row and the steps. */
 export interface MenuState {
@@ -120,6 +120,8 @@ export interface UiState {
   dialog?: DialogView;
   /** The toasts on the stack, oldest first. */
   toasts: Toast[];
+  /** The start the CLI last refused with a check a flag overrides, for start anyway. */
+  start?: RefusedStart;
   /** The command last copied and whether the clipboard took it, shown on its copy button until it times out. */
   copied?: { text: string; ok: boolean };
   /** The command menu, while it is open. */

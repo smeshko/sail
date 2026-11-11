@@ -368,6 +368,89 @@ test('a workflow offers release only while its queue is held on a harness key, a
   expect(release?.disabled).toBe(false);
 });
 
+// Start a run (ADW-524): its row on a repository and a queue, in the general group, its steps, and start anyway.
+const START = { enabled: true, workflows: ['review', 'ticket-to-pr'], defaultWorkflow: 'ticket-to-pr' };
+const startIndex = [
+  { name: 'alpha', remote: null, runs: [], queues: [], offers: { watch: on, workflows: {}, start: START } },
+  {
+    name: 'beta',
+    remote: null,
+    runs: [],
+    offers: { watch: on, workflows: {}, start: { enabled: false, why: '/b/.sail no longer exists', workflows: [] } },
+    queues: [{ workflow: 'ticket-to-pr', watch: { state: 'watched' }, offers: { poll: on, add: on, items: {} } }],
+  },
+  { name: 'gamma', remote: null, runs: [], queues: [], offers: { watch: on, workflows: {} } },
+] as unknown as IndexRepo[];
+const startSource = (extra: Partial<OfferSource> = {}): OfferSource => ({ index: startIndex, ...extra });
+
+test('a repository subject has the row start a run…, and so has a queue’s workflow, each running the action on its subject', () => {
+  const alpha: Subject = { kind: 'repo', repo: 'alpha' };
+  const rows = subjectRows(alpha, startSource()).filter((row) => row.label === 'start a run…');
+  expect(rows.map((row) => [row.disabled, row.run])).toEqual([
+    [false, { act: 'start-run', subject: alpha, data: { repo: 'alpha' } }],
+  ]);
+  const beta: Subject = { kind: 'workflow', repo: 'beta', workflow: 'ticket-to-pr' };
+  expect(subjectRows(beta, startSource()).map((row) => [row.label, row.disabled, row.why])).toContainEqual([
+    'start a run…',
+    true,
+    '/b/.sail no longer exists',
+  ]);
+  expect(labels(subjectRows({ kind: 'repo', repo: 'gamma' }, startSource()))).not.toContain('start a run…');
+});
+
+test('the general group has start a run… as a repository pick, and none when no repository offers it', () => {
+  const row = generalRows(startSource()).find((each) => each.label === 'start a run…');
+  expect([row?.group, row?.disabled, row?.run]).toEqual(['general', false, { pick: 'start-run', of: 'repo' }]);
+  expect(labels(generalRows(source()))).not.toContain('start a run…');
+  const gone = generalRows({ index: [startIndex[1] as IndexRepo] }).find((each) => each.label === 'start a run…');
+  expect([gone?.disabled, gone?.why]).toEqual([true, '/b/.sail no longer exists']);
+});
+
+test('the repository step lists each repository that offers the start, a disabled one with its reason, starting on the first enabled', () => {
+  const model = stepOf({ pick: 'repo', action: 'start-run' }, startSource());
+  expect(model.label).toBe('repository');
+  expect(model.rows.map((row) => [row.label, row.disabled, row.why, row.run])).toEqual([
+    ['alpha', false, undefined, { repo: 'alpha' }],
+    ['beta', true, '/b/.sail no longer exists', { repo: 'beta' }],
+  ]);
+  expect(model.start).toBe(0);
+});
+
+test('the start steps ask the workflow, on the default, then the ticket key or pull request, then the stage to stop after', () => {
+  const alpha: Subject = { kind: 'repo', repo: 'alpha' };
+  const step = (at: number) =>
+    stepOf({ action: 'start-run', subject: alpha, data: { repo: 'alpha' }, values: {}, at }, startSource());
+  const workflow = step(0);
+  expect([workflow.label, workflow.rows.map((row) => row.label), workflow.start]).toEqual([
+    'workflow',
+    ['review', 'ticket-to-pr'],
+    1,
+  ]);
+  expect([step(1).label, step(1).field]).toEqual(['ticket key or pull request', { type: 'text' }]);
+  expect([step(2).label, step(2).field]).toEqual(['stop after', { type: 'text' }]);
+  const queue: Subject = { kind: 'workflow', repo: 'alpha', workflow: 'ticket-to-pr' };
+  const first = stepOf({ action: 'start-run', subject: queue, data: {}, values: {}, at: 0 }, startSource());
+  expect(first.label).toBe('ticket key or pull request');
+});
+
+test('start anyway is a general row naming the ticket and the flag only after a refusal that offers it, running the action with the refused start', () => {
+  const refused = { repo: 'alpha', source: 'FAKE-3', workflow: 'ticket-to-pr', override: 'force' } as const;
+  const row = generalRows(startSource({ start: refused })).find((each) => each.label.startsWith('start FAKE-3'));
+  expect([row?.label, row?.disabled, row?.run]).toEqual([
+    'start FAKE-3 anyway (--force)',
+    false,
+    {
+      act: 'start-run-force',
+      subject: { kind: 'none' },
+      data: { repo: 'alpha', source: 'FAKE-3', workflow: 'ticket-to-pr', force: 'true' },
+    },
+  ]);
+  expect(labels(generalRows(startSource()))).not.toContain('start FAKE-3 anyway (--force)');
+  expect(labels(generalRows(startSource({ start: { ...refused, override: 'ignore-prerequisites' } })))).toContain(
+    'start FAKE-3 anyway (--ignore-prerequisites)',
+  );
+});
+
 test('clean all failed is a general row while a repository offers it, and is left out otherwise', () => {
   const offering = [
     {

@@ -130,3 +130,8 @@ export async function dryRunTicket(
   io.stdout(rosterText(result.header, from, result.branch));
   return EXIT_OK;
 }
+
+/** The ticket key or `#<number>` the first line of `rosterText()` names, or undefined when it names none. */
+export function rosterSource(text: string): string | undefined {
+  return /^\S+@\S+ on (\S+): /.exec(text.split('\n', 1)[0] ?? '')?.[1];
+}

@@ -34,61 +34,12 @@ import {
   underwayId,
   type Values,
 } from './action-registry';
+import type { Actor, ActorDeps } from './actor';
 import { type DialogAsk, renderDialog, renderDialogBody } from './dialog-view';
-import type { PageHost, Region } from './host';
-import type { UiState } from './ui-state';
 
 type Data = Readonly<Record<string, string>>;
 
-export interface ActorEffects {
-  /** Reads the run again, keeping its ⋯ menu open when `keepMenu`. */
-  reopen(repo: string, runId: string, keepMenu: boolean): void;
-  /** Opens the run `runId`. */
-  open(repo: string, runId: string): void;
-  /** Leaves the open run, which no longer exists. */
-  leave(): void;
-  /** Draws the field a change that took emptied as it is, not as it was typed. */
-  took(): void;
-  /** Puts a toast on the stack. */
-  toast(kind: 'ok' | 'bad', head: string, text: string, undo?: () => void): void;
-  /** The local actions' effects, by the name their entry's `run` gives: the text of their toast and what undoes them. */
-  local: Record<string, (data: Data) => { text: string; undo: () => void } | undefined>;
-}
-
-export interface ActorDeps {
-  host: Pick<PageHost, 'post' | 'value' | 'openDialog' | 'closeDialog' | 'dialogValue' | 'redrawDialog'>;
-  ui: UiState;
-  /** What the offers say for `subject`: a run that is not open has its own. */
-  source(subject?: Subject): OfferSource;
-  openRun(): { repo: string; runId: string } | undefined;
-  effects: ActorEffects;
-  mark(...regions: Region[]): void;
-  stopped(): boolean;
-  /** The actions it carries out: the registry's, unless a test gives its own. */
-  registry?: readonly ActionDef[];
-}
-
-export interface Actor {
-  /** Carries out action `id` for the subject `data` names. */
-  act(id: string, data: Data, values?: Values): void;
-  /**
-   * Carries out `id` over `runs`: one dialog listing each, then a request per run that can, in order. False when it took
-   * nothing: a run request is still out, which a red toast says, or the action has no several form.
-   */
-  actSeveral(id: string, runs: readonly SeveralRun[]): boolean;
-  /** Reads the drawn parameters of the actions shown in `place` into the drafts, before a draw. */
-  keep(place: 'run' | 'queue', subject?: Subject): void;
-  /** Forgets what a run's actions hold: an open dialog for it and the drafts. */
-  forget(kind: 'run'): void;
-  /** The subject of the confirmation dialog open now, if any. */
-  dialogFor(): Subject | undefined;
-  /** Confirms the open dialog: it sends what it asks, once. */
-  confirm(): void;
-  /** Closes the open dialog and sends nothing. */
-  cancel(): void;
-  /** A field of the open dialog changed: reads its fields and draws its lines again. */
-  changed(): void;
-}
+export type { Actor, ActorDeps, ActorEffects } from './actor';
 
 /** An actor that does nothing, until the shell wires the real one. */
 export function inertActor(): Actor {
@@ -151,8 +102,13 @@ export function createActor(deps: ActorDeps): Actor {
   /** The toast an answer is: `<verb> <subject>`, then sail's own words, with an Undo on a success when it has one. */
   function say(def: ActionDef, subject: Subject, status: number, answer: ActResult, undo?: () => void) {
     const head = headOf(def, subject);
-    if (answer.refused === true) effects.toast('bad', head, answer.text ?? `the ${def.label(subject)} was refused`);
-    else effects.toast('ok', head, answer.text ?? (status === 200 ? 'done' : 'asked'), undo);
+    const { button } = answer;
+    // A refusal's button is its start anyway; it is the toast's one button, in place of an Undo.
+    if (answer.refused === true) {
+      const text = answer.text ?? `the ${def.label(subject)} was refused`;
+      if (button === undefined) effects.toast('bad', head, text);
+      else effects.toast('bad', head, text, () => act(button.action, button.data), button.label);
+    } else effects.toast('ok', head, answer.text ?? (status === 200 ? 'done' : 'asked'), undo);
   }
 
   type Undo = NonNullable<ReturnType<NonNullable<ActionDef['undo']>>>;
@@ -168,12 +124,24 @@ export function createActor(deps: ActorDeps): Actor {
     });
   }
 
-  function finish(def: ActionDef, subject: Subject, status: number, body: string, undo?: Undo) {
+  function finish(
+    def: ActionDef,
+    subject: Subject,
+    status: number,
+    body: string,
+    undo: Undo | undefined,
+    values: Values,
+  ) {
     if (subject.kind === 'run') runsOut--;
     if (deps.stopped()) return;
-    const answer = def.answer?.(status, body, subject) ?? {};
+    const answer = def.answer?.(status, body, subject, values) ?? {};
     const { effect } = answer;
     delete ui.underway[underwayId(def, subject)];
+    if (answer.start === 'forget') delete ui.start;
+    else if (answer.start !== undefined) ui.start = answer.start;
+    // The run an answer opens is in the repository of the run acted on, or the one the answer names.
+    const openRepo =
+      typeof effect === 'object' ? (effect.repo ?? (subject.kind === 'run' ? subject.repo : undefined)) : undefined;
     const open = deps.openRun();
     const runEffect = effect !== undefined && effect !== 'took';
     const stillOpen = subject.kind === 'run' && open?.repo === subject.repo && open.runId === subject.runId;
@@ -181,14 +149,14 @@ export function createActor(deps: ActorDeps): Actor {
     if (runEffect && !stillOpen) {
       // A run acted on that is not open: a Restart opens the run it started and a Resume (a reopen that keeps no menu)
       // opens the run; a stop's reopen and a clean's leave are the open run's alone.
-      if (typeof effect === 'object' && subject.kind === 'run') effects.open(subject.repo, effect.open);
+      if (typeof effect === 'object' && openRepo !== undefined) effects.open(openRepo, effect.open);
       else if (effect === 'reopen' && answer.keepMenu !== true && subject.kind === 'run')
         effects.open(subject.repo, subject.runId);
     } else {
       if (effect === 'reopen' && subject.kind === 'run')
         effects.reopen(subject.repo, subject.runId, answer.keepMenu === true);
       else if (effect === 'leave' || openIsGone) effects.leave();
-      else if (typeof effect === 'object' && subject.kind === 'run') effects.open(subject.repo, effect.open);
+      else if (typeof effect === 'object' && openRepo !== undefined) effects.open(openRepo, effect.open);
       else if (effect === 'took') {
         // A change that took empties the text typed for it. One with no text of its own, such as a poll or a drop,
         // leaves every field as it is typed.
@@ -203,16 +171,28 @@ export function createActor(deps: ActorDeps): Actor {
         }
       }
     }
-    say(def, subject, status, answer, undo === undefined ? undefined : () => reverse(subject, undo));
+    if (answer.quiet !== true)
+      say(def, subject, status, answer, undo === undefined ? undefined : () => reverse(subject, undo));
     mark('list', 'main');
     if (effect === 'leave' || openIsGone) mark('sidebar', 'inspector', 'status');
+    // The next action comes last, so its dialog opens over the state this answer left.
+    if (answer.next !== undefined) act(answer.next.action, answer.next.data);
   }
 
-  function send(def: ActionDef, subject: Subject, request: { path: string; body: unknown }, undo?: Undo) {
+  function send(
+    def: ActionDef,
+    subject: Subject,
+    request: { path: string; body: unknown },
+    undo?: Undo,
+    values: Values = {},
+  ) {
     if (subject.kind === 'run') runsOut++;
-    if (def.underway !== undefined) ui.underway[underwayId(def, subject)] = def.underway;
+    const underway = underwayId(def, subject);
+    if (def.underway !== undefined && underway !== '') ui.underway[underway] = def.underway;
     mark('list', 'main');
-    return host.post(request.path, request.body).then(({ status, body }) => finish(def, subject, status, body, undo));
+    return host
+      .post(request.path, request.body)
+      .then(({ status, body }) => finish(def, subject, status, body, undo, values));
   }
 
   /**
@@ -285,14 +265,14 @@ export function createActor(deps: ActorDeps): Actor {
     const undo = def.undo?.(subject, source);
     if (def.tier === 'confirmed' && def.dialog !== undefined) {
       const view = def.dialog(subject, values, source);
-      dialog = { subject, submit: () => () => send(def, subject, request, undo) };
+      dialog = { subject, submit: () => () => send(def, subject, request, undo, values) };
       ui.dialog = view;
       host.openDialog(renderDialog(view).value);
       // What was typed for its parameters is kept in the drafts, and drawn again.
       mark('list', 'main');
       return;
     }
-    send(def, subject, request, undo);
+    send(def, subject, request, undo, values);
   }
 
   /** Opens the dialog of `def`, which asks `asked` in it: the request is built from what the dialog holds at confirm. */
@@ -345,7 +325,7 @@ export function createActor(deps: ActorDeps): Actor {
           draw(false);
           return 'keep';
         }
-        return () => send(def, subject, request, undo);
+        return () => send(def, subject, request, undo, values);
       },
     };
     draw(true);

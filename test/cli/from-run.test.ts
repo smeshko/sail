@@ -5,6 +5,7 @@
 import { afterAll, expect, test } from 'bun:test';
 import {
   chmodSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -21,15 +22,17 @@ import { recordingKeepAwake } from '../../src/engine/keep-awake';
 import { readStatus } from '../../src/engine/run-dir';
 import { readEvents } from '../../src/events/consumers/ndjson';
 import { fakeCredentialTools } from '../helpers/fake-credentials';
-import { copyFixture, edit, patchTicket } from '../helpers/fixture';
+import { copyFixture, edit, FIXTURE_SAIL, patchTicket } from '../helpers/fixture';
 import { type CaptureOptions, fakeInterrupts, runCaptured } from '../helpers/run-captured';
-import { cutJournal, runIds, sharedSource } from '../helpers/seeded';
+import { cutJournal, pushedSource, runIds, sharedSource } from '../helpers/seeded';
+import { copyRun } from '../helpers/stub-workflow';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
 
 const source = sharedSource();
 afterAll(() => source.release());
 
 const WORKFLOW = 'workflows/ticket-to-pr/workflow.ts';
+const OPEN = 'workflows/ticket-to-pr/stages/publish/open.sh';
 const PROMPT = 'workflows/ticket-to-pr/stages/spec/prompt.md';
 const EDIT = 'Keep the spec to one page.';
 const SUMMARY = 'Add --shout to greet() and the CLI, upper-casing the whole line.';
@@ -272,12 +275,14 @@ test('the usage lists sail run --from-run and what --continue and --from-base do
   const { stdout } = await runCaptured(['--help']);
   const commands = stdout.split('\n').filter((line) => line.startsWith('  sail '));
   expect(commands[0]).toBe(
-    '  sail <ticket> [--workflow <name>] [--force] [--ignore-prerequisites] [--until <stage>] [-q|-v|-vv]',
+    '  sail <ticket> [--workflow <name>] [--force] [--ignore-prerequisites] [--until <stage>] [--run-id <id>] [-q|-v|-vv]',
   );
   expect(stdout).toMatch(
     /^ {2}sail run --from-run <run> --stage <stage> \[--continue\] \[--from-base\] \[--run-id <id>\]\n {2,}Rerun one stage on another run's earlier calls: a seeded run$/m,
   );
-  expect(stdout).toMatch(/^ {2}--run-id {4}Names the new run, ready to be told before it exists: /m);
+  expect(stdout).toMatch(
+    /^ {2}--run-id {4}Names the new run \(also of sail <ticket>\), ready to be told before it exists: /m,
+  );
   expect(stdout).toMatch(
     /^A seeded run:\n {2}--continue {2,}Runs the rest of the workflow after the stage, not just the stage\n {2}--from-base Starts the workspace at the source run's base, not from the commits it made$/m,
   );
@@ -307,6 +312,25 @@ test("sail run --from-run --from-base starts at the source's base though the sou
   });
   expect(fromBase.repository.startSha).toBeUndefined();
 }, 90_000);
+
+test('sail run --from-run of a source that pushed its branch and then failed carries the pushed commits, with --continue or without', async () => {
+  const carried = async (flags: string[]) =>
+    withTempRepo(async (first) => {
+      const { runId, base, head } = await pushedSource(first);
+      return withTempRepo(async (second) => {
+        copyRun(first.dir, second.dir);
+        // With --continue the run reaches publish again, which must pass this time: the fixture's own open step.
+        if (flags.length > 0) copyFileSync(join(FIXTURE_SAIL, OPEN), join(second.dir, '.sail', OPEN));
+        const ran = await sailRun(second, runId, ['--from-run', runId, '--stage', 'spec', ...flags]);
+        const { baseSha, startSha } = json(ran.dir, 'run.json').repository;
+        return { code: ran.code, repository: { baseSha, startSha }, expected: { baseSha: base, startSha: head } };
+      });
+    });
+  const [plain, continued] = [await carried([]), await carried(['--continue'])];
+  expect([plain.code, continued.code]).toEqual([EXIT_SUSPENDED, EXIT_OK]);
+  expect(plain.repository).toEqual(plain.expected);
+  expect(continued.repository).toEqual(continued.expected);
+}, 120_000);
 
 // Review round 1: a source whose run.json can't be read is refused in the engine's words, not thrown on.
 test('sail run from a source whose run.json is broken is refused with exit 3, and starts no run', async () => {

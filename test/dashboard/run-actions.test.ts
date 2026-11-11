@@ -3,6 +3,7 @@
 // a POST to resume it finishes it. Then its STATUS is made `failed`, and a POST to restart it from spec starts a seeded
 // run under a new id, whose run.json names the run it was seeded from. The seeded run, made suspended, is stopped from the
 // dashboard, and the failed one is cleaned: its branch and run directory go, and the archive holds the directory.
+// The source pushed its branch before it was released, so its run ref is what the restart carries from.
 // Each action waits for the run's closing `run:end`, which follows the release of its workspace and lease.
 import { expect, test } from 'bun:test';
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -15,6 +16,7 @@ import { machineDir, readRegistry, registryDir } from '../../src/watch/registry'
 import { copyFixture } from '../helpers/fixture';
 import { runCaptured } from '../helpers/run-captured';
 import { sailProcess } from '../helpers/sail-process';
+import { markPushed } from '../helpers/seeded';
 import { heldRuns, setHoldAt, writeStub } from '../helpers/stub-workflow';
 import { withTempRepo } from '../helpers/temp-repo';
 
@@ -39,6 +41,7 @@ async function until(what: string, holds: () => boolean, ms = 90_000): Promise<v
 test('a suspended run resumes to completion from the dashboard, and a failed one restarts as a seeded run from a stage it ran, then it is stopped and the failed one cleaned', async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
+    markPushed(join(repo.dir, '.sail'), { fail: false });
     // A machine directory of its own: an in-process run finds the default one through the test process's HOME, which
     // the other test files of the process share, and whose entry for the fixture's name another clone may take.
     const env = { ...repo.env, SAIL_HOME: join(repo.home, '.sail') };
@@ -70,6 +73,11 @@ test('a suspended run resumes to completion from the dashboard, and a failed one
       expect(seeded).not.toBe(runId);
       expect(isRunIdOf('FAKE-1', seeded)).toBe(true);
       expect(JSON.parse(readFileSync(join(runs, seeded, 'run.json'), 'utf8')).fromRun).toBe(runId);
+      const released = readEvents(dir).find((event) => event.type === 'workspace:released');
+      expect(released && 'ref' in released ? released.ref : released).toBe(`refs/sail/runs/${runId}`);
+      expect(JSON.parse(readFileSync(join(runs, seeded, 'run.json'), 'utf8')).repository.startSha).toBe(
+        released && 'head' in released ? released.head : undefined,
+      );
       await until(
         'the seeded run to end',
         () => statusOf(join(runs, seeded)) === 'completed' && endedCompleted(join(runs, seeded)),

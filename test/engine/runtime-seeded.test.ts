@@ -16,7 +16,7 @@ import { AGENT_WORKFLOW } from '../helpers/agent-fixture';
 import { edit } from '../helpers/fixture';
 import { writeLiveRun } from '../helpers/live-run';
 import { TRIO, TRIO_GROUP, TRIO_JOURNAL, trioRunInto } from '../helpers/review-fixture';
-import { SOURCE_BRANCH, SOURCE_JOURNAL, sharedSource } from '../helpers/seeded';
+import { pushedSource, SOURCE_BRANCH, SOURCE_JOURNAL, sharedSource } from '../helpers/seeded';
 import { copyRun } from '../helpers/stub-workflow';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
 import { writeTwoStep } from '../helpers/two-step';
@@ -191,6 +191,34 @@ test("a seeded run of a source that committed 5 of 6 tasks starts a workspace ho
     });
   });
 }, 60_000);
+
+test("a seeded run of a source that pushed its branch and then failed starts from the pushed commits, keeping the source's base", async () => {
+  await withTempRepo(async (first) => {
+    const { runId, base, head } = await pushedSource(first);
+    expect(first.git('rev-parse', `refs/sail/runs/${runId}`)).toBe(head);
+    await withTempRepo(async (second) => {
+      copyRun(first.dir, second.dir);
+      const end = await seeded(second, runId, 'spec');
+      expect(endOf(end)).toEqual({ status: 'suspended', stopReason: 'until' });
+      const dir = dirOf(end);
+      const created = readEvents(dir).filter((event) => event.type === 'workspace:created');
+      expect({
+        head: git(second, join(dir, 'workspace'), ['rev-parse', 'HEAD']),
+        repository: { baseSha: headerOf(dir).repository.baseSha, startSha: headerOf(dir).repository.startSha },
+        created: created.map((event) => ({
+          baseSha: 'baseSha' in event ? event.baseSha : undefined,
+          startSha: 'startSha' in event ? event.startSha : undefined,
+        })),
+        issues: issuesOf(dir),
+      }).toEqual({
+        head,
+        repository: { baseSha: base, startSha: head },
+        created: [{ baseSha: base, startSha: head }],
+        issues: [],
+      });
+    });
+  });
+}, 90_000);
 
 test("with fromBase a seeded run starts at the source's base and records no startSha", async () => {
   await withTempRepo(async (repo) => {
