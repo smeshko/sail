@@ -45,7 +45,12 @@ function stage(repo: TempRepo, diff: string, base = repo.git('rev-parse', 'HEAD'
       INPUT_BASE: baseFile,
     },
   });
-  return { code: child.exitCode, output: JSON.parse(child.stdout.toString()), request: join(out, 'jev-request.json') };
+  return {
+    code: child.exitCode,
+    output: JSON.parse(child.stdout.toString()),
+    request: join(out, 'jev-request.json'),
+    out,
+  };
 }
 const doc = '+++ b/note.md\n@@ -0,0 +1 @@\n+Some project\n';
 
@@ -219,5 +224,67 @@ test('the stage keeps the answers of the requests Jev answered and notes the one
     });
     expect(result.output.jev.asked).toBe(true);
     expect(result.output.jev.note).toStartWith('1 of 2 requests not asked: the request is ');
+  });
+});
+
+test('the stage groups 3,000 key hits into one group per prefix, with five examples each', async () => {
+  await withTempRepo((repo) => {
+    writeOwnSail(repo);
+    const added = (prefix: string, n: number) =>
+      Array.from({ length: n }, (_, i) => `+const k${i} = '${prefix}-${i}';`);
+    const diff = `+++ b/a.ts\n@@ -0,0 +1,2000 @@\n${added('CIR', 2000).join('\n')}\n+++ b/b.ts\n@@ -0,0 +1,1000 @@\n${added('ACME', 1000).join('\n')}\n`;
+    const { output } = stage(repo, diff);
+    expect(output.hits).toHaveLength(3000);
+    expect(output.groups).toHaveLength(2);
+    expect(output.groups[0]).toMatchObject({ kind: 'key', prefix: 'CIR', count: 2000, files: 1 });
+    expect(output.groups[1]).toMatchObject({ kind: 'key', prefix: 'ACME', count: 1000, files: 1 });
+    expect(output.groups[0].examples).toEqual(
+      Array.from({ length: 5 }, (_, i) => ({ file: 'a.ts', line: i + 1, match: `CIR-${i}` })),
+    );
+    expect(output.groups[1].examples).toHaveLength(5);
+  });
+});
+test('the stage groups denylist hits by term and names no term in the groups', async () => {
+  await withTempRepo((repo) => {
+    writeOwnSail(repo);
+    writeFileSync(join(repo.home, 'leak-denylist.txt'), 'Secretname\nOthername\n');
+    const diff =
+      '+++ b/x.ts\n@@ -0,0 +1,3 @@\n+a Secretname\n+b Secretname\n+c Othername\n+++ b/y.ts\n@@ -0,0 +1 @@\n+Secretname again\n';
+    const { output } = stage(repo, diff);
+    expect(output.groups).toEqual([
+      {
+        kind: 'denylist',
+        count: 3,
+        files: 2,
+        examples: [
+          { file: 'x.ts', line: 1 },
+          { file: 'x.ts', line: 2 },
+          { file: 'y.ts', line: 1 },
+        ],
+      },
+      { kind: 'denylist', count: 1, files: 1, examples: [{ file: 'x.ts', line: 3 }] },
+    ]);
+    expect(JSON.stringify(output.groups).includes('Secretname')).toBe(false);
+    expect(JSON.stringify(output.groups).includes('Othername')).toBe(false);
+  });
+});
+test('the stage makes a group of one for a Jev hit, with its yes', async () => {
+  await withTempRepo((repo) => {
+    writeOwnSail(repo, { jev: nouls({ 'leak-1': 0.97 }) });
+    const { output } = stage(repo, doc);
+    expect(output.groups).toEqual([
+      { kind: 'jev', count: 1, files: 1, yes: 0.97, examples: [{ file: 'note.md', line: 1, match: 'Some project' }] },
+    ]);
+  });
+});
+test('leak-locations.txt lists every hit under its group id and names no term', async () => {
+  await withTempRepo((repo) => {
+    writeOwnSail(repo);
+    writeFileSync(join(repo.home, 'leak-denylist.txt'), 'Secretname\n');
+    const diff = '+++ b/x.ts\n@@ -0,0 +1,4 @@\n+"CIR-1"\n+"CIR-2"\n+Secretname\n+"ACME-3"\n';
+    const { out } = stage(repo, diff);
+    const text = readFileSync(join(out, 'leak-locations.txt'), 'utf8');
+    expect(text).toBe('L1\tx.ts:1\nL1\tx.ts:2\nL2\tx.ts:3\nL3\tx.ts:4\n');
+    expect(text.includes('Secretname')).toBe(false);
   });
 });
