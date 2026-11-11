@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { findRepo, index } from '../../src/dashboard/files';
-import { offeredQueues, watching } from '../../src/dashboard/offers';
+import { offeredQueues, repoOffers, watching } from '../../src/dashboard/offers';
 import { writeStatus } from '../../src/engine/run-dir';
 import { type Machine, machine } from '../helpers/dashboard';
 
@@ -152,4 +152,48 @@ test('an item keyed __proto__ is read as an own key and pollutes nothing', () =>
   const items = beta()?.queues[0]?.offers?.items;
   expect(Object.hasOwn(items ?? {}, '__proto__')).toBe(true);
   expect(({} as Record<string, unknown>).drop).toBeUndefined();
+});
+
+/** A listed run of beta with `status`. */
+function runOf(id: string, status: 'failed' | 'completed' | 'suspended'): void {
+  const dir = join(m.beta.clone, '.sail-runs', id);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'run.json'), '{}');
+  if (status === 'completed') writeStatus(dir, status);
+  else writeStatus(dir, status, status === 'failed' ? 'workflow_failed' : 'interrupted');
+}
+
+test('a repository with no failed run offers no clean of every failed run', () => {
+  world();
+  runOf('DONE-RUN', 'completed');
+  runOf('SUSP-RUN', 'suspended');
+  expect(beta()?.offers?.clean).toBeUndefined();
+});
+
+test('a repository with failed runs offers a clean of them alone, each with the queue item that names it', () => {
+  world();
+  runOf('DONE-RUN', 'completed');
+  runOf('FAILED-A', 'failed');
+  runOf('FAILED-B', 'failed');
+  const queue = join(m.beta.clone, '.sail-runs', 'queue', WORKFLOW, 'queue.json');
+  const file = JSON.parse(readFileSync(queue, 'utf8'));
+  file.items.push(item('N', 'parked', { runId: 'FAILED-B' }));
+  writeFileSync(queue, JSON.stringify(file));
+  const clean = beta()?.offers?.clean;
+  expect(clean?.enabled).toBe(true);
+  expect([...(clean?.runs ?? [])].sort((a, b) => a.runId.localeCompare(b.runId))).toEqual([
+    { runId: 'FAILED-A' },
+    { runId: 'FAILED-B', item: { workflow: WORKFLOW, dedupKey: 'ticket:N', state: 'parked' } },
+  ]);
+});
+
+test('a clean of every failed run is disabled with the path when the .sail/ is gone', () => {
+  world();
+  rmSync(m.beta.sailDir, { recursive: true, force: true });
+  const failed = { runId: 'FAILED-A', status: { status: 'failed' as const, stopReason: 'workflow_failed' as const } };
+  expect(repoOffers(entry(), [], [], [failed]).clean).toEqual({
+    enabled: false,
+    why: `${m.beta.sailDir} no longer exists`,
+    runs: [{ runId: 'FAILED-A' }],
+  });
 });

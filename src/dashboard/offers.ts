@@ -24,10 +24,17 @@ export interface QueueOffers {
   items: Record<string, ItemOffers>;
 }
 
-/** What a repository offers: its watch set, and each workflow's watch or unwatch. */
+/** The failed runs a clean of every failed run of the repository takes, each with the queue item that names it. */
+export type CleanAllOffer = Offer & {
+  runs: { runId: string; item?: { workflow: string; dedupKey: string; state: string } }[];
+};
+
+/** What a repository offers: its watch set, its clean of every failed run, and each workflow's watch or unwatch. */
 export interface RepoOffers {
   watch: Offer;
   unwatch?: Offer;
+  /** Left out when the repository has no failed run. The runs are listed unchecked: the clean refuses each in its own line. */
+  clean?: CleanAllOffer;
   workflows: Record<string, { watch?: Offer; unwatch?: Offer }>;
 }
 
@@ -83,11 +90,16 @@ export function offeredQueues(entry: RegistryEntry, runs?: readonly RunItem[], r
   return views.map((view) => ({ ...view, offers: queueOffers(entry, view, live, watcher) }));
 }
 
-/** The repository's offers: `watchingWorkflows` is the live watcher's watch set in this clone, empty when none. */
+/**
+ * The repository's offers: `watchingWorkflows` is the live watcher's watch set in this clone, empty when none, and
+ * `runs` its runs, whose failed ones a clean of every failed run takes. The runs are not checked one by one here: a
+ * check can reach the code host, and this is read every second.
+ */
 export function repoOffers(
   entry: RegistryEntry,
   queues: readonly QueueView[],
   watchingWorkflows: readonly string[],
+  runs: readonly Pick<RunItem, 'runId' | 'status'>[] = [],
 ): RepoOffers {
   const gone = existsSync(entry.sailDir) ? undefined : `${entry.sailDir} no longer exists`;
   const offer = (): Offer => (gone === undefined ? { enabled: true } : { enabled: false, why: gone });
@@ -96,5 +108,23 @@ export function repoOffers(
   for (const view of queues) if (!(view.workflow in workflows)) workflows[view.workflow] = { watch: offer() };
   const offers: RepoOffers = { watch: offer(), workflows };
   if (watchingWorkflows.length > 0) offers.unwatch = offer();
+  const failed = runs.filter((run) => run.status?.status === 'failed');
+  if (failed.length > 0) {
+    offers.clean = {
+      ...offer(),
+      runs: failed.map((run) => {
+        for (const view of queues) {
+          const named = view.queue?.items.find((each) => each.runId === run.runId);
+          if (named !== undefined) {
+            return {
+              runId: run.runId,
+              item: { workflow: view.workflow, dedupKey: named.dedupKey, state: named.state },
+            };
+          }
+        }
+        return { runId: run.runId };
+      }),
+    };
+  }
   return offers;
 }

@@ -22,7 +22,9 @@
 //    running run ends later, and a clean 200 `{ message, removed, archived, problems? }`; a clean whose removal failed is
 //    409 with the failures, and its run directory stays. A clean also resets the run's ticket and, with `item: 'requeue'
 //    | 'drop'` in its body, settles the queue item that names the run, as `sail clean --requeue|--drop` does; a run a
-//    queue item names is refused without it. The watch set is changed at `/api/repos/<repo>/watch` and
+//    queue item names is refused without it. `/api/repos/<repo>/clean-failed` and `/api/clean-failed` (body `{ runs: {
+//    repo, runId }[], items: 'skip' | 'requeue' | 'drop' }`) clean each listed run that way, one at a time, and answer
+//    200 `{ message, runs, cleaned, left, failed }` with one line per run in `sail clean`'s words; one bulk clean runs at a time. The watch set is changed at `/api/repos/<repo>/watch` and
 //    `…/unwatch` (body `{ workflows: string[] }`, none meaning all): each runs `sail watch` or `sail unwatch` in the
 //    clone and passes the CLI's line and refusals through. A watch with no live watcher starts one, detached, its
 //    output in `.sail-runs/dashboard/watcher.log`, and answers 202 `{ message, pid }` once the registry records it; any
@@ -133,10 +135,22 @@ const RESTART_PATH = /^\/api\/repos\/[^/]+\/runs\/[^/]+\/restart$/;
 const STOP_PATH = /^\/api\/repos\/[^/]+\/runs\/[^/]+\/stop$/;
 const CLEAN_PATH = /^\/api\/repos\/[^/]+\/runs\/[^/]+\/clean$/;
 
+/** The paths every failed run is cleaned at: `/api/repos/<repo>/clean-failed` and `/api/clean-failed`. */
+const CLEAN_FAILED_PATH = /^\/api\/(repos\/[^/]+\/)?clean-failed$/;
+
 /** The paths the watch set is changed at: `/api/repos/<repo>/watch` and `…/unwatch`. */
 const WATCH_PATH = /^\/api\/repos\/[^/]+\/(watch|unwatch)$/;
 
 const WatchBody = z.strictObject({ workflows: z.array(z.string().min(1)) });
+
+/** The runs a clean of every failed run takes, as the page's dialog listed them, and what to do with their queue items. */
+const CleanFailedBody = z.strictObject({
+  runs: z.array(z.strictObject({ repo: z.string().min(1), runId: z.string().min(1) })).min(1),
+  items: z.enum(['skip', 'requeue', 'drop']),
+});
+
+/** The largest body a clean of every failed run takes: a dense machine lists hundreds of runs. */
+const CLEAN_FAILED_MAX_CHARS = 262_144;
 
 const StopBody = z.strictObject({ now: z.boolean(), suspend: z.boolean().optional() });
 const CleanBody = z.strictObject({ item: z.enum(['requeue', 'drop']).optional() });
@@ -313,11 +327,16 @@ interface Starts {
 }
 
 /** The JSON body of `request`, or the answer that refuses it. */
-async function bodyOf<T>(request: Request, schema: z.ZodType<T>, what: string): Promise<{ body: T } | Response> {
+async function bodyOf<T>(
+  request: Request,
+  schema: z.ZodType<T>,
+  what: string,
+  maxChars = 4096,
+): Promise<{ body: T } | Response> {
   const text = await request.text();
   let data: unknown;
   try {
-    data = text.length > 4096 ? undefined : JSON.parse(text);
+    data = text.length > maxChars ? undefined : JSON.parse(text);
   } catch {
     return error(400, 'the body is not JSON');
   }
@@ -649,6 +668,121 @@ async function cleanRoute(starts: Starts, segments: string[], request: Request):
   }
 }
 
+/** One run of a clean of every failed run, as the answer says it. */
+interface CleanedLine {
+  repo: string;
+  runId: string;
+  cleaned: boolean;
+  problem?: 'refused' | 'failed';
+  lines: string[];
+}
+
+/**
+ * Cleans the failed runs a request lists, as `sail clean --failed [--all-repos] [--requeue|--drop]` would: `cleanRuns()`
+ * per repository, in the order the runs are given, each run checked by the engine, so one that is not failed, or is
+ * leased or has an open pull request, is refused in its own line and stops no other. With `items: 'skip'` no queue
+ * item is settled, so a run one names is refused with `sail clean`'s line. A repository whose clone is gone, or whose
+ * ports are refused, is reported in a line of each of its runs. Answers 200 `{ message, runs, cleaned, left, failed }`:
+ * `message` is `cleaned <n> of <total> failed runs` (`, left <m>` when a run was left) then every run's lines, each
+ * prefixed `<repo>: ` on the machine route. 409 when another is under way, or the repository route's repository is
+ * unknown; 400 when its body names another repository.
+ */
+async function cleanFailedRoute(starts: Starts, segments: string[], request: Request): Promise<Response> {
+  const { options, underway } = starts;
+  const scoped = segments.length === 4 ? segments[2] : undefined;
+  const parsed = await bodyOf(request, CleanFailedBody, 'a clean of failed runs', CLEAN_FAILED_MAX_CHARS);
+  if (parsed instanceof Response) return parsed;
+  const { runs: listed, items } = parsed.body;
+  if (scoped !== undefined) {
+    if (findRepo(options.registryDir, scoped) === undefined) return error(409, `no repository '${scoped}'`);
+    const other = listed.find((each) => each.repo !== scoped);
+    if (other !== undefined)
+      return error(400, `not a clean of failed runs: ${other.runId} is of ${other.repo}, not ${scoped}`);
+  }
+  if (underway.has('clean-failed')) return error(409, 'a clean of every failed run is already under way');
+  underway.add('clean-failed');
+  const env = options.env ?? process.env;
+  const prefix = (repo: string): string => (scoped === undefined ? `${repo}: ` : '');
+  const results: CleanedLine[] = [];
+  try {
+    const repos = [...new Set(listed.map((each) => each.repo))];
+    for (const name of repos) {
+      const ids = [...new Set(listed.filter((each) => each.repo === name).map((each) => each.runId))];
+      const refuse = (ids: string[], text: string): void => {
+        for (const runId of ids) {
+          results.push({ repo: name, runId, cleaned: false, problem: 'refused', lines: [`${prefix(name)}${text}`] });
+        }
+      };
+      const entry = findRepo(options.registryDir, name);
+      if (entry === undefined) {
+        refuse(ids, `no repository '${name}'`);
+        continue;
+      }
+      if (!existsSync(entry.clone) || !existsSync(entry.sailDir)) {
+        const missing = existsSync(entry.clone) ? `its .sail/ ${entry.sailDir}` : `its clone ${entry.clone}`;
+        refuse(ids, `${missing} is missing: skipped`);
+        continue;
+      }
+      const ports = await (options.ports ?? ((each) => clonePorts(each, env)))(entry);
+      if ('refused' in ports) {
+        refuse(ids, ports.refused);
+        continue;
+      }
+      const busy = ids.filter((runId) => underway.has(`clean ${runId}`));
+      for (const runId of busy) {
+        results.push({
+          repo: name,
+          runId,
+          cleaned: false,
+          problem: 'refused',
+          lines: [`${prefix(name)}a clean of ${runId} is already under way`],
+        });
+      }
+      const mine = ids.filter((runId) => !busy.includes(runId));
+      for (const runId of mine) underway.add(`clean ${runId}`);
+      try {
+        const cleaned = await cleanRuns({
+          sailDir: entry.sailDir,
+          config: ports.config,
+          workspace: ports.adapters.ports.workspace,
+          codeHost: ports.codeHost,
+          ticketSource: ports.ticketSource,
+          env,
+          runIds: mine,
+          ...(items === 'skip' ? {} : { settle: items }),
+          locate: locateRegistered(entry),
+          taken: (file) => commandTaken(file, takenOptions(options)),
+          showPath: (file) => relative(entry.clone, file),
+        });
+        for (const each of cleaned) {
+          results.push({
+            repo: name,
+            runId: each.runId,
+            cleaned: each.cleaned !== undefined,
+            ...(each.problem === undefined ? {} : { problem: each.problem }),
+            lines: each.lines.map((line) => `${prefix(name)}${line.text}`),
+          });
+        }
+      } finally {
+        for (const runId of mine) underway.delete(`clean ${runId}`);
+      }
+    }
+  } finally {
+    underway.delete('clean-failed');
+  }
+  const cleaned = results.filter((each) => each.cleaned).length;
+  const left = results.length - cleaned;
+  const failed = results.filter((each) => each.cleaned && each.problem !== undefined).length;
+  const head = `cleaned ${cleaned} of ${results.length} failed ${results.length === 1 ? 'run' : 'runs'}${left > 0 ? `, left ${left}` : ''}`;
+  return Response.json({
+    message: [head, ...results.flatMap((each) => each.lines)].join('\n'),
+    runs: results,
+    cleaned,
+    left,
+    failed,
+  });
+}
+
 /** The environment a run the server starts gets: the server's own, with no variable left unset. */
 function environmentOf(options: DashboardOptions): Record<string, string> {
   const env = options.env ?? process.env;
@@ -665,13 +799,21 @@ export function guard(request: Request, port: number): Response | undefined {
     const path = new URL(request.url).pathname;
     if (
       request.method !== 'POST' ||
-      ![MOVE_PATH, QUEUE_OP_PATH, RELEASE_PATH, RESUME_PATH, RESTART_PATH, STOP_PATH, CLEAN_PATH, WATCH_PATH].some(
-        (each) => each.test(path),
-      )
+      ![
+        MOVE_PATH,
+        QUEUE_OP_PATH,
+        RELEASE_PATH,
+        RESUME_PATH,
+        RESTART_PATH,
+        STOP_PATH,
+        CLEAN_PATH,
+        CLEAN_FAILED_PATH,
+        WATCH_PATH,
+      ].some((each) => each.test(path))
     ) {
       return error(
         405,
-        'the dashboard answers only GET, and POST to a queue change, a resume, a restart, a stop, a clean, a watch or an unwatch',
+        'the dashboard answers only GET, and POST to a queue change, a resume, a restart, a stop, a clean, a clean of every failed run, a watch or an unwatch',
         {
           Allow: 'GET',
         },
@@ -830,6 +972,10 @@ export function startDashboard(options: DashboardOptions): Dashboard | { refused
           if (start !== undefined) {
             self.timeout(request, 0);
             return start(starts, segments, request);
+          }
+          if (CLEAN_FAILED_PATH.test(path)) {
+            self.timeout(request, 0);
+            return cleanFailedRoute(starts, segments, request);
           }
           if (WATCH_PATH.test(path)) {
             self.timeout(request, 0);
