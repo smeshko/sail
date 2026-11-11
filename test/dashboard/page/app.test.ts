@@ -3947,3 +3947,25 @@ test('once the index says the queue is no longer held, its banner, its button an
     [],
   ]);
 });
+
+test('the highlight stays on the row a person moved to when an index tick removes rows before it, and Enter runs that row', () => {
+  bootIndexed();
+  cmdK();
+  host.advance(100);
+  for (let i = 0; i < 3; i++) host.press('ArrowDown', true);
+  host.advance(100);
+  expect(menuSel()).toBe('switch theme');
+  const message = indexMessage();
+  host.push(host.open('index')[0], {
+    ...message,
+    repos: message.repos.map((repo) => ({
+      ...repo,
+      queues: repo.queues.map((queue) => ({ ...queue, offers: undefined })),
+    })),
+  });
+  host.advance(100);
+  expect(menuLabels()).not.toContain('poll every queue');
+  expect(menuSel()).toBe('switch theme');
+  host.press('Enter', true);
+  expect([page?.ui.theme, page?.ui.inspector]).toEqual(['light', true]);
+});

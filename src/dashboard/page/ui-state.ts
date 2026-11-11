@@ -56,6 +56,8 @@ export interface MenuState {
   query: string;
   /** The highlighted row, by its place in the rows drawn. */
   at: number;
+  /** The row a person moved the highlight to, by `rowKey()`: it keeps the highlight while rows before it come and go. */
+  row?: string;
   steps: MenuStep[];
   error?: string;
   /** Where a right-click opened it, in the page's pixels. */

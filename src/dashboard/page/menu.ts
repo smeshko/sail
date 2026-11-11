@@ -3,8 +3,10 @@
 // the view actions change what is shown. `menu-model.ts` makes the rows and `menu-view.ts` the markup; this module holds
 // only what the person did. The subject is frozen at the open: the hover is dropped while the menu is open.
 //
-// - A row's place is `ui.menu.at`, the one a person moved to. A row that is missing or disabled once the offers arrive
-//   is skipped for the first enabled row (`highlighted()`), so a read that lands late can't leave the highlight on it.
+// - A row's place is `ui.menu.at`, and the row a person moved to is `ui.menu.row`, by its identity, so the highlight
+//   follows that row when an index tick adds or removes rows before it. A row that is missing or disabled once the
+//   offers arrive is skipped for the first enabled row (`highlighted()`), so a read that lands late can't leave the
+//   highlight on it.
 // - Enter on a row that is disabled does nothing.
 // - An action whose parameters its click doesn't give asks them as steps, one for each, in the menu: a choice
 //   lists its options, a number or a text is typed in the field. After the last, the registry's `request()` decides:
@@ -26,11 +28,20 @@ export function modelOf(store: Store, menu: MenuState): MenuModel {
   return menuRows(menu, sourceFor(store, menu.subject), store.index ?? [], store.host.now());
 }
 
-/** The row the highlight is on: the one asked for when it is there and enabled, else the first enabled one, else -1. */
-export function highlighted(model: MenuModel, at: number): number {
-  const asked = model.rows[at];
-  if (asked !== undefined && !asked.disabled) return at;
-  return model.rows.findIndex((row) => !row.disabled);
+/** A row's identity: its group, its label and what it runs, whatever its place. */
+export function rowKey(row: MenuRow): string {
+  return JSON.stringify([row.group, row.label, 'act' in row.run ? row.run.act : row.run]);
+}
+
+/**
+ * The row the highlight is on: the row a person moved to (`row`) wherever it now is, else the place asked for, when it
+ * is there and enabled; else the first enabled one, else -1.
+ */
+export function highlighted(model: MenuModel, at: number, row?: string): number {
+  const place = row === undefined ? at : model.rows.findIndex((each) => rowKey(each) === row);
+  const asked = model.rows[place];
+  if (asked !== undefined && !asked.disabled) return place;
+  return model.rows.findIndex((each) => !each.disabled);
 }
 
 /** Opens the menu on `subject` (the focused one when none is given). A context menu is the subject's group alone, at `point`. */
@@ -75,6 +86,7 @@ export function menuInput(store: Store, value: string): void {
   if (menu === undefined) return;
   menu.query = value;
   menu.at = 0;
+  delete menu.row;
   delete menu.error;
   store.mark('menu');
 }
@@ -84,8 +96,10 @@ function move(store: Store, menu: MenuState, by: 1 | -1): void {
   const model = modelOf(store, menu);
   const enabled = model.rows.flatMap((row, place) => (row.disabled ? [] : [place]));
   if (enabled.length === 0) return;
-  const at = enabled.indexOf(highlighted(model, menu.at));
+  const at = enabled.indexOf(highlighted(model, menu.at, menu.row));
   menu.at = enabled[(Math.max(at, 0) + by + enabled.length) % enabled.length] ?? 0;
+  const row = model.rows[menu.at];
+  if (row !== undefined) menu.row = rowKey(row);
   store.mark('menu');
 }
 
@@ -115,6 +129,7 @@ function goTo(store: Store, subject: Subject): void {
 function enter(store: Store, menu: MenuState, start = 0): void {
   menu.query = '';
   menu.at = start;
+  delete menu.row;
   delete menu.error;
   store.fresh.add('menu');
   store.menuFocus = true;
@@ -242,7 +257,7 @@ export function menuKey(store: Store, key: string): boolean {
     // A typed step takes what is in the field, from the page's own, else what was typed.
     if (step !== undefined && model.step?.field !== undefined)
       answer(store, menu, step, store.host.value('menu-query') ?? menu.query);
-    else runRow(store, highlighted(model, menu.at));
+    else runRow(store, highlighted(model, menu.at, menu.row));
   } else if (key === 'Escape') back(store, menu);
   else return false;
   return true;

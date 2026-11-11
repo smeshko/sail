@@ -92,7 +92,7 @@ export function regions(store: Store): Record<Region, () => string> {
       const { menu } = ui;
       if (menu === undefined) return '';
       const model = modelOf(store, menu);
-      return renderMenu({ ...menu, at: highlighted(model, menu.at) }, model).value;
+      return renderMenu({ ...menu, at: highlighted(model, menu.at, menu.row) }, model).value;
     },
     toasts: () => renderToasts(ui.toasts).value,
   };
