@@ -4,7 +4,7 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { appendFileSync, cpSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { callFile, findRepo, findRunDir, index, repos, runItems } from '../../src/dashboard/files';
+import { callFile, findRepo, findRunDir, index, readSummary, repos, runItems } from '../../src/dashboard/files';
 import { readEvents } from '../../src/events/consumers/ndjson';
 import {
   appendEvent,
@@ -348,4 +348,18 @@ test("index gives a queue view its workflow's watch state from the live watcher,
     state: 'not watched',
     why: `the watcher of 'beta' (pid ${process.pid}) does not watch 'ticket-to-pr': sail watch ticket-to-pr first`,
   });
+});
+
+test('readSummary gives the summary of a valid file, the problem of an unparsable or a wrong-schema one, and nothing for none', () => {
+  m = seedFixtures();
+  const dir = join(m.alpha.clone, '.sail-runs', GOLDEN_RUN_ID);
+  const file = join(dir, 'summary.json');
+  expect(readSummary(dir)).toEqual({ summary: golden('summary.json') });
+  writeFileSync(file, 'not json');
+  expect(readSummary(dir).problem).toStartWith(`${file} can't be read: `);
+  expect(readSummary(dir).summary).toBeUndefined();
+  writeFileSync(file, '{}');
+  expect(readSummary(dir).problem).toStartWith('summary.json is not a sail.summary.v1');
+  rmSync(file);
+  expect(readSummary(dir)).toEqual({});
 });

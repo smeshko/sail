@@ -37,6 +37,7 @@ const runActions: RunActions = {
   },
   stop: on,
   clean: { ...on, removes: ['its worktree', 'its branch'], archive: '/m/failed-runs/x' },
+  rebuild: { ...on, problem: 'summary.json is not a sail.summary.v1' },
 } as unknown as RunActions;
 
 const index = (repo: Record<string, unknown>) =>
@@ -50,7 +51,7 @@ const def = (id: string) => {
 const request = (id: string, subject: Subject, values: Record<string, string> = {}, from = source()) =>
   def(id).request?.(subject, values, from);
 
-test('ACTIONS has exactly the sixteen ids, each with a label, appliesTo, a tier and a request and answer or a local run', () => {
+test('ACTIONS has exactly the seventeen ids, each with a label, appliesTo, a tier and a request and answer or a local run', () => {
   expect(ACTIONS.map((each) => each.id).sort()).toEqual(
     [
       'resume-run',
@@ -58,6 +59,7 @@ test('ACTIONS has exactly the sixteen ids, each with a label, appliesTo, a tier 
       'stop-run',
       'stop-run-now',
       'clean-run',
+      'rebuild-run',
       'drop-item',
       'requeue-item',
       'move-item',
@@ -111,6 +113,7 @@ test('every entry posts what its handler posted', () => {
     body: { now: true },
   });
   expect(request('clean-run', RUN)).toEqual({ path: '/api/repos/alpha/runs/FAKE-1-RUN/clean', body: {} });
+  expect(request('rebuild-run', RUN)).toEqual({ path: '/api/repos/alpha/runs/FAKE-1-RUN/rebuild', body: {} });
   expect(request('restart-run', RUN, { stage: 'spec' })).toEqual({
     path: '/api/repos/alpha/runs/FAKE-1-RUN/restart',
     body: { stage: 'spec' },
@@ -211,6 +214,16 @@ test('each answer means what it meant: resume reopens, restart opens the run nam
     text: 'cleaned',
   });
   expect(def('clean-run').answer?.(200, '{}', RUN)).toEqual({ effect: 'leave' });
+  expect(def('rebuild-run').answer?.(200, '{"message":"rebuilt .sail-runs/R/summary.json"}', RUN)).toEqual({
+    effect: 'reopen',
+    keepMenu: true,
+    text: 'rebuilt .sail-runs/R/summary.json',
+  });
+  const refused = def('rebuild-run').answer?.(409, '{"error":"run R\'s events hold no run:start"}', RUN);
+  expect([refused?.refused, refused?.text]).toEqual([
+    true,
+    expect.stringContaining("run R's events hold no run:start"),
+  ]);
 });
 
 test('a queue change shows a 200 message and took, a 202 waiting, and any other status its refusal', () => {
@@ -501,4 +514,16 @@ test('a move says its rows from the waiting neighbours', () => {
   expect(rows(2, all)).toEqual([{ label: 'move up', data: { dir: 'up', target: 'ticket:FAKE-1' } }]);
   expect(rows(3, all)).toEqual([]);
   expect(move?.variants?.(WORKFLOW, source(all))).toEqual([]);
+});
+
+test("Rebuild is an instant run action offered only with the run's rebuild offer, and asks nothing", () => {
+  const rebuild = def('rebuild-run');
+  expect([rebuild.tier, rebuild.appliesTo, rebuild.dialog, rebuild.params(RUN, source())]).toEqual([
+    'instant',
+    ['run'],
+    undefined,
+    [],
+  ]);
+  expect(rebuild.available(RUN, source())).toEqual({ offered: true, enabled: true });
+  expect(rebuild.available(RUN, source({ run: { stop: on } as RunActions }))).toEqual({ offered: false });
 });

@@ -99,6 +99,24 @@ function strayFiles(dir: string): string | undefined {
 }
 
 /**
+ * The run's `summary.json` as the page reads it: the summary, or the problem with the file. A run with no file has
+ * neither. One that isn't a `sail.summary.v1` is not passed on, since the page reads a summary by its shape (review R1-1).
+ */
+export function readSummary(dir: string): { summary?: Summary; problem?: string } {
+  const file = join(dir, 'summary.json');
+  if (!existsSync(file)) return {};
+  try {
+    const data: unknown = JSON.parse(readFileSync(file, 'utf8'));
+    const issues = validateDocument('sail.summary.v1', data);
+    if (issues.length === 0) return { summary: data as Summary };
+    const first = issues[0];
+    return { problem: `summary.json is not a sail.summary.v1: ${first?.path ?? ''} ${first?.message ?? ''}`.trim() };
+  } catch (error) {
+    return { problem: `${file} can't be read: ${messageOf(error)}` };
+  }
+}
+
+/**
  * The repository's runs in `listRuns()` order, each with its header's source and its parsed `summary.json`. A run whose
  * `run.json`, `STATUS` or `summary.json` links out of it, or isn't a regular file, is listed by id and problem alone.
  */
@@ -119,21 +137,9 @@ export function runItems(entry: RegistryEntry): RunItem[] {
     } catch {
       // listRuns() has already said why the header can't be read.
     }
-    const summary = join(dir, 'summary.json');
-    if (existsSync(summary)) {
-      try {
-        const data: unknown = JSON.parse(readFileSync(summary, 'utf8'));
-        // The page reads a summary by its shape, so one that isn't a `sail.summary.v1` is not passed on (review R1-1).
-        const issues = validateDocument('sail.summary.v1', data);
-        if (issues.length === 0) item.summary = data as Summary;
-        else {
-          const first = issues[0];
-          problems.push(`summary.json is not a sail.summary.v1: ${first?.path ?? ''} ${first?.message ?? ''}`.trim());
-        }
-      } catch (error) {
-        problems.push(`${summary} can't be read: ${messageOf(error)}`);
-      }
-    }
+    const read = readSummary(dir);
+    if (read.summary !== undefined) item.summary = read.summary;
+    if (read.problem !== undefined) problems.push(read.problem);
     if (problems.length > 0) item.problem = problems.join('; ');
     return item;
   });

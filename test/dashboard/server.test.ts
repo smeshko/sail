@@ -1056,3 +1056,48 @@ test.each([
   }
   expect(treeHash(m.root)).toBe(before);
 });
+
+const REBUILD = `/api/repos/alpha/runs/${FAKE_2_ID}/rebuild`;
+const fake2Run = () => join(m.alpha.clone, '.sail-runs', FAKE_2_ID);
+
+test("a POST to rebuild rewrites summary.json and answers sail show --rebuild's line", async () => {
+  m = seedFixtures();
+  writeFileSync(join(fake2Run(), 'summary.json'), '{}');
+  const server = startWith(stubSail('exit 0').cli);
+  const response = await post(server, REBUILD, startedBy('{}'));
+  expect([response.status, await response.json()]).toEqual([
+    200,
+    { message: `rebuilt .sail-runs/${FAKE_2_ID}/summary.json` },
+  ]);
+  expect(JSON.parse(readFileSync(join(fake2Run(), 'summary.json'), 'utf8')).schema).toBe('sail.summary.v1');
+  const again = await post(server, REBUILD, startedBy('{}'));
+  expect([again.status, await again.json()]).toEqual([409, { error: `run ${FAKE_2_ID} offers no rebuild` }]);
+});
+
+test("a rebuild whose events can't be read is refused in rebuildSummary's words", async () => {
+  m = seedFixtures();
+  writeFileSync(join(fake2Run(), 'summary.json'), 'not json');
+  writeFileSync(join(fake2Run(), 'events.ndjson'), '');
+  const response = await post(startWith(stubSail('exit 0').cli), REBUILD, startedBy('{}'));
+  expect([response.status, await response.json()]).toEqual([
+    409,
+    { error: `run ${FAKE_2_ID}'s events hold no run:start, so there is no summary to build` },
+  ]);
+});
+
+test('a rebuild of a run with a readable summary is 409, and a body with a field is 400', async () => {
+  m = seedFixtures();
+  const server = startWith(stubSail('exit 0').cli);
+  const readable = await post(server, REBUILD, startedBy('{}'));
+  expect([readable.status, await readable.json()]).toEqual([409, { error: `run ${FAKE_2_ID} offers no rebuild` }]);
+  const field = await post(server, REBUILD, startedBy('{"force":true}'));
+  expect(field.status).toBe(400);
+});
+
+test('the 405 for another method names a rebuild among what a POST may do', async () => {
+  m = seedFixtures();
+  const server = startWith(stubSail('exit 0').cli);
+  const response = await fetch(`http://127.0.0.1:${server.port}${REBUILD}`, { method: 'PUT', headers: HEADER });
+  expect(response.status).toBe(405);
+  expect(((await response.json()) as { error: string }).error).toContain('a clean, a rebuild, a watch');
+});

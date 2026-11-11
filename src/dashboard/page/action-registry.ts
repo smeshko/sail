@@ -1,5 +1,5 @@
 // The page's actions, defined once: each thing a person can have done from the page (stop, stop now, resume, restart,
-// clean, drop, requeue, move, poll, release a usage-limit hold, add, add skipping its checks, watch, unwatch, all clear,
+// clean, rebuild, drop, requeue, move, poll, release a usage-limit hold, add, add skipping its checks, watch, unwatch, all clear,
 // dismiss) with its id and label, the subject it applies to, its
 // availability from the server's offers, its parameters, its tier, its request and what its answer means. Pure: it
 // holds no host, no state and no storage, so `act.ts` carries any entry out and `action-view.ts` draws any entry, and an
@@ -238,7 +238,7 @@ function availability(offer: (Offered & { why?: string | undefined }) | undefine
 
 const NOT_OFFERED: Availability = { offered: false };
 
-function runOffer(key: 'resume' | 'restart' | 'stop' | 'clean') {
+function runOffer(key: 'resume' | 'restart' | 'stop' | 'clean' | 'rebuild') {
   return (_: Subject, source: OfferSource): Availability => availability(source.run?.[key]);
 }
 
@@ -567,6 +567,23 @@ export const ACTIONS: readonly ActionDef[] = [
       if (!ok(status)) return { text: refusal(status, body, 'clean'), refused: true };
       const text = answerField(body, 'message');
       return { effect: 'leave', ...(text === undefined ? {} : { text }) };
+    },
+  },
+  {
+    id: 'rebuild-run',
+    label: () => 'rebuild',
+    appliesTo: ['run'],
+    tier: 'instant',
+    place: 'run',
+    holdsDisabled: true,
+    params: () => [],
+    available: runOffer('rebuild'),
+    underway: 'rebuilding…',
+    request: (subject) => ({ path: runPath(subject, '/rebuild'), body: {} }),
+    answer: (status, body) => {
+      if (!ok(status)) return { text: refusal(status, body, 'rebuild'), refused: true };
+      const text = answerField(body, 'message');
+      return { effect: 'reopen', keepMenu: true, ...(text === undefined ? {} : { text }) };
     },
   },
   queueItemAction('requeue-item', 'requeue', 'instant', '/requeue'),

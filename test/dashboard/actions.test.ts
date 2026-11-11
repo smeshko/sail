@@ -2,7 +2,7 @@
 // alpha holds the golden run and FAKE-2 (failed, its implement call in error); beta holds FAKE-3 (suspended on its
 // budget, its queue item dispatched) and FAKE-4 (a completed group).
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { takeLease } from '../../src/adapters/leases';
 import { runActions } from '../../src/dashboard/actions';
@@ -405,4 +405,33 @@ test('with no ports given, a clone without a project.yaml disables Clean, saying
   const { clean } = await runActions(alpha(), FAKE_2_ID, { leasesDir, env: { SAIL_HOME: m.sailHome } });
   expect(clean?.enabled).toBe(false);
   expect(clean?.why).toBe('[sail.project.v1]  / is missing');
+});
+
+test('a run whose summary can not be read offers Rebuild beside what its status offers', async () => {
+  settleQueue();
+  const broken = (clone: 'alpha' | 'beta', id: string, text: string) =>
+    writeFileSync(join(runDir(clone, id), 'summary.json'), text);
+  broken('alpha', FAKE_2_ID, '{}');
+  const failed = await actions('alpha', FAKE_2_ID);
+  expect(Object.keys(failed)).toEqual(['restart', 'clean', 'rebuild']);
+  expect(failed.rebuild).toEqual({
+    enabled: true,
+    problem: expect.stringMatching(/^summary\.json is not a sail\.summary\.v1/),
+  });
+  broken('beta', FAKE_3_ID, 'not json');
+  const suspended = await actions('beta', FAKE_3_ID);
+  expect(Object.keys(suspended)).toEqual(['resume', 'stop', 'rebuild']);
+  expect(suspended.rebuild?.problem).toContain("can't be read");
+  broken('beta', FAKE_4_ID, '{}');
+  expect(Object.keys(await actions('beta', FAKE_4_ID))).toEqual(['restart', 'rebuild']);
+});
+
+test('a run with a readable summary, or a summary linked out of the run, offers no Rebuild', async () => {
+  expect((await actions('alpha', FAKE_2_ID)).rebuild).toBeUndefined();
+  const away = join(m.root, 'elsewhere.json');
+  writeFileSync(away, '{}');
+  const file = join(runDir('alpha', FAKE_2_ID), 'summary.json');
+  rmSync(file);
+  symlinkSync(away, file);
+  expect((await actions('alpha', FAKE_2_ID)).rebuild).toBeUndefined();
 });

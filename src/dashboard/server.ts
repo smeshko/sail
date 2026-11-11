@@ -21,7 +21,9 @@
 //    engine function `sail stop` or `sail clean` calls (src/engine/stop.ts, src/engine/clean.ts) in this process,
 //    with the clone's Workspace port, and is refused in the same words, 409. A stop answers 202 `{ message }`, since a
 //    running run ends later, and a clean 200 `{ message, removed, archived }`; a clean whose removal failed is 409
-//    with the failures, and its run directory stays. The watch set is changed at `/api/repos/<repo>/watch` and
+//    with the failures, and its run directory stays. `…/runs/<run>/rebuild` (body `{}`) calls `rebuildSummary()`, which
+//    `sail show --rebuild` calls, and answers 200 `{ message }` with its line, `rebuilt <path>` relative to the clone; a run
+//    whose summary reads fine, or whose events can't be read, is 409. The watch set is changed at `/api/repos/<repo>/watch` and
 //    `…/unwatch` (body `{ workflows: string[] }`, none meaning all): each runs `sail watch` or `sail unwatch` in the
 //    clone and passes the CLI's line and refusals through. A watch with no live watcher starts one, detached, its
 //    output in `.sail-runs/dashboard/watcher.log`, and answers 202 `{ message, pid }` once the registry records it; any
@@ -52,6 +54,7 @@ import { RUN_HEADER_FILE, readRunHeader } from '../engine/run-header';
 import { newRunId } from '../engine/run-id';
 import { formatIssue } from '../engine/schemas';
 import { stoppedMessage, stopRun } from '../engine/stop';
+import { rebuildSummary } from '../events/consumers/summary';
 import type { TicketSource } from '../ports/ticket-source';
 import { releasedLine, releaseHold } from '../watch/holds';
 import { commandTaken, dropCommand, NOT_TAKEN } from '../watch/inbox';
@@ -132,6 +135,8 @@ const RESTART_PATH = /^\/api\/repos\/[^/]+\/runs\/[^/]+\/restart$/;
 /** The paths a run is stopped and cleaned at: `/api/repos/<repo>/runs/<run>/stop` and `…/clean`. */
 const STOP_PATH = /^\/api\/repos\/[^/]+\/runs\/[^/]+\/stop$/;
 const CLEAN_PATH = /^\/api\/repos\/[^/]+\/runs\/[^/]+\/clean$/;
+/** The path a run's summary is rebuilt at: `/api/repos/<repo>/runs/<run>/rebuild`. */
+const REBUILD_PATH = /^\/api\/repos\/[^/]+\/runs\/[^/]+\/rebuild$/;
 
 /** The paths the watch set is changed at: `/api/repos/<repo>/watch` and `…/unwatch`. */
 const WATCH_PATH = /^\/api\/repos\/[^/]+\/(watch|unwatch)$/;
@@ -140,6 +145,7 @@ const WatchBody = z.strictObject({ workflows: z.array(z.string().min(1)) });
 
 const StopBody = z.strictObject({ now: z.boolean() });
 const CleanBody = z.strictObject({});
+const RebuildBody = z.strictObject({});
 
 const ResumeBody = z.strictObject({
   raise: z
@@ -647,6 +653,35 @@ async function cleanRoute(starts: Starts, segments: string[], request: Request):
   }
 }
 
+/**
+ * Rewrites a run's `summary.json` from its events, as `sail show --rebuild` does, and answers 200 `{ message }` with
+ * the line it prints: `rebuilt <path>`, relative to the clone. A run whose summary reads fine offers no rebuild: 409.
+ */
+async function rebuildRoute(starts: Starts, segments: string[], request: Request): Promise<Response> {
+  const { options, underway } = starts;
+  const found = runOf(options.registryDir, segments);
+  if (found instanceof Response) return found;
+  const { entry, runId, dir } = found;
+  const parsed = await bodyOf(request, RebuildBody, 'a rebuild');
+  if (parsed instanceof Response) return parsed;
+  const actions = await runActions(entry, runId, {
+    leasesDir: options.leasesDir,
+    env: options.env,
+    ports: options.ports,
+  });
+  if (actions.rebuild === undefined) return error(409, `run ${runId} offers no rebuild`);
+  const key = `rebuild ${runId}`;
+  if (underway.has(key)) return error(409, `a rebuild of ${runId} is already under way`);
+  underway.add(key);
+  try {
+    const rebuilt = rebuildSummary(dir);
+    if ('refused' in rebuilt) return error(409, rebuilt.refused);
+    return Response.json({ message: `rebuilt ${relative(dirname(entry.sailDir), rebuilt.path)}` });
+  } finally {
+    underway.delete(key);
+  }
+}
+
 /** The environment a run the server starts gets: the server's own, with no variable left unset. */
 function environmentOf(options: DashboardOptions): Record<string, string> {
   const env = options.env ?? process.env;
@@ -663,13 +698,21 @@ export function guard(request: Request, port: number): Response | undefined {
     const path = new URL(request.url).pathname;
     if (
       request.method !== 'POST' ||
-      ![MOVE_PATH, QUEUE_OP_PATH, RELEASE_PATH, RESUME_PATH, RESTART_PATH, STOP_PATH, CLEAN_PATH, WATCH_PATH].some(
-        (each) => each.test(path),
-      )
+      ![
+        MOVE_PATH,
+        QUEUE_OP_PATH,
+        RELEASE_PATH,
+        RESUME_PATH,
+        RESTART_PATH,
+        STOP_PATH,
+        CLEAN_PATH,
+        REBUILD_PATH,
+        WATCH_PATH,
+      ].some((each) => each.test(path))
     ) {
       return error(
         405,
-        'the dashboard answers only GET, and POST to a queue change, a resume, a restart, a stop, a clean, a watch or an unwatch',
+        'the dashboard answers only GET, and POST to a queue change, a resume, a restart, a stop, a clean, a rebuild, a watch or an unwatch',
         {
           Allow: 'GET',
         },
@@ -824,7 +867,9 @@ export function startDashboard(options: DashboardOptions): Dashboard | { refused
                 ? stopRoute
                 : CLEAN_PATH.test(path)
                   ? cleanRoute
-                  : undefined;
+                  : REBUILD_PATH.test(path)
+                    ? rebuildRoute
+                    : undefined;
           if (start !== undefined) {
             self.timeout(request, 0);
             return start(starts, segments, request);

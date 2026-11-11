@@ -5,6 +5,8 @@
 // - A `completed` run offers Restart alone. A `running` run a live process holds offers Resume and Restart,
 //   disabled. A `running` run no live process holds (its process was killed outright, so its STATUS never changed) is
 //   read as a suspended one: the lease decides, as `liveRuns()` has it, not STATUS.
+// - Rebuild is offered, beside what the status offers, for a run whose `summary.json` can't be parsed or is not a
+//   `sail.summary.v1`, and not for one whose `summary.json` links out of the run. It is never disabled.
 // - Stop is offered for a `running` or `suspended` run, and for a dispatched run that has no run directory yet. It is
 //   never disabled: `sail stop` stops a run the watcher dispatched, and its refusals come with the POST. A `completed`
 //   or `failed` run has ended, so it offers none.
@@ -36,7 +38,8 @@ import type { SailEvent } from '../events/types';
 import { queueItemsNaming, startingRun } from '../watch/queue-store';
 import type { RegistryEntry } from '../watch/registry';
 import { clonePorts, type ResolveClonePorts } from './clone-ports';
-import { findRunDir } from './files';
+import { containedFile } from './contained';
+import { findRunDir, readSummary } from './files';
 import { queueViews } from './queues';
 
 export interface Offer {
@@ -76,11 +79,18 @@ export interface CleanOffer extends Offer {
   archive?: string;
 }
 
+export interface RebuildOffer extends Offer {
+  /** Why the run's `summary.json` can't be read: the problem the list shows. */
+  problem: string;
+}
+
 export interface RunActions {
   resume?: ResumeOffer;
   restart?: RestartOffer;
   stop?: StopOffer;
   clean?: CleanOffer;
+  /** Offered for a run whose `summary.json` can't be read, whatever its status. */
+  rebuild?: RebuildOffer;
   /** Why the run offers nothing. */
   why?: string;
 }
@@ -227,7 +237,10 @@ async function cleanOf(entry: RegistryEntry, runId: string, options: ActionsOpti
   }
 }
 
-/** What run `runId` of the repository offers: Resume, Restart, Stop and Clean, each enabled or why not. */
+/**
+ * What run `runId` of the repository offers: Resume, Restart, Stop, Clean and Rebuild, each enabled or why not. Rebuild
+ * is never disabled: it comes with the run's summary problem, and `rebuildSummary()` refuses with the POST.
+ */
 export async function runActions(
   entry: RegistryEntry,
   runId: string,
@@ -238,6 +251,18 @@ export async function runActions(
     if (isPlainName(runId) && startingRun(runsDir(entry.sailDir), runId)) return { stop: { enabled: true } };
     return { why: dir.missing };
   }
+  const offers = await statusActions(entry, runId, dir, options);
+  const { problem } = readSummary(dir);
+  if (problem === undefined || containedFile(dir, join(dir, 'summary.json')) === undefined) return offers;
+  return { ...offers, rebuild: { enabled: true, problem } };
+}
+
+async function statusActions(
+  entry: RegistryEntry,
+  runId: string,
+  dir: string,
+  options: ActionsOptions,
+): Promise<RunActions> {
   try {
     const { status, stopReason } = readStatus(dir);
     const header = readRunHeader(dir);

@@ -148,6 +148,15 @@ test('a completed run has a ⋯, and its open menu draws restart', () => {
   expect(markup).toContain('data-action="restart-run"');
 });
 
+test('a run that offers Rebuild alone draws its menu with a rebuild button', () => {
+  const markup = draw('history', { repo: 'beta', runId: 'b-done', runMenu: { runId: 'b-done', at: 'row' as const } }, {
+    rebuild: { enabled: true, problem: 'summary.json is not a sail.summary.v1' },
+  } as never);
+  expect(markup).toContain(
+    '<div class="r-menu"><div class="acts"><span class="act"><button class="btn" data-action="rebuild-run">rebuild</button></span></div></div>',
+  );
+});
+
 test('History lists failed then done and Queues one row per queue under its repository, with Watch all on each header row', () => {
   const history = draw('history');
   expect(heads(history)).toEqual(['history:failed failed 1', 'history:done done 1']);
