@@ -137,7 +137,7 @@ export interface ActionDef {
   holdsDisabled?: boolean;
   /** The id of the action whose drafts it reads and empties, when it shares its parameters with another's. */
   drafts?: string;
-  /** Where its parameters are drawn: the run menu, the queue's header, on the repository's row, or the list's head. */
+  /** Where its parameters are drawn: the run menu, the queue view's view header, on the repository's row, or the list's head. */
   place: 'run' | 'queue' | 'repo' | 'list';
   params(subject: Subject, source: OfferSource): Param[];
   available(subject: Subject, source: OfferSource): Availability;
