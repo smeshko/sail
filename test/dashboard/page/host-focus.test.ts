@@ -96,13 +96,16 @@ function fakeDom() {
   for (const id of ['sidebar', 'list', 'link', 'main', 'inspector', 'status', 'drawer', 'menu', 'toasts', 'dialog'])
     regions[id] = region(id);
   const pin = make('button', { id: 'pin-inspector', 'aria-pressed': 'false' }, null);
+  // A resize handle, a tab stop of the page's own markup, outside the regions, with no name, action or href.
+  const handle = make('div', { id: 'resize-left', role: 'separator', tabindex: '0' }, null);
+  const fixed: Record<string, Node> = { 'pin-inspector': pin, 'resize-left': handle };
   const dialog = regions.dialog as Node;
   // A modal dialog takes the focus, onto its first button, as a browser's does.
   dialog.showModal = () => dialog.querySelector?.('[data-action]')?.focus?.();
   dialog.close = () => {};
   const win = {
     document: {
-      getElementById: (id: string) => (id === 'pin-inspector' ? pin : (regions[id] ?? null)),
+      getElementById: (id: string) => fixed[id] ?? regions[id] ?? null,
       addEventListener: (type: string, listener: (event: EventLike) => void) => {
         listeners[type] = [...(listeners[type] ?? []), listener];
       },
@@ -136,7 +139,7 @@ function fakeDom() {
     if (found === null || found === undefined) throw new Error(`no ${selector} in #${id}`);
     return found as Node;
   };
-  return { host: browserHost(win), state, find, pin };
+  return { host: browserHost(win), state, find, pin, handle };
 }
 
 const ROWS = (...ids: string[]) =>
@@ -189,6 +192,20 @@ describe('audit 2: overlays behave (ADW-542)', () => {
     expect(state.active).toBe(find('menu', '.cmdk-rows'));
     host.render('menu', '');
     expect(state.active).toBe(find('list', '.r-open[data-run="a"]'));
+  });
+
+  test('a resize handle, which has no name or action, gets the focus back when the menu or a dialog opened from it closes (ADW-547)', () => {
+    const { host, state, handle } = fakeDom();
+    handle.focus?.();
+    host.render('menu', MENU);
+    host.focusMenu();
+    expect(state.active?.name).toBe('menu-query');
+    host.render('menu', '');
+    expect(state.active).toBe(handle);
+    host.openDialog('<button data-action="dialog-confirm">stop</button>');
+    expect(state.active?.dataset.action).toBe('dialog-confirm');
+    host.closeDialog();
+    expect(state.active).toBe(handle);
   });
 
   test('a dialog opened from the command menu gives the focus back to what had it before the menu', () => {

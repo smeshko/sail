@@ -230,7 +230,8 @@ const FOCUSABLE = '[name], [data-action], a[href]';
 
 /**
  * What identifies a focusable element across a redraw, from what its markup carries: its `name`, else its `data-action`
- * with its other `data-*` values, else its `href`. An element with none has no key, and its focus is not restored.
+ * with its other `data-*` values, else its `href`, else its `id`, as a resize handle's. An element with none has no
+ * key, and its focus is not restored.
  */
 function focusKey(element: ElementLike): string | undefined {
   if (element.name !== undefined && element.name !== '') return `name=${element.name}`;
@@ -241,7 +242,9 @@ function focusKey(element: ElementLike): string | undefined {
     return `action=${JSON.stringify(entries)}`;
   }
   const href = element.getAttribute?.('href');
-  return href === null || href === undefined ? undefined : `href=${href}`;
+  if (href !== null && href !== undefined) return `href=${href}`;
+  const id = element.getAttribute?.('id');
+  return id === null || id === undefined || id === '' ? undefined : `id=${id}`;
 }
 
 const isTick = (field: ElementLike) => field.type === 'checkbox' || field.type === 'radio';
@@ -429,6 +432,13 @@ export function browserHost(win: BrowserWindow): PageHost {
   /** Gives the focus back to the element of the regions with `key`, the first, and answers whether there was one. */
   const refocusKey = (key: string | undefined) => {
     if (key === undefined) return false;
+    if (key.startsWith('id=')) {
+      // An element of the page's own markup, such as a resize handle, found by its id wherever it is.
+      const target = doc.getElementById(key.slice(3));
+      if (target === null || target === undefined) return false;
+      refocus(target);
+      return true;
+    }
     for (const region of REGIONS) {
       const root = doc.getElementById(region);
       const target = root === null ? undefined : keyed(root, key)[0];
