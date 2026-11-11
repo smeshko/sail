@@ -323,6 +323,51 @@ export async function renderDashboardViews(outDir: string): Promise<string[]> {
         : repo,
     );
     views['list-queues-problem.html'] = renderList('queues', listRepos(unreadable, VIEWS_NOW), selected, VIEWS_NOW);
+    // A watched queue that is paused and held, with its poll and unwatch offered: the row at its fullest.
+    const held = repos.map((repo) =>
+      repo.name === 'beta'
+        ? {
+            ...repo,
+            watching: { pid: 1, workflows: [QUEUE_WORKFLOW] },
+            queues: repo.queues.map((view) =>
+              view.workflow === QUEUE_WORKFLOW && view.queue !== undefined && view.offers !== undefined
+                ? {
+                    ...view,
+                    watch: { state: 'watched' as const },
+                    offers: { ...view.offers, poll: { enabled: true } },
+                    queue: {
+                      ...view.queue,
+                      polling: {
+                        ...view.queue.polling,
+                        paused: {
+                          port: 'ticketSource' as const,
+                          adapter: 'fake',
+                          message: 'the provider did not answer',
+                          at: '2026-09-24T11:05:00.000Z',
+                        },
+                      },
+                      held: {
+                        until: '2026-09-24T12:00:00.000Z',
+                        runId: FAKE_3_ID,
+                        reason: 'usage limit',
+                        at: '2026-09-24T11:05:00.000Z',
+                      },
+                    },
+                  }
+                : view,
+            ),
+            ...(repo.offers === undefined
+              ? {}
+              : {
+                  offers: {
+                    ...repo.offers,
+                    workflows: { ...repo.offers.workflows, [QUEUE_WORKFLOW]: { unwatch: { enabled: true } } },
+                  },
+                }),
+          }
+        : repo,
+    );
+    views['list-queues-held.html'] = renderList('queues', listRepos(held, VIEWS_NOW), selected, VIEWS_NOW);
     views['attention.html'] = renderAttention(attention(repos), true);
     const queueEvents = readEvents(queueDirOf(machine)) as unknown as QueueEvent[];
     const stream = { recent: queueEvents.slice(-20), polls: pollKind(queueEvents) };

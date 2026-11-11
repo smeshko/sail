@@ -35,6 +35,7 @@ test('the committed dashboard views are what the fixtures render now', async () 
     'list-history.html',
     'list-queues.html',
     'list-queues-problem.html',
+    'list-queues-held.html',
     'attention.html',
     'queue.html',
     'queue-watched.html',
@@ -59,6 +60,15 @@ test('the committed dashboard views are what the fixtures render now', async () 
     'dense-queues.html',
   ]);
   expect(stale(fresh, COMMITTED)).toEqual([]);
+});
+
+test("the committed paused, held, watched queue's row holds both chips, an enabled poll and an unwatch", () => {
+  const row = readFileSync(join(COMMITTED, 'list-queues-held.html'), 'utf8');
+  expect(row).toContain('paused: ticketSource fake: the provider did not answer');
+  expect(row).toMatch(/held until \d\d:\d\d:\d\d: usage limit/);
+  expect(row).toContain('data-action="poll-queue" data-repo="beta" data-workflow="ticket-to-pr"');
+  expect(row).toContain('data-action="unwatch" data-repo="beta" data-workflow="ticket-to-pr"');
+  expect(row).toContain('watched</span>');
 });
 
 test('a view changed by one byte is named as stale, and so is one missing', async () => {
