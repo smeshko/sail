@@ -1,7 +1,7 @@
 // What a key does on the page. With a run or queue open, `j`, `k` and the arrows move the card cursor within the cards,
 // `Enter` opens the card under it and `]` and `[` step to the next and previous card; with none open, they move the
 // list's cursor over its entries (group headers and the rows of the groups not folded), `Enter` opens the row under it
-// or folds the group, and `.` opens the menu of the run under it. `Escape` shuts, in order, the run menu, the item menu,
+// or folds the group, and `.` opens the menu of the run under it. `Escape` shuts, in order, the folded sidebar, the run menu, the item menu,
 // needs attention, the drawer and the timeline, then the selection and, last, the open run or queue, which gives the
 // list the centre. `/` focuses the list's filter field, `1`, `2` and `3` open Active, Queues and History, and `i` pins the
 // inspector open or unpins it, and `a` toggles needs attention. A key typed in an input does nothing but, for Escape, take the focus off.
@@ -60,11 +60,14 @@ export const keys: Record<string, (store: Store) => void> = {
     const card = store.run?.model.cards[store.ui.cursor];
     if (card !== undefined) selectCard(store, card.key, undefined, true);
   },
-  // The run menu, the item menu, needs attention and the drawer shut first, in that order; then back to the cards
+  // The folded sidebar, the run menu, the item menu, needs attention and the drawer shut first, in that order; then back to the cards
   // from a timeline, keeping the selection; from the cards, no selection; last, the run or queue itself.
   Escape: (store) => {
     const { ui } = store;
-    if (ui.runMenu !== undefined) {
+    if (ui.nav) {
+      ui.nav = false;
+      store.host.setNav(false);
+    } else if (ui.runMenu !== undefined) {
       delete ui.runMenu;
       store.mark('list', 'main');
     } else if (ui.itemMenu !== undefined) {

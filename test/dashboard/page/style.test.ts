@@ -205,12 +205,30 @@ test('the inspector has a grid track only from 1100px, and under it is a fixed p
   expect([...style.matchAll(/@media \(((?:min|max)-width[^)]*)\)/g)].map((m) => m[1])).toEqual([
     'min-width: 1100px',
     'max-width: 1099px',
+    'max-width: 799px',
   ]);
 });
 
 test('beside the list the run view keeps 320px and the list gives way first (ADW-528)', () => {
   const grid = declarationsOf(':root[data-detail="open"] .body');
   expect(grid).toContain('minmax(0, var(--list-w, 340px)) minmax(320px, 1fr)');
+});
+
+test('under 800px the page is one column: the sidebar folds, the list hides behind an open detail, and the back button shows (ADW-528)', () => {
+  expect(html).toMatch(/<header class="top">\s*<button[^>]*data-action="toggle-nav"/);
+  const main = /<main class="main">([\s\S]*?)<\/main>/.exec(html)?.[1] ?? '';
+  expect(main.indexOf('data-action="close-detail"')).toBeGreaterThan(-1);
+  expect(main.indexOf('data-action="close-detail"')).toBeLessThan(main.indexOf('id="main"'));
+  expect(declarationsOf('.nav-btn')).toContain('display: none');
+  expect(declarationsOf('.back')).toContain('display: none');
+  const narrow = mediaBlock('max-width: 799px');
+  expect(inBlock(narrow, '.body')).toContain('grid-template-columns: minmax(0, 1fr)');
+  expect(inBlock(narrow, ':root[data-detail="open"] .body')).toContain('grid-template-columns: minmax(0, 1fr)');
+  expect(inBlock(narrow, '.side')).toContain('display: none');
+  expect(inBlock(narrow, ':root[data-nav="open"] .side')).toContain('display: block');
+  expect(inBlock(narrow, ':root[data-detail="open"] .list')).toContain('display: none');
+  expect(inBlock(narrow, '.nav-btn')).toContain('display: inline-flex');
+  expect(inBlock(narrow, ':root[data-detail="open"] .back')).toContain('display: inline-flex');
 });
 
 test('no sidebar or problem rule keeps its text on one line, so labels wrap rather than clip (ADW-522)', () => {

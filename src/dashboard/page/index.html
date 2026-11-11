@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-theme="dark" data-inspector="closed" data-pinned="false" data-detail="closed">
+<html lang="en" data-theme="dark" data-inspector="closed" data-pinned="false" data-detail="closed" data-nav="closed">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -196,6 +196,10 @@
         height: 19px;
         border-radius: 5px;
         background: linear-gradient(135deg, #4c8dff, #34d399);
+      }
+      .nav-btn,
+      .back {
+        display: none;
       }
       .spacer {
         flex: 1;
@@ -1886,12 +1890,55 @@
           box-shadow: -12px 0 32px rgba(0, 0, 0, 0.35);
         }
       }
+      /* under 800px the page is one column: the list, or the open run or queue with a way back */
+      @media (max-width: 799px) {
+        .body,
+        :root[data-detail="open"] .body {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .resize-handle {
+          display: none;
+        }
+        .side {
+          display: none;
+        }
+        :root[data-nav="open"] .side {
+          display: block;
+          position: fixed;
+          top: 46px;
+          left: 0;
+          bottom: 26px;
+          width: min(260px, 80vw);
+          z-index: 30;
+          background: var(--panel);
+          box-shadow: 12px 0 32px rgba(0, 0, 0, 0.35);
+        }
+        :root[data-detail="open"] .list {
+          display: none;
+        }
+        .nav-btn {
+          display: inline-flex;
+        }
+        :root[data-detail="open"] .back {
+          display: inline-flex;
+          align-self: flex-start;
+          margin: 8px 12px 0;
+        }
+        .brand-t {
+          display: none;
+        }
+        .status {
+          overflow: hidden;
+          white-space: nowrap;
+        }
+      }
     </style>
   </head>
   <body>
     <div class="shell">
       <header class="top">
-        <div class="brand"><i></i>sail dashboard</div>
+        <button class="btn nav-btn" type="button" data-action="toggle-nav" aria-label="navigation" title="navigation">☰</button>
+        <div class="brand"><i></i><span class="brand-t">sail dashboard</span></div>
         <div class="spacer"></div>
         <div id="attention"></div>
         <div id="link"></div>
@@ -1907,6 +1954,7 @@
           <div id="list"></div>
         </section>
         <main class="main">
+          <button class="btn back" type="button" data-action="close-detail" title="back to the list (Esc)">‹ list</button>
           <div id="main"></div>
         </main>
         <div class="resize-handle resize-right" data-resize="right"></div>

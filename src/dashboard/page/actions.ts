@@ -189,6 +189,10 @@ export const actions: Record<string, Action> = {
     store.ui.pinned = !store.ui.pinned;
     store.mark('inspector');
   },
+  'toggle-nav': (store) => {
+    store.ui.nav = !store.ui.nav;
+    store.host.setNav(store.ui.nav);
+  },
   'toggle-theme': (store) => {
     store.ui.theme = THEMES[(THEMES.indexOf(store.ui.theme) + 1) % THEMES.length] ?? 'dark';
     store.host.save(THEME_KEY, store.ui.theme);
@@ -236,6 +240,11 @@ export function dispatch(store: Store, action: string, data: Record<string, stri
   const dialogClick = action === 'dialog-confirm' || action === 'dialog-cancel' || action === 'dialog-change';
   const shuts = ui.itemMenu !== undefined && action !== 'item-menu' && !confirming && !dialogClick;
   const shutsRun = ui.runMenu !== undefined && !runAction && action !== 'run-menu' && !dialogClick;
+  // The folded sidebar shuts on any action but its own button, so choosing a view or a repository shows the list.
+  if (ui.nav && action !== 'toggle-nav') {
+    ui.nav = false;
+    store.host.setNav(false);
+  }
   if (shuts) delete ui.itemMenu;
   if (shutsRun) delete ui.runMenu;
   if (shuts || shutsRun) store.mark('main', 'list');

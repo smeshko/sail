@@ -85,6 +85,8 @@ export interface PageHost {
   setTheme(theme: string): void;
   /** Whether the inspector takes its room, and whether it is pinned open. */
   setInspector(open: boolean, pinned: boolean): void;
+  /** Whether the folded sidebar is open. */
+  setNav(open: boolean): void;
   /** Whether a run or queue is open beside the list: the centre is laid out by it. */
   setDetail(open: boolean): void;
   /** The browser's offset east of UTC, in minutes. */
@@ -534,6 +536,9 @@ export function browserHost(win: BrowserWindow): PageHost {
     setInspector(open, pinned) {
       doc.documentElement.dataset.inspector = open ? 'open' : 'closed';
       doc.documentElement.dataset.pinned = pinned ? 'true' : 'false';
+    },
+    setNav(open) {
+      doc.documentElement.dataset.nav = open ? 'open' : 'closed';
     },
     setDetail(open) {
       doc.documentElement.dataset.detail = open ? 'open' : 'closed';

@@ -230,6 +230,11 @@ class FakeHost implements PageHost {
   type(name: string, value: string) {
     this.input?.(name, value);
   }
+  /** What the host was told about the folded sidebar, in order. */
+  navs: boolean[] = [];
+  setNav(open: boolean) {
+    this.navs.push(open);
+  }
   setInspector(open: boolean, pinned: boolean) {
     this.inspectors.push([open, pinned]);
   }
@@ -941,6 +946,28 @@ test('the status bar is empty while a queue is open and describes the run again 
   host.click({ action: 'select-run', repo: 'alpha', run: GOLDEN_RUN_ID });
   host.advance(100);
   expect(host.regions.status).toContain('calls <b>');
+});
+
+test('the navigation button opens the folded sidebar, and choosing a view or pressing Escape shuts it (ADW-528)', () => {
+  page = boot(host);
+  firstIndex();
+  host.click({ action: 'toggle-nav' });
+  expect(host.navs).toEqual([true]);
+  host.click({ action: 'toggle-nav' });
+  expect(host.navs).toEqual([true, false]);
+  host.click({ action: 'toggle-nav' });
+  host.click({ action: 'select-view', view: 'history' });
+  expect([host.navs, page.ui.view]).toEqual([[true, false, true, false], 'history']);
+  replay(host.open('run=')[0], GOLDEN());
+  host.click({ action: 'select-run', repo: 'alpha', run: GOLDEN_RUN_ID });
+  host.click({ action: 'toggle-nav' });
+  host.press('Escape');
+  expect(host.navs.slice(-2)).toEqual([true, false]);
+  host.advance(100);
+  expect(host.regions.main).not.toContain('no run selected');
+  host.press('Escape');
+  host.advance(100);
+  expect(host.regions.main).toContain('no run selected');
 });
 
 test('a copy that took draws one ok toast reading what it copied, and 4,000 ms on it is gone', async () => {
