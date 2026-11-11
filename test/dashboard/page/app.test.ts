@@ -3628,6 +3628,36 @@ test('Enter on a go-to row opens a run, a queue or an item opens the queue, and 
   expect(page?.ui.focus.cursor?.subject).toEqual({ kind: 'repo', repo: 'alpha' });
 });
 
+test('Enter on a go-to row pushes the URL of what it opened, and a key that changes nothing writes none', async () => {
+  await openRunPage(FAKE_2_ID);
+  const enterOn = (query: string) => {
+    cmdK();
+    host.type('menu-query', query);
+    host.advance(100);
+    host.urls = [];
+    host.press('Enter', true);
+    host.advance(100);
+    return host.urls;
+  };
+  expect(enterOn(FAKE_3_ID.slice(0, 10))).toEqual([{ query: `repo=beta&run=${FAKE_3_ID}`, push: true }]);
+  expect(enterOn('ticket:FAKE-5')).toEqual([{ query: `queue=beta%2F${QUEUE_WORKFLOW}`, push: true }]);
+  const repo = enterOn('alph');
+  expect(repo).toHaveLength(1);
+  expect(repo[0]?.query).toContain('view=queues');
+  expect(repo[0]?.push).toBe(true);
+  // Keys that only move the highlight, close the menu or type write nothing.
+  cmdK();
+  host.type('menu-query', 'a');
+  host.advance(100);
+  host.urls = [];
+  host.press('ArrowDown', true);
+  host.press('ArrowUp', true);
+  host.type('menu-query', 'ab');
+  host.press('Escape', true);
+  host.press('Escape', true);
+  expect(host.urls).toEqual([]);
+});
+
 test('Enter on switch theme changes the theme and on toggle inspector the inspector, and Enter on a disabled row does nothing', async () => {
   await openRunPage(FAKE_2_ID);
   cmdK();
