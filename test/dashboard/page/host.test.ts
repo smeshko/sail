@@ -458,8 +458,10 @@ test("render writes a region by id, keys say whether they were typed in an input
   host.render('status', 'nowhere');
   expect(fake.elements.list?.innerHTML).toBe('<b>alpha</b>');
   const keys: [string, boolean][] = [];
-  host.onKey((key, inInput) => {
-    keys.push([key, inInput]);
+  const chords: string[] = [];
+  host.onKey((key, inInput, _on, mod) => {
+    if (mod === true) chords.push(key);
+    else keys.push([key, inInput]);
     return false;
   });
   fake.fire('keydown', { key: 'j', target: element({ tagName: 'DIV' }) });
@@ -468,6 +470,24 @@ test("render writes a region by id, keys say whether they were typed in an input
     ['j', false],
     ['j', true],
   ]);
+  // A key held with Alt is the browser's, one held with Cmd or Ctrl reaches the handler as a chord, for Cmd+K alone; a
+  // letter's case is Shift's, never Caps Lock's (review R5).
+  keys.length = 0;
+  const div = element({ tagName: 'DIV' });
+  fake.fire('keydown', { key: 'e', metaKey: true, target: div });
+  fake.fire('keydown', { key: 'e', ctrlKey: true, target: div });
+  fake.fire('keydown', { key: 'e', altKey: true, target: div });
+  fake.fire('keydown', { key: 'E', shiftKey: false, target: div });
+  fake.fire('keydown', { key: 'e', shiftKey: true, target: div });
+  fake.fire('keydown', { key: 'E', shiftKey: true, target: div });
+  fake.fire('keydown', { key: 'ArrowDown', shiftKey: true, target: div });
+  expect(keys).toEqual([
+    ['e', false],
+    ['E', false],
+    ['E', false],
+    ['ArrowDown', false],
+  ]);
+  expect(chords).toEqual(['e', 'e']);
   host.setTheme('light');
   host.setInspector(false);
   expect(fake.root.dataset).toEqual({ theme: 'light', inspector: 'closed' });

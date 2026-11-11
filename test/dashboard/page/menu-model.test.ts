@@ -125,6 +125,7 @@ test('with no subject there is no head and no subject row, and the general rows 
   expect(model.head).toBeUndefined();
   expect(labels(model.rows)).toEqual([
     'all clear',
+    'dismiss',
     'add a ticket…',
     'poll every queue',
     'switch theme',
@@ -143,7 +144,7 @@ test('the head names the subject by its kind', () => {
 });
 
 test('adding and polling are left out where no queue offers them, and disabled with the reason where none is enabled', () => {
-  expect(labels(generalRows({ index: [] }))).toEqual(['all clear', 'switch theme', 'toggle inspector']);
+  expect(labels(generalRows({ index: [] }))).toEqual(['all clear', 'dismiss', 'switch theme', 'toggle inspector']);
   const closed = JSON.parse(JSON.stringify(index)) as IndexRepo[];
   const queue = closed[1]?.queues[0] as unknown as { offers: { poll: unknown; add: unknown } };
   queue.offers.poll = off;

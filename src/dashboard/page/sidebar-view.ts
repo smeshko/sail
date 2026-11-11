@@ -1,4 +1,4 @@
-// The sidebar: navigation and nothing that grows with activity. Inbox opens needs attention; Active, Queues and History
+// The sidebar: navigation and nothing that grows with activity. Inbox, Active, Queues and History
 // each change the list's view, with the count of the rows they list; then every repository as a filter, with a dot for
 // its watcher: watching, not watching or broken. It holds no run row, no run menu and no watch button.
 import { html, type SafeHtml } from './html';
@@ -9,14 +9,9 @@ import type { UiState } from './ui-state';
 
 const DOT_TITLES = { watching: 'watching', idle: 'not watching', broken: 'broken' } as const;
 
-/** The sidebar. `counts` are what each view lists under the repository filter; `inbox` is the needs-attention count. */
-export function renderSidebar(
-  repos: readonly ListRepo[],
-  counts: Record<ViewName, number>,
-  inbox: number,
-  ui: UiState,
-): SafeHtml {
-  return html`<div class="side-views"><button class="side-ent" type="button" data-action="toggle-attention" aria-pressed="${ui.attention ? 'true' : 'false'}"><span class="nm">Inbox</span><span class="c">${inbox}</span></button>${VIEWS.map(
+/** The sidebar. `counts` are what each view lists under the repository filter. */
+export function renderSidebar(repos: readonly ListRepo[], counts: Record<ViewName, number>, ui: UiState): SafeHtml {
+  return html`<div class="side-views">${VIEWS.map(
     (view) =>
       html`<button class="side-ent${ui.view === view ? ' on' : ''}" type="button" data-action="select-view" data-view="${view}"${ui.view === view ? html` aria-current="true"` : ''}><span class="nm">${VIEW_LABELS[view]}</span><span class="c">${counts[view]}</span></button>`,
   )}</div><div class="side-h">repositories</div><div class="side-repos">${repos.map((repo) => {

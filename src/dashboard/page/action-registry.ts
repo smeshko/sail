@@ -1,5 +1,6 @@
 // The page's actions, defined once: each thing a person can have done from the page (stop, stop now, resume, restart,
-// clean, drop, requeue, move, poll, release a usage-limit hold, add, add skipping its checks, watch, unwatch, all clear) with its id and label, the subject it applies to, its
+// clean, drop, requeue, move, poll, release a usage-limit hold, add, add skipping its checks, watch, unwatch, all clear,
+// dismiss) with its id and label, the subject it applies to, its
 // availability from the server's offers, its parameters, its tier, its request and what its answer means. Pure: it
 // holds no host, no state and no storage, so `act.ts` carries any entry out and `action-view.ts` draws any entry, and an
 // entry added here needs nothing else. This is the only page module that names a POST endpoint.
@@ -681,6 +682,16 @@ export const ACTIONS: readonly ActionDef[] = [
     params: () => [],
     available: () => ({ offered: true, enabled: true }),
     run: 'clear-attention',
+  },
+  {
+    id: 'dismiss-attention',
+    label: () => 'dismiss',
+    appliesTo: ['none'],
+    tier: 'undoable',
+    place: 'list',
+    params: () => [],
+    available: () => ({ offered: true, enabled: true }),
+    run: 'dismiss-attention',
   },
 ];
 

@@ -31,12 +31,12 @@ test('the committed dashboard views are what the fixtures render now', async () 
   const fresh = join(temp, 'fresh');
   expect(await renderDashboardViews(fresh)).toEqual([
     'sidebar.html',
+    'list-inbox.html',
     'list-active.html',
     'list-history.html',
     'list-queues.html',
     'list-queues-problem.html',
     'list-queues-held.html',
-    'attention.html',
     'queue.html',
     'queue-watched.html',
     'menu-item.html',

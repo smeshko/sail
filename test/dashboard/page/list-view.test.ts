@@ -1,6 +1,7 @@
 // The list, drawn from hand-made repositories: its head and counts, its groups and rows, the run menu under a row, the
 // folded group, and the Queues view's watch buttons.
 import { expect, test } from 'bun:test';
+import type { AttentionItem } from '../../../src/dashboard/page/attention';
 import type { ListRepo, ListRun, ListWorkflow } from '../../../src/dashboard/page/index-model';
 import { renderList } from '../../../src/dashboard/page/list-view';
 import { initialUi, pillOf } from '../../../src/dashboard/page/ui-state';
@@ -288,6 +289,64 @@ test('each run status draws its own pill colour in its row (review R11)', () => 
     'p-pend',
     'p-skip',
   ]);
+});
+
+const inboxItems: AttentionItem[] = [
+  {
+    repo: 'alpha',
+    runId: 'a-run',
+    key: 'build#1',
+    kind: 'error',
+    title: 'build#1 ended in error',
+    detail: 'it broke',
+    opens: { repo: 'alpha', runId: 'a-run', key: 'build#1' },
+  },
+  { repo: 'alpha', workflow: 'flow', kind: 'parked', title: 'ticket:ADW-9 parked', detail: 'no tests' },
+  { repo: 'beta', kind: 'problem', title: 'repository', detail: 'cannot <b>read</b>' },
+];
+const inbox = (fields = {}, items = inboxItems) => renderList('inbox', repos, ui(fields), NOW, undefined, items).value;
+
+test('the Inbox is headed Inbox with its count, and each row holds its title, where it is and its detail', () => {
+  const markup = inbox();
+  expect(markup).toContain('<span class="lh-t">Inbox</span><span class="c">3</span>');
+  expect(heads(markup)).toEqual(['inbox:runs runs 1', 'inbox:parked parked 1', 'inbox:problems problems 1']);
+  expect(markup).toContain(
+    '<b class="r-title">build#1 ended in error</b><span class="r-wf">alpha · a-run · build#1</span>',
+  );
+  expect(markup).toContain('title="it broke">it broke</span>');
+  expect(markup).toContain('<span class="r-problem">cannot &lt;b&gt;read&lt;/b&gt;</span>');
+});
+
+test('an Inbox row opens its run at its call, or its queue, or nothing', () => {
+  const markup = inbox();
+  expect(markup).toContain('data-action="open" data-repo="alpha" data-run="a-run" data-key="build#1"');
+  expect(markup).toContain('data-action="select-queue" data-queue="alpha/flow"');
+  const problem = markup.match(/<div class="lrow in-row in-problem[^>]*>.*?<\/div><\/div>/s)?.[0] ?? '';
+  expect(problem).toContain('<div class="r-open">');
+  expect(problem.split('<button class="r-dismiss"')[0]).not.toContain('data-action');
+});
+
+test('the open run marks its Inbox row selected, and so does the open queue', () => {
+  expect(inbox({ repo: 'alpha', runId: 'a-run' })).toMatch(/class="lrow in-row in-error sel" data-row/);
+  expect(inbox({ queue: 'alpha/flow' })).toMatch(/class="lrow in-row in-parked sel" data-row/);
+  expect(inbox()).not.toContain(' sel"');
+});
+
+test('the Inbox says nothing needs attention with no item', () => {
+  expect(inbox({}, [])).toContain('<div class="qempty">nothing needs attention</div>');
+  expect(inbox({}, [])).toContain('<span class="c">0</span>');
+});
+
+test('each Inbox row carries a dismiss button naming its identity, beside its opener', () => {
+  const markup = inbox();
+  expect(
+    markup.match(/<button class="r-dismiss" type="button" data-action="dismiss-attention" data-item="/g),
+  ).toHaveLength(3);
+  expect(markup).toContain('aria-label="dismiss" title="dismiss (e)">✕</button>');
+  expect(markup).toContain(
+    `data-item="${JSON.stringify(['beta', 'problem', null, null, null, 'repository', 'cannot <b>read</b>']).replaceAll('"', '&quot;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')}"`,
+  );
+  expect(draw('active')).not.toContain('r-dismiss');
 });
 
 // A queue's row: counts, last poll, pause, hold and the buttons beside its open button.

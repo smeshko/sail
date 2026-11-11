@@ -62,7 +62,7 @@ export interface Store {
   subjectOffersRead: number;
   /** Carries the registry's actions out: `boot()` wires it, with the effects only the shell can perform. */
   actor: Actor;
-  /** The needs-attention identities a person cleared, and the identities of the rows last drawn. */
+  /** The needs-attention identities a person cleared, and the identities of the Inbox rows last drawn. */
   cleared: Set<string>;
   drawn: string[];
   /** Set when a call is selected before its card exists: the cursor moves to it once it does. */
