@@ -329,15 +329,20 @@ export async function renderDashboardViews(outDir: string): Promise<string[]> {
     const queue = queueId('beta', QUEUE_WORKFLOW);
     const panel = queuePanels(repos).find((each) => queueId(each.repo, each.workflow) === queue);
     if (panel === undefined) throw new Error(`beta has no ${QUEUE_WORKFLOW} queue`);
-    // The queue view's header carries its workflow's Watch or Unwatch, from the repository's offers.
-    const betaOffers = repos.find((each) => each.name === 'beta')?.offers;
-    views['queue.html'] = renderQueue(panel, stream, { ...selected, queue }, VIEWS_NOW, betaOffers);
+    // The queue view's header carries its poll and its workflow's Watch or Unwatch, from the repository's offers: the
+    // watched variant is the one the server gives while the workflow's watcher runs.
+    views['queue.html'] = renderQueue(panel, stream, { ...selected, queue }, VIEWS_NOW);
+    const on = { enabled: true };
     views['queue-watched.html'] = renderQueue(
-      { ...panel, watch: { state: 'watched' } },
+      {
+        ...panel,
+        watch: { state: 'watched' },
+        ...(panel.offers === undefined ? {} : { offers: { ...panel.offers, poll: on } }),
+        repoOffers: { watch: on, unwatch: on, workflows: { [panel.workflow]: { unwatch: on } } },
+      },
       stream,
       { ...selected, queue },
       VIEWS_NOW,
-      betaOffers,
     );
     for (const [name, [repo, dir]] of Object.entries(runDirs)) {
       const runId = runIdOf[name as keyof typeof runIdOf];
@@ -350,10 +355,10 @@ export async function renderDashboardViews(outDir: string): Promise<string[]> {
         entry === undefined
           ? undefined
           : await runActions(entry, runId, { leasesDir, ports: fakeClonePorts(leasesDir) });
-      views[`run-${name}.html`] = renderRun(model, summaryOf(repo, runId), ui({ repo, runId }), VIEWS_NOW);
+      views[`run-${name}.html`] = renderRun(model, summaryOf(repo, runId), ui({ repo, runId }), VIEWS_NOW, offers);
       // What a run offers shows in the list, under its row, once its ⋯ is opened.
       if (offers !== undefined && runControls(offers, ui()) !== undefined) {
-        const open = ui({ repo, runId, runMenu: runId });
+        const open = ui({ repo, runId, runMenu: { runId, at: 'row' } });
         const status = listed.find((each) => each.name === repo)?.runs.find((each) => each.runId === runId)?.status;
         const view = status === 'failed' || status === 'completed' ? 'history' : 'active';
         views[`list-menu-${name}.html`] = renderList(view, listed, open, VIEWS_NOW, offers);
@@ -367,6 +372,23 @@ export async function renderDashboardViews(outDir: string): Promise<string[]> {
         const view = actionOf('clean-run')?.dialog?.(subject, {}, { run, index: [] });
         if (view === undefined) throw new Error('clean-run has no dialog');
         views['dialog-clean.html'] = renderDialog(view);
+      }
+      // The dialog a restart of the failed run opens: the stage is asked in it, at the offer's choice.
+      if (name === 'fake-2' && offers?.restart !== undefined) {
+        const subject = { kind: 'run', repo, runId } as const;
+        const restart = actionOf('restart-run');
+        const source = { run: offers, index: [] };
+        const view = restart?.dialog?.(subject, {}, source);
+        if (restart === undefined || view === undefined) throw new Error('restart-run has no dialog');
+        const fields = restart.params(subject, source);
+        views['dialog-restart.html'] = renderDialog(view, {
+          fields,
+          values: Object.fromEntries(
+            fields.flatMap((param) =>
+              param.type === 'choice' && param.initial !== undefined ? [[param.name, param.initial]] : [],
+            ),
+          ),
+        });
       }
     }
     // One toast of each kind: a success, one with an Undo, and a refusal.

@@ -79,7 +79,7 @@ export const keys: Record<string, (store: Store) => void> = {
     const { ui } = store;
     if (ui.runMenu !== undefined) {
       delete ui.runMenu;
-      store.mark('list');
+      store.mark('list', 'main');
     } else if (ui.itemMenu !== undefined) {
       delete ui.itemMenu;
       store.mark('main');
