@@ -19,7 +19,7 @@ import type { PageHost } from './host';
 import { REGIONS } from './host';
 import { onKey } from './keys';
 import { syncUrl } from './location';
-import { navigate } from './navigate';
+import { navigate, showView } from './navigate';
 import { stopReads } from './reads';
 import { saveCleared, storedCleared } from './saved';
 import { createStore } from './store';
@@ -93,10 +93,12 @@ export function boot(host: PageHost): Page {
     if (name === 'list-filter') dispatch(store, 'list-filter', { value });
   });
   host.onNavigate((asked) => {
-    // Before the first index the entry's query is what the index opens; after it, what the entry names is opened, and
-    // the URL is only replaced where what is shown differs from it.
+    // Before the first index the entry's view is shown and its query is what the index opens; after it, what the entry
+    // names is opened, and the URL is only replaced where what is shown differs from it.
     if (store.start !== undefined) {
       store.start = asked;
+      showView(store, asked);
+      store.mark('list');
       return;
     }
     navigate(store, asked, true);

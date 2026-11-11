@@ -22,17 +22,22 @@ function missing(store: Store, path: string, runId: string) {
   syncUrl(store, false);
 }
 
+/** Shows the list view a Back or forward entry names, `active` when it names none. */
+export function showView(store: Store, asked: Record<string, string>): void {
+  const { ui } = store;
+  const view = fromQuery(asked).view ?? 'active';
+  if (view === ui.view) return;
+  ui.view = view;
+  ui.listFilter = '';
+  delete ui.listCursor;
+  store.fresh.add('list');
+}
+
 export function navigate(store: Store, asked: Record<string, string>, moved: boolean): void {
   const { ui } = store;
   const target = fromQuery(asked);
   const repos = store.index ?? [];
-  const view = target.view ?? 'active';
-  if (moved && view !== ui.view) {
-    ui.view = view;
-    ui.listFilter = '';
-    delete ui.listCursor;
-    store.fresh.add('list');
-  }
+  if (moved) showView(store, asked);
   if (target.queue !== undefined) {
     const id = target.queue;
     if (queuePanels(repos).some((panel) => queueId(panel.repo, panel.workflow) === id)) {

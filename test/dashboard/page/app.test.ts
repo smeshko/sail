@@ -3108,6 +3108,16 @@ describe('Back and forward open what an entry names, and push nothing (ADW-513)'
     host.push(host.open('index')[0], indexMessage());
     expect(host.open('run=').map((socket) => socket.query)).toEqual([runQuery('alpha', FAKE_2_ID)]);
   });
+
+  test("a move before the first index shows the entry's view, and the first index keeps it in the URL", () => {
+    host.startAt = { view: 'history' };
+    page = boot(host);
+    host.go(`repo=alpha&run=${FAKE_2_ID}&view=queues`);
+    host.push(host.open('index')[0], indexMessage());
+    host.advance(100);
+    expect(page.ui.view).toBe('queues');
+    expect(host.urls).toEqual([{ query: `repo=alpha&run=${FAKE_2_ID}&view=queues`, push: false }]);
+  });
 });
 
 describe('Copy link (ADW-513)', () => {
