@@ -62,10 +62,12 @@ Run sail only through `.sail/lib/demo.sh`. It runs this branch's `sail` in a scr
   `live=`.
   A view that needs interaction takes `steps=<file>`: write a JSON list with your file tools, such as
   `[{"wait":"[data-action=\"select-queue\"]"},{"click":"[data-action=\"select-queue\"]"},{"shot":"queue"}]`.
-  The steps are `{"click": css}`, `{"scroll": css, "top": px}`, `{"wait": css}` or `{"wait": ms}`, and `{"shot": name}`,
-  run in order on one page load. Wait on a selector before you click it. Each shot writes
+  The steps are `{"click": css}`, `{"scroll": css, "top": px}`, `{"wait": css}` or `{"wait": ms}`,
+  `{"key": key}` (with `"mod": true` to hold Cmd, so `{"key":"k","mod":true}` opens the command menu),
+  `{"type": css, "text": text}` (types into the field the selector names) and `{"shot": name}`, run in order on one page load. Wait on a selector before you click it. Each shot writes
   `$STAGE_OUT/demo/<name>-<shot>.png` and `.html`, and the transcript prints every step with what it did, and a
-  `scrolled <box> <px>` line for each box left scrolled down, which is how you check it stayed scrolled. A selector
+  `scrolled <box> <px>` line for each box left scrolled down, which is how you check it stayed scrolled, and a
+  `url <path and query>` line, which is how you check the URL the page ended on. A selector
   that matches nothing exits 1 and names the step; the shots before it are kept.
   `live=<ticket key>` starts that run in the demo repository, opens the page on it unless `run=` names another, and
   interrupts it when the steps end, so the transcript shows `live <run id>: suspended`. Pace the run with a
