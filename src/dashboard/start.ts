@@ -62,3 +62,6 @@ export function startableWorkflows(sailDir: string): string[] {
     .filter((name) => 'file' in findWorkflowFile(sailDir, name))
     .sort();
 }
+
+/** A start: a check's body and the key the run will be named by, `pr-<number>` or the ticket key, which the check answered. */
+export const StartRequest = StartBody.extend({ key: z.string().regex(/^[A-Za-z0-9-]+$/) });
