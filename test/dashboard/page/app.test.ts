@@ -5046,6 +5046,19 @@ describe('the Inbox view (ADW-527)', () => {
       expect([page?.ui.runId, page?.ui.view]).toEqual([FAKE_2_ID, 'inbox']);
     });
 
+    test('with the list cursor on no row, e dismisses the row of the open run', () => {
+      inbox();
+      host.click({ action: 'open', repo: 'alpha', run: FAKE_2_ID, key: 'implement#1' });
+      host.advance(100);
+      // A run opened with no row under the cursor, as one a URL names is: the open run's own row is the one dismissed.
+      if (page !== undefined) delete page.ui.listCursor;
+      host.press('e');
+      host.advance(100);
+      expect(count()).toBe('2');
+      expect(rows()).not.toContain('failed: stage_error');
+      expect(page?.ui.runId).toBe(FAKE_2_ID);
+    });
+
     test("a click on a row's ✕ does what e does and does not open the row", () => {
       inbox();
       expect(host.regions.list).toContain('data-action="dismiss-attention" data-item="');
