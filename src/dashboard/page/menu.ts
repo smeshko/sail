@@ -12,7 +12,7 @@
 //   lists its options, a number or a text is typed in the field. After the last, the registry's `request()` decides:
 //   `invalid` shows its words and keeps the step, nothing to send keeps it too, else the menu closes and the actor is
 //   handed the action with the values asked, which opens the confirmation dialog for a confirmed one. Escape goes back
-//   one step, then lets go of the subject, then closes the menu.
+//   one step, then lets go of the subject, then closes the menu. Backspace in the empty field lets go of the subject too.
 
 import { actionOf, type Subject } from './action-registry';
 import { actions } from './actions';
@@ -267,15 +267,18 @@ function back(store: Store, menu: MenuState): void {
     enter(store, menu, modelOf(store, menu).step?.start ?? 0);
     return;
   }
-  if (menu.mode === 'full' && menu.subject !== undefined && menu.subject.kind !== 'none') {
-    delete menu.subject;
-    menu.at = 0;
-    delete menu.row;
-    delete menu.error;
-    store.mark('menu');
-    return;
-  }
-  closeMenu(store);
+  if (!letGo(store, menu)) closeMenu(store);
+}
+
+/** Lets go of the full menu's subject, so its chip and its actions go. False when there is none to let go of. */
+function letGo(store: Store, menu: MenuState): boolean {
+  if (menu.mode !== 'full' || menu.subject === undefined || menu.subject.kind === 'none') return false;
+  delete menu.subject;
+  menu.at = 0;
+  delete menu.row;
+  delete menu.error;
+  store.mark('menu');
+  return true;
 }
 
 /** Handles a key while the menu is open. Answers true for a key it took. */
@@ -291,6 +294,9 @@ export function menuKey(store: Store, key: string): boolean {
       answer(store, menu, step, store.host.value('menu-query') ?? menu.query);
     else runRow(store, highlighted(model, menu.at, menu.row));
   } else if (key === 'Escape') back(store, menu);
+  // Backspace in the empty field, with no step open, lets go of the subject as Escape does; else it is the field's own.
+  else if (key === 'Backspace')
+    return menu.steps.length === 0 && (store.host.value('menu-query') ?? menu.query) === '' && letGo(store, menu);
   else return false;
   return true;
 }
