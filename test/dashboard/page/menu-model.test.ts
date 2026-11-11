@@ -116,6 +116,7 @@ test("an item's rows say a move as its own up and down rows, and a disabled drop
   expect(rows.map((row) => [row.label, row.disabled])).toEqual([
     ['drop', true],
     ['move up', false],
+    ['move to the top', false],
   ]);
   const up = rows[1]?.run;
   expect(up).toEqual({
@@ -401,6 +402,7 @@ describe('audit 2: the menu ranks across groups, matches within words and says a
       expect(own.map((row) => [row.label, row.disabled, row.why])).toEqual([
         ['drop', true, undefined],
         ['move up', true, undefined],
+        ['move to the top', true, undefined],
       ]);
     }
     // Reasons that differ stay on their rows.

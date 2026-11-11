@@ -5905,6 +5905,9 @@ describe('a key for every action, and the shortcut sheet (ADW-523)', () => {
     );
     expect(sheet()).toContain('<kbd>G</kbd><span class="keys-then">then</span><kbd>Q</kbd>');
     expect(sheet()).toContain(
+      '<span class="keys-t">move to the top</span><span class="keys-ks"><span class="keys-k"><kbd>⇧T</kbd>',
+    );
+    expect(sheet()).toContain(
       '<span class="keys-t">move up</span><span class="keys-ks"><span class="keys-k"><kbd>⌥↑</kbd>',
     );
     expect(host.menuFocuses).toBe(1);
@@ -6021,6 +6024,20 @@ describe('a key for every action, and the shortcut sheet (ADW-523)', () => {
     await settle();
     host.advance(100);
     expect(toasts().at(-1)).toBe("hint stop gone-1: its actions can't be read");
+  });
+
+  test('Shift+T moves a waiting item before the first one, and says so on the first', async () => {
+    twoWaiting();
+    openBetaQueue();
+    host.point('hover', { ...ITEM_ROW, item: 'ticket:FAKE-7' });
+    press('T');
+    expect(host.posts).toEqual([
+      { path: `${QUEUE_PATH}/move`, body: { dedupKey: 'ticket:FAKE-7', before: 'ticket:FAKE-5' } },
+    ]);
+    host.point('hover', ITEM_ROW);
+    press('T');
+    expect(host.posts.length).toBe(1);
+    expect(toasts().at(-1)).toBe('hint move to the top ticket:FAKE-5: ticket:FAKE-5 has no move to the top');
   });
 
   test('on a queue item: r requeues, Backspace opens the drop dialog, Alt+Down and Alt+Up move it; on the queue p polls and c asks the ticket in the command menu', async () => {

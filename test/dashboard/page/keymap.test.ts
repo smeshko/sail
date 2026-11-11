@@ -45,6 +45,7 @@ test('two actions share a key only when they are done to subjects of different k
     'drop-item Backspace',
     'move up Alt+ArrowUp',
     'move down Alt+ArrowDown',
+    'move to the top T',
     'poll-queue p',
     'add-ticket c',
     'clear-attention E',
@@ -63,6 +64,11 @@ test('the sheet lists every navigation key and every action key once, in the fiv
     { text: 'resume', keys: ['r'] },
     { text: 'restart', keys: ['R'] },
   ]);
+  expect(lines.find((each) => each.group === 'Queue item')?.lines).toContainEqual({
+    text: 'move to the top',
+    keys: ['T'],
+  });
+  expect(keyLabel('T')).toBe('⇧T');
   expect(groupOf(ACTIONS.find((def) => def.id === 'poll-queue') as ActionDef)).toBe('Queue item');
   expect(groupOf(ACTIONS.find((def) => def.id === 'dismiss-attention') as ActionDef)).toBe('Inbox');
 });
