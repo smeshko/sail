@@ -27,6 +27,7 @@ const SPLIT = [
   'actions.ts',
   'act.ts',
   'keys.ts',
+  'focus.ts',
   'app.ts',
 ];
 

@@ -569,6 +569,16 @@ test('a queue opened over a followed running timeline is not scrolled to its end
   expect(host.scrolls).toEqual([]);
 });
 
+test("the open run, then the open queue, is the open source's subject", () => {
+  page = boot(host);
+  firstIndex(GOLDEN_RUN_ID);
+  host.advance(100);
+  expect(page.ui.focus.open?.subject).toEqual({ kind: 'run', repo: 'alpha', runId: GOLDEN_RUN_ID });
+  host.click({ action: 'select-queue', queue: `beta/${QUEUE_WORKFLOW}` });
+  host.advance(100);
+  expect(page.ui.focus.open?.subject).toEqual({ kind: 'workflow', repo: 'beta', workflow: QUEUE_WORKFLOW });
+});
+
 test('a queue opened over a run stays open when that run leaves the index, and the run alone closes (review R10)', () => {
   page = boot(host);
   firstIndex(GOLDEN_RUN_ID);

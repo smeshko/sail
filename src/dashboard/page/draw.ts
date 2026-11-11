@@ -4,6 +4,7 @@
 import { identity } from './attention';
 import { renderAttention } from './attention-view';
 import { renderDrawer } from './drawer-view';
+import { syncOpen } from './focus';
 import { REGIONS, type Region } from './host';
 import { html } from './html';
 import { listRepos, statusOf } from './index-model';
@@ -77,6 +78,7 @@ export function regions(store: Store): Record<Region, () => string> {
 /** Draws each dirty region in `REGIONS` order, and writes only those whose markup is not what it was. */
 export function flush(store: Store): void {
   const { ui, host } = store;
+  syncOpen(store);
   const draw = regions(store);
   store.flushTimer = undefined;
   const dirty = REGIONS.filter((region) => store.dirty.has(region));

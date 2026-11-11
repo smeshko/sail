@@ -4,6 +4,7 @@
 // clock is at, and the file open in the drawer. `act` is the one state of carrying an action out: the parameters typed. It
 // holds nothing about the runs themselves.
 
+import type { Subject } from './action-registry';
 import type { DialogView } from './dialog-view';
 import type { ViewName } from './list-model';
 import type { Toast } from './toasts';
@@ -21,6 +22,17 @@ export type Theme = (typeof THEMES)[number];
 /** Carrying an action out, for every action alike: what was typed for each action's parameters, kept across a draw. */
 export interface ActState {
   drafts: Record<string, Record<string, string>>;
+}
+
+/** Where the focused subject comes from: the row under the pointer, the keyboard's cursor, or the open run or queue. */
+export type FocusSource = 'hover' | 'cursor' | 'open';
+
+/** The subject each source holds, with the sequence number of its last change: the highest is the focused subject. */
+export interface FocusState {
+  seq: number;
+  hover?: { subject: Subject; at: number };
+  cursor?: { subject: Subject; at: number };
+  open?: { subject: Subject; at: number };
 }
 
 export interface UiState {
@@ -73,6 +85,8 @@ export interface UiState {
   dialog?: DialogView;
   /** The toasts on the stack, oldest first. */
   toasts: Toast[];
+  /** The subject each source of the focus holds. */
+  focus: FocusState;
   /** What a subject reads while a request for it is out, by the id `underwayId()` gives: `stopping…`. */
   underway: Record<string, string>;
 }
@@ -97,6 +111,7 @@ export function initialUi(tz: number): UiState {
     act: { drafts: {} },
     toasts: [],
     underway: {},
+    focus: { seq: 0 },
   };
 }
 
