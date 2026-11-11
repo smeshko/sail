@@ -3152,9 +3152,6 @@ test('by keyboard alone: stop', async () => {
   await menuOn(FAKE_3_ROW);
   typeIn('stop');
   enter();
-  expect(stepLabel()).toBe('stop now');
-  expect(host.posts).toEqual([]);
-  enter();
   expect(dialogTitle()).toBe(`stop ${FAKE_3_ID}`);
   expect(host.posts).toEqual([]);
   host.press('Enter');
@@ -3166,10 +3163,11 @@ test('by keyboard alone: stop now', async () => {
   bootIndexed();
   await menuOn(FAKE_3_ROW);
   typeIn('stop');
-  enter();
   host.press('ArrowDown', true);
   enter();
+  expect(dialogTitle()).toBe(`stop ${FAKE_3_ID} now`);
   expect(dialogLines()[0]).toBe('ends its running call now');
+  expect(host.posts).toEqual([]);
   host.press('Enter');
   expect(host.posts).toEqual([{ path: `${FAKE_3_PATH}/stop`, body: { now: true } }]);
 });
@@ -3295,7 +3293,7 @@ test('by keyboard alone: poll', async () => {
   expect(host.posts).toEqual([{ path: `${QUEUE_PATH}/poll`, body: {} }]);
 });
 
-test('by keyboard alone: add without force, and add with force', async () => {
+test('by keyboard alone: add, and add skipping its checks', async () => {
   bootIndexed();
   await menuOn(WORKFLOW_ROW);
   typeIn('add');
@@ -3303,17 +3301,17 @@ test('by keyboard alone: add without force, and add with force', async () => {
   expect(stepLabel()).toBe('ticket key');
   typeIn('FAKE-9');
   enter();
-  expect(stepLabel()).toBe('force');
-  enter();
   expect(host.posts).toEqual([{ path: `${QUEUE_PATH}/add`, body: { ticketKey: 'FAKE-9' } }]);
   await settle();
   await menuOn(WORKFLOW_ROW);
   typeIn('add');
-  enter();
-  typeIn('FAKE-10');
-  enter();
   host.press('ArrowDown', true);
   enter();
+  expect(stepLabel()).toBe('ticket key');
+  typeIn('FAKE-10');
+  enter();
+  expect([dialogTitle(), host.posts.length]).toEqual(['add FAKE-10, skipping its checks', 1]);
+  host.press('Enter');
   expect(host.posts.at(-1)).toEqual({ path: `${QUEUE_PATH}/add`, body: { ticketKey: 'FAKE-10', force: true } });
 });
 
@@ -3350,11 +3348,6 @@ test('Esc steps back through add’s steps, then closes', async () => {
   enter();
   expect(stepLabel()).toBe('ticket key');
   typeIn('FAKE-9');
-  enter();
-  expect(stepLabel()).toBe('force');
-  host.press('Escape', true);
-  host.advance(100);
-  expect(stepLabel()).toBe('ticket key');
   host.press('Escape', true);
   host.advance(100);
   expect(stepLabel()).toBe('queue');
@@ -3469,7 +3462,6 @@ test('a right-click while the confirmation dialog is open is the browser’s, an
   await menuOn(FAKE_3_ROW);
   typeIn('stop');
   enter();
-  enter();
   expect(dialogTitle()).toBe(`stop ${FAKE_3_ID}`);
   expect(host.point('context', ITEM_6)).toBe(false);
 });
@@ -3487,7 +3479,7 @@ test('a context menu asks a typed step in its own field, and Escape steps back t
   expect(cmdk()).toContain('<input class="cmdk-in" name="menu-query" type="number"');
   host.press('Escape', true);
   host.advance(100);
-  expect([stepLabel(), menuLabels()]).toEqual([undefined, ['resume', 'stop']]);
+  expect([stepLabel(), menuLabels()]).toEqual([undefined, ['resume', 'stop', 'stop now']]);
   host.press('Escape', true);
   host.advance(100);
   expect(cmdk()).toBe('');
