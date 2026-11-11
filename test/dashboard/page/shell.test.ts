@@ -189,10 +189,11 @@ test("the shell's actions are exactly the page's view actions: every action of t
   );
 });
 
-test('app.ts exports boot and the nine constants, and nothing else at runtime', () => {
+test('app.ts exports boot and the ten constants, and nothing else at runtime', () => {
   expect(Object.keys(app).sort()).toEqual(
     [
       'boot',
+      'COPIED_MS',
       'THEME_KEY',
       'LIST_KEY',
       'FILTER_KEY',

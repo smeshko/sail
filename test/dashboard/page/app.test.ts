@@ -7,7 +7,16 @@ import { join } from 'node:path';
 import { runActions } from '../../../src/dashboard/actions';
 import { callFile, findRepo, findRunDir, index } from '../../../src/dashboard/files';
 import type { Subject } from '../../../src/dashboard/page/action-registry';
-import { boot, CLEARED_KEY, FILTER_KEY, LIST_KEY, type Page, THEME_KEY } from '../../../src/dashboard/page/app';
+import {
+  boot,
+  CLEARED_KEY,
+  COPIED_MS,
+  FILTER_KEY,
+  FLUSH_MS,
+  LIST_KEY,
+  type Page,
+  THEME_KEY,
+} from '../../../src/dashboard/page/app';
 import { attention, identity } from '../../../src/dashboard/page/attention';
 import { focused, setFocus } from '../../../src/dashboard/page/focus';
 import { browserHost, type ConnectHandlers, type PageHost, type Region } from '../../../src/dashboard/page/host';
@@ -66,6 +75,10 @@ class FakeHost implements PageHost {
   startAt: Record<string, string> = {};
   clock = Date.parse('2026-10-01T12:00:00.000Z');
   private timers = new Map<number, { at: number; fn: () => void }>();
+  /** How many timers are waiting. */
+  get pendingTimers() {
+    return this.timers.size;
+  }
   private next = 1;
   private action?: (action: string, data: Record<string, string>) => void;
   private key?: (key: string, inInput: boolean, on?: string, mod?: boolean) => boolean;
@@ -1140,6 +1153,75 @@ test('a copy the host refuses draws a red alert that is still drawn 60 s on, unt
   host.click({ action: 'dismiss-toast', toast: '1' });
   host.advance(100);
   expect(host.regions.toasts).toBe('');
+});
+
+describe('a copy button says whether the copy took', () => {
+  const text = `sail show ${GOLDEN_RUN_ID}`;
+  const open = () => {
+    page = boot(host);
+    firstIndex();
+    replay(host.open('run=')[0], GOLDEN(), false);
+    host.advance(FLUSH_MS);
+  };
+  const button = (label: string) => `data-text="${text}">${label}</button>`;
+
+  test('a copy the clipboard took reads copied, and COPIED_MS later copy again', async () => {
+    open();
+    expect(host.regions.main).toContain(button('copy'));
+    host.click({ action: 'copy', text });
+    await settle();
+    host.advance(FLUSH_MS);
+    expect(host.regions.main).toContain(button('copied'));
+    expect(page?.ui.copied).toEqual({ text, ok: true });
+    host.advance(COPIED_MS + FLUSH_MS);
+    expect(host.regions.main).toContain(button('copy'));
+    expect(host.regions.main).not.toContain('>copied</button>');
+    expect(page?.ui.copied).toBeUndefined();
+  });
+
+  test('a copy the clipboard refused reads copy failed, then copy again', async () => {
+    open();
+    host.copyTakes = false;
+    host.click({ action: 'copy', text });
+    await settle();
+    host.advance(FLUSH_MS);
+    expect(host.regions.main).toContain(button('copy failed'));
+    expect(page?.ui.copied).toEqual({ text, ok: false });
+    host.advance(COPIED_MS + FLUSH_MS);
+    expect(host.regions.main).toContain(button('copy'));
+    expect(page?.ui.copied).toBeUndefined();
+  });
+
+  test('a second copy 1 s after the first keeps the label until COPIED_MS after the second', async () => {
+    open();
+    host.click({ action: 'copy', text });
+    await settle();
+    host.advance(1000);
+    host.click({ action: 'copy', text });
+    await settle();
+    host.advance(COPIED_MS - 1);
+    expect(page?.ui.copied).toEqual({ text, ok: true });
+    host.advance(1 + FLUSH_MS);
+    expect(page?.ui.copied).toBeUndefined();
+    expect(host.regions.main).toContain(button('copy'));
+  });
+
+  test('a page stopped before the clipboard answers sets nothing and leaves no timer', async () => {
+    open();
+    host.click({ action: 'copy', text });
+    page?.stop();
+    await settle();
+    expect(page?.ui.copied).toBeUndefined();
+    expect(host.pendingTimers).toBe(0);
+  });
+
+  test('stopping a page while the label shows cancels its timer', async () => {
+    open();
+    host.click({ action: 'copy', text });
+    await settle();
+    page?.stop();
+    expect(host.pendingTimers).toBe(0);
+  });
 });
 
 test('the theme cycles and is saved, a section toggles, copy copies, follow toggles, and the stream buttons read that stream', async () => {

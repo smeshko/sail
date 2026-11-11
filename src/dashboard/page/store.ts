@@ -100,6 +100,8 @@ export interface Store {
   logTimer: number | undefined;
   outputTimer: number | undefined;
   tickTimer: number | undefined;
+  /** The timer that takes the `copied` label off a copy button. */
+  copiedTimer: number | undefined;
   indexRetry: number | undefined;
   indexConnection: { close(): void } | undefined;
   /** The last toast's id, the Undo each toast with one runs, and the timers that take a success off the stack. */
@@ -168,6 +170,7 @@ export function createStore(host: PageHost): Store {
     logTimer: undefined,
     outputTimer: undefined,
     tickTimer: undefined,
+    copiedTimer: undefined,
     indexRetry: undefined,
     indexConnection: undefined,
     toastSeq: 0,

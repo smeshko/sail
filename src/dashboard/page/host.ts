@@ -31,6 +31,8 @@ export interface PageHost {
   /**
    * `handler` is told each key, whether it was typed in an input, `on`, the `data-action` of the element the key
    * landed on, and `mod`, whether Cmd or Ctrl is held; answering true suppresses the key's default, as typing it would.
+   * Enter in a text field under a `data-enter` element arrives as the action of the button that element names, as a
+   * click on it would, and is no key.
    */
   onKey(handler: (key: string, inInput: boolean, on?: string, mod?: boolean) => boolean): void;
   /**
@@ -480,6 +482,17 @@ export function browserHost(win: BrowserWindow): PageHost {
       doc.addEventListener('keydown', (event) => {
         const target = isElement(event.target) ? event.target : undefined;
         const tag = target?.tagName;
+        if (event.key === 'Enter' && target !== undefined && tag === 'INPUT' && !isTick(target)) {
+          // Enter in a text field under an element that declares `data-enter` is a click on the button it names.
+          let at: ElementLike | null = target;
+          while (at !== null && at.dataset?.enter === undefined) at = at.parentElement;
+          const found = at?.querySelector?.(`[data-action="${at.dataset.enter}"]`);
+          if (found !== null && found !== undefined) {
+            event.preventDefault?.();
+            fire(found);
+            return;
+          }
+        }
         if (event.key === 'Enter' || event.key === ' ') {
           // A native button or link is clicked by the browser; any other focused element with its own action (a
           // stage card) is opened here, as a click would.

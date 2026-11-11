@@ -140,13 +140,13 @@ function releaseControl(panel: QueuePanel, key: string, ui: UiState): SafeHtml |
   });
 }
 
-/** The field to add a ticket by its key, as typed so far, and the two buttons that add it, the second skipping its checks. */
+/** The field to add a ticket by its key, as typed so far, and the two buttons that add it, the second skipping its checks. Enter in the field fires the first (`data-enter`). */
 function addForm(panel: QueuePanel, ui: UiState, why: string | undefined): SafeHtml {
   const typed = ui.act.drafts['add-ticket'];
   if (why !== undefined) {
-    return html`<div class="qadd"><input class="txt" type="text" name="add-ticket" placeholder="ticket key" value="${typed?.ticket ?? ''}" disabled title="${why}"><button class="btn" disabled title="${why}">add</button><button class="btn" disabled title="${why}">add, skipping its checks</button></div>`;
+    return html`<div class="qadd" data-enter="add-ticket"><input class="txt" type="text" name="add-ticket" placeholder="ticket key" value="${typed?.ticket ?? ''}" disabled title="${why}"><button class="btn" disabled title="${why}">add</button><button class="btn" disabled title="${why}">add, skipping its checks</button></div>`;
   }
-  return html`<div class="qadd"><input class="txt" type="text" name="add-ticket" placeholder="ticket key" value="${typed?.ticket ?? ''}"><button class="btn" data-action="add-ticket" data-repo="${panel.repo}" data-workflow="${panel.workflow}" title="add the ticket to the queue">add</button><button class="btn" data-action="add-ticket-force" data-repo="${panel.repo}" data-workflow="${panel.workflow}" title="add the ticket without checking its label or state">add, skipping its checks</button></div>`;
+  return html`<div class="qadd" data-enter="add-ticket"><input class="txt" type="text" name="add-ticket" placeholder="ticket key" value="${typed?.ticket ?? ''}"><button class="btn" data-action="add-ticket" data-repo="${panel.repo}" data-workflow="${panel.workflow}" title="add the ticket to the queue">add</button><button class="btn" data-action="add-ticket-force" data-repo="${panel.repo}" data-workflow="${panel.workflow}" title="add the ticket without checking its label or state">add, skipping its checks</button></div>`;
 }
 
 /** A waiting row's ▲ or ▼: `target` is the waiting neighbour the item moves before or after. */

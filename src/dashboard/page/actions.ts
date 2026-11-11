@@ -17,6 +17,9 @@ import { closeDetail, reopenQueue, selectRun } from './streams';
 import { dismissToast, toast, undoToast } from './toast';
 import { FILTERS, type InspectorTab, TABS, THEMES, type TimelineFilter } from './ui-state';
 
+/** How long a copy button says whether its copy took. */
+export const COPIED_MS = 3000;
+
 /** A read of the offers of an older selection is dropped when it answers, and its `checking…` goes. */
 function dropSelectionRead(store: Store) {
   store.selectionRead++;
@@ -299,6 +302,15 @@ export const actions: Record<string, Action> = {
     if (text === undefined) return;
     void store.host.copy(text).then((copied) => {
       if (store.stopped) return;
+      // The button says for a moment whether it took; a second copy starts the moment over.
+      if (store.copiedTimer !== undefined) store.host.cancel(store.copiedTimer);
+      store.ui.copied = { text, ok: copied };
+      store.copiedTimer = store.host.later(() => {
+        store.copiedTimer = undefined;
+        delete store.ui.copied;
+        store.mark('main');
+      }, COPIED_MS);
+      store.mark('main');
       if (copied) toast(store, 'ok', 'copy', `copied ${text}`);
       else toast(store, 'bad', 'copy', 'the clipboard refused it');
     });
