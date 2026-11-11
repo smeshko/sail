@@ -1220,7 +1220,7 @@ test('an add that took writes main though its markup is what was last drawn (ADW
   expect(host.regions.main).toContain('name="add-ticket" placeholder="ticket key" value=""');
 });
 
-test('a switch of run draws the list fresh, and a tick does not (ADW-504)', () => {
+test('a switch of run draws the list and the run view fresh, and a tick does not (ADW-504)', () => {
   const { dir, rest } = runningCopy(m, 1);
   const start = rest.map((line) => JSON.parse(line)).find((event) => event.type === 'stage:start');
   host.clock = Date.parse(start.ts) + 1000;
@@ -1228,7 +1228,7 @@ test('a switch of run draws the list fresh, and a tick does not (ADW-504)', () =
   firstIndex();
   replay(host.open('run=')[0], dir, false);
   host.advance(100);
-  expect(host.freshes).toEqual(['list']);
+  expect(host.freshes).toEqual(['list', 'main']);
   host.renders = [];
   host.freshes = [];
   host.advance(2500);
@@ -1236,7 +1236,7 @@ test('a switch of run draws the list fresh, and a tick does not (ADW-504)', () =
   expect(host.freshes).toEqual([]);
   host.click({ action: 'select-run', repo: 'alpha', run: GOLDEN_RUN_ID });
   host.advance(100);
-  expect(host.freshes).toEqual(['list']);
+  expect(host.freshes).toEqual(['list', 'main']);
 });
 
 test('the open run, once ended, opens its stream again when the index says it runs again, folds past its old run:end as live, and leaves one socket (review R1-2)', () => {
@@ -1624,7 +1624,7 @@ describe('the list by keyboard (ADW-522)', () => {
     host.press('j');
     host.press('j');
     host.press('.');
-    expect([p.ui.runId, p.ui.runMenu]).toEqual([FAKE_2_ID, FAKE_2_ID]);
+    expect([p.ui.runId, p.ui.runMenu]).toEqual([FAKE_2_ID, { runId: FAKE_2_ID, at: 'row' }]);
     host.advance(100);
     expect(host.regions.list).toContain('class="r-menu"');
   });
@@ -2006,7 +2006,7 @@ test("a run's ⋯ opens the run and its menu under its row, reading what it offe
   host.click({ action: 'select-view', view: 'history' });
   host.click({ action: 'run-menu', repo: 'alpha', run: FAKE_2_ID });
   host.advance(100);
-  expect([page?.ui.runId, page?.ui.runMenu]).toEqual([FAKE_2_ID, FAKE_2_ID]);
+  expect([page?.ui.runId, page?.ui.runMenu]).toEqual([FAKE_2_ID, { runId: FAKE_2_ID, at: 'row' }]);
   expect(host.regions.list).toContain(
     '<div class="r-menu"><span class="act-why">reading what the run offers…</span></div>',
   );
@@ -2025,7 +2025,7 @@ test("a run's ⋯ opens the run and its menu under its row, reading what it offe
   host.click({ action: 'restart-run' });
   host.press('Escape');
   host.advance(100);
-  expect([page?.ui.runMenu, host.dialog]).toEqual([FAKE_2_ID, undefined]);
+  expect([page?.ui.runMenu, host.dialog]).toEqual([{ runId: FAKE_2_ID, at: 'row' }, undefined]);
   host.press('Escape');
   host.advance(100);
   expect([page?.ui.runId, page?.ui.runMenu]).toEqual([FAKE_2_ID, undefined]);
@@ -2035,7 +2035,7 @@ test("a run's ⋯ opens the run and its menu under its row, reading what it offe
   host.advance(100);
   expect([page?.ui.runId, page?.ui.runMenu, host.regions.list?.match(/class="r-menu"/g)?.length]).toEqual([
     GOLDEN_RUN_ID,
-    GOLDEN_RUN_ID,
+    { runId: GOLDEN_RUN_ID, at: 'row' },
     1,
   ]);
   expect(host.regions.list).toContain(`<div class="r-menu"><span class="act-why">run ${GOLDEN_RUN_ID} completed`);
@@ -2408,6 +2408,106 @@ test('ticking Stop now only records the tick: no dialog opens and nothing is pos
   host.advance(100);
   expect([page?.ui.act.drafts['stop-run'], host.dialog, host.posts]).toEqual([{ now: 'on' }, undefined, []]);
 });
+
+// The open run's header carries its actions (ADW-516): buttons for its status and a ⋯ for the rest, from the registry.
+/** Boots the page on `run` of `repo`, its events replayed, with its row's menu shut. */
+async function openRun(repo: string, runId: string, dir: string, read = true) {
+  page = boot(host);
+  firstIndex();
+  const status = listRepos(index(m.registryDir), host.clock)
+    .find((each) => each.name === repo)
+    ?.runs.find((run) => run.runId === runId)?.status;
+  host.click({ action: 'select-view', view: status === 'failed' || status === 'completed' ? 'history' : 'active' });
+  host.click({ action: 'open', repo, run: runId });
+  replay(host.open('run=')[0], dir);
+  if (read) await settle();
+  host.advance(100);
+}
+const occurrences = (needle: string) => `${host.regions.list ?? ''}${host.regions.main ?? ''}`.split(needle).length - 1;
+
+test("a failed run's header draws restart and clean once the offers answer arrives, with no other event, and no ⋯", async () => {
+  await openRun('alpha', FAKE_2_ID, fake2Dir(m), false);
+  expect(host.regions.main).not.toContain('data-action="restart-run"');
+  await settle();
+  host.advance(100);
+  expect(buttons(host.regions.main).filter(([, action]) => action?.endsWith('-run'))).toEqual([
+    ['restart', 'restart-run', ''],
+    ['clean', 'clean-run', ''],
+  ]);
+  expect(host.regions.main).not.toContain('data-at="header"');
+  expect(host.regions.list).not.toContain('class="r-menu"');
+});
+
+test("the header's ⋯ opens a menu of the actions it has no button for; its ⋯ again, Escape or any other click shuts it", async () => {
+  settleQueue();
+  await openRun('beta', FAKE_3_ID, m.beta.runDir);
+  const more = { action: 'run-menu', repo: 'beta', run: FAKE_3_ID, at: 'header' };
+  expect(host.regions.main).toContain('data-action="resume-run">resume</button>');
+  expect(host.regions.main).not.toContain('class="h-menu"');
+  host.click(more);
+  host.advance(100);
+  expect(page?.ui.runMenu).toEqual({ runId: FAKE_3_ID, at: 'header' });
+  expect(host.regions.main).toContain('<div class="h-menu">');
+  expect(host.regions.main).toContain('data-action="stop-run">stop</button>');
+  expect(host.regions.list).not.toContain('class="r-menu"');
+  host.click(more);
+  host.advance(100);
+  expect([page?.ui.runMenu, host.regions.main?.includes('class="h-menu"')]).toEqual([undefined, false]);
+  host.click(more);
+  host.press('Escape');
+  host.advance(100);
+  expect([page?.ui.runMenu, host.regions.main?.includes('class="h-menu"')]).toEqual([undefined, false]);
+  host.click(more);
+  host.click({ action: 'toggle-follow' });
+  host.advance(100);
+  expect([page?.ui.runMenu, host.regions.main?.includes('class="h-menu"')]).toEqual([undefined, false]);
+});
+
+test("the header's ⋯ opens only the header's menu, and the row's ⋯ only the row's", async () => {
+  settleQueue();
+  await openRun('beta', FAKE_3_ID, m.beta.runDir);
+  host.click({ action: 'run-menu', repo: 'beta', run: FAKE_3_ID, at: 'header' });
+  host.click({ action: 'run-menu', repo: 'beta', run: FAKE_3_ID });
+  host.advance(100);
+  expect(page?.ui.runMenu).toEqual({ runId: FAKE_3_ID, at: 'row' });
+  expect(host.regions.main).not.toContain('class="h-menu"');
+  expect(host.regions.list).toContain('class="r-menu"');
+});
+
+test("the header's actions yield to an open row menu, so no run action field is on the page twice", async () => {
+  settleQueue();
+  await openRun('beta', FAKE_3_ID, m.beta.runDir);
+  expect([occurrences('name="raise"'), occurrences('name="now"')]).toEqual([1, 0]);
+  host.click({ action: 'run-menu', repo: 'beta', run: FAKE_3_ID });
+  host.advance(100);
+  expect(host.regions.main).not.toContain('data-action="resume-run"');
+  expect([occurrences('name="raise"'), occurrences('name="now"')]).toEqual([1, 1]);
+  host.click({ action: 'run-menu', repo: 'beta', run: FAKE_3_ID });
+  host.click({ action: 'run-menu', repo: 'beta', run: FAKE_3_ID, at: 'header' });
+  host.advance(100);
+  expect([occurrences('name="raise"'), occurrences('name="now"')]).toEqual([1, 1]);
+});
+
+test('a raise typed in the header survives a redraw', async () => {
+  settleQueue();
+  await openRun('beta', FAKE_3_ID, m.beta.runDir);
+  host.fields.raise = '7';
+  host.click({ action: 'run-menu', repo: 'beta', run: FAKE_3_ID, at: 'header' });
+  host.advance(100);
+  expect(host.regions.main).toContain('name="raise" min="0.01" step="any" value="7"');
+});
+
+test("the header's stop, behind its ⋯, opens the dialog and its confirm posts the stop", async () => {
+  settleQueue();
+  await openRun('beta', FAKE_3_ID, m.beta.runDir);
+  host.click({ action: 'run-menu', repo: 'beta', run: FAKE_3_ID, at: 'header' });
+  host.click({ action: 'stop-run' });
+  expect([host.posts, dialogTitle()]).toEqual([[], `stop ${FAKE_3_ID}`]);
+  host.click({ action: 'dialog-confirm' });
+  await settle();
+  expect(host.posts).toEqual([{ path: `${FAKE_3_PATH}/stop`, body: { now: false } }]);
+});
+
 const domHost = () => {
   const dom = new DomHost(m);
   host = dom;

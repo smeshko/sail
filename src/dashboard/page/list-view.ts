@@ -44,7 +44,8 @@ export const tooltipOf = (run: ListRun): string | undefined =>
   run.pr === undefined ? run.title : run.title === undefined ? run.runId : `${run.runId} · ${run.title}`;
 
 /** Whether `run`'s menu is open: only the open run's can be. */
-const isMenuOpen = (repo: string, run: ListRun, ui: UiState) => isOpen(repo, run, ui) && ui.runMenu === run.runId;
+const isMenuOpen = (repo: string, run: ListRun, ui: UiState) =>
+  isOpen(repo, run, ui) && ui.runMenu?.runId === run.runId && ui.runMenu.at === 'row';
 
 /** A row's ⋯: on any run but a completed one, which offers nothing. */
 export function more(repo: string, run: ListRun, ui: UiState): SafeHtml | '' {

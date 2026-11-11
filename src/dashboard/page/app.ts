@@ -47,7 +47,7 @@ export function boot(host: PageHost): Page {
         closeRun(store);
         selectRun(store, repo, runId);
         // The menu the action was made from stays open on the run read again, with the answer.
-        if (keepMenu && menu !== undefined) store.ui.runMenu = menu;
+        if (keepMenu && menu !== undefined) store.ui.runMenu = { ...menu };
       },
       open: (repo, runId) => selectRun(store, repo, runId),
       leave: () => closeRun(store),

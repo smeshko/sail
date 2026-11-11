@@ -350,10 +350,10 @@ export async function renderDashboardViews(outDir: string): Promise<string[]> {
         entry === undefined
           ? undefined
           : await runActions(entry, runId, { leasesDir, ports: fakeClonePorts(leasesDir) });
-      views[`run-${name}.html`] = renderRun(model, summaryOf(repo, runId), ui({ repo, runId }), VIEWS_NOW);
+      views[`run-${name}.html`] = renderRun(model, summaryOf(repo, runId), ui({ repo, runId }), VIEWS_NOW, offers);
       // What a run offers shows in the list, under its row, once its ⋯ is opened.
       if (offers !== undefined && runControls(offers, ui()) !== undefined) {
-        const open = ui({ repo, runId, runMenu: runId });
+        const open = ui({ repo, runId, runMenu: { runId, at: 'row' } });
         const status = listed.find((each) => each.name === repo)?.runs.find((each) => each.runId === runId)?.status;
         const view = status === 'failed' || status === 'completed' ? 'history' : 'active';
         views[`list-menu-${name}.html`] = renderList(view, listed, open, VIEWS_NOW, offers);

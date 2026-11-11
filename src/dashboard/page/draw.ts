@@ -31,8 +31,6 @@ export function regions(store: Store): Record<Region, () => string> {
     },
     list: () => {
       if (store.index === undefined) return html`<div class="qempty">connecting…</div>`.value;
-      // A raise typed and a stage chosen in the open run's menu survive the draw, but not a switch of run.
-      store.actor.keep('run');
       return renderList(ui.view, listRepos(store.index, host.now()), ui, host.now(), store.offers).value;
     },
     attention: () => {
@@ -72,7 +70,7 @@ export function regions(store: Store): Record<Region, () => string> {
       const card = opened(store);
       const view =
         card === undefined
-          ? renderRun(store.run.model, summaryOf(store, store.run), ui, host.now())
+          ? renderRun(store.run.model, summaryOf(store, store.run), ui, host.now(), store.offers)
           : renderTimeline(card, ui, host.now(), store.outputs);
       return html`${error}${view}`.value;
     },
@@ -96,6 +94,9 @@ export function flush(store: Store): void {
     store.detail = detail;
     host.setDetail(detail);
   }
+  // A raise typed and a stage chosen in the open run's header or row menu survive the draw, but not a switch of run:
+  // read once, before either region is written, so the one-shot flag covers both.
+  if (dirty.includes('list') || dirty.includes('main')) store.actor.keep('run');
   for (const region of dirty) {
     // A region that can't be drawn says so, and the others are still drawn (review R2-1).
     let markup: string;
