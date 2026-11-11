@@ -2854,7 +2854,7 @@ test('the add form shows once the queue stream has polled tickets, with add and 
   await settle();
   host.advance(100);
   expect(host.posts).toEqual([{ path: `${QUEUE_PATH}/add`, body: { ticketKey: 'FAKE-9' } }]);
-  expect(toasts()).toEqual([`ok add beta / ${QUEUE_WORKFLOW}: sail queue: queued ticket:FAKE-9 Nine`]);
+  expect(toasts()).toEqual([`ok add a ticket… beta / ${QUEUE_WORKFLOW}: sail queue: queued ticket:FAKE-9 Nine`]);
   expect(host.regions.main).toContain('value=""');
   host.fields['add-ticket'] = 'FAKE-10';
   host.click({ action: 'add-ticket-force', ...BETA });
@@ -3797,7 +3797,7 @@ test('with the cursor set after a hover the menu opens on the cursor, and with t
   setFocus((page as Page).ui, 'cursor', { kind: 'repo', repo: 'beta' });
   cmdK();
   host.advance(100);
-  expect(menuHead()).toBe('repository beta');
+  expect(menuHead()).toBe('beta');
   cmdK();
   host.point('hover', { subject: 'run', repo: 'beta', run: FAKE_3_ID });
   cmdK();
@@ -3856,7 +3856,7 @@ test('Enter on a go-to row opens a run, a queue or an item opens the queue, and 
   goTo(FAKE_3_ID.slice(0, 10), FAKE_3_ID.replace(/-[^-]*$/, ''));
   expect(page?.store.run?.runId).toBe(FAKE_3_ID);
   expect(focused((page as Page).ui)).toEqual({ kind: 'run', repo: 'beta', runId: FAKE_3_ID });
-  goTo('ticket:FAKE-5', 'ticket:FAKE-5');
+  goTo('ticket:FAKE-5', 'FAKE-5');
   expect(page?.ui.queue).toBe(`beta/${QUEUE_WORKFLOW}`);
   expect(page?.ui.focus.cursor?.subject).toEqual({
     kind: 'item',
@@ -4946,7 +4946,7 @@ test('the highlight stays on the row a person moved to when an index tick remove
   bootIndexed();
   cmdK();
   host.advance(100);
-  for (let i = 0; i < 10; i++) host.press('ArrowDown', true);
+  for (let i = 0; i < 7; i++) host.press('ArrowDown', true);
   host.advance(100);
   expect(menuSel()).toBe('switch theme');
   const message = indexMessage();
@@ -5959,7 +5959,7 @@ describe('a key for every action, and the shortcut sheet (ADW-523)', () => {
     expect(host.posts.at(-1)).toEqual({ path: `${QUEUE_PATH}/poll`, body: {} });
     press('c');
     expect(stepLabel()).toBe('ticket key');
-    expect(cmdk()).toContain(`beta / ${QUEUE_WORKFLOW}`);
+    expect(cmdk()).toContain(`beta › ${QUEUE_WORKFLOW}`);
   });
 
   test('an open item menu makes its item the subject', () => {

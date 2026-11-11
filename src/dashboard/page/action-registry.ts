@@ -15,6 +15,7 @@ import type { RunActions } from '../actions';
 import type { OfferedQueue, RepoOffers } from '../offers';
 import type { DialogView } from './dialog-view';
 import { cost } from './format';
+import type { ViewName } from './list-model';
 
 const enc = encodeURIComponent;
 
@@ -137,6 +138,8 @@ export interface OfferSource {
   index: readonly OfferedRepo[];
   /** The start the last refusal left to start anyway. */
   start?: RefusedStart | undefined;
+  /** The list's view: an action whose key works in one view (`keyIn`) is a command menu row only there. */
+  view?: ViewName | undefined;
 }
 
 type Offered = { enabled: boolean; why?: string };
@@ -1099,7 +1102,7 @@ export const ACTIONS: readonly ActionDef[] = [
   },
   {
     id: 'add-ticket',
-    label: () => 'add',
+    label: () => 'add a ticket…',
     appliesTo: ['workflow'],
     tier: 'instant',
     key: 'c',
@@ -1174,7 +1177,13 @@ export const ACTIONS: readonly ActionDef[] = [
         { name: 'until', dom: 'start-until', label: 'stop after', type: 'text' as const },
       ];
     },
-    available: (subject, source) => availability(startOffer(subject, source)),
+    // A repository with no workflow to start is disabled, rather than a workflow step with nothing to choose.
+    available: (subject, source) => {
+      const offer = startOffer(subject, source);
+      if (subject.kind === 'repo' && offer?.enabled === true && offer.workflows.length === 0)
+        return { offered: true, enabled: false, why: `no workflow in ${subject.repo}'s .sail/workflows` };
+      return availability(offer);
+    },
     request: (subject, values) => {
       if ((values.source ?? '').trim() === '') {
         return { invalid: 'give a ticket key or a pull request, such as ADW-1 or #12' };

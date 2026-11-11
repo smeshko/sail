@@ -300,20 +300,21 @@ type Side = 'left' | 'right';
 
 /**
  * How wide each resizable column may be, the window width from which it is a column of the grid, and its CSS variable:
- * the sidebar is one from 800px, the open inspector from 1100px.
+ * the sidebar is one from 900px, the open inspector from 1210px (`index.html`'s breakpoints).
  */
 const COLUMNS: Record<Side, { variable: string; min: number; max: number; start: number; sign: number; from: number }> =
   {
-    left: { variable: '--side-w', min: 140, max: 480, start: 180, sign: 1, from: 800 },
-    right: { variable: '--ins-w', min: 240, max: 640, start: 360, sign: -1, from: 1100 },
+    left: { variable: '--side-w', min: 140, max: 480, start: 180, sign: 1, from: 900 },
+    right: { variable: '--ins-w', min: 240, max: 640, start: 360, sign: -1, from: 1210 },
   };
-/** The grid's resize handle width and the centre's floor, as `index.html` lays them out. */
+/** The grid's resize handle width, the list's fixed width and the centre's floor, as `index.html` lays them out. */
 const HANDLE = 5;
+const LIST = 340;
 const CENTRE_MIN = 320;
 
 /**
- * Drags the column of a `data-resize` handle, which sets its CSS variable on `#body`, never so wide that the centre falls
- * under its floor and the grid runs past the window (ADW-536). Answers the re-clamp a window resize runs, the inspector
+ * Drags the column of a `data-resize` handle, which sets its CSS variable on `#body`, never so wide that the list gives
+ * up its width, the centre falls under its floor and the grid runs past the window (ADW-536). Answers the re-clamp a window resize runs, the inspector
  * first, for a change of layout the window doesn't announce, such as the inspector opening.
  */
 function installResize(win: BrowserWindow): () => void {
@@ -323,14 +324,14 @@ function installResize(win: BrowserWindow): () => void {
   const inGrid = (side: Side) =>
     (win.innerWidth ?? Number.POSITIVE_INFINITY) >= COLUMNS[side].from &&
     (side === 'left' || doc.documentElement.dataset.inspector === 'open');
-  /** The widest `side` may be: its fixed maximum, or what the window leaves beside the other column, the handles in the grid and the centre's floor, never under its minimum. */
+  /** The widest `side` may be: its fixed maximum, or what the window leaves beside the other column, the handles in the grid, the list and the centre's floor, never under its minimum. */
   const widest = (side: Side) => {
     const column = COLUMNS[side];
     const width = win.innerWidth;
     if (width === undefined || !inGrid(side)) return column.max;
     const other: Side = side === 'left' ? 'right' : 'left';
     const beside = inGrid(other) ? widths[other] + HANDLE : 0;
-    return Math.max(column.min, Math.min(column.max, width - beside - HANDLE - CENTRE_MIN));
+    return Math.max(column.min, Math.min(column.max, width - beside - HANDLE - LIST - CENTRE_MIN));
   };
   const set = (side: Side, width: number) => {
     widths[side] = width;

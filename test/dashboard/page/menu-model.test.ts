@@ -1,6 +1,6 @@
 // The command menu's rows: the subject's offered actions, "go to" by fuzzy match, the actions with no subject and the steps
 // that ask an action's parameters. Pure, over made-up offers and a made-up index.
-import { expect, test } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 import type { RunActions } from '../../../src/dashboard/actions';
 import type { IndexRepo } from '../../../src/dashboard/files';
 import type { OfferSource, Subject } from '../../../src/dashboard/page/action-registry';
@@ -15,6 +15,7 @@ import {
   rank,
   stepOf,
   subjectRows,
+  wordFuzzy,
 } from '../../../src/dashboard/page/menu-model';
 import type { MenuState } from '../../../src/dashboard/page/ui-state';
 
@@ -132,27 +133,25 @@ test('with no subject there is no head and no subject row, and the general rows 
     'Active',
     'Queues',
     'History',
-    'all clear',
-    'dismiss',
     'add a ticket…',
     'poll every queue',
     'switch theme',
     'toggle inspector',
   ]);
-  expect(model.rows.map((row) => row.group)).toEqual([...Array(4).fill('goto'), ...Array(6).fill('general')]);
+  expect(model.rows.map((row) => row.group)).toEqual([...Array(4).fill('goto'), ...Array(4).fill('general')]);
 });
 
-test('the head names the subject by its kind', () => {
-  expect(headOf(RUN)).toBe('run FAKE-1-RUN');
-  expect(headOf(ITEM)).toBe('item ticket:FAKE-5');
-  expect(headOf(QUEUE)).toBe('workflow beta / ticket-to-pr');
-  expect(headOf({ kind: 'repo', repo: 'beta' })).toBe('repository beta');
+test('the head names the subject as the list does, with no word for its kind', () => {
+  expect(headOf(RUN)).toBe('FAKE-1-RUN');
+  expect(headOf(ITEM)).toBe('FAKE-5');
+  expect(headOf(QUEUE)).toBe('beta › ticket-to-pr');
+  expect(headOf({ kind: 'repo', repo: 'beta' })).toBe('beta');
   expect(headOf({ kind: 'none' })).toBeUndefined();
   expect(headOf(undefined)).toBeUndefined();
 });
 
 test('adding and polling are left out where no queue offers them, and disabled with the reason where none is enabled', () => {
-  expect(labels(generalRows({ index: [] }))).toEqual(['all clear', 'dismiss', 'switch theme', 'toggle inspector']);
+  expect(labels(generalRows({ index: [] }))).toEqual(['switch theme', 'toggle inspector']);
   const closed = JSON.parse(JSON.stringify(index)) as IndexRepo[];
   const queue = closed[1]?.queues[0] as unknown as { offers: { poll: unknown; add: unknown } };
   queue.offers.poll = off;
@@ -168,10 +167,13 @@ test('a query lists go-to rows for a run id, a run title, a queue, an item key, 
   const goto = (query: string) => gotoRows(query, index, NOW).map((row) => [row.hint, row.label]);
   expect(goto('fake-1-r')).toEqual([['alpha › unknown', 'Fix the parser']]);
   expect(goto('parser')).toEqual([['alpha › unknown', 'Fix the parser']]);
-  expect(goto('ticket-to')).toEqual([['queue', 'beta / ticket-to-pr']]);
-  expect(goto('FAKE-5')).toEqual([['item', 'ticket:FAKE-5']]);
-  expect(goto('widget')).toEqual([['item', 'ticket:FAKE-5']]);
-  expect(goto('alph')).toEqual([['repository', 'alpha']]);
+  expect(goto('ticket-to')).toEqual([['queue', 'beta › ticket-to-pr']]);
+  expect(goto('FAKE-5')).toEqual([['beta › ticket-to-pr', 'Add a widget']]);
+  expect(goto('widget')).toEqual([['beta › ticket-to-pr', 'Add a widget']]);
+  expect(goto('alph')).toEqual([
+    ['repository', 'alpha'],
+    ['alpha › unknown', 'Fix the parser'],
+  ]);
   expect(gotoRows('zzzz', index, NOW)).toEqual([]);
 });
 
@@ -181,6 +183,232 @@ const ticketRun = (runId: string, key: string, title: string) => ({
   summary: { ticket: { title }, totals: { usage: {} } },
 });
 const runsIndex = (runs: unknown[]) => [{ name: 'alpha', remote: null, runs, queues: [] }] as unknown as IndexRepo[];
+
+describe('audit 2: the menu ranks across groups, matches within words and says a reason once (ADW-544)', () => {
+  const liveRun = (runId: string, key: string, title: string, status = 'running') => ({
+    ...ticketRun(runId, key, title),
+    status: { status },
+  });
+  const queueOf = (workflow: string, items: unknown[], offers: unknown = { poll: on, add: on, items: {} }) => ({
+    workflow,
+    watch: { state: 'watched' },
+    offers,
+    queue: { polling: {}, items },
+  });
+  const START_ON = { enabled: true, workflows: ['ticket-to-pr'], defaultWorkflow: 'ticket-to-pr' };
+  const machine = [
+    {
+      name: 'alpha',
+      remote: null,
+      runs: [
+        liveRun('A-LIVE', 'LIFE-204', 'Start the parser'),
+        liveRun('A-DONE', 'LIFE-200', 'Finished earlier', 'completed'),
+        liveRun('A-ADD', 'FAKE-12', 'Add a --shout flag'),
+      ],
+      offers: { watch: on, workflows: {}, start: START_ON },
+      queues: [queueOf('ticket-to-pr', [item('ticket:FAKE-100', 'queued', 'Both queues')])],
+    },
+    {
+      name: 'beta',
+      remote: null,
+      runs: [liveRun('B-1', 'FAKE-13', 'Add log phrase handling')],
+      offers: { watch: on, workflows: {}, start: { enabled: true, workflows: [] } },
+      queues: [queueOf('review', [item('ticket:FAKE-100', 'parked', 'Both queues')])],
+    },
+  ] as unknown as IndexRepo[];
+  const full = (query: string, subject?: Subject, extra: Partial<OfferSource> = {}) =>
+    menuRows(
+      state({ query, ...(subject === undefined ? {} : { subject }) }),
+      { index: machine, ...extra },
+      machine,
+      NOW,
+    ).rows;
+  const groups = (rows: MenuRow[]) => rows.map((row) => row.group).filter((group, at, all) => all[at - 1] !== group);
+
+  test('an action a query starts, or starts a word of, comes before every go-to row', () => {
+    const start = full('start');
+    expect(start[0]).toMatchObject({ group: 'general', label: 'start a run…' });
+    expect(start.findIndex((row) => row.lead === 'LIFE-204')).toBeGreaterThan(0);
+    const add = full('add');
+    expect(add[0]).toMatchObject({ group: 'general', label: 'add a ticket…' });
+    expect(groups(add)).toEqual(['general', 'goto']);
+    // A word inside the label counts too: "run" starts the last word of "start a run…".
+    expect(full('a run')[0]?.label).toBe('start a run…');
+  });
+
+  test('a group whose actions match only as a subsequence comes after go-to, and a view the query names leads', () => {
+    const run: Subject = { kind: 'run', repo: 'alpha', runId: 'A-LIVE' };
+    // "restart" holds "start" mid-word: the subject's group falls behind go-to; start a run still leads.
+    const rows = full('start', run, { run: runActions });
+    expect(groups(rows)).toEqual(['general', 'goto', 'subject']);
+    expect(rows.at(-1)?.label).toBe('restart');
+    // "queue" names the Queues view, which leads before poll every queue.
+    expect(full('queue')[0]).toMatchObject({ group: 'goto', label: 'Queues' });
+    expect(full('queue').map((row) => row.label)).toContain('poll every queue');
+  });
+
+  test('a subsequence of a go-to row is found only within one word, from its first letter', () => {
+    // FAKE-13's title has a, l, p, h, a only spread over its words.
+    expect(fuzzy('alpha', 'Add log phrase handling')).toBeDefined();
+    expect(gotoRows('alpha', machine, NOW).map((row) => row.lead)).not.toContain('FAKE-13');
+    expect(rank('hndl', [], ['Add log phrase handling'])).toEqual({ tier: 3, score: 1 });
+    expect(rank('andl', [], ['Add log phrase handling'])).toBeUndefined();
+    // A key is no exception: its letters may not skip over its separators, though a typed separator matches one.
+    expect(wordFuzzy('fake-100', 'FAKE-12-01M7D000')).toBeUndefined();
+    expect(wordFuzzy('fk1', 'FAKE-1')).toBeUndefined();
+    expect(wordFuzzy('fk-1', 'FAKE-1')).toBe(2);
+    expect(wordFuzzy('q s', 'queue store')).toBe(4);
+    expect(wordFuzzy('st', 'restart')).toBeUndefined();
+    expect(gotoRows('FAKE-100', machine, NOW).map((row) => row.lead)).toEqual(['FAKE-100', 'FAKE-100']);
+  });
+
+  test("a repository's name lists the repository, then its queues and live runs, and a run that ended stays last", () => {
+    const listed = (query: string) => gotoRows(query, machine, NOW).map((row) => [row.hint, row.lead ?? row.label]);
+    expect(listed('alpha')).toEqual([
+      ['repository', 'alpha'],
+      ['queue', 'alpha › ticket-to-pr'],
+      ['alpha › unknown', 'LIFE-204'],
+      ['alpha › unknown', 'FAKE-12'],
+    ]);
+    expect(listed('alp')).toEqual(listed('alpha'));
+    // Two letters list no run for its repository's sake: FAKE-12 matches "al" nowhere else.
+    expect(listed('al').map(([, lead]) => lead)).not.toContain('FAKE-12');
+  });
+
+  test("a queue item's row reads its key, its title and repository › workflow, once for each queue it is in", () => {
+    const rows = gotoRows('FAKE-100', machine, NOW);
+    expect(rows.map((row) => [row.lead, row.label, row.hint, row.status])).toEqual([
+      ['FAKE-100', 'Both queues', 'alpha › ticket-to-pr', 'queued'],
+      ['FAKE-100', 'Both queues', 'beta › review', 'parked'],
+    ]);
+    // A repository's name lists its queue once, though the queue matches the name on its own too.
+    expect(gotoRows('beta', machine, NOW).filter((row) => row.hint === 'queue')).toHaveLength(1);
+    // The run of an item reads as the item does: the run carries no id, as the icon tells them apart.
+    const withRun = structuredClone(machine) as unknown as { runs: unknown[] }[];
+    withRun[0]?.runs.push({ ...liveRun('A-100', 'FAKE-100', 'Both queues'), workflow: 'ticket-to-pr@1' });
+    const both = gotoRows('both queues', withRun as unknown as IndexRepo[], NOW);
+    expect(both.map((row) => [row.lead, row.hint, row.id])).toEqual([
+      ['FAKE-100', 'alpha › ticket-to-pr', undefined],
+      ['FAKE-100', 'alpha › ticket-to-pr', undefined],
+      ['FAKE-100', 'beta › review', undefined],
+    ]);
+  });
+
+  test('a repository with no workflow is disabled for a start with the reason, and a choice with no option says so', () => {
+    const beta: Subject = { kind: 'repo', repo: 'beta' };
+    const why = "no workflow in beta's .sail/workflows";
+    expect(subjectRows(beta, { index: machine }).find((row) => row.label === 'start a run…')).toMatchObject({
+      disabled: true,
+      why,
+    });
+    const step = stepOf({ pick: 'repo', action: 'start-run' }, { index: machine });
+    expect(step.rows.map((row) => [row.label, row.disabled, row.why])).toEqual([
+      ['alpha', false, undefined],
+      ['beta', true, why],
+    ]);
+    const empty = [
+      {
+        name: 'beta',
+        remote: null,
+        runs: [],
+        queues: [],
+        offers: { watch: on, workflows: {}, start: { enabled: true, workflows: [] } },
+      },
+    ] as unknown as IndexRepo[];
+    const first = stepOf({ action: 'start-run', subject: beta, data: {}, values: {}, at: 0 }, { index: empty });
+    expect([first.label, first.rows, first.lines]).toEqual(['workflow', [], ['no workflow to choose']]);
+    expect(stepOf({ pick: 'queue', action: 'add-ticket' }, { index: empty }).lines).toEqual(['no queue to choose']);
+  });
+
+  test('the general group leaves out what the subject group has, and the Inbox actions are there only in the Inbox', () => {
+    const offering = structuredClone(machine) as unknown as { offers: Record<string, unknown> }[];
+    if (offering[0] !== undefined) offering[0].offers.clean = { ...on, runs: [{ runId: 'A-DONE' }] };
+    const repos = offering as unknown as IndexRepo[];
+    const alpha: Subject = { kind: 'repo', repo: 'alpha' };
+    const rows = menuRows(state({ subject: alpha }), { index: repos }, repos, NOW).rows.map((row) => row.label);
+    for (const label of ['start a run…', 'clean all failed'])
+      expect(rows.filter((each) => each === label)).toHaveLength(1);
+    const queue: Subject = { kind: 'workflow', repo: 'alpha', workflow: 'ticket-to-pr' };
+    const onQueue = full('', queue).map((row) => row.label);
+    for (const label of ['start a run…', 'add a ticket…'])
+      expect(onQueue.filter((each) => each === label)).toHaveLength(1);
+    expect(labels(generalRows({ index: [], view: 'active' }))).not.toContain('dismiss');
+    expect(labels(generalRows({ index: [], view: 'inbox' }))).toEqual([
+      'all clear',
+      'dismiss',
+      'switch theme',
+      'toggle inspector',
+    ]);
+  });
+
+  test("a disabled general row gives the offers' one reason, no watcher running for several, else the machine's", () => {
+    const closed = (whys: string[]) =>
+      whys.map((why, at) => ({
+        name: `r${at}`,
+        runs: [],
+        queues: [queueOf('w', [], { poll: { enabled: false, why }, add: { enabled: false, why }, items: {} })],
+      })) as unknown as IndexRepo[];
+    const why = (whys: string[]) =>
+      generalRows({ index: closed(whys) }).find((row) => row.label === 'add a ticket…')?.why;
+    expect(why(["no watcher is running for 'r0': sail watch w first"])).toBe(
+      "no watcher is running for 'r0': sail watch w first",
+    );
+    expect(
+      why(["no watcher is running for 'r0': sail watch w first", "no watcher is running for 'r1': sail watch w first"]),
+    ).toBe('no watcher is running');
+    expect(why(["no watcher is running for 'r0': sail watch w first", "r1 does not watch 'w'"])).toBe(
+      'no queue is watched from this clone',
+    );
+    const starts = [
+      {
+        name: 'a',
+        runs: [],
+        queues: [],
+        offers: { watch: on, workflows: {}, start: { enabled: true, workflows: [] } },
+      },
+      {
+        name: 'b',
+        runs: [],
+        queues: [],
+        offers: { watch: on, workflows: {}, start: { enabled: true, workflows: [] } },
+      },
+    ] as unknown as IndexRepo[];
+    expect(generalRows({ index: starts }).find((row) => row.label === 'start a run…')?.why).toBe(
+      'no repository has a workflow in .sail/workflows',
+    );
+    const gone = { enabled: false, why: '/a/.sail no longer exists', workflows: [] };
+    const mixed = [
+      { ...starts[0], offers: { watch: on, workflows: {}, start: gone } },
+      starts[1],
+    ] as unknown as IndexRepo[];
+    expect(generalRows({ index: mixed }).find((row) => row.label === 'start a run…')?.why).toBe(
+      'no repository can start a run',
+    );
+  });
+
+  test("when every row of the subject is disabled for one reason, the model says it once and the rows don't", () => {
+    const reason = "no watcher is running for 'beta': sail watch ticket-to-pr first";
+    const shut = structuredClone(index) as unknown as { queues: { offers: { items: Record<string, unknown> } }[] }[];
+    const offers = shut[1]?.queues[0]?.offers;
+    if (offers === undefined) throw new Error('no offers');
+    offers.items['ticket:FAKE-6'] = { move: { enabled: false, why: reason }, drop: { enabled: false, why: reason } };
+    const repos = shut as unknown as IndexRepo[];
+    const six: Subject = { ...ITEM, item: 'ticket:FAKE-6' };
+    for (const mode of ['full', 'context'] as const) {
+      const model = menuRows(state({ mode, subject: six }), { index: repos }, repos, NOW);
+      expect(model.why).toBe(reason);
+      const own = model.rows.filter((row) => row.group === 'subject');
+      expect(own.map((row) => [row.label, row.disabled, row.why])).toEqual([
+        ['drop', true, undefined],
+        ['move up', true, undefined],
+      ]);
+    }
+    // Reasons that differ stay on their rows.
+    const mixed = menuRows(state({ subject: { ...ITEM, item: 'ticket:FAKE-6' } }), source(), index, NOW);
+    expect(mixed.why).toBeUndefined();
+    expect(mixed.rows.find((row) => row.label === 'drop')?.why).toBe('no watcher is running');
+  });
+});
 
 test("a run's go-to row reads its key, title, status and repository › workflow", () => {
   const run = {
@@ -223,7 +451,9 @@ test('rank scores exact, prefix, whole title words and subsequence apart', () =>
   expect(rank('FAKE-1', ['fake-1'], [])).toEqual({ tier: 0, score: 0 });
   expect(rank('fake-1', ['FAKE-12', 'FAKE-100'], [])).toEqual({ tier: 1, score: 1 });
   expect(rank('queue store', [], ['Refactor queue-store to use a single write path'])).toEqual({ tier: 2, score: 0 });
-  expect(rank('qsp', ['x'], ['Refactor queue-store to use a single write path'])?.tier).toBe(3);
+  expect(rank('rfctr', ['x'], ['Refactor queue-store to use a single write path'])?.tier).toBe(3);
+  // A subsequence spread over several words is no match.
+  expect(rank('qsp', ['x'], ['Refactor queue-store to use a single write path'])).toBeUndefined();
   expect(rank('zzz', ['x'], ['y'])).toBeUndefined();
   // Half the words of the query are not enough for the title tier.
   expect(rank('queue zebra', [], ['queue store'])).toBeUndefined();
@@ -231,7 +461,7 @@ test('rank scores exact, prefix, whole title words and subsequence apart', () =>
 
 test('go-to ranks an exact key, then a prefix, then whole title words, then a subsequence', () => {
   const runs = [
-    ticketRun('R-4', 'ZZ-4', 'Move the retry policy into one module'),
+    ticketRun('R-4', 'ZZ-4', 'Move the payroll logic'),
     ticketRun('R-3', 'ZZ-3', 'Keep the poll interval short'),
     ticketRun('R-2', 'POLLY-2', 'Another thing'),
     ticketRun('POLL', 'ZZ-1', 'Something else'),
@@ -256,7 +486,7 @@ test("a query that is a ticket key in full lists only that ticket's runs while a
   expect(ids('fake-23')).toEqual(['A-1']);
   expect(ids('fake-6')).toEqual(['A-4', 'A-5']);
   // No run of the ticket: the ordinary ranking applies, an item at the exact tier.
-  expect(gotoRows('fake-5', index, NOW).map((row) => row.hint)).toEqual(['item']);
+  expect(gotoRows('fake-5', index, NOW).map((row) => row.lead)).toEqual(['FAKE-5']);
   // A full key lists no item, queue or repository, even one that matches.
   const mixed = JSON.parse(JSON.stringify(index)) as IndexRepo[];
   (mixed[0] as unknown as { runs: unknown[] }).runs = [ticketRun('FAKE-5-R', 'FAKE-5', 'Mine')];
@@ -345,7 +575,7 @@ test('the queue step lists each queue that offers the action, and a step with no
 
 test('while a step is open the menu is its rows under the subject head, and nothing else', () => {
   const model = menuRows(state({ subject: RUN, steps: [step('restart-run', RUN, 0)] }), source(runActions), index, NOW);
-  expect(model.head).toBe('run FAKE-1-RUN');
+  expect(model.head).toBe('FAKE-1-RUN');
   expect(labels(model.rows)).toEqual(['spec', 'tests']);
   expect(model.step?.label).toBe('from');
 });
@@ -489,7 +719,7 @@ test("a kind's own word lists the kind: queue the Queues view then every queue, 
   const hints = (query: string) => gotoRows(query, index, NOW).map((row) => [row.hint, row.label]);
   expect(hints('queue')).toEqual([
     ['view', 'Queues'],
-    ['queue', 'beta / ticket-to-pr'],
+    ['queue', 'beta › ticket-to-pr'],
   ]);
   expect(hints('queues')).toEqual(hints('queue'));
   expect(hints('repo')).toEqual([
@@ -518,11 +748,11 @@ test('a run that ended comes after every other row, and is left out when it matc
     ['DONE-1', 'FAIL-1'],
   ]);
   // A subsequence of a title finds the live runs, and no run that ended.
-  expect(runIds(gotoRows('qstore', runsIndex(runs), NOW)).sort()).toEqual(['HELD-1', 'LIVE-1']);
+  expect(runIds(gotoRows('stre', runsIndex(runs), NOW)).sort()).toEqual(['HELD-1', 'LIVE-1']);
   // Its ticket key in full still lists a run that ended.
   expect(runIds(gotoRows('zz-1', runsIndex(runs), NOW))).toEqual(['DONE-1']);
   // A queue and its item come before a finished run that matches as well.
   const mixed = JSON.parse(JSON.stringify(index)) as IndexRepo[];
   (mixed[0] as unknown as { runs: unknown[] }).runs = [withStatus('DONE-2', 'ZZ-9', 'Add a widget', 'completed')];
-  expect(gotoRows('widget', mixed, NOW).map((row) => row.hint)).toEqual(['item', 'alpha › unknown']);
+  expect(gotoRows('widget', mixed, NOW).map((row) => row.hint)).toEqual(['beta › ticket-to-pr', 'alpha › unknown']);
 });

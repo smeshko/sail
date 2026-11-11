@@ -240,46 +240,52 @@ test('the keyed pane is topped by a line in the focus colour, and only its curso
   expect(declarationsOf(':root[data-keys="list"] .card.cursor')).toContain('box-shadow: none');
 });
 
-test('the inspector has a grid track only from 1100px, and under it is a fixed panel no wider than the window (ADW-528)', () => {
+test('the inspector has a grid track only from 1210px, and under it is a fixed panel no wider than the window (ADW-528, ADW-544)', () => {
   expect(declarationsOf('.body')).not.toContain('--ins-w');
-  const wide = mediaBlock('min-width: 1100px');
+  const wide = mediaBlock('min-width: 1210px');
   expect(inBlock(wide, ':root[data-inspector="open"] .body')).toContain('5px var(--ins-w, 360px);');
   expect(inBlock(wide, ':root[data-inspector="open"] .body')).toContain(
     'minmax(0, var(--list-w, 340px)) minmax(320px, 1fr) 5px var(--ins-w, 360px);',
   );
-  const narrow = mediaBlock('max-width: 1099px');
+  const narrow = mediaBlock('max-width: 1209px');
   expect(inBlock(narrow, '.inspector')).toContain('position: fixed');
   expect(inBlock(narrow, '.inspector')).toContain('width: min(var(--ins-w, 360px), 100vw)');
   expect(inBlock(narrow, '.resize-right')).toContain('display: none');
   expect([...style.matchAll(/@media \(((?:min|max)-width[^)]*)\)/g)].map((m) => m[1])).toEqual([
-    'min-width: 1100px',
-    'max-width: 1099px',
+    'min-width: 1210px',
+    'max-width: 1209px',
+    'max-width: 899px',
     'max-width: 799px',
   ]);
 });
 
-test('under 1100px the inspector carries a close button over its head, and from 1100px it is hidden (review R2) (ADW-528)', () => {
+test('under 1210px the inspector carries a close button over its head, and from 1210px it is hidden (review R2) (ADW-528, ADW-544)', () => {
   const aside = /<aside class="inspector">([\s\S]*?)<\/aside>/.exec(html)?.[1] ?? '';
   expect(aside).toMatch(/<button[^>]*class="btn ins-close"[^>]*data-action="close-inspector"/);
   expect(declarationsOf('.ins-close')).toContain('display: none');
-  const narrow = mediaBlock('max-width: 1099px');
+  const narrow = mediaBlock('max-width: 1209px');
   expect(inBlock(narrow, '.ins-close')).toContain('display: inline-flex');
   expect(inBlock(narrow, '.ins-close')).toContain('position: absolute');
 });
 
-test('under 800px the page is one column: the sidebar folds, the list hides behind an open detail, and the back button shows (ADW-528)', () => {
+test('under 900px the sidebar folds behind its button beside the list and the centre, and under 800px the page is one column: the list hides behind an open detail, and the back button shows (ADW-528, ADW-544)', () => {
   expect(html).toMatch(/<header class="top">\s*<button[^>]*data-action="toggle-sidebar"/);
   const main = /<main class="main">([\s\S]*?)<\/main>/.exec(html)?.[1] ?? '';
   expect(main.indexOf('data-action="close-detail"')).toBeGreaterThan(-1);
   expect(main.indexOf('data-action="close-detail"')).toBeLessThan(main.indexOf('id="main"'));
   expect(declarationsOf('.sidebar-btn')).toContain('display: none');
   expect(declarationsOf('.back')).toContain('display: none');
+  const folded = mediaBlock('max-width: 899px');
+  expect(inBlock(folded, '.body')).toContain(
+    'grid-template-columns: minmax(0, var(--list-w, 340px)) minmax(320px, 1fr)',
+  );
+  expect(inBlock(folded, '.side')).toContain('display: none');
+  expect(inBlock(folded, '.resize-handle')).toContain('display: none');
+  expect(inBlock(folded, ':root[data-sidebar="open"] .side')).toContain('display: block');
+  expect(inBlock(folded, '.sidebar-btn')).toContain('display: inline-flex');
   const narrow = mediaBlock('max-width: 799px');
   expect(inBlock(narrow, '.body')).toContain('grid-template-columns: minmax(0, 1fr)');
-  expect(inBlock(narrow, '.side')).toContain('display: none');
-  expect(inBlock(narrow, ':root[data-sidebar="open"] .side')).toContain('display: block');
   expect(inBlock(narrow, ':root[data-detail="open"] .list')).toContain('display: none');
-  expect(inBlock(narrow, '.sidebar-btn')).toContain('display: inline-flex');
   expect(inBlock(narrow, ':root[data-detail="open"] .back')).toContain('display: inline-flex');
 });
 
