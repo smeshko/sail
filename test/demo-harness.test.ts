@@ -223,7 +223,16 @@ test.skipIf(chrome === undefined)(
       expect(single.code).toBe(0);
       expect(single.stdout).toMatch(/^layout window=390 page=\d+/m);
       const steps = join(repo.dir, 'steps.json');
-      await Bun.write(steps, JSON.stringify([{ wait: '[data-action="select-card"]' }, { shot: 'a' }, { shot: 'b' }]));
+      await Bun.write(
+        steps,
+        JSON.stringify([
+          { wait: '[data-action="select-card"]' },
+          { shot: 'a' },
+          { shot: 'b' },
+          { click: '[data-action="select-card"]' },
+          { shot: 'c' },
+        ]),
+      );
       const two = await demo(
         repo.env,
         'dashboard',
@@ -236,8 +245,12 @@ test.skipIf(chrome === undefined)(
       );
       expect(two.code).toBe(0);
       const layouts = two.stdout.split('\n').filter((line) => line.trim().startsWith('layout '));
-      expect(layouts).toHaveLength(2);
-      expect(layouts.every((line) => /layout window=390 page=390\b/.test(line))).toBe(true);
+      // Each line names the columns drawn and their widths: under 800px the open run alone, then the inspector over it.
+      expect(layouts.map((line) => line.trim())).toEqual([
+        'layout window=390 page=390 main=390',
+        'layout window=390 page=390 main=390',
+        'layout window=390 page=390 main=390 inspector=360',
+      ]);
     });
   },
   120_000,
