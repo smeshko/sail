@@ -34,7 +34,7 @@ import { renderDialog } from '../src/dashboard/page/dialog-view';
 import type { SafeHtml } from '../src/dashboard/page/html';
 import { listRepos, pollKind, queuePanels } from '../src/dashboard/page/index-model';
 import { renderInspector } from '../src/dashboard/page/inspector-view';
-import { viewCounts } from '../src/dashboard/page/list-model';
+import { shownGroups, viewCounts } from '../src/dashboard/page/list-model';
 import { renderList } from '../src/dashboard/page/list-view';
 import { queueId, renderQueue } from '../src/dashboard/page/queue-view';
 import { foldRun } from '../src/dashboard/page/run-model';
@@ -294,6 +294,13 @@ export async function renderDashboardViews(outDir: string): Promise<string[]> {
     views['sidebar.html'] = renderSidebar(listed, viewCounts(listed), attention(repos).length, selected);
     views['list-active.html'] = renderList('active', listed, selected, VIEWS_NOW);
     views['list-history.html'] = renderList('history', listed, selected, VIEWS_NOW);
+    const firstRun = shownGroups('history', listed, { listFilter: '', tz: VIEWS_TZ }, VIEWS_NOW)[0]?.rows[0];
+    views['list-history-selected.html'] = renderList(
+      'history',
+      listed,
+      { ...selected, listSelected: firstRun === undefined ? [] : [firstRun.id] },
+      VIEWS_NOW,
+    );
     views['list-queues.html'] = renderList('queues', listed, selected, VIEWS_NOW);
     const unreadable = repos.map((repo) =>
       repo.name === 'beta'

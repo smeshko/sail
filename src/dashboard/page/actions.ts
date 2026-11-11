@@ -120,6 +120,7 @@ export const actions: Record<string, Action> = {
     store.ui.listFilter = '';
     delete store.ui.historyStatus;
     delete store.ui.historyWorkflow;
+    store.ui.listSelected = [];
     delete store.ui.listCursor;
     // The filter field gives up what was typed in it, so it reads as empty as the filter now is.
     store.fresh.add('list');
@@ -164,6 +165,21 @@ export const actions: Record<string, Action> = {
   'filter-workflow': (store, data) => {
     if (data.value === undefined || data.value === '') delete store.ui.historyWorkflow;
     else store.ui.historyWorkflow = data.value;
+    store.mark('list');
+  },
+  // `x` marks or unmarks a History run row, by its row id.
+  'toggle-select': (store, data) => {
+    const row = data.row;
+    if (row === undefined || store.ui.view !== 'history') return;
+    const { listSelected } = store.ui;
+    store.ui.listSelected = listSelected.includes(row)
+      ? listSelected.filter((each) => each !== row)
+      : [...listSelected, row];
+    store.mark('list');
+  },
+  'clear-selection': (store) => {
+    if (store.ui.listSelected.length === 0) return;
+    store.ui.listSelected = [];
     store.mark('list');
   },
   'item-menu': (store, data) => {

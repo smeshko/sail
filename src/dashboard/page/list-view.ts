@@ -1,6 +1,7 @@
 // The list: the one component every view draws its rows on, in the centre. A head names the view with its count, which
 // reads `n of m` while the filter field narrows it, and carries the field itself; History's head also carries a status and a
-// workflow control, which narrow it the same way. Under it,
+// workflow control, which narrow it the same way, and, while History rows are selected, their count and a clear button;
+// a selected row is drawn `picked`. Under it,
 // folding groups: Active's `waiting on you` and `running`, History's days, and in Queues one per
 // repository. A run's row is a `div` holding two sibling buttons: its own, which opens the run and shows on one line
 // its status, id, title, repository › workflow, stalled mark, duration, cost and stop reason, with a problem wrapping
@@ -24,6 +25,7 @@ import {
   type ListRow,
   type QueueRow,
   type RunRow,
+  selectedRows,
   shownGroups,
   type ViewName,
 } from './list-model';
@@ -98,8 +100,9 @@ const cur = (id: string, ui: UiState) => (ui.listCursor === id ? ' cur' : '');
 
 function runRow(row: RunRow, ui: UiState, offers: RunActions | undefined): SafeHtml {
   const { repo, run } = row;
+  const picked = ui.listSelected.includes(row.id);
   const tip = tooltipOf(run);
-  return html`<div class="run lrow${isOpen(repo, run, ui) ? ' sel' : ''}${cur(row.id, ui)}" data-row="${row.id}"><button class="r-open"${
+  return html`<div class="run lrow${isOpen(repo, run, ui) ? ' sel' : ''}${picked ? ' picked' : ''}${cur(row.id, ui)}" data-row="${row.id}"${picked ? html` aria-selected="true"` : ''}><button class="r-open"${
     tip === undefined ? '' : html` title="${tip}"`
   } data-action="select-run" data-repo="${repo}" data-run="${run.runId}"><span class="r-line">${statusMark(repo, run, ui)}<span class="r-id">${runLabel(run)}</span><span class="r-title">${run.title}</span><span class="r-wf">${repo} › ${workflowOf(run)}</span>${
     run.status === 'running' && run.stalled !== undefined
@@ -160,6 +163,12 @@ function historyControls(repos: readonly ListRepo[], ui: UiState): SafeHtml {
   return html`<select class="list-s" name="list-status" aria-label="filter by status">${option('', 'any status', ui.historyStatus === undefined)}${option('failed', 'failed', ui.historyStatus === 'failed')}${option('completed', 'done', ui.historyStatus === 'completed')}</select><select class="list-s" name="list-workflow" aria-label="filter by workflow">${option('', 'any workflow', chosen === undefined)}${workflows.map((name) => option(name, name, name === chosen))}</select>`;
 }
 
+/** What the head says of the selection: its count and a button that clears it, drawn only while a row is selected. */
+const selectionHead = (count: number): SafeHtml =>
+  count === 0
+    ? html``
+    : html`<span class="lh-sel">${count} selected</span><button class="btn" data-action="clear-selection">clear</button>`;
+
 const total = (groups: readonly ListGroup[]) => groups.reduce((sum, group) => sum + group.rows.length, 0);
 
 /**
@@ -179,7 +188,7 @@ export function renderList(
     ui.listFilter.trim() !== '' ||
     (view === 'history' && (ui.historyStatus !== undefined || ui.historyWorkflow !== undefined));
   const count = narrowed ? `${total(shown)} of ${total(all)}` : String(total(all));
-  const head = html`<div class="list-h"><span class="lh-t">${VIEW_LABELS[view]}</span><span class="c">${count}</span><input class="list-f" name="list-filter" type="search" value="${ui.listFilter}" placeholder="filter (/)" aria-label="filter the list" autocomplete="off" spellcheck="false">${view === 'history' ? historyControls(repos, ui) : ''}</div>`;
+  const head = html`<div class="list-h"><span class="lh-t">${VIEW_LABELS[view]}</span><span class="c">${count}</span><input class="list-f" name="list-filter" type="search" value="${ui.listFilter}" placeholder="filter (/)" aria-label="filter the list" autocomplete="off" spellcheck="false">${view === 'history' ? historyControls(repos, ui) : ''}${view === 'history' ? selectionHead(selectedRows(shown, ui.listSelected).length) : ''}</div>`;
   const empty =
     repos.length === 0
       ? 'no repository is registered yet: run sail watch in one'

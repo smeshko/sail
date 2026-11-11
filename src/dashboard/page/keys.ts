@@ -1,8 +1,8 @@
 // What a key does on the page. With a run or queue open, `j`, `k` and the arrows move the card cursor within the cards,
 // `Enter` opens the card under it and `]` and `[` step to the next and previous card; with none open, they move the
 // list's cursor over its entries (group headers and the rows of the groups not folded), `Enter` opens the row under it
-// or folds the group, and `.` opens the menu of the run under it. `Escape` shuts, in order, the run menu, the item menu,
-// needs attention, the drawer and the timeline, then the selection and, last, the open run or queue, which gives the
+// or folds the group, `.` opens the menu of the run under it, and `x`, in History, marks or unmarks the run under it. `Escape` shuts, in order, the run menu, the item menu,
+// needs attention, the drawer and the timeline, then, with no run or queue open, the History selection and, last, the open run or queue, which gives the
 // list the centre. `/` focuses the list's filter field, `1`, `2` and `3` open Active, Queues and History, and `i` and `a`
 // toggle the inspector and needs attention. A key typed in an input does nothing but, for Escape, take the focus off.
 import { actions, closeAttention, step } from './actions';
@@ -74,6 +74,7 @@ export const keys: Record<string, (store: Store) => void> = {
     else if (ui.file !== undefined) closeFile(store);
     else if (ui.timeline) actions['close-timeline']?.(store, {});
     else if (ui.key !== undefined) selectCard(store, undefined);
+    else if (!detailOpen(store) && ui.listSelected.length > 0) actions['clear-selection']?.(store, {});
     else actions['close-detail']?.(store, {});
   },
   ']': (store) => step(store, 1),
@@ -83,6 +84,12 @@ export const keys: Record<string, (store: Store) => void> = {
   '.': (store) => {
     const row = rowOf(store, store.ui.listCursor);
     if (row?.kind === 'run') actions['run-menu']?.(store, { repo: row.repo, run: row.run.runId });
+  },
+  // Marks the History run row under the list's cursor, with no run or queue open.
+  x: (store) => {
+    const { ui } = store;
+    const row = detailOpen(store) || ui.view !== 'history' ? undefined : rowOf(store, ui.listCursor);
+    if (row?.kind === 'run') actions['toggle-select']?.(store, { row: row.id });
   },
   '/': (store) => store.host.focus('list-filter'),
   1: (store) => actions['select-view']?.(store, { view: VIEWS[0] ?? 'active' }),

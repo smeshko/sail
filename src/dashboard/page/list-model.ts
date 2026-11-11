@@ -214,6 +214,13 @@ export function shownGroups(
   return filterRows(narrowed, filters.listFilter);
 }
 
+/** The run rows of `groups` whose id is in `selected`, in list order. */
+export function selectedRows(groups: readonly ListGroup[], selected: readonly string[]): RunRow[] {
+  return groups.flatMap((group) =>
+    group.rows.filter((row): row is RunRow => row.kind === 'run' && selected.includes(row.id)),
+  );
+}
+
 /** What each view lists under the repository filter: the sidebar's counts. */
 export function viewCounts(repos: readonly ListRepo[], repoFilter?: string): Record<ViewName, number> {
   const count = (view: ViewName) =>

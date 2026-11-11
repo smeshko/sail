@@ -313,3 +313,15 @@ test("History's head holds a status and a workflow control and the count reads n
   expect(draw('active')).not.toContain('<select');
   expect(draw('queues')).not.toContain('<select');
 });
+
+test("a selected row is drawn picked and History's head counts the selection with a clear button", () => {
+  const none = draw('history');
+  expect(none).not.toContain('lh-sel');
+  expect(none).not.toContain('picked');
+  const one = draw('history', { listSelected: ['run:alpha/a-fail', 'run:gone/zz'] });
+  expect(one).toContain('<span class="lh-sel">1 selected</span>');
+  expect(one).toContain('<button class="btn" data-action="clear-selection">clear</button>');
+  expect(one).toContain('class="run lrow picked" data-row="run:alpha/a-fail" aria-selected="true"');
+  expect(one).not.toContain('data-row="run:beta/b-done" aria-selected');
+  expect(draw('active', { listSelected: ['run:alpha/a-run'] })).not.toContain('lh-sel');
+});

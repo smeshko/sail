@@ -1723,6 +1723,87 @@ describe('the list by keyboard (ADW-522)', () => {
     expect(host.regions.list).toContain('<span class="c">3</span>');
   });
 
+  test('x marks and unmarks the History run under the cursor and the head counts the marks', () => {
+    const p = bootHistory();
+    toFake2();
+    host.press('x');
+    host.advance(100);
+    expect(p.ui.listSelected).toEqual([`run:alpha/${FAKE_2_ID}`]);
+    expect(host.regions.list).toContain(`class="run lrow picked cur" data-row="run:alpha/${FAKE_2_ID}"`);
+    expect(host.regions.list).toContain('<span class="lh-sel">1 selected</span>');
+    host.press('x');
+    host.advance(100);
+    expect(p.ui.listSelected).toEqual([]);
+    expect(host.regions.list).not.toContain('lh-sel');
+    expect(host.regions.list).not.toContain('picked');
+  });
+
+  test('x selects nothing on a group, in Active or Queues, with a run open, or typed in the filter field', () => {
+    const p = bootHistory();
+    host.press('j');
+    host.press('x');
+    expect(p.ui.listSelected).toEqual([]);
+    host.press('x', true);
+    expect(p.ui.listSelected).toEqual([]);
+    host.press('j');
+    host.press('Enter');
+    replay(host.open('run=')[0], fake2Dir(m));
+    host.advance(100);
+    host.press('x');
+    expect(p.ui.listSelected).toEqual([]);
+    host.press('Escape');
+    host.press('1');
+    host.press('j');
+    host.press('j');
+    host.press('x');
+    expect(p.ui.listSelected).toEqual([]);
+    host.press('2');
+    host.press('j');
+    host.press('x');
+    expect(p.ui.listSelected).toEqual([]);
+    host.press('3');
+    host.type('list-filter', 'x');
+    host.advance(100);
+    expect(p.ui.listFilter).toBe('x');
+    expect(p.ui.listSelected).toEqual([]);
+  });
+
+  test('a selected row a filter hides is not counted', () => {
+    const p = bootHistory();
+    toFake2();
+    host.press('x');
+    host.press('j');
+    host.press('j');
+    host.press('x');
+    host.advance(100);
+    expect(p.ui.listSelected).toHaveLength(2);
+    expect(host.regions.list).toContain('2 selected');
+    host.type('list-status', 'failed');
+    host.advance(100);
+    expect(host.regions.list).toContain('<span class="lh-sel">1 selected</span>');
+  });
+
+  test('Escape clears the selection only with no run open, and clear and a change of view empty it', () => {
+    const p = bootHistory();
+    toFake2();
+    host.press('x');
+    host.press('Enter');
+    replay(host.open('run=')[0], fake2Dir(m));
+    host.advance(100);
+    host.press('Escape');
+    host.advance(100);
+    expect([p.ui.runId, p.ui.listSelected]).toEqual([undefined, [`run:alpha/${FAKE_2_ID}`]]);
+    host.press('Escape');
+    host.advance(100);
+    expect(p.ui.listSelected).toEqual([]);
+    host.press('x');
+    host.click({ action: 'clear-selection' });
+    expect(p.ui.listSelected).toEqual([]);
+    host.press('x');
+    host.press('1');
+    expect(p.ui.listSelected).toEqual([]);
+  });
+
   test('Escape in the filter field blurs it and changes nothing else; any other key typed there changes only the filter', () => {
     const p = bootHistory();
     host.press('j');

@@ -11,6 +11,7 @@ import {
   historyWorkflows,
   queueGroups,
   repoDot,
+  selectedRows,
   shownGroups,
   VIEWS,
   viewCounts,
@@ -232,4 +233,15 @@ test('shownGroups combines the repository, status, workflow and text filters in 
     flat(shownGroups('history', mixed, { ...filters, listFilter: 'a3', historyStatus: 'failed' }, CLOCK.now)),
   ).toEqual([]);
   expect(flat(shownGroups('active', mixed, { ...filters, historyStatus: 'failed' }, CLOCK.now))).toEqual([]);
+});
+
+test('selectedRows gives the run rows of the groups whose id is selected, in list order', () => {
+  const groups = historyGroups(mixed, CLOCK);
+  expect(
+    selectedRows(groups, ['run:beta/b1', 'run:alpha/a1', 'run:gone/x', 'history:2026-10-01']).map((row) => row.id),
+  ).toEqual(['run:alpha/a1', 'run:beta/b1']);
+  expect(selectedRows(groups, [])).toEqual([]);
+  expect(
+    selectedRows(filterHistory(groups, { status: 'completed' }), ['run:alpha/a1', 'run:alpha/a2']).map((r) => r.id),
+  ).toEqual(['run:alpha/a2']);
 });

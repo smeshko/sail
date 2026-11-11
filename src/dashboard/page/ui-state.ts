@@ -52,6 +52,8 @@ export interface UiState {
   historyWorkflow?: string;
   listCursor?: string;
   listFolded: string[];
+  /** The History rows marked with `x`, by row id: the selection. */
+  listSelected: string[];
   /** Whether the needs attention pane is open. */
   attention: boolean;
   /** The queue view's folded sections, as `<repo>/<workflow>:<state>`. */
@@ -89,6 +91,7 @@ export function initialUi(tz: number): UiState {
     view: 'active',
     listFilter: '',
     listFolded: [],
+    listSelected: [],
     attention: false,
     folded: [],
     queueEvents: false,

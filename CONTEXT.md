@@ -666,8 +666,12 @@ The dashboard's navigation column, 180px wide and never growing with activity: I
 _Avoid_: rail, nav, menu
 
 **List**:
-The one component every dashboard view draws its rows on, in the centre: folding groups, one line per row, a keyboard cursor and a filter field. A selected row opens its run or queue beside it.
+The one component every dashboard view draws its rows on, in the centre: folding groups, one line per row, a keyboard cursor and a filter field. A clicked row opens its run or queue beside it. History's head carries two more controls, a status and a workflow, and the count of the Selection.
 _Avoid_: table, grid, feed
+
+**Selection**:
+The History rows a person marked with `x`, counted in the list's head, for the one action that takes several, Clean. A row a filter hides is not in it, and a change of view or `Escape` empties it.
+_Avoid_: multi-select, checked rows
 
 **Active view**:
 The list of live runs: those that wait on a person, suspended or unreadable, first under `waiting on you`, then the running ones under `running`.
