@@ -14,6 +14,8 @@ import { readEvents } from '../../src/events/consumers/ndjson';
 import { machineDir, readRegistry, registryDir } from '../../src/watch/registry';
 import { copyFixture } from '../helpers/fixture';
 import { runCaptured } from '../helpers/run-captured';
+import { sailProcess } from '../helpers/sail-process';
+import { heldRuns, setHoldAt, writeStub } from '../helpers/stub-workflow';
 import { withTempRepo } from '../helpers/temp-repo';
 
 const POST = { 'X-Sail-Dashboard': '1', 'Content-Type': 'application/json' };
@@ -99,6 +101,48 @@ test('a suspended run resumes to completion from the dashboard, and a failed one
         runId: string;
       }[];
       expect(listed.map((run) => run.runId)).not.toContain(runId);
+    } finally {
+      await started.stop();
+    }
+  });
+}, 180_000);
+
+test('a live run held in a call is suspended and held from the dashboard, ends suspended interrupted, then offers Resume', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir, { testsPassAt: 1 });
+    setHoldAt(repo.dir, 'implement#1');
+    const env = { ...repo.env, SAIL_HOME: join(repo.home, 'sail-home') };
+    const runs = join(repo.dir, '.sail-runs');
+    const running = sailProcess(repo.dir, env, ['FAKE-1']);
+    const registry = registryDir(machineDir(env));
+    const started = startDashboard({ registryDir: registry, port: 0, env });
+    if ('refused' in started) throw new Error(started.refused);
+    try {
+      await until('the run holding at implement#1', () => heldRuns(repo.dir).length === 1);
+      const runId = heldRuns(repo.dir)[0]?.runId ?? '';
+      const { name = '' } = readRegistry(registry).entries.find((entry) => entry.clone === repo.dir) ?? {};
+      const base = `http://127.0.0.1:${started.port}/api/repos/${name}/runs/${runId}`;
+      const offers = async () =>
+        (await (await fetch(`${base}/actions`, { headers: { 'X-Sail-Dashboard': '1' } })).json()) as Record<
+          string,
+          { enabled: boolean }
+        >;
+      expect((await offers()).suspend).toEqual({ enabled: true });
+      const answer = await fetch(`${base}/stop`, {
+        method: 'POST',
+        headers: POST,
+        body: '{"now":false,"suspend":true}',
+      });
+      expect([answer.status, await answer.json()]).toEqual([
+        202,
+        { message: `run ${runId} suspends now, held until sail resume ${runId} (pid ${running.pid})` },
+      ]);
+      await until('the run to suspend', () => statusOf(join(runs, runId)) === 'suspended interrupted');
+      await running.exited;
+      expect(existsSync(join(runs, runId, 'HOLD'))).toBe(true);
+      const after = await offers();
+      expect(after.resume?.enabled).toBe(true);
+      expect(after).not.toHaveProperty('suspend');
     } finally {
       await started.stop();
     }
