@@ -183,7 +183,7 @@ async function uninstall(service: ServiceDeps, all: boolean, names: string[], io
     let failed = false;
     for (const name of installed) {
       const result = await uninstallAgent(service, watcherLabel(name), notInstalled(name));
-      if ('refused' in result) {
+      if (result.refused !== undefined) {
         io.stderr(`${COMMAND}: ${result.refused}\n`);
         failed = true;
       } else {
@@ -196,7 +196,7 @@ async function uninstall(service: ServiceDeps, all: boolean, names: string[], io
   if (typeof project === 'number') return project;
   const { name } = project.config;
   const result = await uninstallAgent(service, watcherLabel(name), notInstalled(name));
-  if ('refused' in result) return refuse(result.refused);
+  if (result.refused !== undefined) return refuse(result.refused);
   io.stdout(`${COMMAND}: uninstalled the login service '${watcherLabel(name)}'\n`);
   return EXIT_OK;
 }
@@ -220,7 +220,7 @@ async function restart(
     const before = readEntry(registry, name);
     const old = before === undefined ? undefined : liveWatcher(before, isAlive)?.pid;
     const result = await restartAgent(service, label, notInstalled(name));
-    if ('refused' in result) return result.refused;
+    if (result.refused !== undefined) return result.refused;
     const deadline = performance.now() + (deps.applyTimeoutMs ?? 15_000);
     let now: number | undefined;
     for (;;) {

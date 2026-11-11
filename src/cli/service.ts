@@ -127,6 +127,8 @@ export interface AgentSpec {
 }
 
 export type Refused = { refused: string };
+/** What an operation that succeeded returns: no refusal. */
+export type Done = { refused?: undefined };
 
 const target = (deps: ServiceDeps, label: string) => `gui/${deps.uid}/${label}`;
 const failed = (verb: string, result: LaunchctlResult): Refused => ({
@@ -157,7 +159,7 @@ export async function installAgent(
 }
 
 /** Boots the agent out and deletes its plist; `notInstalled` is the refusal when there is no plist. */
-export async function uninstallAgent(deps: ServiceDeps, label: string, notInstalled: string): Promise<Refused | {}> {
+export async function uninstallAgent(deps: ServiceDeps, label: string, notInstalled: string): Promise<Refused | Done> {
   const plist = plistPath(deps.home, label);
   if (!existsSync(plist)) return { refused: notInstalled };
   await deps.launchctl(['bootout', target(deps, label)]);
@@ -166,7 +168,7 @@ export async function uninstallAgent(deps: ServiceDeps, label: string, notInstal
 }
 
 /** Kills the agent's process and starts it again; `notInstalled` is the refusal when there is no plist. */
-export async function restartAgent(deps: ServiceDeps, label: string, notInstalled: string): Promise<Refused | {}> {
+export async function restartAgent(deps: ServiceDeps, label: string, notInstalled: string): Promise<Refused | Done> {
   if (!existsSync(plistPath(deps.home, label))) return { refused: notInstalled };
   const result = await deps.launchctl(['kickstart', '-k', target(deps, label)]);
   return result.code === 0 ? {} : failed('kickstart', result);

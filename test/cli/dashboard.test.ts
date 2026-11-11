@@ -1,11 +1,14 @@
 // `sail dashboard [--port N]`, in process through run(): it serves in the foreground until the interrupt, and refuses a
 // port it can't take with exit code 3. The registry is a temporary SAIL_HOME's, and every server binds a free port.
 import { afterEach, expect, test } from 'bun:test';
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { EXIT_OK, EXIT_REFUSED, type ExitCode } from '../../src/cli/exit-codes';
+import { type DashboardDeps, dashboardCommand } from '../../src/cli/commands/dashboard';
+import { EXIT_OK, EXIT_REFUSED, EXIT_RESTART, type ExitCode } from '../../src/cli/exit-codes';
 import { type Io, run } from '../../src/cli/index';
+import type { Launchctl } from '../../src/cli/service';
+import { fakeTimers } from '../helpers/fake-timers';
 import { fakeInterrupts, runCaptured } from '../helpers/run-captured';
 
 const dirs: string[] = [];
@@ -123,3 +126,138 @@ test('the usage lists sail dashboard', async () => {
     /^ {2}sail dashboard \[--port <n>\] {2,}Serve every repository's runs and queues on localhost$/m,
   );
 }, 15_000);
+
+// --- the login service ---
+
+/** A dashboard command on a recording launchctl, platform and uid injected, with a HOME of its own. */
+function service(platform = 'darwin') {
+  const calls: string[][] = [];
+  const launchctl: Launchctl = async (args) => {
+    calls.push(args);
+    return { code: 0, stdout: '', stderr: '' };
+  };
+  const home = sailHome();
+  const machine = sailHome();
+  const deps: DashboardDeps = { service: { platform, uid: 501, launchctl, home, sail: ['/bin/bun', '/sail/main.ts'] } };
+  const plist = join(home, 'Library', 'LaunchAgents', 'sail.dashboard.plist');
+  const sail = async (values: Record<string, boolean | string>) => {
+    let stdout = '';
+    let stderr = '';
+    const code = await dashboardCommand(deps)(
+      { values, positionals: [] },
+      {
+        cwd: machine,
+        env: { SAIL_HOME: machine, HOME: home },
+        stdout: (t) => (stdout += t),
+        stderr: (t) => (stderr += t),
+      },
+    );
+    return { code, stdout, stderr };
+  };
+  return { calls, plist, sail, machine };
+}
+
+test('sail dashboard --install --port 3411 exits 0, writes sail.dashboard.plist ending dashboard, --service, --port, 3411, and bootstraps it', async () => {
+  const s = service();
+  const got = await s.sail({ install: true, port: '3411' });
+  expect(got.code).toBe(EXIT_OK);
+  expect(readFileSync(s.plist, 'utf8')).toContain(
+    '<string>/sail/main.ts</string>\n    <string>dashboard</string>\n    <string>--service</string>\n    <string>--port</string>\n    <string>3411</string>\n  </array>',
+  );
+  expect(readFileSync(s.plist, 'utf8')).toContain(`<key>WorkingDirectory</key>\n  <string>${s.machine}</string>`);
+  expect(s.calls).toEqual([
+    ['bootout', 'gui/501/sail.dashboard'],
+    ['bootstrap', 'gui/501', s.plist],
+  ]);
+  expect(got.stdout).toContain("installed the login service 'sail.dashboard'");
+  expect(got.stdout).toContain('http://127.0.0.1:3411');
+});
+
+test('sail dashboard --install with no port installs the default port 3400', async () => {
+  const s = service();
+  await s.sail({ install: true });
+  expect(readFileSync(s.plist, 'utf8')).toContain('<string>--port</string>\n    <string>3400</string>');
+});
+
+test("sail dashboard --install --port nope exits 3 with today's port refusal and writes nothing", async () => {
+  const s = service();
+  const got = await s.sail({ install: true, port: 'nope' });
+  expect([got.code, got.stderr]).toEqual([EXIT_REFUSED, 'sail dashboard: --port takes a port number, 0 to 65535\n']);
+  expect(existsSync(s.plist)).toBe(false);
+  expect(s.calls).toEqual([]);
+});
+
+test('sail dashboard --restart kickstarts the agent and prints that it restarted; with none installed it exits 3 and launchctl sees nothing', async () => {
+  const s = service();
+  const none = await s.sail({ restart: true });
+  expect([none.code, none.stderr]).toEqual([
+    EXIT_REFUSED,
+    'sail dashboard: no login service is installed: sail dashboard --install installs it\n',
+  ]);
+  expect(s.calls).toEqual([]);
+  await s.sail({ install: true });
+  s.calls.length = 0;
+  const got = await s.sail({ restart: true });
+  expect([got.code, got.stdout]).toEqual([EXIT_OK, 'sail dashboard: restarted the login service\n']);
+  expect(s.calls).toEqual([['kickstart', '-k', 'gui/501/sail.dashboard']]);
+});
+
+test('sail dashboard --uninstall boots the agent out and deletes its plist, and refuses with none installed', async () => {
+  const s = service();
+  expect((await s.sail({ uninstall: true })).code).toBe(EXIT_REFUSED);
+  await s.sail({ install: true });
+  s.calls.length = 0;
+  expect((await s.sail({ uninstall: true })).code).toBe(EXIT_OK);
+  expect(s.calls).toEqual([['bootout', 'gui/501/sail.dashboard']]);
+  expect(existsSync(s.plist)).toBe(false);
+});
+
+test('on linux sail dashboard --install, --uninstall and --restart exit 3 naming macOS and write nothing; two of them exit 3 too', async () => {
+  const s = service('linux');
+  for (const option of ['install', 'uninstall', 'restart']) {
+    const got = await s.sail({ [option]: true });
+    expect([got.code, got.stderr]).toEqual([
+      EXIT_REFUSED,
+      'sail dashboard: a login service is macOS only: launchd is its service manager\n',
+    ]);
+  }
+  expect(existsSync(s.plist)).toBe(false);
+  const two = await s.sail({ install: true, restart: true });
+  expect(two.stderr).toBe('sail dashboard: take one of --install, --uninstall and --restart\n');
+});
+
+test('a dashboard serving under --service returns 6 once its version changes and frees its port; one without --service keeps serving', async () => {
+  for (const serviceMode of [true, false]) {
+    const home = sailHome();
+    let stdout = '';
+    const interrupts = fakeInterrupts();
+    const timers = fakeTimers('2026-10-15T09:00:00.000Z');
+    const version = { current: 'aaaaaaa1' };
+    const running = dashboardCommand({ timers, sailVersion: () => version.current, sailVersionEveryMs: 60_000 })(
+      { values: serviceMode ? { port: '0', service: true } : { port: '0' }, positionals: [] },
+      {
+        cwd: home,
+        env: { SAIL_HOME: home },
+        stdout: (t) => (stdout += t),
+        stderr: () => {},
+        onInterrupt: interrupts.onInterrupt as NonNullable<Io['onInterrupt']>,
+      },
+    );
+    const deadline = Date.now() + 5000;
+    while (!stdout.includes('Ctrl-C stops it\n') && Date.now() < deadline) await Bun.sleep(10);
+    const port = Number(/127\.0\.0\.1:(\d+)/.exec(stdout)?.[1]);
+    await Bun.sleep(0);
+    version.current = 'bbbbbbb2';
+    await timers.advance(60_000);
+    if (serviceMode) {
+      expect(await Promise.race([running, after(5000, 'still running')])).toBe(EXIT_RESTART);
+      expect(stdout).toContain('sail dashboard: sail changed (aaaaaaa → bbbbbbb)');
+      expect(await listening(port)).toBe(false);
+    } else {
+      expect(await Promise.race([running, after(300, 'still running')])).toBe('still running');
+      expect(await listening(port)).toBe(true);
+      interrupts.interrupt();
+      expect(await running).toBe(EXIT_OK);
+    }
+  }
+}, 20_000);

@@ -186,5 +186,6 @@ test("the usage lists the login service forms of sail watch, and not --service, 
   expect(stdout).toMatch(/^ {2}sail watch --install \[<workflow>\.\.\.\] \| --install --all {2,}\S/m);
   expect(stdout).toMatch(/^ {2}sail watch --restart \[<repository>\|--all\] {2,}\S/m);
   expect(stdout).toMatch(/^ {2}sail watch --uninstall \[--all\] {2,}\S/m);
+  expect(stdout).toContain('  sail dashboard --install [--port <n>] | --restart | --uninstall\n');
   expect(stdout).not.toContain('--service');
 });
