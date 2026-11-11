@@ -6,7 +6,7 @@
 //   watcher of the repository that no installed agent could own (none is installed): it names its pid and
 //   `sail unwatch`, so the agent doesn't loop on "a live watcher in the way".
 // - `--install --all` installs one agent, with no names, for each registry entry whose `.sail/` still declares a watch,
-//   and prints one line for each entry it skips, with the reason.
+//   and prints one line for each entry it skips, with the reason. It refuses when it installed none.
 // - `--uninstall [--all]` unloads the agent of this repository, or every installed one, and deletes its plist.
 // - `--restart [<repository>|--all]` kicks the installed agent of one repository, or of every one, so launchd ends its
 //   watcher and starts it again. With a repository name or `--all` it reads only HOME, so an agent's shell runs it from
@@ -130,6 +130,7 @@ async function installAll(
   const env = io.env ?? process.env;
   const skipped = (name: string, why: string) => io.stdout(`${COMMAND}: skipped '${name}': ${why}\n`);
   let failed = false;
+  let installed = 0;
   for (const entry of readRegistry(registryDirOf(machineDir(env))).entries) {
     const label = watcherLabel(entry.name);
     if (!existsSync(entry.sailDir)) {
@@ -167,9 +168,11 @@ async function installAll(
       failed = true;
     } else {
       io.stdout(installedLine(label, result));
+      installed += 1;
     }
   }
-  return failed ? EXIT_REFUSED : EXIT_OK;
+  if (failed) return EXIT_REFUSED;
+  return installed === 0 ? refuse('installed no login service: no registered repository declares a watch') : EXIT_OK;
 }
 
 /** Unloads this clone's watcher agent, or with `all` every installed one, and deletes the plists. */

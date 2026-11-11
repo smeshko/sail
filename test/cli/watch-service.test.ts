@@ -321,6 +321,36 @@ test('sail watch --install --all writes one plist for the repository that declar
   });
 }, 30_000);
 
+test('sail watch --install --all exits 3 when it installs nothing: an empty registry, or every repository skipped', async () => {
+  await withTempRepo(async (repo) => {
+    const world = repository(repo);
+    const a = agent(repo);
+    const empty = await sail(a.deps, repo.home, world.env, { install: true, all: true });
+    expect(empty.code).toBe(EXIT_REFUSED);
+    expect(empty.stderr).toBe('sail watch: installed no login service: no registered repository declares a watch\n');
+    const other = join(repo.home, 'other');
+    mkdirSync(other, { recursive: true });
+    writeStub(other);
+    mkdirSync(world.registry, { recursive: true });
+    writeFileSync(
+      join(world.registry, 'other.json'),
+      JSON.stringify({
+        schema: 'sail.registry.v1',
+        name: 'other',
+        remote: null,
+        clone: other,
+        sailDir: join(other, '.sail'),
+        updatedAt: START,
+      }),
+    );
+    const skipped = await sail(a.deps, repo.home, world.env, { install: true, all: true });
+    expect(skipped.code).toBe(EXIT_REFUSED);
+    expect(skipped.stdout).toContain("sail watch: skipped 'other': no workflow declares a watch\n");
+    expect(skipped.stderr).toBe('sail watch: installed no login service: no registered repository declares a watch\n');
+    expect(a.calls).toEqual([]);
+  });
+}, 30_000);
+
 test('sail watch --uninstall exits 0, boots the agent out and deletes its plist; with none installed it exits 3 and launchctl sees nothing', async () => {
   await withTempRepo(async (repo) => {
     const world = repository(repo);
