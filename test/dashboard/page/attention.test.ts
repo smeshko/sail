@@ -78,13 +78,27 @@ test('a run with denials and no failure or error adds no item, and denials only 
     ['spec#1', 0],
     ['implement#1', 1],
   ]);
-  for (const call of calls) if (call.key === 'spec#1') call.denials = 4;
+  const failed = runOf(repos, 'alpha', FAKE_2_ID)?.summary;
+  if (!failed) throw new Error('missing fixture summary');
+  failed.totals.denials = 5;
   const items = attention(repos);
   expect(items).toHaveLength(3);
   expect(items[0]?.detail.endsWith(' · 5 denials')).toBe(true);
-  const golden = runOf(repos, 'alpha', GOLDEN_RUN_ID)?.summary?.calls ?? [];
-  for (const call of golden) call.denials = 3;
+  const golden = runOf(repos, 'alpha', GOLDEN_RUN_ID)?.summary;
+  if (!golden) throw new Error('missing golden summary');
+  golden.totals.denials = 3;
+  for (const call of golden.calls) call.denials = 3;
   expect(attention(repos)).toHaveLength(3);
+});
+
+test("the row's denial count is the run's total, though no call entry carries those denials", () => {
+  const repos = index(m.registryDir);
+  const failed = runOf(repos, 'alpha', FAKE_2_ID)?.summary;
+  if (!failed) throw new Error('missing fixture summary');
+  for (const call of failed.calls) Reflect.deleteProperty(call, 'denials');
+  failed.totals.denials = 3;
+  const row = attention(repos).find((item) => item.runId === FAKE_2_ID);
+  expect(row?.detail.endsWith(' · 3 denials')).toBe(true);
 });
 
 test('a failed run with two calls in error is one item opening the last, naming the other', () => {

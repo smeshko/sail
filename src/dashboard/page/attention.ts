@@ -47,7 +47,7 @@ function repoItems(repo: IndexRepo): AttentionItem[] {
     const last = errors.at(-1);
     if (status === 'failed' || last !== undefined) {
       const others = errors.filter((call) => call !== last).map((call) => call.key);
-      const denials = calls.reduce((sum, call) => sum + (call.denials ?? 0), 0);
+      const denials = run.summary?.totals.denials ?? 0;
       const reasons = [
         status === 'failed' ? about : last?.summary,
         status === 'failed' ? message : undefined,
