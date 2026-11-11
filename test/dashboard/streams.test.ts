@@ -400,7 +400,19 @@ test("the index carries each repository's queues, and an item added to queue.jso
     message.repos.map((repo: Received) => [repo.name, repo.queues.map(({ offers: _, ...view }: Received) => view)]);
   expect(queuesOf(socket.messages[0])).toEqual([
     ['alpha', []],
-    ['beta', [{ workflow: QUEUE_WORKFLOW, queue: file }]],
+    [
+      'beta',
+      [
+        {
+          workflow: QUEUE_WORKFLOW,
+          queue: file,
+          watch: {
+            state: 'watcher not running',
+            why: `no watcher is running for 'beta': sail watch ${QUEUE_WORKFLOW} first`,
+          },
+        },
+      ],
+    ],
   ]);
   // Each queue carries what it offers, with no watcher running.
   expect(socket.messages[0].repos[1].queues[0].offers.poll).toEqual({

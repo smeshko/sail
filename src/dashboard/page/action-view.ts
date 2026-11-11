@@ -4,7 +4,8 @@
 //
 // - Not offered, nothing is drawn.
 // - An offer that is disabled is drawn disabled, with its `why`, only where the caller asks (`honourDisabled`): the run
-//   menu does, and the queue and the watch set draw enabled, with the server's refusal coming with the POST.
+//   menu does, the queue view draws its own disabled controls with the reason, and the watch set draws enabled, with
+//   the server's refusal coming with the POST.
 import type { ActionDef, OfferSource, Param, Subject, Values } from './action-registry';
 import { html, type SafeHtml } from './html';
 import type { ActState } from './ui-state';

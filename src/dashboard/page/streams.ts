@@ -184,11 +184,9 @@ export function onQueueMessage(store: Store, id: string, open: OpenQueue, text: 
   if (message?.kind !== 'queue-event') return;
   const event = message.event as QueueEvent;
   const recent = [...open.stream.recent, event].slice(-RECENT_EVENTS);
-  const watch =
-    event.type === 'watch:added' ? 'watched' : event.type === 'watch:removed' ? 'not watched' : open.stream.watch;
   const polls =
     event.type === 'queue:polled' ? (event as Extract<QueueEvent, { type: 'queue:polled' }>).kind : open.stream.polls;
-  open.stream = { recent, watch, ...(polls === undefined ? {} : { polls }) };
+  open.stream = { recent, ...(polls === undefined ? {} : { polls }) };
   if (ui.queue === id) store.mark('main');
 }
 
@@ -203,7 +201,7 @@ export function connectQueue(store: Store, id: string, open: OpenQueue) {
       () => open.stream.error !== undefined,
       () => store.queues.get(id) === open && open.connection === connection,
       () => {
-        open.stream = { recent: [], watch: 'unknown' };
+        open.stream = { recent: [] };
         connectQueue(store, id, open);
         if (ui.queue === id) store.mark('main');
       },
@@ -213,7 +211,7 @@ export function connectQueue(store: Store, id: string, open: OpenQueue) {
 }
 
 export function openQueueSocket(store: Store, id: string) {
-  const open: OpenQueue = { stream: { recent: [], watch: 'unknown' } };
+  const open: OpenQueue = { stream: { recent: [] } };
   store.queues.set(id, open);
   connectQueue(store, id, open);
 }
@@ -290,7 +288,7 @@ export function openIndex(store: Store, onStart: (asked: Record<string, string>)
 export function reopenQueue(store: Store, id: string): void {
   const failed = store.queues.get(id);
   if (failed?.stream.error !== undefined) {
-    failed.stream = { recent: [], watch: 'unknown' };
+    failed.stream = { recent: [] };
     connectQueue(store, id, failed);
   }
 }

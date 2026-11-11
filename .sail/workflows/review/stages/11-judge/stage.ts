@@ -17,5 +17,6 @@ export const judge = agent('judge', {
   output: Judgement,
   model: 'frontier',
   permissions: readonly,
-  budget: { maxTurns: 60, maxUsd: 6, maxMinutes: 40 },
+  // The cap stops a session gone wrong: a large pull request's judgment spent $6 while working (ADW-533).
+  budget: { maxTurns: 60, maxUsd: 15, maxMinutes: 60 },
 });

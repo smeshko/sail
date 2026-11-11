@@ -3,11 +3,11 @@
 // fetch and WebSocket are Bun's own, aimed at the server, so the real bundle, server and streams are exercised, and
 // only the DOM is fake.
 import { afterEach, expect, test } from 'bun:test';
-import { rmSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { BrowserWindow, ElementLike, EventLike } from '../../src/dashboard/page/host';
 import { type Dashboard, startDashboard } from '../../src/dashboard/server';
-import { FAKE_2_ID, fakeClonePorts, type Machine, seedFixtures } from '../helpers/dashboard';
+import { betaWatcher, FAKE_2_ID, fakeClonePorts, type Machine, seedFixtures } from '../helpers/dashboard';
 
 let m: Machine | undefined;
 let server: Dashboard | undefined;
@@ -107,7 +107,11 @@ test("the real bundle boots headless: both repositories, the golden run's eight 
   expect(page.text('main')).toContain('<div class="stat"><b>$1.35</b><span>of $25.00 (5.4%)</span></div>');
   expect(page.text('attention')).toContain('<span class="badge">4</span>');
   page.click({ action: 'select-queue', queue: 'beta/ticket-to-pr' });
-  expect(await until(() => page.text('main').includes('<span class="pill p-pass">watched</span>'))).toBe(true);
+  expect(await until(() => page.text('main').includes('<span class="pill p-skip">watcher not running</span>'))).toBe(
+    true,
+  );
+  expect(page.text('main')).toContain('<button class="btn" disabled');
+  expect(page.text('rail')).toContain('watcher not running');
   page.click({ action: 'open', repo: 'alpha', run: FAKE_2_ID, key: 'implement#1', tab: 'permissions' });
   expect(await until(() => page.text('inspector').includes('<code>git push --force origin HEAD</code>'))).toBe(true);
   expect(page.text('inspector')).toContain('<dt>rule</dt><dd>commands</dd>');
@@ -129,8 +133,25 @@ test("once beta's queue/ is gone, the next index drops its queue row and gives t
   expect(page.text('rail')).toContain('<span class="nm">beta</span>');
 }, 30_000);
 
-test('instant tier: on the real bundle and server, a poll with no watcher draws a red toast quoting the refusal, with no dialog', async () => {
+test("a beta queue that can't be read is listed in the rail with its problem, and its row opens a queue view that shows it", async () => {
   m = seedFixtures();
+  const broken = join(m.beta.clone, '.sail-runs', 'queue', 'broken');
+  mkdirSync(broken, { recursive: true });
+  writeFileSync(join(broken, 'queue.json'), '{');
+  const started = startDashboard({ registryDir: m.registryDir, port: 0, followPollMs: 20, indexPollMs: 50 });
+  if ('refused' in started) throw new Error(started.refused);
+  server = started;
+  const page = await bootHeadless(server);
+  expect(await until(() => page.text('rail').includes('beta › broken'))).toBe(true);
+  expect(page.text('rail')).toContain('<span class="n">unreadable</span>');
+  page.click({ action: 'select-queue', queue: 'beta/broken' });
+  expect(await until(() => page.text('main').includes('broken queue'))).toBe(true);
+  expect(page.text('main')).toContain('queue.json can&#39;t be read');
+}, 30_000);
+
+test('instant tier: on the real bundle and server, a move the watcher refuses draws a red toast quoting the refusal, with no dialog', async () => {
+  m = seedFixtures();
+  betaWatcher(m, { pid: process.pid, sailDir: m.beta.sailDir });
   const started = startDashboard({ registryDir: m.registryDir, port: 0, followPollMs: 20, indexPollMs: 50 });
   if ('refused' in started) throw new Error(started.refused);
   server = started;
@@ -139,11 +160,18 @@ test('instant tier: on the real bundle and server, a poll with no watcher draws 
   expect(await until(() => page.text('rail').includes('data-action="select-queue"'))).toBe(true);
   page.click({ action: 'select-queue', queue: 'beta/ticket-to-pr' });
   expect(await until(() => page.text('main').includes('data-action="poll-queue"'))).toBe(true);
-  page.click({ action: 'poll-queue', repo: 'beta', workflow: 'ticket-to-pr' });
+  page.click({
+    action: 'move-item',
+    dir: 'down',
+    repo: 'beta',
+    workflow: 'ticket-to-pr',
+    key: 'ticket:FAKE-5',
+    target: 'ticket:FAKE-6',
+  });
   expect(await until(() => page.text('toasts').includes('toast bad'))).toBe(true);
   expect(page.text('toasts')).toContain('role="alert"');
-  expect(page.text('toasts')).toContain('poll beta / ticket-to-pr');
-  expect(page.text('toasts')).toContain('no watcher is running');
+  expect(page.text('toasts')).toContain('ticket:FAKE-6 is parked: only a queued item is moved');
+  expect(page.text('dialog')).not.toContain('data-action="dialog-confirm"');
 }, 30_000);
 
 test('confirmed tier: on the real bundle and server, a click on FAKE-2 clean-run fills the dialog with a clean button, and no POST was made', async () => {

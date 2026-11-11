@@ -11,9 +11,10 @@ import { listRuns, type RunListing } from '../engine/runs';
 import { validateDocument } from '../engine/schemas';
 import { EVENTS_FILE, readEvents } from '../events/consumers/ndjson';
 import type { Summary } from '../events/summary';
-import { liveSet, liveWatcher, type RegistryEntry, type RegistryProblem, readRegistry } from '../watch/registry';
+import { type RegistryEntry, type RegistryProblem, readRegistry } from '../watch/registry';
 import { containedFile, inside } from './contained';
 import { type OfferedQueue, offeredQueues, type RepoOffers, repoOffers } from './offers';
+import { type QueueWatch, queueWatch, repoWatcher, workflowWatch } from './watch-state';
 
 export { containedFile, inside };
 
@@ -23,10 +24,13 @@ export type Repo = RegistryEntry & { problem?: string };
 /** One run as the dashboard lists it: `sail runs`' listing, its source, and its summary or null. */
 export type RunItem = Omit<RunListing, 'dir'> & { source?: Source; summary: Summary | null };
 
+/** A queue view with its workflow's watch state, from the live watcher, and the reason when it isn't watched. */
+export type IndexQueue = OfferedQueue & { watch: QueueWatch };
+
 /** A repository with its runs and its queues: what the index stream sends. */
 export type IndexRepo = Repo & {
   runs: RunItem[];
-  queues: OfferedQueue[];
+  queues: IndexQueue[];
   /** What the repository offers: its watch set, and each workflow's watch or unwatch. */
   offers?: RepoOffers;
   /** The live watcher of this repository and the workflows it watches, set only while it runs in this clone. */
@@ -136,24 +140,23 @@ export function runItems(entry: RegistryEntry): RunItem[] {
 }
 
 /**
- * Every repository with its runs and its queues. A repository whose runs can't be listed has none, nor any queue, and
+ * Every repository with its runs and its queues, each queue with its watch state (src/dashboard/watch-state.ts). A repository whose runs can't be listed has none, nor any queue, and
  * a problem that says why.
  */
 export function index(registryDir: string): IndexRepo[] {
   return repos(registryDir).repos.map((repo) => {
     try {
-      const watcher = liveWatcher(repo);
+      const read = repoWatcher(repo);
+      const { watcher } = read;
       const watching =
         watcher?.sailDir === repo.sailDir
-          ? {
-              watching: {
-                pid: watcher.pid,
-                workflows: liveSet(repo.sailDir, watcher.pid).map((each) => each.workflow),
-              },
-            }
+          ? { watching: { pid: watcher.pid, workflows: read.set.map((each) => each.workflow) } }
           : {};
       const runs = runItems(repo);
-      const queues = offeredQueues(repo, runs);
+      const queues = offeredQueues(repo, runs, read).map((view) => ({
+        ...view,
+        watch: queueWatch(workflowWatch(repo, view.workflow, read)),
+      }));
       return {
         ...repo,
         runs,

@@ -4,10 +4,11 @@
 // one check behind both these offers and the POSTs that change a queue, and a `.sail/` that still exists for the watch
 // set. Read-only.
 import { existsSync } from 'node:fs';
-import { liveSet, liveWatcher, type RegistryEntry } from '../watch/registry';
+import type { RegistryEntry } from '../watch/registry';
 import type { Offer } from './actions';
 import { type RunItem, runItems } from './files';
 import { type QueueView, queueViews } from './queues';
+import { type RepoWatcher, repoWatcher, workflowWatch } from './watch-state';
 
 /** What one queue item offers: only the actions that apply to its state. */
 export interface ItemOffers {
@@ -35,26 +36,26 @@ export type OfferedQueue = QueueView & { offers?: QueueOffers };
 
 /**
  * The repository's live watcher when it runs in this clone and watches `workflow`, with how to name it and the label it
- * polls the workflow on, or why not.
+ * polls the workflow on, or why not: the workflow's watch state (watch-state.ts), so an offer, a refusal and the state
+ * the page shows give one reason. `read` is the watcher as already read, read here when not given.
  */
 export function watching(
   entry: RegistryEntry,
   workflow: string,
+  read: RepoWatcher = repoWatcher(entry),
 ): { named: string; label: string } | { refused: string } {
-  const watcher = liveWatcher(entry);
-  if (watcher === undefined) {
-    return { refused: `no watcher is running for '${entry.name}': sail watch ${workflow} first` };
-  }
-  const named = `the watcher of '${entry.name}' (pid ${watcher.pid})`;
-  if (watcher.sailDir !== entry.sailDir) return { refused: `${named} runs in another clone: ${watcher.sailDir}` };
-  const set = liveSet(entry.sailDir, watcher.pid).find((each) => each.workflow === workflow);
-  if (set === undefined) return { refused: `${named} does not watch '${workflow}': sail watch ${workflow} first` };
-  return { named, label: set.label };
+  const watch = workflowWatch(entry, workflow, read);
+  return watch.state === 'watched' ? { named: watch.named, label: watch.label } : { refused: watch.why };
 }
 
 /** The offers of one queue: `liveRunIds` are the runs that are running or suspended, to tell a failed item's run has ended. */
-export function queueOffers(entry: RegistryEntry, view: QueueView, liveRunIds: ReadonlySet<string>): QueueOffers {
-  const watched = watching(entry, view.workflow);
+export function queueOffers(
+  entry: RegistryEntry,
+  view: QueueView,
+  liveRunIds: ReadonlySet<string>,
+  read: RepoWatcher = repoWatcher(entry),
+): QueueOffers {
+  const watched = watching(entry, view.workflow, read);
   const offer: Offer = 'refused' in watched ? { enabled: false, why: watched.refused } : { enabled: true };
   const items: Record<string, ItemOffers> = Object.create(null) as Record<string, ItemOffers>;
   for (const item of view.queue?.items ?? []) {
@@ -68,8 +69,8 @@ export function queueOffers(entry: RegistryEntry, view: QueueView, liveRunIds: R
   return { poll: { ...offer }, add: { ...offer }, items };
 }
 
-/** The repository's queues, each with its offers. `runs` are its runs, read when not given. */
-export function offeredQueues(entry: RegistryEntry, runs?: readonly RunItem[]): OfferedQueue[] {
+/** The repository's queues, each with its offers. `runs` are its runs and `read` its watcher, read when not given. */
+export function offeredQueues(entry: RegistryEntry, runs?: readonly RunItem[], read?: RepoWatcher): OfferedQueue[] {
   const views = queueViews(entry);
   if (views.length === 0) return [];
   const all = runs ?? runItems(entry);
@@ -78,7 +79,8 @@ export function offeredQueues(entry: RegistryEntry, runs?: readonly RunItem[]): 
       .filter((run) => ['running', 'suspended'].includes(run.status?.status ?? run.summary?.status ?? 'unknown'))
       .map((run) => run.runId),
   );
-  return views.map((view) => ({ ...view, offers: queueOffers(entry, view, live) }));
+  const watcher = read ?? repoWatcher(entry);
+  return views.map((view) => ({ ...view, offers: queueOffers(entry, view, live, watcher) }));
 }
 
 /** The repository's offers: `watchingWorkflows` is the live watcher's watch set in this clone, empty when none. */

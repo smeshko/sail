@@ -330,6 +330,7 @@ function queueItemAction(id: string, op: 'requeue' | 'drop', tier: Tier, path: s
     label: () => op,
     appliesTo: ['item'],
     tier,
+    holdsDisabled: true,
     place: 'queue',
     params: () => [],
     available: itemOffer(op),
@@ -550,6 +551,7 @@ export const ACTIONS: readonly ActionDef[] = [
     label: () => 'move',
     appliesTo: ['item'],
     tier: 'instant',
+    holdsDisabled: true,
     place: 'queue',
     params: () => [
       { name: 'dir', dom: 'dir', type: 'choice', options: [{ value: 'up' }, { value: 'down' }], given: 'data' },
@@ -571,6 +573,7 @@ export const ACTIONS: readonly ActionDef[] = [
     label: () => 'poll',
     appliesTo: ['workflow'],
     tier: 'instant',
+    holdsDisabled: true,
     place: 'queue',
     params: () => [],
     available: queueOffer('poll'),
@@ -583,6 +586,7 @@ export const ACTIONS: readonly ActionDef[] = [
     label: () => 'add',
     appliesTo: ['workflow'],
     tier: 'instant',
+    holdsDisabled: true,
     place: 'queue',
     params: () => [
       { name: 'ticket', dom: 'add-ticket', label: 'ticket key', type: 'text', placeholder: 'ticket key' },

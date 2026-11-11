@@ -6,7 +6,9 @@
 // neighbour, and a ⋯ on any item but a running one, which opens its menu: requeue, on a parked item or a failed one
 // whose run has ended, and drop, which opens the confirmation dialog. One menu is open at a time. The answer to any of
 // them, a refusal or that the watcher has not taken it yet, is a toast, and while a request is out the header or the
-// item's row reads the word under way. An item whose run the rail lists opens it. A waiting item shows its priority. A held item shows
+// item's row reads the word under way. While the workflow isn't watched, or its watcher isn't running, which the index
+// says from the live watcher, every one of those controls is drawn disabled and the server's reason shows beside the
+// poll button. An item whose run the rail lists opens it. A waiting item shows its priority. A held item shows
 // when its hold ends and why, and its hold's events name it. An item that waits on its ticket's prerequisites names them.
 import type { QueueEvent } from '../../events/types';
 import type { QueueItemState } from '../../watch/queue-store';
@@ -14,13 +16,12 @@ import { ACTIONS, actionOf, type OfferSource, type Subject } from './action-regi
 import { actionControl } from './action-view';
 import { ago, clock } from './format';
 import { html, type SafeHtml, safeHref } from './html';
-import { type PanelItem, panelSource, QUEUE_STATES, type QueuePanel, type WatchState } from './index-model';
+import { type PanelItem, panelSource, QUEUE_STATES, type QueuePanel } from './index-model';
 import type { UiState } from './ui-state';
 
-/** What the shell has heard on a queue's stream: its last events and its watch state. */
+/** What the shell has heard on a queue's stream: its last events. */
 export interface QueueStream {
   recent: readonly QueueEvent[];
-  watch: WatchState;
   /** The error its stream sent, which stops its reconnects. */
   error?: string;
   /** What the workflow polls, from its last `queue:polled` event. */
@@ -104,8 +105,11 @@ export const hasItemActions = (panel: QueuePanel, item: PanelItem) => {
  * failed one whose run has ended; drop on any item that isn't running, which opens the dialog. A running item
  * offers neither, so it has no ⋯.
  */
-function itemMenu(panel: QueuePanel, item: PanelItem, ui: UiState): SafeHtml | '' {
+function itemMenu(panel: QueuePanel, item: PanelItem, ui: UiState, why: string | undefined): SafeHtml | '' {
   if (!hasItemActions(panel, item)) return '';
+  if (why !== undefined) {
+    return html`<span class="qmore"><button class="btn mv more" disabled aria-label="actions for ${item.dedupKey}" title="${why}">⋯</button></span>`;
+  }
   const open = ui.itemMenu === item.dedupKey;
   const toggle = html`<button class="btn mv more${open ? ' open' : ''}" data-action="item-menu" data-item="${item.dedupKey}" aria-label="actions for ${item.dedupKey}" aria-expanded="${open ? 'true' : 'false'}" title="actions for ${item.dedupKey}">⋯</button>`;
   if (!open) return html`<span class="qmore">${toggle}</span>`;
@@ -119,17 +123,29 @@ function itemMenu(panel: QueuePanel, item: PanelItem, ui: UiState): SafeHtml | '
 }
 
 /** The field to add a ticket by its key, with Force, as typed so far. */
-function addForm(panel: QueuePanel, ui: UiState): SafeHtml {
+function addForm(panel: QueuePanel, ui: UiState, why: string | undefined): SafeHtml {
   const typed = ui.act.drafts['add-ticket'];
+  if (why !== undefined) {
+    return html`<div class="qadd"><input class="txt" type="text" name="add-ticket" placeholder="ticket key" value="${typed?.ticket ?? ''}" disabled title="${why}"><label class="lbl"><input type="checkbox" name="add-force"${typed?.force === 'on' ? ' checked' : ''} disabled title="${why}"> force</label><button class="btn" disabled title="${why}">add</button></div>`;
+  }
   return html`<div class="qadd"><input class="txt" type="text" name="add-ticket" placeholder="ticket key" value="${typed?.ticket ?? ''}"><label class="lbl"><input type="checkbox" name="add-force"${typed?.force === 'on' ? ' checked' : ''}> force</label><button class="btn" data-action="add-ticket" data-repo="${panel.repo}" data-workflow="${panel.workflow}" title="add the ticket to the queue">add</button></div>`;
 }
 
 /** A waiting row's ▲ or ▼: `target` is the waiting neighbour the item moves before or after. */
-function moveButton(panel: QueuePanel, item: PanelItem, dir: 'up' | 'down', target: PanelItem): SafeHtml {
+function moveButton(
+  panel: QueuePanel,
+  item: PanelItem,
+  dir: 'up' | 'down',
+  target: PanelItem,
+  why: string | undefined,
+): SafeHtml {
+  if (why !== undefined) {
+    return html`<button class="btn mv" disabled aria-label="move ${dir === 'up' ? 'up, before' : 'down, after'} ${target.dedupKey}" title="${why}">${dir === 'up' ? '▲' : '▼'}</button>`;
+  }
   return html`<button class="btn mv" data-action="move-item" data-dir="${dir}" data-repo="${panel.repo}" data-workflow="${panel.workflow}" data-key="${item.dedupKey}" data-target="${target.dedupKey}" aria-label="move ${dir === 'up' ? 'up, before' : 'down, after'} ${target.dedupKey}" title="move ${dir === 'up' ? 'up, before' : 'down, after'} ${target.dedupKey}">${dir === 'up' ? '▲' : '▼'}</button>`;
 }
 
-function moveButtons(panel: QueuePanel, item: PanelItem): SafeHtml | '' {
+function moveButtons(panel: QueuePanel, item: PanelItem, why: string | undefined): SafeHtml | '' {
   if (!offered(panel, item, 'move-item')) return '';
   const waiting = panel.items.filter((each) => each.state === 'queued');
   const at = waiting.indexOf(item);
@@ -137,10 +153,10 @@ function moveButtons(panel: QueuePanel, item: PanelItem): SafeHtml | '' {
   const below = waiting[at + 1];
   // A missing ▲ or ▼ keeps its place, so the arrows line up down the box.
   const gap = html`<span class="mv-gap"></span>`;
-  return html`${above === undefined ? gap : moveButton(panel, item, 'up', above)}${below === undefined ? gap : moveButton(panel, item, 'down', below)}`;
+  return html`${above === undefined ? gap : moveButton(panel, item, 'up', above, why)}${below === undefined ? gap : moveButton(panel, item, 'down', below, why)}`;
 }
 
-function itemRow(panel: QueuePanel, item: PanelItem, ui: UiState): SafeHtml {
+function itemRow(panel: QueuePanel, item: PanelItem, ui: UiState, why: string | undefined): SafeHtml {
   const href = safeHref(item.url);
   const title =
     href === undefined
@@ -161,7 +177,7 @@ function itemRow(panel: QueuePanel, item: PanelItem, ui: UiState): SafeHtml {
     item.held === undefined
       ? ''
       : html` · held until ${clock(item.held.until, ui.tz)} · <span class="why">${item.held.reason}</span>`
-  }${item.waitingOn === undefined ? '' : html` · waiting on ${item.waitingOn.join(', ')}`}${item.reason === undefined ? '' : html` · <span class="why">${item.reason}</span>`}</span></span><span class="c-side">${run}${moveButtons(panel, item)}${itemMenu(panel, item, ui)}</span></div>`;
+  }${item.waitingOn === undefined ? '' : html` · waiting on ${item.waitingOn.join(', ')}`}${item.reason === undefined ? '' : html` · <span class="why">${item.reason}</span>`}</span></span><span class="c-side">${run}${moveButtons(panel, item, why)}${itemMenu(panel, item, ui, why)}</span></div>`;
 }
 
 /** What each state is called in the view: what it means to the person, rather than the queue file's word. */
@@ -185,15 +201,16 @@ function recentEvents(stream: QueueStream | undefined, ui: UiState): SafeHtml {
 }
 
 function panelView(panel: QueuePanel, stream: QueueStream | undefined, ui: UiState, now: number): SafeHtml {
-  const watch = stream?.watch ?? 'unknown';
+  const { state } = panel.watch;
+  const why = panel.watch.state === 'watched' ? undefined : panel.watch.why;
   const polling = panel.queue?.polling;
   const paused = polling?.paused;
   const held = panel.queue?.held;
   const underway = ui.underway[`queue:${panel.repo}/${panel.workflow}`];
   return html`<section class="qpanel">
-<div class="srcbar"><span class="h${watch === 'watched' ? '' : ' held'}"></span><span class="nm">${panel.repo} / ${panel.workflow}</span>${
+<div class="srcbar"><span class="h${why === undefined ? '' : ' held'}"></span><span class="nm">${panel.repo} / ${panel.workflow}</span>${
     underway === undefined
-      ? html`<span class="pill ${watch === 'watched' ? 'p-pass' : 'p-skip'}">${watch}</span>`
+      ? html`<span class="pill ${why === undefined ? 'p-pass' : 'p-skip'}">${state}</span>`
       : html`<span class="busy">${underway}</span>`
   }${
     polling === undefined
@@ -204,11 +221,13 @@ function panelView(panel: QueuePanel, stream: QueueStream | undefined, ui: UiSta
       ? ''
       : html`<span class="warnchip">held${held.until === undefined ? '' : html` until ${clock(held.until, ui.tz)}`}: ${held.reason}</span>`
   }${
-    queueOffered(panel, 'poll-queue')
-      ? html`<button class="btn" data-action="poll-queue" data-repo="${panel.repo}" data-workflow="${panel.workflow}" title="poll now">poll</button>`
-      : ''
+    !queueOffered(panel, 'poll-queue')
+      ? ''
+      : why === undefined
+        ? html`<button class="btn" data-action="poll-queue" data-repo="${panel.repo}" data-workflow="${panel.workflow}" title="poll now">poll</button>`
+        : html`<span class="act"><button class="btn" disabled title="${why}">poll</button><span class="act-why">${why}</span></span>`
   }</div>
-${stream?.polls === 'ticket' && queueOffered(panel, 'add-ticket') ? addForm(panel, ui) : ''}
+${stream?.polls === 'ticket' && queueOffered(panel, 'add-ticket') ? addForm(panel, ui, why) : ''}
 ${panel.problem === undefined ? '' : html`<div class="code bad">${panel.problem}</div>`}
 ${stream?.error === undefined ? '' : html`<div class="code bad">${stream.error}</div>`}
 <div class="statebar">${QUEUE_STATES.map((state) => html`<span class="sf"><i class="d ${state}"></i>${LABELS[state]} <span class="n">${panel.counts[state]}</span></span>`)}</div>
@@ -222,7 +241,7 @@ ${
         const open = !ui.folded.includes(id);
         const heading = html`<button class="qsec grp-t${open ? ' open' : ''}" data-action="toggle-queue-section" data-section="${id}" aria-expanded="${open ? 'true' : 'false'}"><span class="caret">›</span>${LABELS[state]} · ${items.length}</button>`;
         if (!open) return heading;
-        return html`${heading}<div class="qbox">${items.map((item) => itemRow(panel, item, ui))}</div>`;
+        return html`${heading}<div class="qbox">${items.map((item) => itemRow(panel, item, ui, why))}</div>`;
       })
 }
 ${recentEvents(stream, ui)}
