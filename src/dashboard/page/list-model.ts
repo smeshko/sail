@@ -1,6 +1,7 @@
 // The list's model: the index's repositories (from `listRepos`) turned into the grouped rows each view draws, and the
 // counts the sidebar shows. Pure, with no markup. The views are Active (live runs, those that wait on a person first),
-// Queues (one row per queue, under its repository) and History (finished runs, failed then done).
+// Queues (one row per queue, under its repository) and History (finished runs, one group per start day).
+import { dayOf, dayOfMs } from './format';
 import { type ListRepo, type ListRun, type ListWorkflow, newestFirst, workflowOf } from './index-model';
 
 export const VIEWS = ['active', 'queues', 'history'] as const;
@@ -70,21 +71,34 @@ export function activeGroups(repos: readonly ListRepo[]): ListGroup[] {
   ];
 }
 
-/** The finished runs, failed then done, newest first. */
-export function historyGroups(repos: readonly ListRepo[]): ListGroup[] {
+export interface DayClock {
+  /** ms since the epoch */
+  now: number;
+  /** minutes east of UTC */
+  tz: number;
+}
+
+/**
+ * The finished runs, newest first across statuses, cut into one group per start day at the clock's offset: `Today`,
+ * `Yesterday`, then the date. A run with no readable start time goes in a last group.
+ */
+export function historyGroups(repos: readonly ListRepo[], clock: DayClock): ListGroup[] {
+  const today = dayOfMs(clock.now, clock.tz);
+  const yesterday = dayOfMs(clock.now - 86_400_000, clock.tz);
+  const days = new Map<string, RunRow[]>();
+  const undated: RunRow[] = [];
+  for (const row of runRows(repos, isFinished)) {
+    const day = dayOf(row.run.startedAt, clock.tz);
+    if (day === undefined) undated.push(row);
+    else days.set(day, [...(days.get(day) ?? []), row]);
+  }
   return [
-    ...groupOf(
-      'history',
-      'failed',
-      'failed',
-      runRows(repos, (run) => run.status === 'failed'),
-    ),
-    ...groupOf(
-      'history',
-      'done',
-      'done',
-      runRows(repos, (run) => run.status === 'completed'),
-    ),
+    ...[...days].map(([day, rows]) => ({
+      id: `history:${day}`,
+      label: day === today ? 'Today' : day === yesterday ? 'Yesterday' : day,
+      rows,
+    })),
+    ...groupOf('history', 'undated', 'no start time', undated),
   ];
 }
 
@@ -112,10 +126,15 @@ export function queueGroups(repos: readonly ListRepo[]): ListGroup[] {
 }
 
 /** The view's groups, over `repoFilter`'s repository alone when one is given. */
-export function groupsOf(view: ViewName, repos: readonly ListRepo[], repoFilter?: string): ListGroup[] {
+export function groupsOf(
+  view: ViewName,
+  repos: readonly ListRepo[],
+  repoFilter: string | undefined,
+  clock: DayClock,
+): ListGroup[] {
   const kept = repoFilter === undefined ? repos : repos.filter((repo) => repo.name === repoFilter);
   if (view === 'active') return activeGroups(kept);
-  if (view === 'history') return historyGroups(kept);
+  if (view === 'history') return historyGroups(kept, clock);
   return queueGroups(kept);
 }
 
@@ -148,7 +167,7 @@ export function filterRows(groups: readonly ListGroup[], text: string): ListGrou
 /** What each view lists under the repository filter: the sidebar's counts. */
 export function viewCounts(repos: readonly ListRepo[], repoFilter?: string): Record<ViewName, number> {
   const count = (view: ViewName) =>
-    groupsOf(view, repos, repoFilter).reduce((sum, group) => sum + group.rows.length, 0);
+    groupsOf(view, repos, repoFilter, { now: 0, tz: 0 }).reduce((sum, group) => sum + group.rows.length, 0);
   return { active: count('active'), queues: count('queues'), history: count('history') };
 }
 

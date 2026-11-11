@@ -678,7 +678,7 @@ The sidebar's first entry: it opens the needs attention pane, and its count is t
 _Avoid_: alerts, notifications
 
 **History view**:
-The list of ended runs: the failed ones under `failed`, then the completed ones under `done`.
+The list of ended runs, failed and completed together: one newest-first list grouped by the day a run started (`Today`, `Yesterday`, then the date), with the runs that have no start time last.
 _Avoid_: archive, past runs
 
 **View header**:

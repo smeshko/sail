@@ -18,7 +18,10 @@ export const MOVES: Record<string, number> = { j: 1, ArrowDown: 1, ArrowRight: 1
 /** What the list shows now: its groups under the repository filter and the filter field. */
 function shown(store: Store) {
   const { ui, host } = store;
-  return filterRows(groupsOf(ui.view, listRepos(store.index ?? [], host.now()), ui.repoFilter), ui.listFilter);
+  return filterRows(
+    groupsOf(ui.view, listRepos(store.index ?? [], host.now()), ui.repoFilter, { now: host.now(), tz: ui.tz }),
+    ui.listFilter,
+  );
 }
 
 /** The row with `id` in what the list shows. */

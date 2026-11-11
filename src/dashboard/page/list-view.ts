@@ -1,6 +1,6 @@
 // The list: the one component every view draws its rows on, in the centre. A head names the view with its count, which
 // reads `n of m` while the filter field narrows it, and carries the field itself. Under it,
-// folding groups: Active's `waiting on you` and `running`, History's `failed` and `done`, and in Queues one per
+// folding groups: Active's `waiting on you` and `running`, History's days, and in Queues one per
 // repository. A run's row is a `div` holding two sibling buttons: its own, which opens the run and shows on one line
 // its status, id, title, repository › workflow, stalled mark, duration, cost and stop reason, with a problem wrapping
 // inside it, and, but on a completed run, a ⋯ of its own that opens the run and a menu of what it offers: Resume,
@@ -160,7 +160,7 @@ export function renderList(
   now: number,
   offers?: RunActions | undefined,
 ): SafeHtml {
-  const all = groupsOf(view, repos, ui.repoFilter);
+  const all = groupsOf(view, repos, ui.repoFilter, { now, tz: ui.tz });
   const shown = filterRows(all, ui.listFilter);
   const narrowed = ui.listFilter.trim() !== '';
   const count = narrowed ? `${total(shown)} of ${total(all)}` : String(total(all));

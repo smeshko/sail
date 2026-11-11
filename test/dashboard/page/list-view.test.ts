@@ -42,7 +42,7 @@ const repos: ListRepo[] = [
       offers: { watch: { enabled: true }, unwatch: { enabled: true }, workflows: {} },
     },
   ),
-  repo('beta', [run('b-done', 'completed', '2026-10-01T06:00:00Z', { title: 'Done work' })], {
+  repo('beta', [run('b-done', 'completed', '2026-09-30T06:00:00Z', { title: 'Done work' })], {
     offers: { watch: { enabled: true }, workflows: {} },
   }),
 ];
@@ -142,9 +142,11 @@ test('a completed run has no ⋯', () => {
   expect(draw('history')).toContain('data-action="run-menu" data-repo="alpha" data-run="a-fail"');
 });
 
-test('History lists failed then done and Queues one row per queue under its repository, with Watch all on each header row', () => {
+test('History lists one group per start day and Queues one row per queue under its repository, with Watch all on each header row', () => {
   const history = draw('history');
-  expect(heads(history)).toEqual(['history:failed failed 1', 'history:done done 1']);
+  expect(heads(history)).toEqual(['history:2026-10-01 Today 1', 'history:2026-09-30 Yesterday 1']);
+  expect(history).not.toContain('history:failed');
+  expect(history).not.toContain('history:done');
   const queues = draw('queues');
   expect(queues).toContain('<span class="lh-t">Queues</span><span class="c">1</span>');
   expect(queues.match(/data-action="select-queue" data-queue="alpha\/flow"/g)).toHaveLength(1);

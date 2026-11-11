@@ -1584,7 +1584,7 @@ test('booted with ?repo=&run=&view=history the run opens beside the History list
 });
 
 describe('the list by keyboard (ADW-522)', () => {
-  /** Boots on the first index in History: failed FAKE-2, then done runs. */
+  /** Boots on the first index in History: one group per start day, FAKE-1 (09-25), FAKE-2 (09-23), FAKE-4 (09-22). */
   const bootHistory = () => {
     page = boot(host);
     plainIndex();
@@ -1593,16 +1593,21 @@ describe('the list by keyboard (ADW-522)', () => {
     return page;
   };
 
+  /** Moves the cursor onto FAKE-2's row: its group header is the third entry, the row the fourth. */
+  const toFake2 = () => {
+    for (let i = 0; i < 4; i++) host.press('j');
+  };
+
   test('j and k move the cursor one entry and stop at both ends', () => {
     const p = bootHistory();
     expect(p.ui.view).toBe('history');
     host.press('j');
-    expect(p.ui.listCursor).toBe('history:failed');
+    expect(p.ui.listCursor).toBe('history:2026-09-25');
     host.press('j');
-    expect(p.ui.listCursor).toBe(`run:alpha/${FAKE_2_ID}`);
+    expect(p.ui.listCursor?.startsWith('run:alpha/FAKE-1-')).toBe(true);
     host.press('k');
     host.press('k');
-    expect(p.ui.listCursor).toBe('history:failed');
+    expect(p.ui.listCursor).toBe('history:2026-09-25');
     for (let i = 0; i < 9; i++) host.press('ArrowDown');
     const last = p.ui.listCursor;
     expect(last?.startsWith('run:')).toBe(true);
@@ -1614,8 +1619,7 @@ describe('the list by keyboard (ADW-522)', () => {
 
   test('an index that drops the cursor run leaves the cursor alone until the next move, which lands on the first entry', () => {
     const p = bootHistory();
-    host.press('j');
-    host.press('j');
+    toFake2();
     expect(p.ui.listCursor).toBe(`run:alpha/${FAKE_2_ID}`);
     const repos = index(m.registryDir).map((repo) => ({
       ...repo,
@@ -1626,22 +1630,22 @@ describe('the list by keyboard (ADW-522)', () => {
     expect(p.ui.listCursor).toBe(`run:alpha/${FAKE_2_ID}`);
     expect(host.regions.list).not.toContain(' cur"');
     host.press('j');
-    expect(p.ui.listCursor).toBe(`history:done`);
+    expect(p.ui.listCursor).toBe('history:2026-09-25');
     host.press('k');
     host.press('k');
-    expect(p.ui.listCursor).toBe(`history:done`);
+    expect(p.ui.listCursor).toBe('history:2026-09-25');
   });
 
   test('Enter opens the row under the cursor, and folds the group under it', () => {
     const p = bootHistory();
     host.press('j');
     host.press('Enter');
-    expect(p.ui.listFolded).toEqual(['history:failed']);
+    expect(p.ui.listFolded).toEqual(['history:2026-09-25']);
     host.advance(100);
-    expect(host.regions.list).not.toContain(`data-run="${FAKE_2_ID}"`);
+    expect(host.regions.list).not.toContain('data-run="FAKE-1-');
     host.press('Enter');
     expect(p.ui.listFolded).toEqual([]);
-    host.press('j');
+    for (let i = 0; i < 3; i++) host.press('j');
     host.press('Enter');
     expect(host.open('run=').map((socket) => socket.query)).toEqual([runQuery('alpha', FAKE_2_ID)]);
     expect([p.ui.repo, p.ui.runId]).toEqual(['alpha', FAKE_2_ID]);
@@ -1658,8 +1662,7 @@ describe('the list by keyboard (ADW-522)', () => {
 
   test('. opens the menu of the run under the cursor', () => {
     const p = bootHistory();
-    host.press('j');
-    host.press('j');
+    toFake2();
     host.press('.');
     expect([p.ui.runId, p.ui.runMenu]).toEqual([FAKE_2_ID, { runId: FAKE_2_ID, at: 'row' }]);
     host.advance(100);
@@ -1701,7 +1704,7 @@ describe('the list by keyboard (ADW-522)', () => {
     host.press('/', true);
     expect([p.ui.view, p.ui.listCursor, p.ui.runId, host.focused]).toEqual([
       'history',
-      'history:failed',
+      'history:2026-09-25',
       undefined,
       [],
     ]);
@@ -1714,7 +1717,7 @@ describe('the list by keyboard (ADW-522)', () => {
     dom.field('list', 'list-filter').value = 'fake';
     host.type('list-filter', 'fake');
     host.advance(100);
-    host.click({ action: 'toggle-list-group', group: 'history:done' });
+    host.click({ action: 'toggle-list-group', group: 'history:2026-09-22' });
     host.advance(100);
     expect(dom.field('list', 'list-filter').value).toBe('fake');
     expect(p.ui.listFilter).toBe('fake');
@@ -1745,8 +1748,7 @@ describe('the list by keyboard (ADW-522)', () => {
 
   test('with a run open, j and k move the card cursor as before and leave the list cursor alone, and Escape steps back to the list', () => {
     const p = bootHistory();
-    host.press('j');
-    host.press('j');
+    toFake2();
     host.press('Enter');
     replay(host.open('run=')[0], fake2Dir(m));
     host.advance(100);
@@ -1758,7 +1760,7 @@ describe('the list by keyboard (ADW-522)', () => {
     host.advance(100);
     expect([p.ui.runId, host.details.at(-1)]).toEqual([undefined, false]);
     host.press('j');
-    expect(p.ui.listCursor).toBe('history:done');
+    expect(p.ui.listCursor).toBe('history:2026-09-22');
   });
 
   test('a redraw of the list that moves no cursor, such as the tick, leaves its scroll alone (review R8)', () => {
@@ -1766,7 +1768,7 @@ describe('the list by keyboard (ADW-522)', () => {
     host.press('j');
     host.advance(100);
     host.revealed = [];
-    host.click({ action: 'toggle-list-group', group: 'history:done' });
+    host.click({ action: 'toggle-list-group', group: 'history:2026-09-22' });
     host.advance(100);
     expect(host.regions.list).toBeDefined();
     expect(host.revealed).toEqual([]);
@@ -1779,7 +1781,7 @@ describe('the list by keyboard (ADW-522)', () => {
     host.press('k');
     host.advance(100);
     host.revealed = [];
-    host.click({ action: 'toggle-list-group', group: 'history:done' });
+    host.click({ action: 'toggle-list-group', group: 'history:2026-09-22' });
     host.advance(100);
     expect(host.regions.list).toBeDefined();
     expect(host.revealed).toEqual([]);

@@ -45,6 +45,7 @@ const beta = repo('beta', [
   run('b-fail', 'failed', '2026-10-01T09:30:00Z'),
   run('b-done', 'completed', '2026-10-01T12:00:00Z'),
 ]);
+const CLOCK = { now: Date.parse('2026-10-01T12:00:00Z'), tz: 0 };
 const ids = (groups: ReturnType<typeof activeGroups>) => groups.map((g) => [g.label, g.rows.map((r) => r.id)]);
 
 test('activeGroups puts waiting-on-you runs first and running ones after, each newest first, and leaves finished runs out', () => {
@@ -67,11 +68,46 @@ test('waitsOnPerson is true for a live run that is not running', () => {
   ).toEqual([false, true, true, true, false, false]);
 });
 
-test('historyGroups gives failed then completed runs, newest first, across repositories', () => {
-  expect(ids(historyGroups([alpha, beta]))).toEqual([
-    ['failed', ['run:beta/b-fail', 'run:alpha/a-fail']],
-    ['done', ['run:beta/b-done', 'run:alpha/a-done']],
+test('historyGroups groups finished runs by start day, Today and Yesterday first, newest first across statuses', () => {
+  const one = repo('one', [
+    run('o-old', 'failed', '2026-09-20T10:00:00Z'),
+    run('o-today', 'completed', '2026-10-01T09:00:00Z'),
+    run('o-live', 'running', '2026-10-01T10:00:00Z'),
   ]);
+  const two = repo('two', [
+    run('t-yday', 'failed', '2026-09-30T08:00:00Z'),
+    run('t-today', 'failed', '2026-10-01T11:00:00Z'),
+    run('t-yday2', 'completed', '2026-09-30T23:00:00Z'),
+  ]);
+  const groups = historyGroups([one, two], CLOCK);
+  expect(groups.map((g) => g.id)).toEqual(['history:2026-10-01', 'history:2026-09-30', 'history:2026-09-20']);
+  expect(ids(groups)).toEqual([
+    ['Today', ['run:two/t-today', 'run:one/o-today']],
+    ['Yesterday', ['run:two/t-yday2', 'run:two/t-yday']],
+    ['2026-09-20', ['run:one/o-old']],
+  ]);
+});
+
+test("historyGroups takes the day at the clock's offset", () => {
+  const late = repo('late', [run('l1', 'failed', '2026-10-01T23:30:00Z')]);
+  expect(ids(historyGroups([late], CLOCK))).toEqual([['Today', ['run:late/l1']]]);
+  const ahead = historyGroups([late], { now: CLOCK.now, tz: 60 });
+  expect(ahead.map((g) => [g.id, g.label])).toEqual([['history:2026-10-02', '2026-10-02']]);
+  expect(historyGroups([late], { now: Date.parse('2026-10-01T23:30:00Z'), tz: 60 })[0]?.label).toBe('Today');
+});
+
+test('historyGroups puts a run with no start time in a last group', () => {
+  const r = repo('x', [
+    { runId: 'x-none', status: 'failed', workflow: 'flow@1' },
+    run('x-bad', 'completed', 'not a time'),
+    run('x-ok', 'completed', '2026-10-01T09:00:00Z'),
+  ]);
+  const groups = historyGroups([r], CLOCK);
+  expect(groups.map((g) => [g.id, g.label])).toEqual([
+    ['history:2026-10-01', 'Today'],
+    ['history:undated', 'no start time'],
+  ]);
+  expect(groups[1]?.rows.map((row) => row.id).sort()).toEqual(['run:x/x-bad', 'run:x/x-none']);
 });
 
 test('queueGroups gives a group for every repository, with a row per queue and none for a workflow without one', () => {
@@ -90,7 +126,7 @@ test('queueGroups gives a group for every repository, with a row per queue and n
 });
 
 test('groupsOf with a repository filter keeps only that repository, and viewCounts counts the same rows', () => {
-  expect(ids(groupsOf('active', [alpha, beta], 'alpha'))).toEqual([
+  expect(ids(groupsOf('active', [alpha, beta], 'alpha', CLOCK))).toEqual([
     ['waiting on you', ['run:alpha/a-run2']],
     ['running', ['run:alpha/a-run1']],
   ]);
@@ -98,7 +134,7 @@ test('groupsOf with a repository filter keeps only that repository, and viewCoun
   expect(viewCounts([alpha, beta], 'alpha')).toEqual({ active: 2, queues: 0, history: 2 });
   const q = repo('q', [], { workflows: [{ name: 'w', runs: [], queue: { waiting: 0 } }] });
   expect(viewCounts([q, alpha], 'q').queues).toBe(1);
-  expect(groupsOf('queues', [q, alpha], 'q').map((g) => g.id)).toEqual(['queues:q']);
+  expect(groupsOf('queues', [q, alpha], 'q', CLOCK).map((g) => g.id)).toEqual(['queues:q']);
   expect(VIEWS).toEqual(['active', 'queues', 'history']);
 });
 
@@ -116,7 +152,9 @@ test('filterRows matches a title fragment in any case and drops a group left emp
   expect(ids(filterRows(groups, 'adw-2'))).toEqual([['waiting on you', ['run:alpha/a-run2']]]);
   expect(ids(filterRows(groups, 'zzz'))).toEqual([]);
   expect(filterRows(groups, '  ')).toEqual(groups);
-  expect(ids(filterRows(historyGroups([alpha, beta]), 'stage_error'))).toEqual([['failed', ['run:alpha/a-fail']]]);
+  expect(ids(filterRows(historyGroups([alpha, beta], CLOCK), 'stage_error'))).toEqual([
+    ['Today', ['run:alpha/a-fail']],
+  ]);
   expect(ids(filterRows(activeGroups([alpha, beta]), 'beta'))).toEqual([
     ['waiting on you', ['run:beta/b-susp', 'run:beta/b-bad']],
     ['running', ['run:beta/b-run1', 'run:beta/b-run2']],
