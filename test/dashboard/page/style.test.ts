@@ -158,9 +158,9 @@ test('the sidebar is 180px wide by default, and the list beside a run is 340px (
   expect(declarationsOf(':root:not([data-detail="open"]) .main')).toContain('display: none');
 });
 
-test('no sidebar, list-notice or problem rule keeps its text on one line, so labels wrap rather than clip (ADW-522)', () => {
+test('no sidebar or problem rule keeps its text on one line, so labels wrap rather than clip (ADW-522)', () => {
   const wrapping = rulesOf().filter(([selectors]) =>
-    selectors.some((each) => /^\.(side\b|side-|r-problem|lgrp-p|list-notice|r-menu|lgh \.nm)/.test(each)),
+    selectors.some((each) => /^\.(side\b|side-|r-problem|lgrp-p|r-menu|lgh \.nm)/.test(each)),
   );
   expect(wrapping.length).toBeGreaterThan(8);
   for (const [selectors, body] of wrapping)

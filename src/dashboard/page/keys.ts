@@ -65,11 +65,9 @@ export const keys: Record<string, (store: Store) => void> = {
     const { ui } = store;
     if (ui.runMenu !== undefined) {
       delete ui.runMenu;
-      store.actor.disarm();
       store.mark('list');
     } else if (ui.itemMenu !== undefined) {
       delete ui.itemMenu;
-      store.actor.disarm();
       store.mark('main');
     } else if (ui.attention) closeAttention(store);
     else if (ui.file !== undefined) closeFile(store);
@@ -92,11 +90,18 @@ export const keys: Record<string, (store: Store) => void> = {
 };
 
 /**
- * Handles `key`: in an input, Escape takes the focus off and nothing else is handled; else a cursor move, clamped to the
- * cards or, with none open, to the list's entries, else the key's function. Answers true for `/`, whose default would
- * type it into the field just focused.
+ * Handles `key`: while the dialog is open its keys alone; in an input, Escape takes the focus off and nothing else is
+ * handled; else a cursor move, clamped to the cards or, with none open, to the list's entries, else the key's function.
+ * Answers true for `/`, whose default would type it into the field just focused.
  */
-export function onKey(store: Store, key: string, inInput: boolean): boolean {
+export function onKey(store: Store, key: string, inInput: boolean, on?: string): boolean {
+  // While the dialog is open, Escape cancels it, Enter confirms it unless the cancel button holds the focus, and no
+  // other key does anything.
+  if (store.actor.dialogFor() !== undefined) {
+    if (key === 'Escape') store.actor.cancel();
+    else if (key === 'Enter' && on !== 'dialog-cancel') store.actor.confirm();
+    return false;
+  }
   if (inInput) {
     if (key === 'Escape') store.host.blur();
     return false;

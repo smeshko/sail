@@ -136,23 +136,30 @@ test('History lists failed then done and Queues one row per queue under its repo
   expect(queues).toContain('data-action="unwatch" data-repo="alpha">unwatch all');
 });
 
-test('an armed unwatch reads click again, and the watch notice and a problem show on the repository row', () => {
+test('unwatch all is never armed, and a problem shows on the repository row with no answer beside it', () => {
   const markup = renderList(
     'queues',
     [{ ...repos[0], problem: 'cannot read' } as ListRepo, repos[1] as ListRepo],
-    ui({
-      act: {
-        pending: { id: 'unwatch', subject: { kind: 'repo', repo: 'alpha' }, values: {}, sent: false },
-        results: {
-          repo: { id: 'watch', subject: { kind: 'repo', repo: 'alpha' }, text: 'watching flow', place: 'repo' },
-        },
-        drafts: {},
-      },
-    }),
+    ui(),
     NOW,
   ).value;
-  expect(markup).toContain('unwatch all? click again');
-  expect(markup).toContain('<div class="lgrp-p">cannot read</div><div class="lgrp-p">watching flow</div>');
+  expect(markup).toContain('data-action="unwatch" data-repo="alpha">unwatch all</button>');
+  expect(markup).not.toContain('armed');
+  expect(markup.match(/class="lgrp-p"/g)).toHaveLength(1);
+  expect(markup).toContain('<div class="lgrp-p">cannot read</div>');
+});
+
+test("while a watch request is out a repository's watch buttons read the word under way", () => {
+  const markup = draw('queues', { underway: { 'watch:alpha': 'unwatching…' } });
+  expect(markup).toContain('<span class="busy">unwatching…</span>');
+  expect(markup).not.toContain('data-action="unwatch" data-repo="alpha">unwatch all');
+  expect(draw('queues')).not.toContain('busy');
+});
+
+test('while a request for a run is out its row reads the word under way in place of the status dot', () => {
+  const markup = draw('active', { underway: { 'run:alpha/a-run': 'stopping…' } });
+  expect(markup).toContain('<span class="r-line"><span class="busy">stopping…</span><span class="r-id">ADW-1</span>');
+  expect(draw('active')).not.toContain('busy');
 });
 
 test('an empty view says what it lacks', () => {

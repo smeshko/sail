@@ -22,3 +22,29 @@ test('no file of the page and no built page holds a string the prototype is drop
   expect(found(built)).toEqual([]);
   expect(found('a Sunrise board, pushed to Master at 14:02:11 in Azure for ado-17263')).toHaveLength(5);
 }, 30_000);
+
+// The page has no armed button and no notice (ADW-514): an action runs at once, or opens the confirmation dialog, and
+// its answer is a toast. No file of the page may still hold the words of the old arming or of the notices.
+const GONE = [/runNotice/, /queueNotice/, /watchNotice/, /indexNotice/, /\barmed/, /click again/, /second click/];
+
+const leftovers = (text: string) => GONE.filter((pattern) => pattern.test(text)).map(String);
+
+test('no file of the page holds a word of the armed buttons or the notices, and the scan finds each in a made-up one', () => {
+  const files = readdirSync(PAGE);
+  expect(files).toEqual(expect.arrayContaining(['index.html', 'act.ts', 'toast.ts', 'dialog-view.ts']));
+  expect(
+    files.flatMap((file) => leftovers(readFileSync(join(PAGE, file), 'utf8')).map((hit) => `${file}: ${hit}`)),
+  ).toEqual([]);
+  for (const word of [
+    'runNotice',
+    'queueNotice',
+    'watchNotice',
+    'indexNotice',
+    'armedDrop',
+    'click again',
+    'a second click',
+  ]) {
+    expect(leftovers(`// ${word}`)).not.toEqual([]);
+  }
+  expect(leftovers('the disarmed row')).toEqual([]);
+});

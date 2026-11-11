@@ -7,7 +7,14 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { BrowserWindow, ElementLike, EventLike } from '../../src/dashboard/page/host';
 import { type Dashboard, startDashboard } from '../../src/dashboard/server';
-import { FAKE_2_ID, GOLDEN_RUN_ID, type Machine, seedFixtures } from '../helpers/dashboard';
+import {
+  betaWatcher,
+  FAKE_2_ID,
+  fakeClonePorts,
+  GOLDEN_RUN_ID,
+  type Machine,
+  seedFixtures,
+} from '../helpers/dashboard';
 
 let m: Machine | undefined;
 let server: Dashboard | undefined;
@@ -43,6 +50,7 @@ async function bootHeadless(dashboard: Dashboard, search = '') {
   const listeners: Record<string, ((event: EventLike) => void)[]> = {};
   const origin = `http://127.0.0.1:${dashboard.port}`;
   const sockets: WebSocket[] = [];
+  const posted: string[] = [];
   const timers = new Set<ReturnType<typeof setTimeout>>();
   const urls: string[] = [];
   const win: BrowserWindow = {
@@ -56,7 +64,10 @@ async function bootHeadless(dashboard: Dashboard, search = '') {
     },
     location: { host: `127.0.0.1:${dashboard.port}`, pathname: '/', search },
     history: { replaceState: (_state, _title, url) => void urls.push(url) },
-    fetch: (path, init) => fetch(`${origin}${path}`, init),
+    fetch: (path, init) => {
+      if (init.method === 'POST') posted.push(path);
+      return fetch(`${origin}${path}`, init);
+    },
     // Bun's own WebSocket, with the Origin a browser would send.
     WebSocket: class extends WebSocket {
       constructor(url: string) {
@@ -88,7 +99,7 @@ async function bootHeadless(dashboard: Dashboard, search = '') {
       listener({ target: { innerHTML: '', dataset, parentElement: null } satisfies ElementLike });
     }
   };
-  return { ids, text, click, urls };
+  return { ids, text, click, urls, posted };
 }
 
 test("the real bundle boots headless: both repositories, the golden run's eight cards and its $1.35 once its row is clicked, then FAKE-2's denial on the permissions tab", async () => {
@@ -165,4 +176,75 @@ test("a beta queue that can't be read is listed in the Queues view with its prob
   page.click({ action: 'select-queue', queue: 'beta/broken' });
   expect(await until(() => page.text('main').includes('broken queue'))).toBe(true);
   expect(page.text('main')).toContain('queue.json can&#39;t be read');
+}, 30_000);
+
+test('instant tier: on the real bundle and server, a move the watcher refuses draws a red toast quoting the refusal, with no dialog', async () => {
+  m = seedFixtures();
+  betaWatcher(m, { pid: process.pid, sailDir: m.beta.sailDir });
+  const started = startDashboard({ registryDir: m.registryDir, port: 0, followPollMs: 20, indexPollMs: 50 });
+  if ('refused' in started) throw new Error(started.refused);
+  server = started;
+  const page = await bootHeadless(server);
+  expect(page.ids).toEqual(expect.arrayContaining(['toasts']));
+  page.click({ action: 'select-view', view: 'queues' });
+  expect(await until(() => page.text('list').includes('data-action="select-queue"'))).toBe(true);
+  page.click({ action: 'select-queue', queue: 'beta/ticket-to-pr' });
+  expect(await until(() => page.text('main').includes('data-action="poll-queue"'))).toBe(true);
+  page.click({
+    action: 'move-item',
+    dir: 'down',
+    repo: 'beta',
+    workflow: 'ticket-to-pr',
+    key: 'ticket:FAKE-5',
+    target: 'ticket:FAKE-6',
+  });
+  expect(await until(() => page.text('toasts').includes('toast bad'))).toBe(true);
+  expect(page.text('toasts')).toContain('role="alert"');
+  expect(page.text('toasts')).toContain('ticket:FAKE-6 is parked: only a queued item is moved');
+  expect(page.text('dialog')).not.toContain('data-action="dialog-confirm"');
+}, 30_000);
+
+test('confirmed tier: on the real bundle and server, a click on FAKE-2 clean-run fills the dialog with a clean button, and no POST was made', async () => {
+  m = seedFixtures();
+  const leasesDir = join(m.root, 'leases');
+  const started = startDashboard({
+    registryDir: m.registryDir,
+    port: 0,
+    followPollMs: 20,
+    indexPollMs: 50,
+    leasesDir,
+    ports: fakeClonePorts(leasesDir),
+  });
+  if ('refused' in started) throw new Error(started.refused);
+  server = started;
+  const page = await bootHeadless(server);
+  expect(await until(() => page.text('sidebar').includes('<span class="nm">alpha</span>'))).toBe(true);
+  page.click({ action: 'select-view', view: 'history' });
+  expect(await until(() => page.text('list').includes(`data-run="${FAKE_2_ID}"`))).toBe(true);
+  page.click({ action: 'run-menu', repo: 'alpha', run: FAKE_2_ID });
+  expect(await until(() => page.text('list').includes('data-action="clean-run"'))).toBe(true);
+  page.click({ action: 'clean-run', repo: 'alpha', run: FAKE_2_ID });
+  expect(await until(() => page.text('dialog').includes('data-action="dialog-confirm"'))).toBe(true);
+  expect(page.text('dialog')).toContain(`<h2 id="dialog-title">clean ${FAKE_2_ID}</h2>`);
+  expect(page.text('dialog')).toContain('autofocus>clean</button>');
+  expect(page.text('list')).not.toContain('armed');
+  expect(page.posted).toEqual([]);
+}, 30_000);
+
+test('undoable tier: on the real bundle, clear-attention empties attention and draws an undo-toast button, and clicking it brings back the badge of 3', async () => {
+  m = seedFixtures();
+  const started = startDashboard({ registryDir: m.registryDir, port: 0, followPollMs: 20, indexPollMs: 50 });
+  if ('refused' in started) throw new Error(started.refused);
+  server = started;
+  const page = await bootHeadless(server);
+  expect(await until(() => page.text('attention').includes('<span class="badge">3</span>'))).toBe(true);
+  page.click({ action: 'clear-attention' });
+  expect(await until(() => page.text('toasts').includes('data-action="undo-toast"'))).toBe(true);
+  expect(page.text('attention')).not.toContain('<span class="badge">');
+  expect(page.text('toasts')).toContain('<span class="toast-head">all clear</span>');
+  const id = /data-action="undo-toast" data-toast="(\d+)"/.exec(page.text('toasts'))?.[1] ?? '';
+  page.click({ action: 'undo-toast', toast: id });
+  expect(await until(() => page.text('attention').includes('<span class="badge">3</span>'))).toBe(true);
+  expect(page.text('toasts')).not.toContain('toast ok');
+  expect(page.posted).toEqual([]);
 }, 30_000);

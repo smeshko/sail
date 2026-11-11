@@ -60,7 +60,7 @@ class FakeHost implements PageHost {
   private timers = new Map<number, { at: number; fn: () => void }>();
   private next = 1;
   private action?: (action: string, data: Record<string, string>) => void;
-  private key?: (key: string, inInput: boolean) => boolean;
+  private key?: (key: string, inInput: boolean, on?: string) => boolean;
 
   constructor(private readonly machine: Machine) {}
 
@@ -79,8 +79,20 @@ class FakeHost implements PageHost {
   onAction(handler: (action: string, data: Record<string, string>) => void) {
     this.action = handler;
   }
-  onKey(handler: (key: string, inInput: boolean) => boolean) {
+  onKey(handler: (key: string, inInput: boolean, on?: string) => boolean) {
     this.key = handler;
+  }
+  /** The dialog's markup while one is open, and how many times it was opened and closed. */
+  dialog: string | undefined;
+  dialogOpens = 0;
+  dialogCloses = 0;
+  openDialog(html: string) {
+    this.dialog = html;
+    this.dialogOpens++;
+  }
+  closeDialog() {
+    this.dialog = undefined;
+    this.dialogCloses++;
   }
   /** The reads of a run's actions: answered at once, and kept apart from the reads of its calls. */
   actionReads: string[] = [];
@@ -159,9 +171,11 @@ class FakeHost implements PageHost {
   save(key: string, value: string) {
     this.storage.set(key, value);
   }
+  /** Whether the clipboard takes a copy. */
+  copyTakes = true;
   async copy(text: string) {
     this.copied.push(text);
-    return true;
+    return this.copyTakes;
   }
   setTheme(theme: string) {
     this.theme = theme;
@@ -222,8 +236,8 @@ class FakeHost implements PageHost {
   click(data: Record<string, string>) {
     this.action?.(data.action ?? '', data);
   }
-  press(key: string, inInput = false) {
-    return this.key?.(key, inInput);
+  press(key: string, inInput = false, on?: string) {
+    return this.key?.(key, inInput, on);
   }
   /** The open sockets whose query starts with `prefix`. */
   open(prefix: string) {
@@ -268,6 +282,9 @@ afterEach(() => {
   page = undefined;
   m.remove();
 });
+
+/** The toasts on the stack, as `<kind> <head>: <text>`. */
+const toasts = () => (page?.ui.toasts ?? []).map((each) => `${each.kind} ${each.head}: ${each.text}`);
 
 /** Lets the reads' promises settle. */
 const settle = () => Bun.sleep(0);
@@ -317,7 +334,16 @@ test('boot draws the sidebar and the list from the first index and opens no run;
   page = boot(host);
   expect(host.sockets.map((socket) => socket.query)).toEqual(['index=1']);
   host.advance(100);
-  expect(host.renders.sort()).toEqual(['attention', 'drawer', 'inspector', 'list', 'main', 'sidebar', 'status']);
+  expect(host.renders.sort()).toEqual([
+    'attention',
+    'drawer',
+    'inspector',
+    'list',
+    'main',
+    'sidebar',
+    'status',
+    'toasts',
+  ]);
   plainIndex();
   expect(host.open('run=')).toEqual([]);
   host.renders = [];
@@ -822,6 +848,35 @@ test('keys move the cursor, Enter opens a timeline, ] and [ step it, Escape goes
   for (let i = 0; i < 20; i++) host.press('ArrowRight');
   host.advance(100);
   expect(cursor()).toBe('publish#1');
+});
+
+test('a copy that took draws one ok toast reading what it copied, and 4,000 ms on it is gone', async () => {
+  page = boot(host);
+  host.click({ action: 'copy', text: 'sail show X' });
+  await settle();
+  host.advance(100);
+  expect(host.regions.toasts).toContain('<div class="toast ok" role="status" data-toast="1">');
+  expect(host.regions.toasts).toContain(
+    '<span class="toast-head">copy</span> <span class="toast-text">copied sail show X</span>',
+  );
+  host.advance(3899);
+  expect(host.regions.toasts).toContain('copied sail show X');
+  host.advance(1);
+  host.advance(100);
+  expect(host.regions.toasts).toBe('');
+});
+
+test('a copy the host refuses draws a red alert that is still drawn 60 s on, until dismiss-toast removes it', async () => {
+  page = boot(host);
+  host.copyTakes = false;
+  host.click({ action: 'copy', text: 'x' });
+  await settle();
+  host.advance(60_000);
+  expect(host.regions.toasts).toContain('<div class="toast bad" role="alert" data-toast="1">');
+  expect(host.regions.toasts).toContain('the clipboard refused it');
+  host.click({ action: 'dismiss-toast', toast: '1' });
+  host.advance(100);
+  expect(host.regions.toasts).toBe('');
 });
 
 test('the theme cycles and is saved, a section toggles, copy copies, follow toggles, and the stream buttons read that stream', async () => {
@@ -1780,7 +1835,7 @@ test('the list restores the folds it saved and ignores a stored value that is no
   again.stop();
 });
 
-test("a click on a waiting row's down button posts the move to the queue's move route, a 409 shows its error as the notice, and a 202 clears it", async () => {
+test("a click on a waiting row's down button posts the move to the queue's move route, a 409 is a red toast quoting its error, and a 202 an ok one", async () => {
   const file = join(queueDirOf(m), 'queue.json');
   const queue = JSON.parse(readFileSync(file, 'utf8'));
   const waiting = queue.items.find((item: { state: string }) => item.state === 'queued');
@@ -1795,15 +1850,15 @@ test("a click on a waiting row's down button posts the move to the queue's move 
   host.click({ action: 'move-item', dir: 'down', ...row, key: 'ticket:FAKE-5', target: 'ticket:FAKE-7' });
   await settle();
   host.advance(100);
-  const refused = host.regions.main;
+  const refused = toasts();
   host.postAnswer = { status: 202, body: '{"file":"x"}' };
   host.click({ action: 'move-item', dir: 'up', ...row, key: 'ticket:FAKE-7', target: 'ticket:FAKE-5' });
   await settle();
   host.advance(100);
   expect({
     posts: host.posts,
-    refused: refused?.includes('<span class="warnchip">no watcher is running for &#39;beta&#39;</span>'),
-    cleared: [page.ui.act.results.queue?.text, host.regions.main?.includes('no watcher is running')],
+    refused,
+    after: toasts(),
   }).toEqual({
     posts: [
       {
@@ -1815,8 +1870,8 @@ test("a click on a waiting row's down button posts the move to the queue's move 
         body: { dedupKey: 'ticket:FAKE-7', before: 'ticket:FAKE-5' },
       },
     ],
-    refused: true,
-    cleared: [undefined, false],
+    refused: ["bad move ticket:FAKE-5: no watcher is running for 'beta'"],
+    after: ["bad move ticket:FAKE-5: no watcher is running for 'beta'", `ok move ticket:FAKE-7: asked`],
   });
 });
 
@@ -1827,22 +1882,15 @@ const GOLDEN_PATH = `/api/repos/alpha/runs/${GOLDEN_RUN_ID}`;
 const FAKE_2_PATH = `/api/repos/alpha/runs/${FAKE_2_ID}`;
 const FAKE_3_PATH = `/api/repos/beta/runs/${FAKE_3_ID}`;
 const buttons = (region: string | undefined) =>
-  [
-    ...(region ?? '').matchAll(
-      /<button class="btn( armed)?"( disabled)? ?(?:data-action="(\w+-run)")?>([^<]*)<\/button>/g,
-    ),
-  ].map(([, armed, disabled, action, label]) => [
-    label,
-    action,
-    armed === undefined ? '' : 'armed',
-    disabled === undefined ? '' : 'disabled',
-  ]);
+  [...(region ?? '').matchAll(/<button class="btn"( disabled)? ?(?:data-action="(\w+-run)")?>([^<]*)<\/button>/g)].map(
+    ([, disabled, action, label]) => [label, action, disabled === undefined ? '' : 'disabled'],
+  );
 
-/** The item whose drop a first click has armed. */
-const armedDrop = () => {
-  const pending = page?.ui.act.pending;
-  return pending?.id === 'drop-item' && pending.subject.kind === 'item' ? pending.subject.item : undefined;
-};
+/** The lines of the dialog open now, and its primary button's verb. */
+const dialogLines = () => [...(host.dialog ?? '').matchAll(/<li>([^<]*)<\/li>/g)].map(([, line]) => line);
+const dialogVerb = () => host.dialog?.match(/data-action="dialog-confirm" autofocus>([^<]*)<\/button>/)?.[1];
+/** The subject of the dialog open now: its title, or undefined when none is open. */
+const dialogTitle = () => host.dialog?.match(/<h2 id="dialog-title">([^<]*)<\/h2>/)?.[1];
 
 /** Boots the page on `run` of `repo`, its events replayed, its actions read and its ⋯ menu open, and settled. */
 async function openOffering(repo: string, runId: string, dir: string) {
@@ -1866,96 +1914,89 @@ const settleQueue = () => {
   writeFileSync(file, readFileSync(file, 'utf8').replace('"state": "dispatched"', '"state": "done"'));
 };
 
-test("a failed run's view offers Restart with its stages and the failed one chosen, and no Resume; the first click arms it and posts nothing, the second posts the stage and opens the new run", async () => {
+test("a failed run's view offers Restart with its stages and the failed one chosen, and no Resume; the first click opens the dialog and posts nothing, its confirm posts the stage and opens the new run", async () => {
   await openOffering('alpha', FAKE_2_ID, fake2Dir(m));
   expect(host.actionReads).toEqual([`${GOLDEN_PATH}/actions`, `${FAKE_2_PATH}/actions`]);
   expect(buttons(host.regions.list).filter(([, action]) => action?.endsWith('-run'))).toEqual([
-    ['restart', 'restart-run', '', ''],
-    ['clean', 'clean-run', '', ''],
+    ['restart', 'restart-run', ''],
+    ['clean', 'clean-run', ''],
   ]);
   expect(host.regions.list).toContain(
     '<option value="implement" title="implement#1 and everything after it, in loop fix from iteration 1" selected>',
   );
   host.click({ action: 'restart-run' });
   host.advance(100);
-  expect(host.posts).toEqual([]);
-  expect(buttons(host.regions.list).find(([, action]) => action === 'restart-run')).toEqual([
-    'confirm restart from implement · budget $25.00',
-    'restart-run',
-    'armed',
-    '',
+  expect([host.posts, dialogTitle(), dialogVerb()]).toEqual([[], `restart ${FAKE_2_ID}`, 'restart']);
+  expect(dialogLines()).toEqual([
+    'runs again: implement#1 and everything after it, in loop fix from iteration 1',
+    'budget $25.00',
+    `starts a new run seeded from ${FAKE_2_ID}`,
   ]);
+  expect(host.regions.list).not.toContain('armed');
   host.postAnswer = { status: 202, body: JSON.stringify({ runId: NEW_ID }) };
-  host.click({ action: 'restart-run' });
+  host.click({ action: 'dialog-confirm' });
+  expect(page?.ui.underway).toEqual({ [`run:alpha/${FAKE_2_ID}`]: 'restarting…' });
   await settle();
   host.advance(100);
   expect(host.posts).toEqual([{ path: `${FAKE_2_PATH}/restart`, body: { stage: 'implement' } }]);
-  expect([host.open('run=').map((socket) => socket.query), page?.ui.runId, page?.ui.act.pending]).toEqual([
+  expect([host.open('run=').map((socket) => socket.query), page?.ui.runId, page?.ui.underway]).toEqual([
     [runQuery('alpha', NEW_ID)],
     NEW_ID,
-    undefined,
+    {},
   ]);
+  expect(toasts()).toEqual([`ok restart ${FAKE_2_ID}: started ${NEW_ID}`]);
 });
-
-test('a stage chosen in the list is the one a restart is armed and posted with, and changing it after arming arms again', async () => {
+test('a stage chosen in the list is the one the restart dialog names and its confirm posts', async () => {
   await openOffering('alpha', FAKE_2_ID, fake2Dir(m));
   host.fields.stage = 'spec';
   host.click({ action: 'restart-run' });
-  host.advance(100);
-  expect(buttons(host.regions.list).find(([, action]) => action === 'restart-run')?.[0]).toBe(
-    'confirm restart from spec · budget $25.00',
-  );
+  expect(dialogLines()[0]).toBe('runs again: spec#1 and everything after it');
+  host.click({ action: 'dialog-cancel' });
   host.fields.stage = 'implement';
   host.click({ action: 'restart-run' });
-  host.advance(100);
-  expect(host.posts).toEqual([]);
-  expect(buttons(host.regions.list).find(([, action]) => action === 'restart-run')?.[0]).toBe(
-    'confirm restart from implement · budget $25.00',
-  );
-  host.click({ action: 'restart-run' });
+  expect([host.posts, dialogLines()[0]]).toEqual([
+    [],
+    'runs again: implement#1 and everything after it, in loop fix from iteration 1',
+  ]);
+  host.click({ action: 'dialog-confirm' });
   await settle();
   expect(host.posts).toEqual([{ path: `${FAKE_2_PATH}/restart`, body: { stage: 'implement' } }]);
 });
-
-test("a refusal is shown beside the buttons in the dashboard's words and disarms, and a request that got no answer says so", async () => {
+test("a refusal is a red toast in the dashboard's words that stays until dismissed, and a request that got no answer says so", async () => {
   await openOffering('alpha', FAKE_2_ID, fake2Dir(m));
-  host.click({ action: 'restart-run' });
   host.postAnswer = {
     status: 409,
     body: JSON.stringify({ error: 'sail run: branch sail/x is leased by run FAKE-9-Y' }),
   };
   host.click({ action: 'restart-run' });
+  host.click({ action: 'dialog-confirm' });
   await settle();
-  host.advance(100);
-  expect(host.regions.list).toContain(
-    '<span class="warnchip">sail run: branch sail/x is leased by run FAKE-9-Y</span>',
-  );
+  host.advance(60_000);
+  expect(toasts()).toEqual([`bad restart ${FAKE_2_ID}: sail run: branch sail/x is leased by run FAKE-9-Y`]);
+  expect(host.regions.toasts).toContain('role="alert"');
   expect(buttons(host.regions.list).find(([, action]) => action === 'restart-run')?.[0]).toBe('restart');
   host.postAnswer = { status: 0, body: '' };
   host.click({ action: 'restart-run' });
-  host.click({ action: 'restart-run' });
+  host.click({ action: 'dialog-confirm' });
   await settle();
   host.advance(100);
-  expect(host.regions.list).toContain(
-    '<span class="warnchip">the restart could not be sent: the dashboard did not answer</span>',
-  );
+  expect(toasts().at(-1)).toBe(`bad restart ${FAKE_2_ID}: the restart could not be sent: the dashboard did not answer`);
   expect(page?.ui.runId).toBe(FAKE_2_ID);
 });
-
-test('any other click disarms an armed button', async () => {
+test("a click on another control while the run's dialog is open can't confirm it, and the run menu toggled closes it with nothing sent", async () => {
   await openOffering('alpha', FAKE_2_ID, fake2Dir(m));
   host.click({ action: 'restart-run' });
-  host.click({ action: 'toggle-theme' });
-  host.advance(100);
-  expect([page?.ui.runMenu, host.regions.list?.includes('class="r-menu"')]).toEqual([undefined, false]);
+  expect(dialogTitle()).toBe(`restart ${FAKE_2_ID}`);
   host.click({ action: 'run-menu', repo: 'alpha', run: FAKE_2_ID });
   host.advance(100);
-  expect(buttons(host.regions.list).find(([, action]) => action === 'restart-run')?.[0]).toBe('restart');
+  expect([host.dialog, page?.ui.runMenu, host.posts]).toEqual([undefined, undefined, []]);
+  host.click({ action: 'run-menu', repo: 'alpha', run: FAKE_2_ID });
+  host.advance(100);
   host.click({ action: 'restart-run' });
   await settle();
+  expect(dialogTitle()).toBe(`restart ${FAKE_2_ID}`);
   expect(host.posts).toEqual([]);
 });
-
 test("a run's ⋯ opens the run and its menu under its row, reading what it offers; its ⋯ again or Escape shuts it, and another run's ⋯ moves it there (ADW-466)", async () => {
   page = boot(host);
   firstIndex();
@@ -1984,7 +2025,10 @@ test("a run's ⋯ opens the run and its menu under its row, reading what it offe
   host.click({ action: 'restart-run' });
   host.press('Escape');
   host.advance(100);
-  expect([page?.ui.runId, page?.ui.runMenu, page?.ui.act.pending]).toEqual([FAKE_2_ID, undefined, undefined]);
+  expect([page?.ui.runMenu, host.dialog]).toEqual([FAKE_2_ID, undefined]);
+  host.press('Escape');
+  host.advance(100);
+  expect([page?.ui.runId, page?.ui.runMenu]).toEqual([FAKE_2_ID, undefined]);
   host.click({ action: 'run-menu', repo: 'alpha', run: FAKE_2_ID });
   host.click({ action: 'run-menu', repo: 'alpha', run: GOLDEN_RUN_ID });
   await settle();
@@ -1997,34 +2041,36 @@ test("a run's ⋯ opens the run and its menu under its row, reading what it offe
   expect(host.regions.list).toContain(`<div class="r-menu"><span class="act-why">run ${GOLDEN_RUN_ID} completed`);
 });
 
-test('a suspended run over its dollars offers Resume with a raise field and no Restart; with no raise typed a click gives a notice, and with one the second click posts it and reads the run again', async () => {
+test('a suspended run over its dollars offers Resume with a raise field and no Restart; with no raise typed a click is a red toast, and with one the dialog reads the raise and its confirm posts it and reads the run again', async () => {
   settleQueue();
   await openOffering('beta', FAKE_3_ID, m.beta.runDir);
   expect(host.regions.list).toContain('name="raise"');
   expect(buttons(host.regions.list).filter(([, action]) => action?.endsWith('-run'))).toEqual([
-    ['resume', 'resume-run', '', ''],
-    ['stop', 'stop-run', '', ''],
+    ['resume', 'resume-run', ''],
+    ['stop', 'stop-run', ''],
   ]);
   host.click({ action: 'resume-run' });
   host.advance(100);
-  expect([host.posts, page?.ui.act.pending]).toEqual([[], undefined]);
-  expect(host.regions.list).toContain('give the dollars to raise the budget by: at least 0.01');
+  expect([host.posts, host.dialog]).toEqual([[], undefined]);
+  expect(toasts()).toEqual([`bad resume ${FAKE_3_ID}: give the dollars to raise the budget by: at least 0.01`]);
   host.fields.raise = '5';
   host.click({ action: 'resume-run' });
   host.advance(100);
-  expect(buttons(host.regions.list).find(([, action]) => action === 'resume-run')?.[0]).toBe(
-    'confirm resume · spent $1.06 of $1.00',
-  );
+  expect([dialogTitle(), dialogLines(), dialogVerb()]).toEqual([
+    `resume ${FAKE_3_ID}`,
+    ['spent $1.06 of $1.00', 'raises the budget by $5.00'],
+    'resume',
+  ]);
   const before = host.open('run=')[0];
-  host.click({ action: 'resume-run' });
+  host.click({ action: 'dialog-confirm' });
   await settle();
   expect(host.posts).toEqual([{ path: `${FAKE_3_PATH}/resume`, body: { raise: { usd: 5 } } }]);
   expect([before?.closed, host.open('run=').map((socket) => socket.query)]).toEqual([
     true,
     [runQuery('beta', FAKE_3_ID)],
   ]);
+  expect(toasts().at(-1)).toBe(`ok resume ${FAKE_3_ID}: resumed`);
 });
-
 test('a run the watcher has is offered Resume disabled with the reason, and a click posts nothing', async () => {
   await openOffering('beta', FAKE_3_ID, m.beta.runDir);
   expect(
@@ -2040,7 +2086,7 @@ test('a run the watcher has is offered Resume disabled with the reason, and a cl
   expect(host.posts).toEqual([]);
 });
 
-test("the open run's actions are read again when the index shows its status change, and the armed button is disarmed", async () => {
+test("the open run's actions are read again when the index shows its status change, and the open dialog closes with nothing sent", async () => {
   await openOffering('alpha', FAKE_2_ID, fake2Dir(m));
   host.click({ action: 'restart-run' });
   writeFileSync(join(fake2Dir(m), 'STATUS'), 'running\n');
@@ -2048,7 +2094,7 @@ test("the open run's actions are read again when the index shows its status chan
   await settle();
   host.advance(100);
   expect(host.actionReads).toEqual([`${GOLDEN_PATH}/actions`, `${FAKE_2_PATH}/actions`, `${FAKE_2_PATH}/actions`]);
-  expect(page?.ui.act.pending).toBeUndefined();
+  expect([host.dialog, host.posts]).toEqual([undefined, []]);
   // The run is Active now: its row, and the menu still open under it, move to that view with the next index.
   if (page !== undefined) page.ui.view = 'active';
   plainIndex();
@@ -2095,9 +2141,9 @@ function openBetaQueue() {
 const BETA = { repo: 'beta', workflow: QUEUE_WORKFLOW };
 const QUEUE_PATH = `/api/repos/beta/queues/${QUEUE_WORKFLOW}`;
 
-test('a poll click posts an empty body to the queue poll route; a 200 shows its message beside the header, a 202 says waiting, a 409 its error, and no answer says so (ADW-460)', async () => {
+test('a poll click posts an empty body to the queue poll route; a 200 toasts its message, a 202 its waiting line, a 409 its error, and no answer says so (ADW-460)', async () => {
   openBetaQueue();
-  const notices: (string | undefined)[] = [];
+  const answers: (string | undefined)[] = [];
   for (const answer of [
     { status: 200, body: JSON.stringify({ message: 'sail queue: polled ticket-to-pr' }) },
     { status: 202, body: JSON.stringify({ waiting: 'the watcher has not taken the command yet' }) },
@@ -2108,16 +2154,17 @@ test('a poll click posts an empty body to the queue poll route; a 200 shows its 
     host.click({ action: 'poll-queue', ...BETA });
     await settle();
     host.advance(100);
-    notices.push(page?.ui.act.results.queue?.text);
+    answers.push(toasts().at(-1));
   }
   expect(host.posts).toEqual(Array(4).fill({ path: `${QUEUE_PATH}/poll`, body: {} }));
-  expect(notices).toEqual([
-    'sail queue: polled ticket-to-pr',
-    'the watcher has not taken the command yet',
-    "no watcher is running for 'beta'",
-    'the poll could not be sent: the dashboard did not answer',
+  const head = `poll beta / ${QUEUE_WORKFLOW}`;
+  expect(answers).toEqual([
+    `ok ${head}: sail queue: polled ticket-to-pr`,
+    `ok ${head}: the watcher has not taken the command yet`,
+    `bad ${head}: no watcher is running for 'beta'`,
+    `bad ${head}: the poll could not be sent: the dashboard did not answer`,
   ]);
-  expect(host.regions.main).toContain('<span class="warnchip">the poll could not be sent');
+  expect(host.regions.toasts).toContain('role="alert"');
 });
 
 test('the add form shows once the queue stream has polled tickets; add posts the typed key and force, an empty key posts nothing, and the key is kept across a draw (ADW-460)', async () => {
@@ -2140,7 +2187,7 @@ test('the add form shows once the queue stream has polled tickets; add posts the
   await settle();
   host.advance(100);
   expect(host.posts).toEqual([{ path: `${QUEUE_PATH}/add`, body: { ticketKey: 'FAKE-9', force: true } }]);
-  expect(page?.ui.act.results.queue?.text).toBe('sail queue: queued ticket:FAKE-9 Nine');
+  expect(toasts()).toEqual([`ok add beta / ${QUEUE_WORKFLOW}: sail queue: queued ticket:FAKE-9 Nine`]);
   expect(host.regions.main).toContain('value=""');
   host.fields['add-force'] = '';
   host.click({ action: 'add-ticket', ...BETA });
@@ -2148,31 +2195,59 @@ test('the add form shows once the queue stream has polled tickets; add posts the
   expect(host.posts[1]).toEqual({ path: `${QUEUE_PATH}/add`, body: { ticketKey: 'FAKE-9' } });
 });
 
-test('the first click on drop arms it and posts nothing, the second posts the dedup key, and any other click disarms it (ADW-460)', async () => {
+test('the first click on drop opens the dialog and posts nothing; its title names the item, its lines what goes, its button the verb (ADW-514)', () => {
   openBetaQueue();
   const row = { ...BETA, item: 'ticket:FAKE-6' };
   host.click({ action: 'item-menu', item: row.item });
   host.click({ action: 'drop-item', ...row });
-  host.advance(100);
-  expect([host.posts, armedDrop(), host.regions.main?.includes('confirm drop')]).toEqual([[], 'ticket:FAKE-6', true]);
-  host.click({ action: 'toggle-queue-events' });
-  host.advance(100);
-  expect([host.posts, armedDrop(), host.regions.main?.includes('confirm drop')]).toEqual([[], undefined, false]);
-  host.click({ action: 'item-menu', item: row.item });
-  host.click({ action: 'drop-item', ...row });
+  expect([host.posts, host.dialogOpens, dialogTitle()]).toEqual([[], 1, 'drop ticket:FAKE-6']);
+  expect(host.dialog).toContain(`<li>removes ticket:FAKE-6 from beta / ${QUEUE_WORKFLOW}&#39;s queue</li>`);
+  expect(host.dialog).toContain('<li>it is parked after 2 attempts</li>');
+  expect(host.dialog).toContain('<button class="btn primary" data-action="dialog-confirm" autofocus>drop</button>');
+  expect(host.regions.main).not.toContain('armed');
+  expect(page?.ui.itemMenu).toBe('ticket:FAKE-6');
+});
+
+test('Enter on the dialog posts the drop once, also when a dialog-confirm click follows it, and the answer is a toast', async () => {
+  openBetaQueue();
   host.click({ action: 'item-menu', item: 'ticket:FAKE-5' });
   host.click({ action: 'drop-item', ...BETA, item: 'ticket:FAKE-5' });
-  expect([host.posts, armedDrop(), page?.ui.itemMenu]).toEqual([[], 'ticket:FAKE-5', 'ticket:FAKE-5']);
   host.postAnswer = { status: 200, body: JSON.stringify({ message: 'sail queue: ticket:FAKE-5 dropped' }) };
-  host.click({ action: 'drop-item', ...BETA, item: 'ticket:FAKE-5' });
+  host.press('Enter');
+  host.click({ action: 'dialog-confirm' });
   await settle();
   host.advance(100);
-  expect([host.posts, armedDrop(), page?.ui.itemMenu, page?.ui.act.results.queue?.text]).toEqual([
+  expect([host.posts, host.dialog, host.dialogCloses, toasts()]).toEqual([
     [{ path: `${QUEUE_PATH}/drop`, body: { dedupKey: 'ticket:FAKE-5' } }],
     undefined,
-    undefined,
-    'sail queue: ticket:FAKE-5 dropped',
+    1,
+    ['ok drop ticket:FAKE-5: sail queue: ticket:FAKE-5 dropped'],
   ]);
+});
+
+test('Escape and the cancel button close the dialog and post nothing, and Enter on the cancel button posts nothing either', () => {
+  openBetaQueue();
+  const row = { ...BETA, item: 'ticket:FAKE-6' };
+  host.click({ action: 'drop-item', ...row });
+  host.press('Escape');
+  expect([host.dialog, host.dialogCloses, host.posts]).toEqual([undefined, 1, []]);
+  host.click({ action: 'drop-item', ...row });
+  host.click({ action: 'dialog-cancel' });
+  expect([host.dialog, host.dialogCloses, host.posts]).toEqual([undefined, 2, []]);
+  host.click({ action: 'drop-item', ...row });
+  host.press('Enter', false, 'dialog-cancel');
+  expect([dialogTitle(), host.posts]).toEqual(['drop ticket:FAKE-6', []]);
+  host.click({ action: 'dialog-cancel' });
+  expect([host.dialog, host.posts]).toEqual([undefined, []]);
+});
+
+test('while the dialog is open, j, a and i change nothing', () => {
+  openBetaQueue();
+  host.click({ action: 'drop-item', ...BETA, item: 'ticket:FAKE-6' });
+  const before = [page?.ui.attention, page?.ui.inspector, page?.ui.cursor];
+  for (const key of ['j', 'a', 'i']) host.press(key);
+  expect([page?.ui.attention, page?.ui.inspector, page?.ui.cursor]).toEqual(before);
+  expect(dialogTitle()).toBe('drop ticket:FAKE-6');
 });
 
 test("an item's ⋯ opens its menu, one at a time; its ⋯ again, Escape, another control, or its item drawn running shuts it (ADW-464)", () => {
@@ -2193,7 +2268,10 @@ test("an item's ⋯ opens its menu, one at a time; its ⋯ again, Escape, anothe
   host.click({ action: 'drop-item', ...BETA, item: 'ticket:FAKE-6' });
   host.press('Escape');
   host.advance(100);
-  expect([...menus(), armedDrop(), page?.ui.queue]).toEqual([undefined, 0, undefined, 'beta/ticket-to-pr']);
+  expect([...menus(), host.dialog, page?.ui.queue]).toEqual(['ticket:FAKE-6', 1, undefined, 'beta/ticket-to-pr']);
+  host.press('Escape');
+  host.advance(100);
+  expect(menus()).toEqual([undefined, 0]);
   host.click({ action: 'item-menu', item: 'ticket:FAKE-6' });
   host.click({ action: 'toggle-queue-events' });
   host.advance(100);
@@ -2222,7 +2300,7 @@ test("an item's ⋯ opens its menu, one at a time; its ⋯ again, Escape, anothe
   expect(menus()).toEqual([undefined, 0]);
 });
 
-test('an armed drop is disarmed when its item is drawn dispatched, so it asks again once the item can be dropped (review R6)', () => {
+test('an open drop dialog closes with nothing sent when its item is drawn dispatched, and asks again once the item can be dropped (review R6)', () => {
   openBetaQueue();
   const row = { ...BETA, item: 'ticket:FAKE-6' };
   host.click({ action: 'drop-item', ...row });
@@ -2255,12 +2333,22 @@ test('an armed drop is disarmed when its item is drawn dispatched, so it asks ag
   host.advance(100);
   host.push(host.open('index')[0], withState('parked'));
   host.advance(100);
-  expect([armedDrop(), host.regions.main?.includes('confirm drop')]).toEqual([undefined, false]);
+  expect([host.dialog, host.dialogCloses, host.posts]).toEqual([undefined, 1, []]);
   host.click({ action: 'drop-item', ...row });
-  expect(host.posts).toEqual([]);
+  expect([dialogTitle(), host.posts]).toEqual(['drop ticket:FAKE-6', []]);
 });
 
-test('a requeue click posts at once with the dedup key, and a 409 shows the CLI line as the notice (ADW-460)', async () => {
+test("between a requeue's click and its answer the item's row reads requeuing… in place of its state, and the answer takes it away", async () => {
+  openBetaQueue();
+  host.click({ action: 'requeue-item', ...BETA, item: 'ticket:FAKE-6' });
+  host.advance(100);
+  expect(host.regions.main).toContain('<span class="c-sub"><span class="busy">requeuing…</span> · ');
+  await settle();
+  host.advance(100);
+  expect(host.regions.main).not.toContain('requeuing…');
+});
+
+test('a requeue click posts at once with the dedup key, and a 409 is a red toast quoting the CLI line (ADW-460)', async () => {
   openBetaQueue();
   host.postAnswer = {
     status: 409,
@@ -2269,70 +2357,57 @@ test('a requeue click posts at once with the dedup key, and a 409 shows the CLI 
   host.click({ action: 'requeue-item', ...BETA, item: 'ticket:FAKE-6' });
   await settle();
   host.advance(100);
-  expect([host.posts, page?.ui.act.results.queue?.text]).toEqual([
+  expect([host.posts, toasts()]).toEqual([
     [{ path: `${QUEUE_PATH}/requeue`, body: { dedupKey: 'ticket:FAKE-6' } }],
-    'ticket:FAKE-6 is queued: only a parked or failed item is requeued',
+    ['bad requeue ticket:FAKE-6: ticket:FAKE-6 is queued: only a parked or failed item is requeued'],
   ]);
 });
 
-test('Stop arms on a first click and posts { now: false } on the second, shows the answer beside the buttons, and reads the run again', async () => {
+test('Stop opens the dialog on a first click and posts nothing; its confirm posts { now: false }, toasts the answer, and reads the run again', async () => {
   settleQueue();
   await openOffering('beta', FAKE_3_ID, m.beta.runDir);
   host.click({ action: 'stop-run' });
   host.advance(100);
-  expect(host.posts).toEqual([]);
-  expect(buttons(host.regions.list).find(([, action]) => action === 'stop-run')).toEqual([
-    'confirm stop · at its next call boundary',
-    'stop-run',
-    'armed',
-    '',
+  expect([host.posts, dialogTitle(), dialogLines(), dialogVerb()]).toEqual([
+    [],
+    `stop ${FAKE_3_ID}`,
+    ['stops at its next call boundary', 'the run fails as stopped'],
+    'stop',
   ]);
   host.postAnswer = {
     status: 202,
     body: JSON.stringify({ message: `run ${FAKE_3_ID} stops at its next call boundary (pid 7)` }),
   };
-  host.click({ action: 'stop-run' });
+  host.click({ action: 'dialog-confirm' });
+  host.advance(100);
+  expect(host.regions.list).toContain('<span class="busy">stopping…</span>');
+  expect(host.regions.list).not.toMatch(new RegExp(`<span class="st [^"]*"></span><span class="r-id">${FAKE_3_ID}`));
   await settle();
   host.advance(100);
   expect(host.posts).toEqual([{ path: `${FAKE_3_PATH}/stop`, body: { now: false } }]);
-  expect(host.regions.list).toContain(
-    `<span class="warnchip">run ${FAKE_3_ID} stops at its next call boundary (pid 7)</span>`,
-  );
+  expect(toasts()).toEqual([`ok stop ${FAKE_3_ID}: run ${FAKE_3_ID} stops at its next call boundary (pid 7)`]);
+  expect(host.regions.list).not.toContain('stopping…');
   expect(host.actionReads.filter((path) => path === `${FAKE_3_PATH}/actions`).length).toBeGreaterThan(1);
 });
-
-test('with Stop now ticked, the confirmation says so and the post is { now: true }', async () => {
+test('with Stop now ticked, the dialog says so and the post is { now: true }', async () => {
   settleQueue();
   await openOffering('beta', FAKE_3_ID, m.beta.runDir);
   host.fields.now = 'on';
   host.click({ action: 'stop-run' });
-  host.advance(100);
-  expect(buttons(host.regions.list).find(([, action]) => action === 'stop-run')?.[0]).toBe(
-    'confirm stop now · ends its running call',
-  );
+  expect(dialogLines()[0]).toBe('ends its running call now');
   host.postAnswer = { status: 202, body: JSON.stringify({ message: 'run X ends its running call now (pid 7)' }) };
-  host.click({ action: 'stop-run' });
+  host.click({ action: 'dialog-confirm' });
   await settle();
   expect(host.posts).toEqual([{ path: `${FAKE_3_PATH}/stop`, body: { now: true } }]);
 });
-
-test('ticking Stop now once Stop is armed keeps it armed and makes it say so (review D1)', async () => {
+test('ticking Stop now only records the tick: no dialog opens and nothing is posted', async () => {
   settleQueue();
   await openOffering('beta', FAKE_3_ID, m.beta.runDir);
-  host.click({ action: 'stop-run' });
-  host.advance(100);
   host.fields.now = 'on';
   host.click({ action: 'stop-now' });
   host.advance(100);
-  expect(
-    buttons(host.regions.list)
-      .find(([, action]) => action === 'stop-run')
-      ?.slice(0, 3),
-  ).toEqual(['confirm stop now · ends its running call', 'stop-run', 'armed']);
-  expect(host.regions.list).toContain('data-action="stop-now" checked');
-  expect(host.posts).toEqual([]);
+  expect([page?.ui.act.drafts['stop-run'], host.dialog, host.posts]).toEqual([{ now: 'on' }, undefined, []]);
 });
-
 const domHost = () => {
   const dom = new DomHost(m);
   host = dom;
@@ -2346,26 +2421,22 @@ test("a raise typed in the list's run menu is read from the list and posted with
   dom.field('list', 'raise').value = '5';
   host.click({ action: 'resume-run' });
   host.advance(100);
-  expect(buttons(host.regions.list).find(([, action]) => action === 'resume-run')?.[0]).toBe(
-    'confirm resume · spent $1.06 of $1.00',
-  );
-  expect(host.regions.list).not.toContain('give the dollars to raise the budget by');
+  expect(dialogLines()).toEqual(['spent $1.06 of $1.00', 'raises the budget by $5.00']);
+  expect(toasts()).toEqual([]);
   expect(host.regions.list).toContain('name="raise" min="0.01" step="any" value="5"');
-  host.click({ action: 'resume-run' });
+  host.click({ action: 'dialog-confirm' });
   await settle();
   expect(host.posts).toEqual([{ path: `${FAKE_3_PATH}/resume`, body: { raise: { usd: 5 } } }]);
 });
 
-test("a stage chosen in the list's run menu is read from the list, armed and posted with the restart", async () => {
+test("a stage chosen in the list's run menu is read from the list, named in the dialog and posted with the restart", async () => {
   const dom = domHost();
   await openOffering('alpha', FAKE_2_ID, fake2Dir(m));
   dom.field('list', 'stage').value = 'spec';
   host.click({ action: 'restart-run' });
   host.advance(100);
-  expect(buttons(host.regions.list).find(([, action]) => action === 'restart-run')?.[0]).toBe(
-    'confirm restart from spec · budget $25.00',
-  );
-  host.click({ action: 'restart-run' });
+  expect(dialogLines()[0]).toBe('runs again: spec#1 and everything after it');
+  host.click({ action: 'dialog-confirm' });
   await settle();
   expect(host.posts).toEqual([{ path: `${FAKE_2_PATH}/restart`, body: { stage: 'spec' } }]);
 });
@@ -2374,65 +2445,48 @@ test("stop now ticked in the list's run menu is read from the list, stays ticked
   settleQueue();
   const dom = domHost();
   await openOffering('beta', FAKE_3_ID, m.beta.runDir);
-  host.click({ action: 'stop-run' });
-  host.advance(100);
   dom.field('list', 'now').checked = true;
   host.click({ action: 'stop-now' });
-  host.advance(100);
-  expect(buttons(host.regions.list).find(([, action]) => action === 'stop-run')).toEqual([
-    'confirm stop now · ends its running call',
-    'stop-run',
-    'armed',
-    '',
-  ]);
-  expect(dom.field('list', 'now').checked).toBe(true);
   host.click({ action: 'stop-run' });
+  host.advance(100);
+  expect(dialogLines()[0]).toBe('ends its running call now');
+  expect(dom.field('list', 'now').checked).toBe(true);
+  host.click({ action: 'dialog-confirm' });
   await settle();
   expect(host.posts).toEqual([{ path: `${FAKE_3_PATH}/stop`, body: { now: true } }]);
 });
-
-test('Clean arms with what it removes, posts {} on the second click, and leaves the run for the index with the cleaned line until a run is selected', async () => {
+test('Clean opens the dialog with what it removes and where the run directory goes, posts {} on confirm, and leaves the run for the index with the cleaned line as a toast', async () => {
   await openOffering('alpha', FAKE_2_ID, fake2Dir(m));
   host.click({ action: 'clean-run' });
   host.advance(100);
-  expect(host.posts).toEqual([]);
-  expect(buttons(host.regions.list).find(([, action]) => action === 'clean-run')?.[0]).toStartWith(
-    'confirm clean · removes run ref · run directory -&gt; ',
-  );
+  expect([host.posts, dialogTitle(), dialogVerb()]).toEqual([[], `clean ${FAKE_2_ID}`, 'clean']);
+  expect(dialogLines()[0]).toBe('removes run ref');
+  expect(dialogLines()[1]).toStartWith('run directory → ');
   const cleaned = `cleaned ${FAKE_2_ID}: run ref; run directory -> ~/.sail/failed-runs/2026-11-01/${FAKE_2_ID}`;
   host.postAnswer = { status: 200, body: JSON.stringify({ message: cleaned, removed: ['run ref'], archived: '/x' }) };
   const before = host.open('run=')[0];
-  host.click({ action: 'clean-run' });
+  host.click({ action: 'dialog-confirm' });
   await settle();
   host.advance(100);
   expect(host.posts).toEqual([{ path: `${FAKE_2_PATH}/clean`, body: {} }]);
-  expect([before?.closed, page?.ui.act.results.list?.text]).toEqual([true, cleaned]);
-  expect(host.regions.list).toContain(`<span class="warnchip list-notice">${cleaned.replace('->', '-&gt;')}</span>`);
-  host.click({ action: 'select-run', repo: 'alpha', run: GOLDEN_RUN_ID });
-  host.advance(100);
-  expect(host.regions.list).not.toContain('cleaned ');
+  expect([before?.closed, toasts()]).toEqual([true, [`ok clean ${FAKE_2_ID}: ${cleaned}`]]);
+  expect(host.regions.toasts).toContain('role="status"');
 });
-
-test('a refused Stop or Clean shows its error beside the buttons and disarms, and any other click disarms an armed one', async () => {
+test('a refused Clean is a red toast quoting its error and the run stays open, and a cancelled dialog posts nothing', async () => {
   await openOffering('alpha', FAKE_2_ID, fake2Dir(m));
   host.click({ action: 'clean-run' });
-  host.postAnswer = { status: 409, body: JSON.stringify({ error: 'run X: a queue item names it' }) };
+  host.click({ action: 'dialog-cancel' });
+  expect(host.posts).toEqual([]);
   host.click({ action: 'clean-run' });
+  host.postAnswer = { status: 409, body: JSON.stringify({ error: 'run X: a queue item names it' }) };
+  host.click({ action: 'dialog-confirm' });
   await settle();
   host.advance(100);
-  expect(host.regions.list).toContain('<span class="warnchip">run X: a queue item names it</span>');
+  expect(toasts()).toEqual([`bad clean ${FAKE_2_ID}: run X: a queue item names it`]);
   expect(buttons(host.regions.list).find(([, action]) => action === 'clean-run')?.[0]).toBe('clean');
   expect(page?.ui.runId).toBe(FAKE_2_ID);
-  host.click({ action: 'clean-run' });
-  host.click({ action: 'toggle-theme' });
-  host.click({ action: 'run-menu', repo: 'alpha', run: FAKE_2_ID });
-  host.advance(100);
-  expect(buttons(host.regions.list).find(([, action]) => action === 'clean-run')?.[0]).toBe('clean');
-  host.click({ action: 'clean-run' });
-  await settle();
   expect(host.posts).toHaveLength(1);
 });
-
 /** The page booted on an index whose beta has a live watcher that watches `workflows`, or none. */
 function bootWatching(workflows?: string[]) {
   page = boot(host);
@@ -2460,71 +2514,81 @@ function bootWatching(workflows?: string[]) {
 }
 const watchClick = (op: string, workflow?: string) =>
   host.click({ action: op, repo: 'beta', ...(workflow === undefined ? {} : { workflow }) });
-/** What the last watch or unwatch answered, shown under the repository: its text, with the repository it names. */
-const watchNotice = () => {
-  const result = page?.ui.act.results.repo;
-  return result !== undefined && 'repo' in result.subject
-    ? { repo: result.subject.repo, text: result.text }
-    : undefined;
-};
-/** The unwatch a first click has armed: the repository, or `<repository>/<workflow>`. */
-const armedWatch = () => {
-  const pending = page?.ui.act.pending;
-  if (pending?.id !== 'unwatch' || pending.sent) return undefined;
-  const { subject } = pending;
-  return subject.kind === 'workflow'
-    ? `${subject.repo}/${subject.workflow}`
-    : 'repo' in subject
-      ? subject.repo
-      : undefined;
-};
+/** What watch and unwatch answered, as toasts. */
+const watchToasts = () => toasts();
 
 test('a Watch click posts the workflow to the repository watch route at once, and says it is watching until the answer', async () => {
   bootWatching();
   host.postAnswer = { status: 200, body: JSON.stringify({ message: 'sail watch: it watches ticket-to-pr' }) };
   watchClick('watch', QUEUE_WORKFLOW);
   expect(host.posts).toEqual([{ path: '/api/repos/beta/watch', body: { workflows: [QUEUE_WORKFLOW] } }]);
-  expect(watchNotice()).toEqual({ repo: 'beta', text: 'watching…' });
+  expect(page?.ui.underway).toEqual({ [`watch:beta/${QUEUE_WORKFLOW}`]: 'watching…' });
   await settle();
-  expect(watchNotice()).toEqual({ repo: 'beta', text: 'sail watch: it watches ticket-to-pr' });
+  expect([page?.ui.underway, watchToasts()]).toEqual([
+    {},
+    [`ok watch beta / ${QUEUE_WORKFLOW}: sail watch: it watches ticket-to-pr`],
+  ]);
   host.advance(100);
-  expect(host.regions.list).toContain('<div class="lgrp-p">sail watch: it watches ticket-to-pr</div>');
+  expect(host.regions.list).not.toContain('<div class="lgrp-p">sail watch: it watches ticket-to-pr</div>');
 });
 
-test('an Unwatch click arms and posts nothing, another action disarms it, and the second click posts the workflow to the unwatch route', async () => {
+test('an Unwatch click posts the workflow to the unwatch route at once, with no dialog and no armed button', async () => {
   bootWatching([QUEUE_WORKFLOW]);
   host.click({ action: 'select-queue', queue: `beta/${QUEUE_WORKFLOW}` });
-  watchClick('unwatch', QUEUE_WORKFLOW);
   host.advance(100);
-  expect([host.posts, armedWatch()]).toEqual([[], `beta/${QUEUE_WORKFLOW}`]);
-  expect(host.regions.main).toContain('unwatch? click again');
-  host.click({ action: 'toggle-list-group', group: 'queues:alpha' });
-  host.advance(100);
-  expect(armedWatch()).toBeUndefined();
-  expect(host.regions.main).not.toContain('click again');
-  watchClick('unwatch', QUEUE_WORKFLOW);
-  expect(host.posts).toEqual([]);
+  expect(host.regions.main).toContain(
+    'data-action="unwatch" data-repo="beta" data-workflow="ticket-to-pr">unwatch</button>',
+  );
+  expect(host.regions.main).not.toContain('armed');
   host.postAnswer = { status: 200, body: JSON.stringify({ message: 'sail unwatch: done' }) };
   watchClick('unwatch', QUEUE_WORKFLOW);
   expect(host.posts).toEqual([{ path: '/api/repos/beta/unwatch', body: { workflows: [QUEUE_WORKFLOW] } }]);
-  expect([armedWatch(), watchNotice()]).toEqual([undefined, { repo: 'beta', text: 'unwatching…' }]);
+  expect([host.dialog, page?.ui.underway]).toEqual([undefined, { [`watch:beta/${QUEUE_WORKFLOW}`]: 'unwatching…' }]);
+  host.advance(100);
+  expect(host.regions.list).not.toContain('armed');
 });
 
-test('Watch all posts an empty list at once, and Unwatch all posts one on its second click', async () => {
+test('an Unwatch toast has an undo that posts the watch with the same body and takes the toast away; the undo toast is drawn at 7,999 ms and gone at 8,000 ms', async () => {
+  bootWatching([QUEUE_WORKFLOW]);
+  host.postAnswer = { status: 200, body: JSON.stringify({ message: 'sail unwatch: done' }) };
+  watchClick('unwatch', QUEUE_WORKFLOW);
+  await settle();
+  host.advance(100);
+  expect(host.regions.toasts).toContain('data-action="undo-toast" data-toast="1">undo</button>');
+  host.advance(7_899);
+  host.advance(0);
+  expect(page?.ui.toasts.map((each) => each.id)).toEqual([1]);
+  host.advance(1);
+  expect(page?.ui.toasts).toEqual([]);
+  // The same again, taken by the undo.
+  watchClick('unwatch', QUEUE_WORKFLOW);
+  await settle();
+  host.postAnswer = { status: 200, body: JSON.stringify({ message: 'sail watch: it watches ticket-to-pr' }) };
+  host.click({ action: 'undo-toast', toast: '2' });
+  expect(host.posts.at(-1)).toEqual({ path: '/api/repos/beta/watch', body: { workflows: [QUEUE_WORKFLOW] } });
+  expect(page?.ui.toasts).toEqual([]);
+  await settle();
+  expect(toasts()).toEqual([`ok watch beta / ${QUEUE_WORKFLOW}: sail watch: it watches ticket-to-pr`]);
+});
+
+test('Watch all posts an empty list at once, and Unwatch all posts one at once and undoes with the workflows watched before the click', async () => {
   bootWatching([QUEUE_WORKFLOW]);
   watchClick('watch');
   expect(host.posts).toEqual([{ path: '/api/repos/beta/watch', body: { workflows: [] } }]);
+  await settle();
   host.posts.length = 0;
-  watchClick('unwatch');
-  expect([host.posts, armedWatch()]).toEqual([[], 'beta']);
+  host.postAnswer = { status: 200, body: JSON.stringify({ message: 'sail unwatch: all' }) };
   watchClick('unwatch');
   expect(host.posts).toEqual([{ path: '/api/repos/beta/unwatch', body: { workflows: [] } }]);
   await settle();
+  host.click({ action: 'undo-toast', toast: String(page?.ui.toasts.at(-1)?.id) });
+  expect(host.posts.at(-1)).toEqual({ path: '/api/repos/beta/watch', body: { workflows: [QUEUE_WORKFLOW] } });
+  await settle();
 });
 
-test('a 202 shows its waiting line, a 409 the CLI refusal, and no answer says so, each under the repository', async () => {
+test('a 202 toasts its waiting line, a 409 the CLI refusal, and no answer says so', async () => {
   bootWatching();
-  const notices: (string | undefined)[] = [];
+  const answers: (string | undefined)[] = [];
   for (const answer of [
     { status: 202, body: JSON.stringify({ message: 'the watcher of beta (pid 7) starts', pid: 7 }) },
     { status: 202, body: JSON.stringify({ waiting: 'the watcher has not taken the command yet' }) },
@@ -2534,13 +2598,13 @@ test('a 202 shows its waiting line, a 409 the CLI refusal, and no answer says so
     host.postAnswer = answer;
     watchClick('watch');
     await settle();
-    notices.push(watchNotice()?.text);
+    answers.push(watchToasts().at(-1));
   }
-  expect(notices).toEqual([
-    'the watcher of beta (pid 7) starts',
-    'the watcher has not taken the command yet',
-    'sail watch: no workflow declares a watch',
-    'the watch could not be sent: the dashboard did not answer',
+  expect(answers).toEqual([
+    'ok watch all beta: the watcher of beta (pid 7) starts',
+    'ok watch all beta: the watcher has not taken the command yet',
+    'bad watch all beta: sail watch: no workflow declares a watch',
+    'bad watch all beta: the watch could not be sent: the dashboard did not answer',
   ]);
 });
 
@@ -2573,6 +2637,26 @@ describe('all clear', () => {
     expect(host.regions.attention).not.toContain('all clear');
     expect(host.posts).toEqual([]);
     expect(host.regions.list).toContain(`data-run="${FAKE_2_ID}"`);
+  });
+
+  test('all clear answers in a toast with an undo, which lists the same items again and takes only its own identities out of storage', async () => {
+    bootOpen();
+    const other = 'another tab: a cleared thing';
+    host.storage.set(CLEARED_KEY, JSON.stringify([other]));
+    host.click({ action: 'clear-attention' });
+    host.advance(100);
+    expect(toasts()).toEqual(['ok all clear: 3 hidden']);
+    expect(page?.ui.toasts[0]?.undo).toBe(true);
+    expect(badge()).toBeUndefined();
+    const saved: string[] = JSON.parse(host.storage.get(CLEARED_KEY) ?? '[]');
+    expect(saved).toContain(other);
+    expect(saved).toHaveLength(4);
+    host.click({ action: 'undo-toast', toast: '1' });
+    host.advance(100);
+    expect(badge()).toBe('3');
+    expect(JSON.parse(host.storage.get(CLEARED_KEY) ?? '[]')).toEqual([other]);
+    expect(page?.ui.toasts).toEqual([]);
+    expect(host.posts).toEqual([]);
   });
 
   test('a cleared run whose row gains another call in error is listed again, with it in the row', () => {
@@ -2681,7 +2765,7 @@ describe('all clear', () => {
   });
 });
 
-test('an index that turns the open queue to watcher not running redraws main with the disabled poll, shuts the open menu and the armed drop, and a poll posts nothing', async () => {
+test('an index that turns the open queue to watcher not running redraws main with the disabled poll, shuts the open menu and closes the drop dialog, and a poll posts nothing', async () => {
   page = boot(host);
   host.push(host.open('index')[0], indexMessage());
   host.click({ action: 'select-queue', queue: `beta/${QUEUE_WORKFLOW}` });
@@ -2689,7 +2773,7 @@ test('an index that turns the open queue to watcher not running redraws main wit
   host.click({ action: 'item-menu', item: 'ticket:FAKE-6' });
   host.click({ action: 'drop-item', repo: 'beta', workflow: QUEUE_WORKFLOW, item: 'ticket:FAKE-6' });
   host.advance(100);
-  expect([page.ui.itemMenu, armedDrop()]).toEqual(['ticket:FAKE-6', 'ticket:FAKE-6']);
+  expect([page.ui.itemMenu, dialogTitle()]).toEqual(['ticket:FAKE-6', 'drop ticket:FAKE-6']);
   host.renders = [];
   const why = "no watcher is running for 'beta': sail watch ticket-to-pr first";
   host.push(host.open('index')[0], indexMessage({ state: 'watcher not running', why }));
@@ -2699,7 +2783,7 @@ test('an index that turns the open queue to watcher not running redraws main wit
     `<button class="btn" disabled title="no watcher is running for &#39;beta&#39;: sail watch ticket-to-pr first">poll</button>`,
   );
   expect(host.regions.main).toContain('<span class="pill p-skip">watcher not running</span>');
-  expect([page.ui.itemMenu, armedDrop()]).toEqual([undefined, undefined]);
+  expect([page.ui.itemMenu, dialogTitle(), host.posts]).toEqual([undefined, undefined, []]);
   const posts = host.posts.length;
   host.click({ action: 'poll-queue', repo: 'beta', workflow: QUEUE_WORKFLOW });
   await settle();

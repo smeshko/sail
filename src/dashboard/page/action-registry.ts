@@ -10,6 +10,7 @@
 // (`reopen`, `leave`, `took`, or open a run), and never does it.
 import type { RunActions } from '../actions';
 import type { OfferedQueue, RepoOffers } from '../offers';
+import type { DialogView } from './dialog-view';
 import { cost } from './format';
 
 const enc = encodeURIComponent;
@@ -62,11 +63,6 @@ export function subjectOf(
   return undefined;
 }
 
-/** Whether `a` and `b` are the same thing: the same kind, and every field the same. */
-export function sameSubject(a: Subject, b: Subject): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
-}
-
 interface ParamBase {
   /** The key of its value in `values` and in a click's `data-*` when `given`. */
   name: string;
@@ -87,15 +83,13 @@ export type Param = ParamBase &
         /** The option chosen before one is. */
         initial?: string | undefined;
         tick?: boolean;
-        /** A second click that finds it changed arms again instead of confirming. */
-        rearm?: boolean;
         /** The `data-action` its field carries, to redraw what depends on it. */
         change?: string;
       }
     | { type: 'text'; placeholder?: string }
   );
 
-/** `instant` is sent at once, `confirmed` after a second click, `undoable` at once with a way back (no action uses it yet). */
+/** `instant` is sent at once, `undoable` at once with a way back, `confirmed` after the confirmation dialog. */
 export type Tier = 'instant' | 'undoable' | 'confirmed';
 
 export type Values = Readonly<Record<string, string>>;
@@ -103,7 +97,14 @@ export type Values = Readonly<Record<string, string>>;
 /** What a repository of the index offers: its queues' offers and its own. */
 export interface OfferedRepo {
   name: string;
-  queues: readonly { workflow: string; offers?: OfferedQueue['offers'] | undefined }[];
+  /** The workflows its watcher watches, for what Unwatch all undoes. */
+  watching?: { workflows: readonly string[] } | undefined;
+  queues: readonly {
+    workflow: string;
+    offers?: OfferedQueue['offers'] | undefined;
+    /** The queue's items, for what a dialog says of one. */
+    queue?: { items?: readonly { dedupKey: string; state: string; attempts: number }[] } | undefined;
+  }[];
   offers?: RepoOffers | undefined;
 }
 
@@ -117,7 +118,13 @@ type Offered = { enabled: boolean; why?: string };
 
 export type Availability = { offered: false; why?: string } | { offered: true; enabled: boolean; why?: string };
 
-export type ActResult = { text?: string; place: 'run' | 'queue' | 'repo' | 'list'; effect?: Effect; keepMenu?: true };
+export type ActResult = {
+  text?: string;
+  effect?: Effect;
+  keepMenu?: true;
+  /** The request was refused: its text is sail's refusal. */
+  refused?: true;
+};
 export type Effect = 'reopen' | 'leave' | 'took' | { open: string };
 
 export interface ActionDef {
@@ -129,14 +136,16 @@ export interface ActionDef {
   key?: string;
   /** A disabled offer stops the click before its request: otherwise the server's refusal comes with the POST. */
   holdsDisabled?: boolean;
-  /** Where its answer shows: the run menu, the queue's header, on the repository's row, or the list's head. */
+  /** Where its parameters are drawn: the run menu, the queue's header, on the repository's row, or the list's head. */
   place: 'run' | 'queue' | 'repo' | 'list';
   params(subject: Subject, source: OfferSource): Param[];
   available(subject: Subject, source: OfferSource): Availability;
-  /** The armed button's label. */
-  confirm?(subject: Subject, values: Values, source: OfferSource): string;
-  /** What shows while its request is out. */
-  sending?(subject: Subject): string;
+  /** The confirmation dialog a confirmed action opens: its title, a line per consequence, its verb. */
+  dialog?(subject: Subject, values: Values, source: OfferSource): DialogView;
+  /** What its subject's row reads, in place of its status, while its request is out. */
+  underway?: string;
+  /** What reverses an undoable action once it took, read from the source at the click: the request, and the action whose answer it gets. */
+  undo?(subject: Subject, source: OfferSource): { action: string; path: string; body: unknown } | undefined;
   /** What to post, `{ invalid }` for a value it can't send, or nothing when there is nothing to send. */
   request?(
     subject: Subject,
@@ -169,6 +178,41 @@ export function answerField(body: string, field: string): string | undefined {
     return undefined;
   }
 }
+
+/** What a toast names an action's subject as: the run, the item's key, `<repo> / <workflow>`, the repository. */
+export function subjectName(subject: Subject): string {
+  switch (subject.kind) {
+    case 'run':
+      return subject.runId;
+    case 'item':
+      return subject.item;
+    case 'workflow':
+      return `${subject.repo} / ${subject.workflow}`;
+    case 'repo':
+      return subject.repo;
+    case 'none':
+      return '';
+  }
+}
+
+/** The key of `ui.underway` that `def` done to `subject` sets while its request is out. */
+export function underwayId(def: ActionDef, subject: Subject): string {
+  const watching = def.id === 'watch' || def.id === 'unwatch';
+  switch (subject.kind) {
+    case 'run':
+      return `run:${subject.repo}/${subject.runId}`;
+    case 'item':
+      return `item:${subject.repo}/${subject.workflow}/${subject.item}`;
+    case 'workflow':
+      return `${watching ? 'watch' : 'queue'}:${subject.repo}/${subject.workflow}`;
+    case 'repo':
+      return `watch:${subject.repo}`;
+    case 'none':
+      return '';
+  }
+}
+
+const runName = (subject: Subject) => (subject.kind === 'run' ? subject.runId : '');
 
 const REPO = (subject: Subject) => ('repo' in subject ? subject.repo : '');
 
@@ -257,13 +301,26 @@ function budgetOf(offer: NonNullable<RunActions['restart']>): string {
 /** An answer a queue change got: a 200's message (the change was taken) or a 202's waiting, else the refusal. */
 function queueAnswer(word: string) {
   return (status: number, body: string): ActResult => {
-    if (status !== 200 && status !== 202) return { place: 'queue', text: refusal(status, body, word) };
+    if (status !== 200 && status !== 202) return { text: refusal(status, body, word), refused: true };
     const text = answerField(body, status === 200 ? 'message' : 'waiting');
     return {
-      place: 'queue',
       ...(text === undefined ? {} : { text }),
       ...(status === 200 ? { effect: 'took' as const } : {}),
     };
+  };
+}
+
+/** What dropping a queue item says before it is done: what leaves which queue, and what state the item is in. */
+function dropDialog(subject: Subject, _values: Values, source: OfferSource): DialogView {
+  if (subject.kind !== 'item') return { title: 'drop', lines: [], verb: 'drop' };
+  const item = queueOf(subject, source)?.queue?.items?.find((each) => each.dedupKey === subject.item);
+  return {
+    title: `drop ${subject.item}`,
+    lines: [
+      `removes ${subject.item} from ${subject.repo} / ${subject.workflow}'s queue`,
+      ...(item === undefined ? [] : [`it is ${item.state} after ${item.attempts} attempts`]),
+    ],
+    verb: 'drop',
   };
 }
 
@@ -277,8 +334,9 @@ function queueItemAction(id: string, op: 'requeue' | 'drop', tier: Tier, path: s
     place: 'queue',
     params: () => [],
     available: itemOffer(op),
-    ...(tier === 'confirmed' ? { confirm: () => 'confirm drop' } : {}),
+    ...(tier === 'confirmed' ? { dialog: dropDialog } : {}),
     request: (subject) => ({ path: queuePath(subject, path), body: { dedupKey: itemKey(subject) } }),
+    underway: op === 'drop' ? 'dropping…' : 'requeuing…',
     answer: queueAnswer(op),
   };
 }
@@ -288,22 +346,28 @@ function watchAction(op: 'watch' | 'unwatch', path: string): ActionDef {
     id: op,
     label: (subject) => (subject.kind === 'repo' ? `${op} all` : op),
     appliesTo: ['workflow', 'repo'],
-    tier: op === 'unwatch' ? 'confirmed' : 'instant',
+    tier: op === 'unwatch' ? 'undoable' : 'instant',
     place: 'repo',
     params: () => [],
     available: watchOffer(op),
     ...(op === 'unwatch'
-      ? { confirm: (subject: Subject) => `${subject.kind === 'repo' ? 'unwatch all' : 'unwatch'}? click again` }
+      ? {
+          undo: (subject: Subject, source: OfferSource) => {
+            const repo = source.index.find((each) => each.name === REPO(subject));
+            const workflows = subject.kind === 'workflow' ? [subject.workflow] : [...(repo?.watching?.workflows ?? [])];
+            return { action: 'watch', path: `/api/repos/${enc(REPO(subject))}/watch`, body: { workflows } };
+          },
+        }
       : {}),
-    sending: () => (op === 'watch' ? 'watching…' : 'unwatching…'),
+    underway: op === 'watch' ? 'watching…' : 'unwatching…',
     request: (subject) => ({
       path: `/api/repos/${enc(REPO(subject))}${path}`,
       body: { workflows: subject.kind === 'workflow' ? [subject.workflow] : [] },
     }),
     answer: (status, body) => {
-      if (status !== 200 && status !== 202) return { place: 'repo', text: refusal(status, body, op) };
+      if (status !== 200 && status !== 202) return { text: refusal(status, body, op), refused: true };
       const text = answerField(body, 'message') ?? answerField(body, 'waiting');
-      return { place: 'repo', ...(text === undefined ? {} : { text }) };
+      return { ...(text === undefined ? {} : { text }) };
     },
   };
 }
@@ -342,9 +406,20 @@ export const ACTIONS: readonly ActionDef[] = [
           ];
     },
     available: runOffer('resume'),
-    confirm: (_, __, source) =>
-      source.run?.resume === undefined ? 'resume' : `confirm resume · ${spentOf(source.run.resume)}`,
-    sending: (subject) => `resuming ${subject.kind === 'run' ? subject.runId : ''}…`,
+    underway: 'resuming…',
+    dialog: (subject, values, source) => {
+      const offer = source.run?.resume;
+      const raise = Number(values.raise);
+      const raised =
+        offer?.raise === undefined || !Number.isFinite(raise) || raise <= 0
+          ? []
+          : [offer.raise === 'usd' ? `raises the budget by ${cost(raise)}` : `raises the budget by ${raise} min`];
+      return {
+        title: `resume ${runName(subject)}`,
+        lines: [...(offer === undefined ? [] : [spentOf(offer)]), ...raised],
+        verb: 'resume',
+      };
+    },
     request: (subject, values, source) => {
       const raising = source.run?.resume?.raise;
       const path = runPath(subject, '/resume');
@@ -359,7 +434,7 @@ export const ACTIONS: readonly ActionDef[] = [
       return { path, body: { raise: { [raising]: amount } } };
     },
     answer: (status, body) =>
-      ok(status) ? { place: 'run', effect: 'reopen' } : { place: 'run', text: refusal(status, body, 'resume') },
+      ok(status) ? { effect: 'reopen', text: 'resumed' } : { text: refusal(status, body, 'resume'), refused: true },
   },
   {
     id: 'restart-run',
@@ -380,26 +455,37 @@ export const ACTIONS: readonly ActionDef[] = [
               type: 'choice',
               options: offer.stages.map((each) => ({ value: each.stage, title: each.runsAgain })),
               initial: offer.stage,
-              rearm: true,
             },
           ];
     },
     available: runOffer('restart'),
-    confirm: (_, values, source) => {
+    underway: 'restarting…',
+    dialog: (subject, values, source) => {
       const offer = source.run?.restart;
-      if (offer === undefined) return 'restart';
-      const chosen = offer.stages.some((each) => each.stage === values.stage) ? values.stage : offer.stage;
-      return `confirm restart from ${chosen} · ${budgetOf(offer)}`;
+      const chosen =
+        offer?.stages.find((each) => each.stage === values.stage) ??
+        offer?.stages.find((each) => each.stage === offer.stage);
+      return {
+        title: `restart ${runName(subject)}`,
+        lines:
+          offer === undefined
+            ? []
+            : [
+                ...(chosen === undefined ? [] : [`runs again: ${chosen.runsAgain}`]),
+                budgetOf(offer),
+                `starts a new run seeded from ${runName(subject)}`,
+              ],
+        verb: 'restart',
+      };
     },
-    sending: (subject) => `restarting ${subject.kind === 'run' ? subject.runId : ''}…`,
     request: (subject, values, source) => ({
       path: runPath(subject, '/restart'),
       body: { stage: values.stage ?? source.run?.restart?.stage },
     }),
     answer: (status, body) => {
-      if (!ok(status)) return { place: 'run', text: refusal(status, body, 'restart') };
+      if (!ok(status)) return { text: refusal(status, body, 'restart'), refused: true };
       const runId = answerField(body, 'runId');
-      return runId === undefined ? { place: 'run' } : { place: 'run', effect: { open: runId } };
+      return runId === undefined ? {} : { effect: { open: runId }, text: `started ${runId}` };
     },
   },
   {
@@ -411,14 +497,20 @@ export const ACTIONS: readonly ActionDef[] = [
     holdsDisabled: true,
     params: () => [STOP_NOW()],
     available: runOffer('stop'),
-    confirm: (_, values) =>
-      values.now === 'on' ? 'confirm stop now · ends its running call' : 'confirm stop · at its next call boundary',
-    sending: (subject) => `stopping ${subject.kind === 'run' ? subject.runId : ''}…`,
+    underway: 'stopping…',
+    dialog: (subject, values) => ({
+      title: `stop ${runName(subject)}`,
+      lines: [
+        values.now === 'on' ? 'ends its running call now' : 'stops at its next call boundary',
+        'the run fails as stopped',
+      ],
+      verb: 'stop',
+    }),
     request: (subject, values) => ({ path: runPath(subject, '/stop'), body: { now: values.now === 'on' } }),
     answer: (status, body) => {
-      if (!ok(status)) return { place: 'run', text: refusal(status, body, 'stop') };
+      if (!ok(status)) return { text: refusal(status, body, 'stop'), refused: true };
       const text = answerField(body, 'message');
-      return { place: 'run', effect: 'reopen', keepMenu: true, ...(text === undefined ? {} : { text }) };
+      return { effect: 'reopen', keepMenu: true, ...(text === undefined ? {} : { text }) };
     },
   },
   {
@@ -430,18 +522,26 @@ export const ACTIONS: readonly ActionDef[] = [
     holdsDisabled: true,
     params: () => [],
     available: runOffer('clean'),
-    confirm: (_, __, source) => {
+    underway: 'cleaning…',
+    dialog: (subject, _, source) => {
       const offer = source.run?.clean;
-      if (offer === undefined) return 'clean';
-      const where = offer.archive === undefined ? '' : ` · run directory -> ${offer.archive}`;
-      return `confirm clean · removes ${offer.removes.join(', ') || 'nothing'}${where}`;
+      return {
+        title: `clean ${runName(subject)}`,
+        lines:
+          offer === undefined
+            ? []
+            : [
+                ...(offer.removes.length === 0 ? ['removes nothing'] : offer.removes.map((each) => `removes ${each}`)),
+                ...(offer.archive === undefined ? [] : [`run directory → ${offer.archive}`]),
+              ],
+        verb: 'clean',
+      };
     },
-    sending: (subject) => `cleaning ${subject.kind === 'run' ? subject.runId : ''}…`,
     request: (subject) => ({ path: runPath(subject, '/clean'), body: {} }),
     answer: (status, body) => {
-      if (!ok(status)) return { place: 'run', text: refusal(status, body, 'clean') };
+      if (!ok(status)) return { text: refusal(status, body, 'clean'), refused: true };
       const text = answerField(body, 'message');
-      return { place: 'list', effect: 'leave', ...(text === undefined ? {} : { text }) };
+      return { effect: 'leave', ...(text === undefined ? {} : { text }) };
     },
   },
   queueItemAction('requeue-item', 'requeue', 'instant', '/requeue'),
@@ -465,6 +565,7 @@ export const ACTIONS: readonly ActionDef[] = [
           ? { dedupKey: itemKey(subject), before: values.target }
           : { dedupKey: itemKey(subject), after: values.target },
     }),
+    underway: 'moving…',
     answer: queueAnswer('move'),
   },
   {
@@ -477,6 +578,7 @@ export const ACTIONS: readonly ActionDef[] = [
     params: () => [],
     available: queueOffer('poll'),
     request: (subject) => ({ path: queuePath(subject, '/poll'), body: {} }),
+    underway: 'polling…',
     answer: queueAnswer('poll'),
   },
   {
@@ -499,6 +601,7 @@ export const ACTIONS: readonly ActionDef[] = [
         body: values.force === 'on' ? { ticketKey, force: true } : { ticketKey },
       };
     },
+    underway: 'adding…',
     answer: queueAnswer('add'),
   },
   watchAction('watch', '/watch'),
@@ -507,7 +610,7 @@ export const ACTIONS: readonly ActionDef[] = [
     id: 'clear-attention',
     label: () => 'all clear',
     appliesTo: ['none'],
-    tier: 'instant',
+    tier: 'undoable',
     place: 'list',
     params: () => [],
     available: () => ({ offered: true, enabled: true }),

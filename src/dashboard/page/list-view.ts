@@ -1,17 +1,18 @@
 // The list: the one component every view draws its rows on, in the centre. A head names the view with its count, which
-// reads `n of m` while the filter field narrows it, and carries the last Clean's notice and the field itself. Under it,
+// reads `n of m` while the filter field narrows it, and carries the field itself. Under it,
 // folding groups: Active's `waiting on you` and `running`, History's `failed` and `done`, and in Queues one per
 // repository. A run's row is a `div` holding two sibling buttons: its own, which opens the run and shows on one line
 // its status, id, title, repository › workflow, stalled mark, duration, cost and stop reason, with a problem wrapping
 // inside it, and, but on a completed run, a ⋯ of its own that opens the run and, under the row, a menu of what it
 // offers: Resume, Restart, Stop and Clean. A queue's row opens its queue and names its watch state, the live watcher's;
 // a queue that can't be read shows its problem in place of its waiting count. A Queues group's header row also carries
-// the Watch all and Unwatch all the repository offers, drawn from the registry, its problem and the answer to the last
-// change of its watch set; an Unwatch armed by a first click reads `click again`. A folded group draws its header alone.
+// the Watch all and Unwatch all the repository offers, drawn from the registry, and its problem; each runs at once, its
+// answer is a toast, and while its request is out the buttons read the word under way, as a run's row reads it in place
+// of its status. A folded group draws its header alone.
 import type { RunActions } from '../actions';
 import type { RepoOffers } from '../offers';
 import { ACTIONS, type OfferSource, type Subject } from './action-registry';
-import { actionControl, resultOf } from './action-view';
+import { actionControl } from './action-view';
 import { ago, cost, duration } from './format';
 import { html, type SafeHtml } from './html';
 import { type ListRepo, type ListRun, workflowOf } from './index-model';
@@ -62,11 +63,13 @@ export function runMenu(repo: string, run: ListRun, ui: UiState, offers: RunActi
 
 /**
  * The watch or unwatch button each offered, drawn from the registry, for a workflow, or for the whole repository when
- * `workflow` is left out. An armed unwatch asks for its second click.
+ * `workflow` is left out. While a request for it is out, the word under way takes their place.
  */
 export function watchButtons(repo: string, offers: RepoOffers | undefined, ui: UiState, workflow?: string): SafeHtml {
   const subject: Subject = workflow === undefined ? { kind: 'repo', repo } : { kind: 'workflow', repo, workflow };
   const source: OfferSource = { index: [{ name: repo, queues: [], offers }] };
+  const underway = ui.underway[workflow === undefined ? `watch:${repo}` : `watch:${repo}/${workflow}`];
+  if (underway !== undefined) return html`<span class="busy">${underway}</span>`;
   return html`${ACTIONS.filter((def) => def.place === 'repo' && def.appliesTo.includes(subject.kind)).map((def) =>
     actionControl(def, subject, ui.act, source, { class: 'wf-act', data: true }),
   )}`;
@@ -80,6 +83,14 @@ function watchWord(watch: QueueRow['watch']): SafeHtml | '' {
   return html`<span class="wf-watch ${kind}" title="${watch.why ?? ''}">${watch.state}</span>`;
 }
 
+/** A run's status dot, or the word under way while a request for the run is out. */
+function statusMark(repo: string, run: ListRun, ui: UiState): SafeHtml {
+  const underway = ui.underway[`run:${repo}/${run.runId}`];
+  return underway === undefined
+    ? html`<span class="st ${pillOf(run.status)}"></span>`
+    : html`<span class="busy">${underway}</span>`;
+}
+
 const cur = (id: string, ui: UiState) => (ui.listCursor === id ? ' cur' : '');
 
 function runRow(row: RunRow, ui: UiState, offers: RunActions | undefined): SafeHtml {
@@ -87,7 +98,7 @@ function runRow(row: RunRow, ui: UiState, offers: RunActions | undefined): SafeH
   const tip = tooltipOf(run);
   return html`<div class="run lrow${isOpen(repo, run, ui) ? ' sel' : ''}${cur(row.id, ui)}" data-row="${row.id}"><button class="r-open"${
     tip === undefined ? '' : html` title="${tip}"`
-  } data-action="select-run" data-repo="${repo}" data-run="${run.runId}"><span class="r-line"><span class="st ${pillOf(run.status)}"></span><span class="r-id">${runLabel(run)}</span><span class="r-title">${run.title}</span><span class="r-wf">${repo} › ${workflowOf(run)}</span>${
+  } data-action="select-run" data-repo="${repo}" data-run="${run.runId}"><span class="r-line">${statusMark(repo, run, ui)}<span class="r-id">${runLabel(run)}</span><span class="r-title">${run.title}</span><span class="r-wf">${repo} › ${workflowOf(run)}</span>${
     run.status === 'running' && run.stalled !== undefined
       ? html`<span class="stalled">stalled ${run.stalled}</span>`
       : ''
@@ -111,14 +122,13 @@ function queueRow(row: QueueRow, ui: UiState, now: number): SafeHtml {
 const rowOf = (row: ListRow, ui: UiState, now: number, offers: RunActions | undefined): SafeHtml =>
   row.kind === 'run' ? runRow(row, ui, offers) : queueRow(row, ui, now);
 
-/** A Queues group's header row: the repository, its watch buttons, its problem and the answer to the last watch change. */
+/** A Queues group's header row: the repository, its watch buttons and its problem. */
 function repoHeader(group: ListGroup, repo: ListRepo, open: boolean, ui: UiState): SafeHtml {
-  const said = resultOf(ui.act, 'repo', { repo: repo.name });
   return html`<div class="lgrp-row${cur(group.id, ui)}"><button class="lgh${open ? ' open' : ''}"${
     repo.remote === null ? '' : html` title="${repo.remote}"`
   } data-action="toggle-list-group" data-group="${group.id}" aria-expanded="${open ? 'true' : 'false'}"><span class="lcaret">›</span><span class="nm">${group.label}</span><span class="c">${group.rows.length}</span></button>${watchButtons(repo.name, repo.offers, ui)}</div>${
     repo.problem === undefined ? '' : html`<div class="lgrp-p">${repo.problem}</div>`
-  }${said === undefined ? '' : html`<div class="lgrp-p">${said}</div>`}`;
+  }`;
 }
 
 function groupBlock(group: ListGroup, ui: UiState, now: number, offers: RunActions | undefined): SafeHtml {
@@ -153,9 +163,7 @@ export function renderList(
   const shown = filterRows(all, ui.listFilter);
   const narrowed = ui.listFilter.trim() !== '';
   const count = narrowed ? `${total(shown)} of ${total(all)}` : String(total(all));
-  const left = resultOf(ui.act, 'list');
-  const notice = left === undefined ? '' : html`<span class="warnchip list-notice">${left}</span>`;
-  const head = html`<div class="list-h"><span class="lh-t">${VIEW_LABELS[view]}</span><span class="c">${count}</span>${notice}<input class="list-f" name="list-filter" type="search" value="${ui.listFilter}" placeholder="filter (/)" aria-label="filter the list" autocomplete="off" spellcheck="false"></div>`;
+  const head = html`<div class="list-h"><span class="lh-t">${VIEW_LABELS[view]}</span><span class="c">${count}</span><input class="list-f" name="list-filter" type="search" value="${ui.listFilter}" placeholder="filter (/)" aria-label="filter the list" autocomplete="off" spellcheck="false"></div>`;
   const empty =
     repos.length === 0
       ? 'no repository is registered yet: run sail watch in one'
