@@ -4,7 +4,17 @@
 // members the page uses, since the project's TypeScript has no DOM library.
 
 /** The page's regions, each an element id in `index.html`. */
-export const REGIONS = ['sidebar', 'list', 'attention', 'main', 'inspector', 'status', 'drawer', 'toasts'] as const;
+export const REGIONS = [
+  'sidebar',
+  'list',
+  'attention',
+  'link',
+  'main',
+  'inspector',
+  'status',
+  'drawer',
+  'toasts',
+] as const;
 export type Region = (typeof REGIONS)[number];
 
 export interface Connection {
@@ -66,15 +76,19 @@ export interface PageHost {
   /** Copies to the clipboard: false when it can't. */
   copy(text: string): Promise<boolean>;
   setTheme(theme: string): void;
-  /** Sets the URL's parameter `name` to `value`, keeping the others, without a history entry. */
-  setParam(name: string, value: string): void;
   setInspector(open: boolean): void;
   /** Whether a run or queue is open beside the list: the centre is laid out by it. */
   setDetail(open: boolean): void;
   /** The browser's offset east of UTC, in minutes. */
   offset(): number;
-  /** What the page's URL asks it to open first, from `?repo=…&run=…&key=…&tab=…&view=…`: empty when it asks nothing. */
+  /** What the page's URL asks it to open first, from `?repo=…&run=…&key=…&tab=…&timeline=1&file=…` or `?queue=…`, each with `&view=…`: empty when it asks nothing. */
   start(): Record<string, string>;
+  /** Writes the page's URL to `?query` (the path alone for an empty one), as a new history entry when `push`, else in place of the current one. */
+  setUrl(query: string, push: boolean): void;
+  /** The page's whole URL, as the address bar shows it. */
+  href(): string;
+  /** Calls `handler` with the URL's query, parsed as `start()` parses it, when the browser moves to another history entry. */
+  onNavigate(handler: (asked: Record<string, string>) => void): void;
 }
 
 /** The members of an element the page uses. */
@@ -131,8 +145,12 @@ export interface BrowserWindow {
     documentElement: { dataset: Record<string, string | undefined> };
     activeElement?: ElementLike | null;
   };
-  location: { host: string; pathname: string; search: string };
-  history: { replaceState(state: unknown, title: string, url: string): void };
+  location: { host: string; search: string; pathname: string; href: string };
+  history: {
+    pushState(data: unknown, unused: string, url: string): void;
+    replaceState(data: unknown, unused: string, url: string): void;
+  };
+  addEventListener(type: string, listener: () => void): void;
   fetch(
     url: string,
     init: { headers: Record<string, string>; method?: string; body?: string },
@@ -477,10 +495,14 @@ export function browserHost(win: BrowserWindow): PageHost {
       doc.documentElement.dataset.theme = theme;
     },
     start: () => Object.fromEntries(new URLSearchParams(win.location.search)),
-    setParam(name, value) {
-      const params = new URLSearchParams(win.location.search);
-      params.set(name, value);
-      win.history.replaceState(null, '', `${win.location.pathname}?${params}`);
+    href: () => win.location.href,
+    onNavigate(handler) {
+      win.addEventListener('popstate', () => handler(Object.fromEntries(new URLSearchParams(win.location.search))));
+    },
+    setUrl(query, push) {
+      const url = query === '' ? win.location.pathname : `?${query}`;
+      if (push) win.history.pushState(null, '', url);
+      else win.history.replaceState(null, '', url);
     },
     setInspector(open) {
       doc.documentElement.dataset.inspector = open ? 'open' : 'closed';

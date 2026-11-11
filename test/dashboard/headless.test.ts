@@ -50,9 +50,9 @@ async function bootHeadless(dashboard: Dashboard, search = '') {
   const listeners: Record<string, ((event: EventLike) => void)[]> = {};
   const origin = `http://127.0.0.1:${dashboard.port}`;
   const sockets: WebSocket[] = [];
+  const history: { kind: string; data: unknown; unused: string; url: string }[] = [];
   const posted: string[] = [];
   const timers = new Set<ReturnType<typeof setTimeout>>();
-  const urls: string[] = [];
   const win: BrowserWindow = {
     document: {
       getElementById: (id) => regions[id] ?? null,
@@ -62,8 +62,12 @@ async function bootHeadless(dashboard: Dashboard, search = '') {
       removeEventListener() {},
       documentElement: { dataset: {} },
     },
-    location: { host: `127.0.0.1:${dashboard.port}`, pathname: '/', search },
-    history: { replaceState: (_state, _title, url) => void urls.push(url) },
+    location: { host: `127.0.0.1:${dashboard.port}`, search, pathname: '/', href: `http://127.0.0.1/${search}` },
+    addEventListener() {},
+    history: {
+      pushState: (data, unused, url) => history.push({ kind: 'push', data, unused, url }),
+      replaceState: (data, unused, url) => history.push({ kind: 'replace', data, unused, url }),
+    },
     fetch: (path, init) => {
       if (init.method === 'POST') posted.push(path);
       return fetch(`${origin}${path}`, init);
@@ -99,7 +103,7 @@ async function bootHeadless(dashboard: Dashboard, search = '') {
       listener({ target: { innerHTML: '', dataset, parentElement: null } satisfies ElementLike });
     }
   };
-  return { ids, text, click, urls, posted };
+  return { ids, text, click, history, posted };
 }
 
 test("the real bundle boots headless: both repositories, the golden run's eight cards and its $1.35 once its row is clicked, then FAKE-2's denial on the permissions tab", async () => {
@@ -108,7 +112,9 @@ test("the real bundle boots headless: both repositories, the golden run's eight 
   if ('refused' in started) throw new Error(started.refused);
   server = started;
   const page = await bootHeadless(server);
-  expect(page.ids).toEqual(expect.arrayContaining(['sidebar', 'list', 'attention', 'main', 'inspector', 'status']));
+  expect(page.ids).toEqual(
+    expect.arrayContaining(['sidebar', 'list', 'attention', 'link', 'main', 'inspector', 'status']),
+  );
   expect(page.ids).not.toContain('queues');
   expect(await until(() => page.text('sidebar').includes('<span class="nm">beta</span>'))).toBe(true);
   expect(page.text('sidebar')).toContain('<span class="nm">alpha</span>');
@@ -119,8 +125,12 @@ test("the real bundle boots headless: both repositories, the golden run's eight 
   expect(await until(() => (page.text('main').match(/data-action="select-card"/g) ?? []).length === 8)).toBe(true);
   expect(page.text('main')).toContain('<div class="stat"><b>$1.35</b><span>of $25.00 (5.4%)</span></div>');
   expect(page.text('attention')).toContain('<span class="badge">3</span>');
+  expect(page.text('link')).toContain('data-action="copy-link"');
   page.click({ action: 'select-view', view: 'queues' });
   page.click({ action: 'select-queue', queue: 'beta/ticket-to-pr' });
+  expect(page.history.filter((entry) => entry.kind === 'push').map((entry) => entry.url)).toContain(
+    '?queue=beta%2Fticket-to-pr&view=queues',
+  );
   expect(await until(() => page.text('main').includes('<span class="pill p-skip">watcher not running</span>'))).toBe(
     true,
   );
@@ -157,7 +167,7 @@ test('the real bundle opens the view the URL names, and writes the view it is ch
   expect(await until(() => page.text('list').includes('<span class="lh-t">History</span>'))).toBe(true);
   page.click({ action: 'select-view', view: 'queues' });
   expect(await until(() => page.text('list').includes('<span class="lh-t">Queues</span>'))).toBe(true);
-  expect(page.urls).toEqual(['/?view=queues']);
+  expect(page.history.at(-1)).toEqual({ kind: 'push', data: null, unused: '', url: '?view=queues' });
 }, 30_000);
 
 test("a beta queue that can't be read is listed in the Queues view with its problem, and its row opens a queue view that shows it", async () => {
@@ -247,4 +257,17 @@ test('undoable tier: on the real bundle, clear-attention empties attention and d
   expect(await until(() => page.text('attention').includes('<span class="badge">3</span>'))).toBe(true);
   expect(page.text('toasts')).not.toContain('toast ok');
   expect(page.posted).toEqual([]);
+}, 30_000);
+
+test('a page loaded at a run the index does not list says so in a toast, opens no run and replaces the URL (ADW-513)', async () => {
+  m = seedFixtures();
+  const started = startDashboard({ registryDir: m.registryDir, port: 0, followPollMs: 20, indexPollMs: 50 });
+  if ('refused' in started) throw new Error(started.refused);
+  server = started;
+  const page = await bootHeadless(server, '?repo=alpha&run=NOPE-1');
+  expect(await until(() => page.text('toasts').includes('run NOPE-1 of alpha is not listed'))).toBe(true);
+  expect(page.text('main')).toContain('no run selected');
+  const written = page.history.map((entry) => [entry.kind, entry.url]);
+  expect(written[0]).toEqual(['replace', '/']);
+  expect(written.flat().join(' ')).not.toContain('NOPE-1');
 }, 30_000);

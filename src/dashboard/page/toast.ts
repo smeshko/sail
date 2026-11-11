@@ -39,6 +39,21 @@ export function dismissToast(store: Store, id: number): void {
   store.mark('toasts');
 }
 
+/** Says in a toast what a URL named that is not there (a run, queue, call or file), in place of the last such toast. */
+export function sayMissing(store: Store, text: string): void {
+  endMissing(store);
+  toast(store, 'bad', 'open link', text);
+  store.missingToast = store.toastSeq;
+}
+
+/** Ends the toast that says a URL named what is not there: opening a run or a queue, by any path, does. */
+export function endMissing(store: Store): void {
+  if (store.missingToast === undefined) return;
+  const id = store.missingToast;
+  store.missingToast = undefined;
+  dismissToast(store, id);
+}
+
 export function undoToast(store: Store, id: number): void {
   const undo = store.undos.get(id);
   dismissToast(store, id);

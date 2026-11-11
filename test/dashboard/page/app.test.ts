@@ -177,6 +177,10 @@ class FakeHost implements PageHost {
     this.copied.push(text);
     return this.copyTakes;
   }
+  href() {
+    const query = this.urls.at(-1)?.query ?? new URLSearchParams(this.startAt).toString();
+    return `http://dashboard/${query === '' ? '' : `?${query}`}`;
+  }
   setTheme(theme: string) {
     this.theme = theme;
   }
@@ -206,11 +210,6 @@ class FakeHost implements PageHost {
   type(name: string, value: string) {
     this.input?.(name, value);
   }
-  /** The URL parameters the page wrote, in order. */
-  params: [string, string][] = [];
-  setParam(name: string, value: string) {
-    this.params.push([name, value]);
-  }
   setInspector(open: boolean) {
     this.inspector = open;
   }
@@ -219,6 +218,19 @@ class FakeHost implements PageHost {
   }
   start() {
     return this.startAt;
+  }
+  private navigated?: (asked: Record<string, string>) => void;
+  onNavigate(handler: (asked: Record<string, string>) => void) {
+    this.navigated = handler;
+  }
+  /** The browser moving to the history entry whose query is `query`. */
+  go(query: string) {
+    this.navigated?.(Object.fromEntries(new URLSearchParams(query)));
+  }
+  /** The URL writes made, in order. */
+  urls: { query: string; push: boolean }[] = [];
+  setUrl(query: string, push: boolean) {
+    this.urls.push({ query, push });
   }
 
   /** Moves the clock on by `ms`, running every timer that falls due, in order. */
@@ -338,6 +350,7 @@ test('boot draws the sidebar and the list from the first index and opens no run;
     'attention',
     'drawer',
     'inspector',
+    'link',
     'list',
     'main',
     'sidebar',
@@ -431,6 +444,8 @@ test('a URL naming a run no repository lists opens no run and leaves the list al
   plainIndex();
   host.advance(100);
   expect([host.open('run='), page.ui.runId, host.details.at(-1) ?? false]).toEqual([[], undefined, false]);
+  expect(host.regions.toasts).toContain('run FAKE-9-01M5PY0000000000000000000 of alpha is not listed');
+  expect(host.urls).toEqual([{ query: '', push: false }]);
 });
 
 test('the URL is read on the first index only: a run picked since stays open through the next index', () => {
@@ -1523,16 +1538,24 @@ test('booted with ?view=history the list draws History, and with ?view=nope or n
   }
 });
 
-test('select-view rewrites the view parameter, and a view that is none writes nothing (ADW-522)', () => {
+test('select-view pushes the view into the URL, a view that is none writes nothing, and Back shows the view its entry names (ADW-522, ADW-513)', () => {
   page = boot(host);
   plainIndex();
+  host.urls = [];
   host.click({ action: 'select-view', view: 'queues' });
   host.press('3');
   host.click({ action: 'select-view', view: 'bogus' });
-  expect(host.params).toEqual([
-    ['view', 'queues'],
-    ['view', 'history'],
+  host.click({ action: 'select-view', view: 'active' });
+  expect(host.urls).toEqual([
+    { query: 'view=queues', push: true },
+    { query: 'view=history', push: true },
+    { query: '', push: true },
   ]);
+  host.go('view=queues');
+  host.advance(100);
+  expect([page.ui.view, host.regions.list?.includes('<span class="lh-t">Queues</span>')]).toEqual(['queues', true]);
+  host.go('');
+  expect(page.ui.view).toBe('active');
 });
 
 test('booted with ?repo=&run=&view=history the run opens beside the History list (ADW-522)', () => {
@@ -2788,6 +2811,364 @@ test('an index that turns the open queue to watcher not running redraws main wit
   host.click({ action: 'poll-queue', repo: 'beta', workflow: QUEUE_WORKFLOW });
   await settle();
   expect(host.posts.length).toBe(posts);
+});
+
+describe('the page keeps its URL in step with what it shows (ADW-513)', () => {
+  const QUEUE = `beta/${QUEUE_WORKFLOW}`;
+  // The page loaded at the golden run: with nothing named, the first index opens no run.
+  const open = () => {
+    host.startAt = { repo: 'alpha', run: GOLDEN_RUN_ID };
+    page = boot(host);
+    host.push(host.open('index')[0], indexMessage());
+    replay(host.open('run=')[0], GOLDEN());
+    host.advance(100);
+  };
+
+  test('the first index writes the run it opened, in place of the current entry', () => {
+    open();
+    expect(host.urls).toEqual([{ query: `repo=alpha&run=${GOLDEN_RUN_ID}`, push: false }]);
+  });
+
+  test('selecting a run, a queue, a card, a tab, a file and closing it each push one entry naming the selection', () => {
+    open();
+    host.urls = [];
+    host.click({ action: 'select-run', repo: 'alpha', run: FAKE_2_ID });
+    expect(host.urls).toEqual([{ query: `repo=alpha&run=${FAKE_2_ID}`, push: true }]);
+    host.urls = [];
+    host.click({ action: 'select-queue', queue: QUEUE });
+    expect(host.urls).toEqual([{ query: 'queue=beta%2Fticket-to-pr', push: true }]);
+    host.urls = [];
+    host.click({ action: 'select-run', repo: 'alpha', run: FAKE_2_ID });
+    host.urls = [];
+    host.click({ action: 'select-card', key: 'implement#1' });
+    expect(host.urls).toEqual([{ query: `repo=alpha&run=${FAKE_2_ID}&key=implement%231&timeline=1`, push: true }]);
+    host.urls = [];
+    host.click({ action: 'tab', tab: 'files' });
+    expect(host.urls).toEqual([
+      { query: `repo=alpha&run=${FAKE_2_ID}&key=implement%231&tab=files&timeline=1`, push: true },
+    ]);
+    host.urls = [];
+    host.click({ action: 'open-file', name: 'x.md', path: 'implement#1/out/x.md' });
+    expect(host.urls.map((url) => [url.push, url.query.endsWith('&file=implement%231%2Fout%2Fx.md')])).toEqual([
+      [true, true],
+    ]);
+    host.urls = [];
+    host.click({ action: 'close-file' });
+    expect(host.urls).toEqual([
+      { query: `repo=alpha&run=${FAKE_2_ID}&key=implement%231&tab=files&timeline=1`, push: true },
+    ]);
+  });
+
+  test('the keys Enter, ] and Escape push one entry each', () => {
+    open();
+    host.click({ action: 'select-run', repo: 'alpha', run: FAKE_2_ID });
+    replay(host.open('run=')[0], fake2Dir(m));
+    host.urls = [];
+    host.press('Enter');
+    expect(host.urls).toEqual([{ query: `repo=alpha&run=${FAKE_2_ID}&key=intake%231&timeline=1`, push: true }]);
+    host.urls = [];
+    host.press(']');
+    expect(host.urls).toEqual([{ query: `repo=alpha&run=${FAKE_2_ID}&key=spec%231&timeline=1`, push: true }]);
+    host.urls = [];
+    host.press('Escape');
+    host.press('Escape');
+    expect(host.urls).toEqual([
+      { query: `repo=alpha&run=${FAKE_2_ID}&key=spec%231`, push: true },
+      { query: `repo=alpha&run=${FAKE_2_ID}`, push: true },
+    ]);
+  });
+
+  test('toggling the theme, a group or follow writes nothing, and nothing is written before the first index', () => {
+    page = boot(host);
+    host.click({ action: 'toggle-theme' });
+    host.click({ action: 'select-card', key: 'implement#1' });
+    host.push(host.open('index')[0], indexMessage());
+    expect(host.urls.map((url) => url.push)).toEqual([false]);
+    host.urls = [];
+    host.click({ action: 'toggle-theme' });
+    host.click({ action: 'toggle-group', group: 'alpha' });
+    host.click({ action: 'toggle-follow' });
+    expect(host.urls).toEqual([]);
+  });
+
+  test('an index that no longer lists the open queue replaces the entry with the run', () => {
+    open();
+    host.click({ action: 'select-queue', queue: QUEUE });
+    host.urls = [];
+    const listed = indexMessage();
+    host.push(host.open('index')[0], {
+      ...listed,
+      repos: listed.repos.map((repo) => ({ ...repo, queues: [] })),
+    });
+    expect(host.urls).toEqual([{ query: `repo=alpha&run=${GOLDEN_RUN_ID}`, push: false }]);
+  });
+
+  test("a restart's answer naming a new run replaces the entry with that run", async () => {
+    await openOffering('alpha', FAKE_2_ID, fake2Dir(m));
+    host.postAnswer = { status: 202, body: JSON.stringify({ runId: NEW_ID }) };
+    host.click({ action: 'restart-run' });
+    host.urls = [];
+    host.click({ action: 'dialog-confirm' });
+    await settle();
+    expect(host.urls).toEqual([{ query: `repo=alpha&run=${NEW_ID}&view=history`, push: false }]);
+  });
+});
+
+describe('loading a URL opens what it names (ADW-513)', () => {
+  const FILE = 'implement#1/out/notes.txt';
+  const FILE_READ = `${`/api/repos/alpha/runs/${FAKE_2_ID}`}/file?path=${encodeURIComponent(FILE)}`;
+  const start = (query: Record<string, string>) => {
+    host.startAt = query;
+    page = boot(host);
+    host.push(host.open('index')[0], indexMessage());
+  };
+
+  test('repo, run, call, tab and timeline open FAKE-2 at implement#1 on its permissions tab with its timeline, with no push', async () => {
+    start({ repo: 'alpha', run: FAKE_2_ID, key: 'implement#1', tab: 'permissions', timeline: '1' });
+    expect(host.open('run=').map((socket) => socket.query)).toEqual([runQuery('alpha', FAKE_2_ID)]);
+    replay(host.open('run=')[0], fake2Dir(m));
+    await settle();
+    host.advance(100);
+    expect(host.regions.inspector).toContain(
+      '<button class="tab on" data-action="tab" data-tab="permissions">permissions</button>',
+    );
+    expect(host.regions.main).toContain('class="tl-top"');
+    expect(host.urls.filter((url) => url.push)).toEqual([]);
+  });
+
+  test("a file in the URL is read for the drawer, named by the path's last segment", async () => {
+    host.bodies.set(FILE_READ, { status: 200, body: 'hello notes' });
+    start({ repo: 'alpha', run: FAKE_2_ID, file: FILE });
+    await settle();
+    host.advance(100);
+    expect(host.reads.map((read) => read.path)).toEqual([FILE_READ]);
+    expect(host.regions.drawer).toContain('<b>notes.txt</b>');
+    expect(host.regions.drawer).toContain('hello notes');
+  });
+
+  test('a queue in the URL draws the queue view', () => {
+    start({ queue: `beta/${QUEUE_WORKFLOW}` });
+    host.advance(100);
+    expect(host.regions.main).toStartWith('<div class="d-h"><span class="d-title">ticket-to-pr queue</span>');
+  });
+
+  test('a queue the index does not list says so and opens no run, leaving the list the centre', () => {
+    start({ queue: 'beta/nope' });
+    host.advance(100);
+    expect(host.regions.toasts).toContain('queue beta/nope is not listed');
+    expect(host.open('run=')).toEqual([]);
+    expect(host.regions.main).toContain('no run selected');
+    expect(host.urls).toEqual([{ query: '', push: false }]);
+  });
+
+  test("a call an ended run does not have is dropped at the stream's end, with a toast, and the URL replaced; before the end it stays", () => {
+    start({ repo: 'alpha', run: FAKE_2_ID, key: 'nope#1' });
+    const [socket] = host.open('run=');
+    host.push(socket, { kind: 'event', event: readEvents(fake2Dir(m))[0] });
+    expect(page?.ui.key).toBe('nope#1');
+    replay(socket, fake2Dir(m));
+    host.advance(100);
+    expect(page?.ui.key).toBeUndefined();
+    expect(host.regions.toasts).toContain(`call nope#1 is not in run ${FAKE_2_ID}`);
+    expect(host.urls.at(-1)).toEqual({ query: `repo=alpha&run=${FAKE_2_ID}`, push: false });
+  });
+
+  test('a file whose read answers 404 leaves the drawer empty, says so, and replaces the URL without it', async () => {
+    host.bodies.set(FILE_READ, { status: 404, body: '' });
+    start({ repo: 'alpha', run: FAKE_2_ID, file: FILE });
+    await settle();
+    host.advance(100);
+    expect(host.regions.drawer).toBe('');
+    expect(host.regions.toasts).toContain(`file ${FILE} is not in run ${FAKE_2_ID}`);
+    expect(host.urls.at(-1)).toEqual({ query: `repo=alpha&run=${FAKE_2_ID}`, push: false });
+  });
+
+  test('an unknown tab shows the overview and no toast', async () => {
+    start({ repo: 'alpha', run: FAKE_2_ID, key: 'implement#1', tab: 'bogus' });
+    replay(host.open('run=')[0], fake2Dir(m));
+    await settle();
+    host.advance(100);
+    expect(host.regions.inspector).toContain('<button class="tab on" data-action="tab" data-tab="overview">');
+    expect(host.regions.toasts).not.toContain('is not');
+  });
+
+  test('the not-listed toast shows until a run or a queue is selected', () => {
+    start({ repo: 'alpha', run: 'NOPE-1' });
+    host.advance(100);
+    expect(host.regions.toasts).toContain('run NOPE-1 of alpha is not listed');
+    host.click({ action: 'select-run', repo: 'alpha', run: FAKE_2_ID });
+    host.advance(100);
+    expect(host.regions.toasts).not.toContain('is not listed');
+  });
+
+  test('the not-listed toast goes once a needs-attention row opens a run (review R2)', () => {
+    start({ repo: 'alpha', run: 'NOPE-1' });
+    host.advance(100);
+    expect(host.regions.toasts).toContain('run NOPE-1 of alpha is not listed');
+    host.click({ action: 'open', repo: 'alpha', run: FAKE_2_ID, key: 'implement#1' });
+    host.advance(100);
+    expect(host.regions.toasts).not.toContain('is not listed');
+  });
+});
+
+describe('Back and forward open what an entry names, and push nothing (ADW-513)', () => {
+  const QUEUE = `beta/${QUEUE_WORKFLOW}`;
+  const FILE = 'implement#1/out/notes.txt';
+  const FILE_READ = `/api/repos/alpha/runs/${FAKE_2_ID}/file?path=${encodeURIComponent(FILE)}`;
+  // The page loaded at the golden run: with nothing named, the first index opens no run.
+  const open = () => {
+    host.startAt = { repo: 'alpha', run: GOLDEN_RUN_ID };
+    page = boot(host);
+    host.push(host.open('index')[0], indexMessage());
+    replay(host.open('run=')[0], GOLDEN());
+    host.advance(100);
+  };
+  const query = (at: number) => host.urls[at]?.query ?? '';
+  const pushes = () => host.urls.filter((url) => url.push).length;
+
+  test('Back from a tab to its card, and from the card to the cards, reopens each; neither writes', () => {
+    open();
+    host.click({ action: 'select-run', repo: 'alpha', run: FAKE_2_ID });
+    replay(host.open('run=')[0], fake2Dir(m));
+    host.click({ action: 'select-card', key: 'implement#1' });
+    host.click({ action: 'tab', tab: 'log' });
+    host.advance(100);
+    const written = host.urls.length;
+    const [run, card] = [query(written - 3), query(written - 2)];
+    host.go(card);
+    host.advance(100);
+    expect(page?.ui.key).toBe('implement#1');
+    expect(page?.ui.tab).toBe('overview');
+    host.go(run);
+    host.advance(100);
+    expect(page?.ui.key).toBeUndefined();
+    expect(cards(host.regions.main)).toContain('implement#1');
+    expect(host.regions.main).not.toContain(' sel"');
+    expect(host.urls).toHaveLength(written);
+  });
+
+  test('a move from a run to a queue and back keeps the run socket and draws each', () => {
+    open();
+    host.click({ action: 'select-queue', queue: QUEUE });
+    const run = query(0);
+    const sockets = host.open('run=').length;
+    host.go('queue=beta%2Fticket-to-pr');
+    host.advance(100);
+    expect(host.regions.main).toStartWith('<div class="d-h"><span class="d-title">ticket-to-pr queue</span>');
+    host.go(run);
+    host.advance(100);
+    expect(cards(host.regions.main)).toContain('implement#1');
+    expect([host.open('run=').length, host.sockets.filter((s) => s.query.startsWith('run=')).length]).toEqual([
+      sockets,
+      sockets,
+    ]);
+    expect(pushes()).toBe(1);
+  });
+
+  test('a move to an entry with an empty query closes the queue and the run, giving the list the centre (review R3)', () => {
+    open();
+    host.click({ action: 'select-queue', queue: QUEUE });
+    const written = host.urls.length;
+    host.go('');
+    host.advance(100);
+    expect([page?.ui.queue, page?.ui.runId]).toEqual([undefined, undefined]);
+    expect(host.regions.main).toContain('no run selected');
+    expect(host.urls).toHaveLength(written);
+  });
+
+  test('a move to a query with a file opens the drawer, and to one without it empties it', async () => {
+    host.bodies.set(FILE_READ, { status: 200, body: 'hello notes' });
+    open();
+    host.click({ action: 'select-run', repo: 'alpha', run: FAKE_2_ID });
+    replay(host.open('run=')[0], fake2Dir(m));
+    const base = `repo=alpha&run=${FAKE_2_ID}`;
+    host.go(`${base}&file=${encodeURIComponent(FILE)}`);
+    await settle();
+    host.advance(100);
+    expect(host.regions.drawer).toContain('<b>notes.txt</b>');
+    host.go(base);
+    host.advance(100);
+    expect(host.regions.drawer).toBe('');
+  });
+
+  test('a move to a run the index no longer lists keeps the open run, says so, and replaces the entry with the open run', () => {
+    open();
+    host.urls = [];
+    host.go('repo=alpha&run=GONE-1');
+    host.advance(100);
+    expect(host.regions.toasts).toContain('run GONE-1 of alpha is not listed');
+    expect(host.open('run=').map((socket) => socket.query)).toEqual([runQuery('alpha', GOLDEN_RUN_ID)]);
+    expect(host.urls).toEqual([{ query: `repo=alpha&run=${GOLDEN_RUN_ID}`, push: false }]);
+  });
+
+  test('a move before the first index is what the first index opens, and writes nothing', () => {
+    page = boot(host);
+    host.go(`repo=alpha&run=${FAKE_2_ID}`);
+    expect(host.urls).toEqual([]);
+    host.push(host.open('index')[0], indexMessage());
+    expect(host.open('run=').map((socket) => socket.query)).toEqual([runQuery('alpha', FAKE_2_ID)]);
+  });
+
+  test("a move before the first index shows the entry's view, and the first index keeps it in the URL", () => {
+    host.startAt = { view: 'history' };
+    page = boot(host);
+    host.go(`repo=alpha&run=${FAKE_2_ID}&view=queues`);
+    host.push(host.open('index')[0], indexMessage());
+    host.advance(100);
+    expect(page.ui.view).toBe('queues');
+    expect(host.urls).toEqual([{ query: `repo=alpha&run=${FAKE_2_ID}&view=queues`, push: false }]);
+  });
+});
+
+describe('Copy link (ADW-513)', () => {
+  const select = () => {
+    page = boot(host);
+    host.push(host.open('index')[0], indexMessage());
+    host.click({ action: 'select-run', repo: 'alpha', run: FAKE_2_ID });
+    host.click({ action: 'select-card', key: 'implement#1' });
+    host.advance(100);
+  };
+
+  test('the link region draws a Copy link button after the first flush', () => {
+    page = boot(host);
+    host.advance(100);
+    expect(host.regions.link).toContain(
+      '<button class="btn" type="button" data-action="copy-link" aria-label="copy link" title="copy link">',
+    );
+  });
+
+  test("a click copies the current URL and toasts 'link copied', and no URL is written", async () => {
+    select();
+    const written = host.urls.length;
+    host.click({ action: 'copy-link' });
+    await settle();
+    host.advance(100);
+    expect(host.copied).toEqual([`http://dashboard/?repo=alpha&run=${FAKE_2_ID}&key=implement%231&timeline=1`]);
+    expect(host.regions.toasts).toContain('<span class="toast-head">copy link</span>');
+    expect(host.regions.toasts).toContain('link copied');
+    expect(host.urls).toHaveLength(written);
+  });
+
+  test('the toast is gone four seconds later', async () => {
+    select();
+    host.click({ action: 'copy-link' });
+    await settle();
+    host.advance(3999);
+    expect(host.regions.toasts).toContain('link copied');
+    host.advance(1);
+    host.advance(100);
+    expect(host.regions.toasts).not.toContain('link copied');
+  });
+
+  test('a clipboard that refuses toasts, in red, that the link could not be copied', async () => {
+    select();
+    host.copyTakes = false;
+    host.click({ action: 'copy-link' });
+    await settle();
+    host.advance(100);
+    expect(host.regions.toasts).toContain('toast bad');
+    expect(host.regions.toasts).toContain('the link could not be copied');
+  });
 });
 
 /** The index with beta's queue held, on `harnessKey` when given, and with no hold when `held` is false. */
