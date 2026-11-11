@@ -1,6 +1,6 @@
 // Needs attention, drawn: a button in the top bar with how many items there are, which opens a pane over the page. The
 // pane has one row per item across every repository: a run that failed or has a call in error, a parked item or a
-// problem. Each is a button that opens its run and, for a run, the call that ended it. An item with
+// problem. Each is a button that opens its run and, for a run, its last call in error. An item with
 // nothing to open is drawn the same, without the action. A click outside the pane closes it. While the list has items,
 // the pane's header has an all clear button.
 import type { AttentionItem } from './attention';
