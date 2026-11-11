@@ -91,6 +91,34 @@ test('queueGroups gives a group for every repository, with a row per queue and n
   expect(groups[0]?.rows[0]).toMatchObject({ kind: 'queue', waiting: 2, lastPolledAt: '2026-10-01T10:00:00Z' });
 });
 
+test('queueGroups copies the counts, pause, hold and offers to the row, and a watched workflow with no queue file has a bare row', () => {
+  const paused = { port: 'ticketSource', adapter: 'linear', message: '503' };
+  const held = { reason: 'usage limit' };
+  const offers = { poll: { enabled: true }, add: { enabled: true }, items: {} };
+  const withQueues = repo('alpha', [], {
+    workflows: [
+      {
+        name: 'one',
+        runs: [],
+        queue: { waiting: 2, running: 1, failed: 3, parked: 4, paused, held, offers },
+      },
+      { name: 'ghost', runs: [], queue: { waiting: 0 }, watch: { state: 'watched' } },
+      { name: 'none', runs: [] },
+    ],
+  });
+  const rows = queueGroups([withQueues])[0]?.rows;
+  expect(rows?.[0]).toMatchObject({ waiting: 2, running: 1, failed: 3, parked: 4, paused, held, offers });
+  expect(rows?.[1]).toEqual({
+    kind: 'queue',
+    id: 'queue:alpha/ghost',
+    repo: 'alpha',
+    workflow: 'ghost',
+    waiting: 0,
+    watch: { state: 'watched' },
+  });
+  expect(rows).toHaveLength(2);
+});
+
 test('groupsOf with a repository filter keeps only that repository, and viewCounts counts the same rows', () => {
   expect(ids(groupsOf('active', [alpha, beta], 'alpha'))).toEqual([
     ['waiting on you', ['run:alpha/a-run2']],

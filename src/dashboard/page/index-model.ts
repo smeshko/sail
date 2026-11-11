@@ -1,5 +1,5 @@
 // The index message, made into what the sidebar, the list and the queue view show: every repository with its workflows, each with its
-// runs newest first and its queue's waiting count, and every watched workflow's queue. It reads only the index the server streams, which already carries each run's
+// runs newest first and its queue's counts (waiting, running, failed, parked), last poll, pause, hold and offers, and every watched workflow's queue. It reads only the index the server streams, which already carries each run's
 // summary and each repository's queues, so nothing here opens a run. Nothing here names a stage, a workflow or a
 // repository: they all come from the index.
 import type { QueueItem, QueueItemState } from '../../watch/queue-store';
@@ -25,11 +25,24 @@ export interface ListRun {
   problem?: string;
 }
 
-/** One workflow of a repository as the list shows it: its runs newest first and its queue when it has one. */
+/**
+ * One workflow of a repository as the list shows it: its runs newest first and its queue when it has one. The queue's
+ * `running`, `failed` and `parked` are set only above 0; a watched workflow with no queue view has `{ waiting: 0 }`.
+ */
 export interface ListWorkflow {
   name: string;
   runs: ListRun[];
-  queue?: { waiting?: number; lastPolledAt?: string; problem?: string };
+  queue?: {
+    waiting?: number;
+    running?: number;
+    failed?: number;
+    parked?: number;
+    lastPolledAt?: string;
+    paused?: { port: string; adapter: string; message: string };
+    held?: { until?: string; reason: string };
+    problem?: string;
+    offers?: QueueOffers;
+  };
   /**
    * Its watch state from the live watcher, with why it isn't watched: its queue view's, else `watched` while it is in the
    * watch set, else none for a workflow with runs alone. Its Watch or Unwatch comes from the repository's offers.
@@ -123,18 +136,38 @@ function workflows(repo: IndexRepo, runs: readonly ListRun[]): ListWorkflow[] {
     const workflow: ListWorkflow = { name, runs: runs.filter((run) => workflowOf(run) === name) };
     const view = repo.queues.find((each) => each.workflow === name);
     if (view !== undefined) {
-      // A queue that can't be read has nothing to count: its problem is listed in place of its waiting count.
-      const waiting = (view.queue?.items ?? []).filter((item) => item.state === 'queued').length;
-      const polled = view.queue?.polling.lastPolledAt;
-      workflow.queue =
-        view.problem !== undefined
-          ? { problem: view.problem }
-          : polled === undefined
-            ? { waiting }
-            : { waiting, lastPolledAt: polled };
+      // A queue that can't be read has nothing to count: its problem is listed in place of its counts.
+      if (view.problem !== undefined) workflow.queue = { problem: view.problem };
+      else {
+        const items = view.queue?.items ?? [];
+        const count = (state: QueueItemState) => items.filter((item) => item.state === state).length;
+        const queue: NonNullable<ListWorkflow['queue']> = { waiting: count('queued') };
+        for (const [field, state] of [
+          ['running', 'dispatched'],
+          ['failed', 'failed'],
+          ['parked', 'parked'],
+        ] as const) {
+          if (count(state) > 0) queue[field] = count(state);
+        }
+        const polling = view.queue?.polling;
+        if (polling?.lastPolledAt !== undefined) queue.lastPolledAt = polling.lastPolledAt;
+        if (polling?.paused !== undefined) {
+          const { port, adapter, message } = polling.paused;
+          queue.paused = { port, adapter, message };
+        }
+        if (view.queue?.held !== undefined) {
+          const { until, reason } = view.queue.held;
+          queue.held = until === undefined ? { reason } : { until, reason };
+        }
+        workflow.queue = queue;
+      }
+      if (view.offers !== undefined) workflow.queue.offers = view.offers;
     }
     if (view !== undefined) workflow.watch = view.watch.state === 'watched' ? { state: 'watched' } : view.watch;
-    else if (watched.includes(name)) workflow.watch = { state: 'watched' };
+    else if (watched.includes(name)) {
+      workflow.watch = { state: 'watched' };
+      workflow.queue = { waiting: 0 };
+    }
     return workflow;
   });
 }

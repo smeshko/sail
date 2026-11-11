@@ -130,10 +130,10 @@ test('buttons, selects, text inputs and role=button have a 24px minimum height i
 
 test('no control class is given a height under 24px (ADW-508)', () => {
   const controls =
-    /\.(btn|wf-act|qbadge|hist-t|r-more|r-open|tab|tog|run-link|art-open|q-row|trow|qsec|qrecent-h|lgrp-h|wf-t|sig)\b/;
+    /\.(btn|wf-act|qbadge|hist-t|r-more|r-open|tab|tog|run-link|art-open|q-open|trow|qsec|qrecent-h|lgrp-h|wf-t|sig)\b/;
   const small: string[] = [];
   for (const [selector, body] of rules()) {
-    // A decoration inside a control (`.q-row .qd`) is no target: only a selector that ends on the control counts.
+    // A decoration inside a control (`.q-open .qd`) is no target: only a selector that ends on the control counts.
     if (!selector.split(',').some((each) => controls.test(each.trim().split(/\s+/).pop() ?? ''))) continue;
     for (const m of body.matchAll(/(?<![\w-])(height|max-height|min-height):\s*(\d+(?:\.\d+)?)px/g)) {
       if (Number(m[2]) < 24) small.push(`${selector} { ${m[1]}: ${m[2]}px }`);

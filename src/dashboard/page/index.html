@@ -108,7 +108,7 @@
         outline-offset: 1px;
       }
       .r-open:focus-visible,
-      .q-row:focus-visible,
+      .q-open:focus-visible,
       .qsec:focus-visible,
       .qrecent-h:focus-visible,
       .trow:focus-visible {
@@ -823,6 +823,39 @@
         color: var(--fg-3);
         border-left: 2px solid transparent;
       }
+      .q-open {
+        flex: 1 1 auto;
+        min-width: 0;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 7px;
+        min-height: var(--row-h);
+        padding: 0;
+        font: inherit;
+        color: inherit;
+        text-align: left;
+      }
+      .q-c,
+      .q-polled {
+        font-family: var(--mono);
+        color: var(--fg-4);
+        white-space: nowrap;
+      }
+      .q-c.failed {
+        color: var(--del);
+      }
+      .q-c.parked {
+        color: var(--warn);
+      }
+      .q-row .warnchip {
+        overflow-wrap: anywhere;
+        white-space: normal;
+      }
+      .wf-act[disabled] {
+        opacity: 0.5;
+        cursor: default;
+      }
       .q-row .nm {
         min-width: 0;
         overflow-wrap: anywhere;
@@ -844,7 +877,6 @@
         color: var(--fg);
       }
       .q-row .n {
-        margin-left: auto;
         color: var(--warn);
       }
       .q-row {

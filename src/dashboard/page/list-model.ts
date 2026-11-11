@@ -2,6 +2,8 @@
 // counts the sidebar shows. Pure, with no markup. The views are Inbox (what needs attention: runs, parked items and
 // problems, from the items it is given), Active (live runs, those that wait on a person first), Queues (one row per
 // queue, under its repository) and History (finished runs, failed then done).
+
+import type { QueueOffers } from '../offers';
 import { type AttentionItem, identity } from './attention';
 import { type ListRepo, type ListRun, type ListWorkflow, newestFirst, workflowOf } from './index-model';
 
@@ -23,7 +25,16 @@ export interface QueueRow {
   repo: string;
   workflow: string;
   waiting: number;
+  /** Its items running, failed and parked, set only above 0. */
+  running?: number;
+  failed?: number;
+  parked?: number;
   lastPolledAt?: string;
+  /** Why its poll is paused, and why its dispatch is held. */
+  paused?: NonNullable<ListWorkflow['queue']>['paused'];
+  held?: NonNullable<ListWorkflow['queue']>['held'];
+  /** What the queue offers, for its poll. */
+  offers?: QueueOffers;
   /** Why its queue can't be read, listed in place of its waiting count. */
   problem?: string;
   /** Its watch state from the live watcher, with why it isn't watched. */
@@ -113,7 +124,14 @@ export function queueGroups(repos: readonly ListRepo[]): ListGroup[] {
         workflow: workflow.name,
         waiting: workflow.queue.waiting ?? 0,
       };
-      if (workflow.queue.lastPolledAt !== undefined) row.lastPolledAt = workflow.queue.lastPolledAt;
+      const { running, failed, parked, lastPolledAt, paused, held, offers } = workflow.queue;
+      if (running !== undefined) row.running = running;
+      if (failed !== undefined) row.failed = failed;
+      if (parked !== undefined) row.parked = parked;
+      if (lastPolledAt !== undefined) row.lastPolledAt = lastPolledAt;
+      if (paused !== undefined) row.paused = paused;
+      if (held !== undefined) row.held = held;
+      if (offers !== undefined) row.offers = offers;
       if (workflow.queue.problem !== undefined) row.problem = workflow.queue.problem;
       if (workflow.watch !== undefined) row.watch = workflow.watch;
       return [row];
