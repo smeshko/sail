@@ -2,8 +2,9 @@
 // workflow is under its `maxConcurrentRuns`.
 //
 // - **In flight** is an item `dispatched` whose pid is alive. Those count against the cap, and so do the workflow's live
-//   manual runs: the live runs in this clone that no dispatched item owns, which `liveRuns()` finds once at the top of
-//   each tick, by their lease. A run that cannot be counted, because a lease cannot be read, starts and resumes
+//   manual runs: the live runs in this clone that no dispatched item owns, which `slotRuns()` finds once at the top of
+//   each tick, by their lease. A held run (`sail stop --suspend`) fills a slot too, whoever started it, until it is
+//   resumed, stopped or cleaned: `slotRuns()` finds those by their `HOLD`, and one that is also in flight counts once. A run that cannot be counted, because a lease cannot be read, starts and resumes
 //   nothing that tick, and is said once. Each tick hands every
 //   dispatched item to `reconcile.ts`, which answers by its run directory, its dispatch log and its lease: a live run is
 //   in flight, and adopted with `run:adopted` on this dispatcher's first tick, its control file left to it;
@@ -13,7 +14,7 @@
 //   resume lives, unless a live process holds its lease, which is adopted instead, or the cap is reached, when it waits
 //   for a slot; a resume that leaves the run unended parks the item with why, or with the `error:crash` message it left
 //   when it crashed; no `run.json` is a start that was refused, whose reason is the last line of its dispatch log.
-//   Anything else, such as `suspended until`, waits for a person, holding no slot.
+//   Anything else, such as `suspended until`, waits for a person, holding no slot unless it is held.
 // - A hand-off file (`engine/control.ts`) the run never took is deleted when its item settles: done, failed or parked.
 //   A failure with a `stopped` hand-off, a start refused after `sail stop` reached it, parks the item instead.
 // - **A held dispatch**: a run `suspended usage_limit` holds the workflow's dispatch (`queue:held`) until its reset time,
@@ -70,7 +71,7 @@ import { dropHandOff, handOffStops } from '../engine/control';
 import { getPullRequestDetails } from '../engine/pr-source';
 import { readStatus } from '../engine/run-dir';
 import { newRunId } from '../engine/run-id';
-import { liveRuns } from '../engine/runs';
+import { slotRuns } from '../engine/runs';
 import { sdkFingerprint } from '../engine/sdk-version';
 import { claimedBy } from '../engine/source';
 import type { ResumedFrom } from '../events/types';
@@ -154,7 +155,7 @@ export interface DispatcherOptions {
 export interface Dispatcher {
   /** Settles what has ended, then starts what is due within the cap. */
   tick(): Promise<void>;
-  /** How many of the workflow's dispatched runs are alive. The live manual runs, which also fill the cap, are not in it. */
+  /** How many of the workflow's dispatched runs are alive. The live manual runs and the held runs, which also fill the cap, are not in it. */
   inFlight(): number;
   /**
    * Changes what the workflow's watch declares, from the next tick on. A cap lowered under the live runs stops none of
@@ -224,17 +225,30 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
   let manual: number | undefined;
   /** The message reported for the live runs that could not be counted, until they are counted again. */
   let uncounted: string | undefined;
-  const full = () => manual === undefined || inFlight() + manual >= maxConcurrentRuns;
+  /** The workflow's held runs that are not live, this tick: each fills a slot. */
+  let held: string[] = [];
+  /** The held runs this tick that no dispatched item with a live process already counts. */
+  const heldOutside = () => {
+    const counted = new Set(
+      dispatchedItems()
+        .filter(alive)
+        .map((item) => item.runId),
+    );
+    return held.filter((runId) => !counted.has(runId)).length;
+  };
+  const full = () => manual === undefined || inFlight() + manual + heldOutside() >= maxConcurrentRuns;
 
   const countManual = async () => {
     try {
       const owned = new Set(dispatchedItems().map((item) => item.runId));
-      const live = await liveRuns(options.runsDir, workflow, { workspace, isAlive });
-      manual = live.filter((runId) => !owned.has(runId)).length;
+      const slots = await slotRuns(options.runsDir, workflow, { workspace, isAlive });
+      manual = slots.live.filter((runId) => !owned.has(runId)).length;
+      held = slots.held;
       uncounted = undefined;
     } catch (error) {
       if (!(error instanceof PortError)) throw error;
       manual = undefined;
+      held = [];
       const message = `the live runs of ${workflow} were not counted: ${error.message} (${error.code})`;
       if (uncounted !== message) {
         uncounted = message;
