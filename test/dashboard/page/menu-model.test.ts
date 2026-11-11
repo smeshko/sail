@@ -4,6 +4,7 @@ import { expect, test } from 'bun:test';
 import type { RunActions } from '../../../src/dashboard/actions';
 import type { IndexRepo } from '../../../src/dashboard/files';
 import type { OfferSource, Subject } from '../../../src/dashboard/page/action-registry';
+import { listRepos } from '../../../src/dashboard/page/index-model';
 import {
   fuzzy,
   generalRows,
@@ -11,6 +12,7 @@ import {
   headOf,
   type MenuRow,
   menuRows,
+  rank,
   stepOf,
   subjectRows,
 } from '../../../src/dashboard/page/menu-model';
@@ -166,6 +168,74 @@ test('a query lists go-to rows for a run id, a run title, a queue, an item key, 
   expect(goto('alph')).toEqual([['repository', 'alpha']]);
   expect(gotoRows('', index, NOW)).toEqual([]);
   expect(gotoRows('zzzz', index, NOW)).toEqual([]);
+});
+
+const ticketRun = (runId: string, key: string, title: string) => ({
+  runId,
+  source: { kind: 'ticket', ticketKey: key },
+  summary: { ticket: { title }, totals: { usage: {} } },
+});
+const runsIndex = (runs: unknown[]) => [{ name: 'alpha', remote: null, runs, queues: [] }] as unknown as IndexRepo[];
+
+test('rank scores exact, prefix, whole title words and subsequence apart', () => {
+  expect(rank('FAKE-1', ['fake-1'], [])).toEqual({ tier: 0, score: 0 });
+  expect(rank('fake-1', ['FAKE-12', 'FAKE-100'], [])).toEqual({ tier: 1, score: 1 });
+  expect(rank('queue store', [], ['Refactor queue-store to use a single write path'])).toEqual({ tier: 2, score: 0 });
+  expect(rank('qsp', ['x'], ['Refactor queue-store to use a single write path'])?.tier).toBe(3);
+  expect(rank('zzz', ['x'], ['y'])).toBeUndefined();
+  // Half the words of the query are not enough for the title tier.
+  expect(rank('queue zebra', [], ['queue store'])).toBeUndefined();
+});
+
+test('go-to ranks an exact key, then a prefix, then whole title words, then a subsequence', () => {
+  const runs = [
+    ticketRun('R-4', 'ZZ-4', 'Move the retry policy into one module'),
+    ticketRun('R-3', 'ZZ-3', 'Keep the poll interval short'),
+    ticketRun('R-2', 'POLLY-2', 'Another thing'),
+    ticketRun('POLL', 'ZZ-1', 'Something else'),
+  ];
+  const order = (list: unknown[]) => gotoRows('poll', runsIndex(list), NOW).map((row) => row.run);
+  const run = (id: string) => ({ goto: { kind: 'run' as const, repo: 'alpha', runId: id } });
+  const want = [run('POLL'), run('R-2'), run('R-3'), run('R-4')];
+  expect(order(runs)).toEqual(want);
+  expect(order([...runs].reverse())).toEqual(want);
+});
+
+test("a query that is a ticket key in full lists only that ticket's runs while any exist", () => {
+  const runs = [
+    ticketRun('A-1', 'FAKE-23', 'One'),
+    ticketRun('A-2', 'FAKE-2', 'Two'),
+    ticketRun('A-3', 'FAKE-25', 'Three'),
+    ticketRun('A-4', 'FAKE-62', 'Four'),
+    ticketRun('A-5', 'FAKE-X6', 'Five'),
+  ];
+  const ids = (query: string) => gotoRows(query, runsIndex(runs), NOW).map((row) => row.label);
+  expect(ids('Fake-2')).toEqual(['A-2']);
+  expect(ids('fake-23')).toEqual(['A-1']);
+  expect(ids('fake-6')).toEqual(['A-4', 'A-5']);
+  // No run of the ticket: the ordinary ranking applies, an item at the exact tier.
+  expect(gotoRows('fake-5', index, NOW).map((row) => row.hint)).toEqual(['item']);
+  // A full key lists no item, queue or repository, even one that matches.
+  const mixed = JSON.parse(JSON.stringify(index)) as IndexRepo[];
+  (mixed[0] as unknown as { runs: unknown[] }).runs = [ticketRun('FAKE-5-R', 'FAKE-5', 'Mine')];
+  expect(gotoRows('FAKE-5', mixed, NOW).map((row) => row.hint)).toEqual(['run']);
+});
+
+test('a pull-request run is a full key by its number as the list shows it', () => {
+  const pr = { runId: 'P-1', source: { kind: 'pr', number: 12 }, summary: { totals: { usage: {} } } };
+  expect(gotoRows('pr #12', runsIndex([pr]), NOW).map((row) => row.label)).toEqual(['P-1']);
+  expect(gotoRows('#12', runsIndex([pr, ticketRun('T-1', 'FAKE-1', 'x')]), NOW).map((row) => row.label)).toEqual([
+    'P-1',
+  ]);
+});
+
+test('equal rows keep the index order, and at most eight are listed', () => {
+  const runs = Array.from({ length: 10 }, (_, at) => ticketRun(`Q-${at}`, `K-${at}`, 'Same words'));
+  const rows = gotoRows('same words', runsIndex(runs), NOW);
+  expect(rows).toHaveLength(8);
+  expect(rows.map((row) => row.label)).toEqual(
+    (listRepos(runsIndex(runs), NOW)[0]?.runs ?? []).slice(0, 8).map((run) => run.runId),
+  );
 });
 
 test('a go-to row for an item goes to the item, and only the eight best are listed', () => {
