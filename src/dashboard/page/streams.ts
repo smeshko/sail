@@ -152,8 +152,13 @@ export function closeRun(store: Store) {
 
 /** Leaves the open queue and the open run, so the list has the centre. */
 export function closeDetail(store: Store) {
+  delete store.ui.queue;
+  leaveRun(store);
+}
+
+/** Leaves the open run, and what was selected in it, keeping an open queue. */
+function leaveRun(store: Store) {
   const { ui } = store;
-  delete ui.queue;
   closeRun(store);
   clearCall(store);
   closeFile(store);
@@ -270,7 +275,11 @@ export function onIndex(store: Store, text: string, onStart: (asked: Record<stri
   const asked = store.start;
   store.start = undefined;
   if (asked !== undefined && lists(asked.repo, asked.run)) onStart(asked);
-  else if (ui.runId !== undefined && !lists(ui.repo, ui.runId)) closeDetail(store);
+  // A run that has left the index closes; a queue opened over it stays open (review R10).
+  else if (ui.runId !== undefined && !lists(ui.repo, ui.runId)) {
+    if (ui.queue === undefined) closeDetail(store);
+    else leaveRun(store);
+  }
   if (store.run !== undefined) followAgain(store, store.run, true);
   if (store.run !== undefined && offerSignature(store, store.run) !== store.offersFor) {
     delete ui.armed;

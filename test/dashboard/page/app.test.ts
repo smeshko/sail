@@ -520,6 +520,21 @@ test('a queue opened over a followed running timeline is not scrolled to its end
   expect(host.scrolls).toEqual([]);
 });
 
+test('a queue opened over a run stays open when that run leaves the index, and the run alone closes (review R10)', () => {
+  page = boot(host);
+  firstIndex(GOLDEN_RUN_ID);
+  host.click({ action: 'select-queue', queue: `beta/${QUEUE_WORKFLOW}` });
+  host.advance(100);
+  const repos = index(m.registryDir).map((repo) => ({
+    ...repo,
+    runs: repo.runs.filter((entry) => entry.runId !== GOLDEN_RUN_ID),
+  }));
+  host.push(host.open('index')[0], { kind: 'index', repos });
+  host.advance(100);
+  expect([page.ui.queue, page.ui.runId, host.open('run=')]).toEqual([`beta/${QUEUE_WORKFLOW}`, undefined, []]);
+  expect(host.regions.main).toStartWith('<div class="d-h"><span class="d-title">ticket-to-pr queue</span>');
+});
+
 test('a run socket closed without end reconnects after 2 s into a fresh model, one closed after end stays closed, and the index socket reconnects', () => {
   page = boot(host);
   firstIndex();
