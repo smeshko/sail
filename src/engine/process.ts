@@ -11,7 +11,11 @@
 // Every live group is also kept in a process-wide set, so `stopLiveGroups` can end what a call left before sail exits.
 // A harness adapter registers the groups it spawns there too, with `trackGroup`.
 //
-// POSIX process groups only. A descendant that calls `setsid` leaves the group, and survives the stop.
+// A stop also ends the groups the leader's descendants are in at that moment, looked up once before the signal. A
+// descendant whose parent chain to the leader is already broken (a double fork), or one left in another group by a
+// script that exited by itself, survives.
+//
+// POSIX process groups only. A descendant that calls `setsid` leaves the group, and survives unless that look saw it.
 import { closeSync, openSync } from 'node:fs';
 
 /** How long a stopped group has between SIGTERM and SIGKILL. */
@@ -92,6 +96,37 @@ export async function stopLiveGroups(graceMs: number = DEFAULT_GRACE_MS): Promis
   }
 }
 
+/** Every process's pid, parent and group, from `ps`; none when it can't be run. */
+export function processTable(): { pid: number; ppid: number; pgid: number }[] {
+  try {
+    const listed = Bun.spawnSync(['ps', '-A', '-o', 'pid=,ppid=,pgid='], { stdout: 'pipe', stderr: 'ignore' });
+    return listed.stdout
+      .toString()
+      .split('\n')
+      .map((line) => line.trim().split(/\s+/).map(Number))
+      .filter((row) => row.length === 3 && row.every((n) => Number.isInteger(n) && n > 0))
+      .map(([pid, ppid, pgid]) => ({ pid: pid as number, ppid: ppid as number, pgid: pgid as number }));
+  } catch {
+    return [];
+  }
+}
+
+/** The groups `leader`'s descendants are in, other than its own and sail's. */
+export function descendantGroups(leader: number): number[] {
+  const table = processTable();
+  const own = table.find((row) => row.pid === process.pid)?.pgid;
+  const found = new Set<number>();
+  const below = [leader];
+  for (let at = below.shift(); at !== undefined; at = below.shift()) {
+    for (const row of table) {
+      if (row.ppid !== at || below.includes(row.pid)) continue;
+      below.push(row.pid);
+      if (row.pgid !== leader && row.pgid !== own && row.pgid > 1) found.add(row.pgid);
+    }
+  }
+  return [...found];
+}
+
 export async function runProcess(options: ProcessOptions): Promise<ProcessEnd> {
   const graceMs = options.graceMs ?? DEFAULT_GRACE_MS;
   const stdout = openSync(options.stdout, 'w');
@@ -122,9 +157,17 @@ export async function runProcess(options: ProcessOptions): Promise<ProcessEnd> {
   trackGroup(pgid);
   let timedOut = false;
   let aborted = false;
-  let stopping: Promise<void> | undefined;
+  let stopping: Promise<unknown> | undefined;
+  /** The groups the leader's descendants were in when it was stopped. */
+  const found = new Set<number>();
   const stop = () => {
-    stopping ??= stopGroup(pgid, graceMs);
+    if (stopping !== undefined) return;
+    // One look, before the signal, while the parent chain is whole.
+    for (const group of descendantGroups(pgid)) {
+      found.add(group);
+      trackGroup(group);
+    }
+    stopping = Promise.all([pgid, ...found].map((group) => stopGroup(group, graceMs)));
   };
   const timer = setTimeout(() => {
     timedOut = true;
@@ -148,6 +191,7 @@ export async function runProcess(options: ProcessOptions): Promise<ProcessEnd> {
     await stopGroup(pgid, graceMs); // whatever the leader left running
   } finally {
     untrackGroup(pgid);
+    for (const group of found) untrackGroup(group);
   }
   return { started: true, code: child.exitCode, signal: child.signalCode ?? null, timedOut, aborted };
 }
