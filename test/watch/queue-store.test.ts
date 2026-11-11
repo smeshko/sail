@@ -1330,6 +1330,21 @@ test('waiting on a failed item that had attempts keeps its attempt count', () =>
   expect(store.snapshot().items[0]).toMatchObject({ state: 'queued', attempts: 1, waitingOn: ['FAKE-1'] });
 });
 
+test('waiting on a failed item whose run failed drops the run, its pid and its sail', () => {
+  const store = open(runsDir());
+  store.add([ticket('FAKE-2')]);
+  store.dispatched('ticket:FAKE-2', 'run-1', '0.9.0');
+  store.spawned('ticket:FAKE-2', 4242);
+  store.failed('ticket:FAKE-2', 'stage_error');
+  expect(store.snapshot().items[0]).toMatchObject({ state: 'failed', runId: 'run-1', pid: 4242, sail: '0.9.0' });
+  store.waiting('ticket:FAKE-2', ['FAKE-1']);
+  const item = store.snapshot().items[0];
+  expect(item).toMatchObject({ state: 'queued', attempts: 1 });
+  expect(item?.runId).toBeUndefined();
+  expect(item?.pid).toBeUndefined();
+  expect(item?.sail).toBeUndefined();
+});
+
 test('waiting with an empty list leaves a failed item failed, with its reason and retryAt, and emits nothing', () => {
   const runs = runsDir();
   const store = open(runs);

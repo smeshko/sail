@@ -39,8 +39,8 @@
 //   leave a moved item where it is, and its dispatch clears the mark. It emits `queue:moved`.
 // - `waiting()` records the open prerequisites that hold a queued item at dispatch in its `waitingOn`, and emits
 //   `queue:waiting` when the list changes; an empty list clears it silently. A dispatch and a requeue clear it too. A
-//   `failed` item given a non-empty list is queued again, its reason and retry time cleared and its attempts kept, and
-//   that emits `queue:waiting` whatever the list was.
+//   `failed` item given a non-empty list is queued again, its reason, retry time and failed run cleared and its attempts
+//   kept, and that emits `queue:waiting` whatever the list was.
 // - `relabel()` changes the label `queue.json` polls for, silently. `skippedLeased()`, `watched()` and `unwatched()` only
 //   emit their events: none of them changes `queue.json`.
 // - Every event the store emits is handed to `onEvent` once it is appended, in order: the watcher's terminal lines. A
@@ -270,8 +270,9 @@ export interface QueueStore {
   /**
    * Records which open prerequisites (as `waitingOnText` names them) hold the queued item at dispatch. A list that
    * differs from the item's `waitingOn` replaces it and emits `queue:waiting`; the same list changes nothing. An empty
-   * list clears `waitingOn` and emits nothing. A `failed` item given a non-empty list is queued again: its `reason` and
-   * `retryAt` are cleared, its `attempts` kept, and `queue:waiting` is emitted even for the list it already had.
+   * list clears `waitingOn` and emits nothing. A `failed` item given a non-empty list is queued again: its `reason`,
+   * `retryAt`, `runId`, `pid` and `sail` are cleared, its `attempts` kept, and `queue:waiting` is emitted even for the
+   * list it already had.
    */
   waiting(key: string, on: readonly string[]): void;
   /** Emits `queue:skipped_leased`: the due item waits, since run `heldBy` holds `branch`. The queue is unchanged. */
@@ -679,6 +680,9 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
           waiting.state = 'queued';
           delete waiting.reason;
           delete waiting.retryAt;
+          delete waiting.runId;
+          delete waiting.pid;
+          delete waiting.sail;
         }
       });
       if (on.length > 0) stream.emit({ type: 'queue:waiting', workflow, dedupKey: key, on: [...on] });
