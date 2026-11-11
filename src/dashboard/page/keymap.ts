@@ -30,7 +30,7 @@ export const NAV = [
   { id: 'queues', keys: ['g q', '3'], group: 'Global', text: 'go to Queues' },
   { id: 'history', keys: ['g h', '4'], group: 'Global', text: 'go to History' },
   { id: 'pane', keys: ['w'], group: 'Global', text: 'give the keys to the other pane' },
-  { id: 'inspector', keys: ['i'], group: 'Global', text: 'pin the inspector' },
+  { id: 'inspector', keys: ['i'], group: 'Global', text: 'pin inspector' },
   { id: 'back', keys: ['Escape'], group: 'Global', text: 'back one level' },
   { id: 'down', keys: ['j', 'ArrowDown', 'ArrowRight'], group: 'List', text: 'move down' },
   { id: 'up', keys: ['k', 'ArrowUp', 'ArrowLeft'], group: 'List', text: 'move up' },

@@ -37,7 +37,7 @@ const keyBoxes = (key: string): SafeHtml =>
 
 export function renderSheet(registry?: readonly ActionDef[]): SafeHtml {
   const groups = sheetLines(registry).filter((each) => each.lines.length > 0);
-  return html`<button class="cmdk-back" type="button" data-action="close-sheet" aria-label="close the keyboard shortcuts" tabindex="-1"></button><div class="cmdk keys" role="dialog" aria-modal="true" aria-label="keyboard shortcuts" tabindex="-1"><div class="keys-h">keyboard shortcuts<span class="keys-close">${keyBoxes('?')} or ${keyBoxes('Escape')} to close</span></div><div class="keys-cols">${groups.map(
+  return html`<button class="cmdk-back" type="button" data-action="close-sheet" aria-label="close the keyboard shortcuts" tabindex="-1"></button><div class="cmdk keys" role="dialog" aria-modal="true" aria-label="keyboard shortcuts" tabindex="-1"><div class="keys-h">Keyboard shortcuts<span class="keys-close">${keyBoxes('?')} or ${keyBoxes('Escape')} to close</span></div><div class="keys-cols">${groups.map(
     ({ group, lines }) =>
       html`<section class="keys-grp"><div class="cmdk-grp">${group}</div>${lines.map(
         (line) =>

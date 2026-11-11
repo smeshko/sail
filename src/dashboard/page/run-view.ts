@@ -2,7 +2,7 @@
 // group's cards side by side under a header of their own, the roster stages not called yet, the pull request it opened,
 // and the CLI commands to copy. The cards come from the run model, fed by the run's events. The totals come from the
 // summary in the index when there is one, and from the cards otherwise. The Resume, Restart, Stop or Clean a run offers
-// are drawn in the run view's view header, by `runHeaderActions`: a button for each the run's status has (Stop while it runs,
+// are drawn in the run view's view header, two rows that never wrap (key, title and status; id, workflow and actions), by `runHeaderActions`: a button for each the run's status has (Stop while it runs,
 // Resume while suspended, Restart and Clean once failed) and the rest behind a ⋯, Rebuild among them. `runControls` is the one component both
 // that ⋯ menu and the list row's ⋯ menu are drawn with. A run whose files can't be read says so under its view header,
 // with why and the Rebuild it offers. A stop reason is amber, as a suspension is, and red only on a failed run.
@@ -118,7 +118,7 @@ function totals(model: RunModel, summary: Summary | null | undefined, now: numbe
   const used = final?.totals.budget?.usedPct;
   const settled = model.cards.filter((entry) => entry.state === 'settled').length;
   return html`<div class="stats totals">
-<div class="stat"><b>${duration(ms)}</b><span>${maxMinutes === undefined ? 'duration' : `of ${maxMinutes}m`}</span></div>
+<div class="stat"><b>${duration(ms)}</b><span>${maxMinutes === undefined ? 'duration' : `of ${maxMinutes} min`}</span></div>
 <div class="stat"><b>${cost(spent)}</b><span>${maxUsd === undefined ? 'cost' : `of ${cost(maxUsd)} (${used === undefined ? percent(spent, maxUsd) : `${used}%`})`}</span></div>
 <div class="stat"><b>${settled}/${model.cards.length}</b><span>calls settled</span></div>
 </div>`;
@@ -172,7 +172,9 @@ export function runHeaderActions(
   const ids = HEADER_BUTTONS[status ?? ''] ?? [];
   const buttons = RUN_ACTIONS.filter((def) => ids.includes(def.id));
   const rest = RUN_ACTIONS.filter((def) => !ids.includes(def.id));
-  const drawn = buttons.map((def) => actionControl(def, subject, ui.act, source, { honourDisabled: true, wrap: true }));
+  const drawn = buttons.map((def) =>
+    actionControl(def, subject, ui.act, source, { honourDisabled: true, wrap: true, why: 'title' }),
+  );
   const menu = runControls(offers, ui, rest, runId);
   if (menu === undefined && drawn.every((each) => each === '')) return '';
   const open = ui.runMenu?.runId === runId && ui.runMenu.at === 'header';
@@ -219,15 +221,15 @@ export function renderRun(
   const ticket = model.ticket ?? summary?.ticket;
   // A summary's result is the workflow's own, free-form: its PR is read only when it is an object (review R2-1).
   const pr = model.pr ?? fieldsOf(fieldsOf(summary?.result)?.pr);
-  return html`<div class="d-h run-h">${
+  return html`<div class="d-h run-h"><div class="h-row">${
     ticket === undefined ? '' : html`<span class="d-title">${ticket.ticketKey}</span> ${link(ticket.url, ticket.title)}`
   }<span class="pill ${pillOf(status)}">${status ?? 'unknown'}</span>${
     stopReason === undefined
       ? ''
       : html`<span class="${status === 'failed' ? 'pill p-fail' : 'warnchip'}">${stopReason}</span>`
-  }<span class="d-agent">${runId}${model.workflow === undefined ? '' : html` · ${model.workflow}`}${
+  }</div><div class="h-row"><span class="d-agent">${runId}${model.workflow === undefined ? '' : html` · ${model.workflow}`}${
     model.fromRun === undefined ? '' : html` · seeded from ${model.fromRun}`
-  }</span>${runHeaderActions(status, runId, offers, ui)}</div>
+  }</span>${runHeaderActions(status, runId, offers, ui)}</div></div>
 ${problem === undefined ? '' : unreadable(problem, runId, offers, ui)}
 ${model.end?.message === undefined ? '' : html`<div class="d-msg">${model.end.message}</div>`}
 <div class="run-b">

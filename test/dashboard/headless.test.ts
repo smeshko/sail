@@ -155,7 +155,10 @@ test("the real bundle boots headless: both repositories, the golden run's eight 
   );
   expect(page.text('main')).toContain('<button class="btn" disabled');
   expect(page.text('list')).toContain('watcher not running');
-  expect(page.text('status')).toBe('');
+  expect(await until(() => page.text('status').includes('watcher not running'))).toBe(true);
+  expect(page.text('status')).toContain('<span>beta / ticket-to-pr</span>');
+  expect(page.text('status')).toContain('waiting <b>');
+  expect(page.text('status')).toContain('running <b>');
   page.click({ action: 'open', repo: 'alpha', run: FAKE_2_ID, key: 'implement#1', tab: 'permissions' });
   expect(await until(() => page.text('status').includes('calls <b>'))).toBe(true);
   expect(await until(() => page.text('inspector').includes('<code>git push --force origin HEAD</code>'))).toBe(true);
@@ -176,6 +179,7 @@ test("once beta's queue/ is gone, the next index drops its queue row and gives t
   rmSync(join(m.beta.clone, '.sail-runs', 'queue'), { recursive: true });
   expect(await until(() => !page.text('list').includes('select-queue'))).toBe(true);
   expect(await until(() => page.text('main').includes('No queue selected'))).toBe(true);
+  expect(page.text('status')).toStartWith('<span>Queues</span>');
   expect(page.text('sidebar')).toContain('<span class="nm">beta</span>');
 }, 30_000);
 
@@ -346,7 +350,7 @@ test('on the real bundle and server, restart from the menu lists the stages and 
   expect(await until(() => page.text('menu').includes('<span class="cmdk-label">restart</span>'))).toBe(true);
   page.type('menu-query', 'restart');
   page.press('Enter');
-  expect(await until(() => page.text('menu').includes('<div class="cmdk-step">from</div>'))).toBe(true);
+  expect(await until(() => page.text('menu').includes('<div class="cmdk-step">From</div>'))).toBe(true);
   expect((page.text('menu').match(/class="cmdk-row/g) ?? []).length).toBeGreaterThan(1);
   page.press('Enter');
   expect(await until(() => page.text('dialog').includes('<h2 id="dialog-title">restart FAKE-2</h2>'))).toBe(true);

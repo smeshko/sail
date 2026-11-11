@@ -543,7 +543,8 @@ test('boot draws the sidebar and the list from the first index and opens no run;
   expect(host.open('run=')).toEqual([]);
   host.renders = [];
   host.advance(100);
-  expect(host.renders.sort()).toEqual(['list', 'main', 'sidebar']);
+  expect(host.renders.sort()).toEqual(['list', 'main', 'sidebar', 'status']);
+  expect(host.regions.status).toContain('<span>Active</span><span>1 waiting on you</span>');
   expect(host.regions.sidebar).toContain('<span class="nm">alpha</span>');
   expect(host.regions.sidebar).toContain('<span class="nm">beta</span>');
   expect(host.regions.list).toContain('<span class="lh-t">Active</span><span class="c">1</span>');
@@ -1140,16 +1141,35 @@ test('a queue open over a selected card closes the inspector, and a pinned one s
   expect(host.regions.inspector).not.toContain('implement#1');
 });
 
-test('the status bar is empty while a queue is open and describes the run again once it is back (ADW-528)', () => {
+test('the status bar names the view with nothing open, the queue while one is open, and the view again after Esc (ADW-548)', () => {
   page = boot(host);
-  firstIndex();
+  plainIndex();
+  host.advance(100);
+  expect(host.regions.status).toContain('<span>Active</span><span>1 waiting on you</span>');
+  host.click({ action: 'select-view', view: 'history' });
+  host.advance(100);
+  expect(host.regions.status).toContain('<span>History</span><span>');
+  host.click({ action: 'select-queue', queue: `beta/${QUEUE_WORKFLOW}` });
+  host.advance(100);
+  expect(host.regions.status).toContain(`<span>beta / ${QUEUE_WORKFLOW}</span><span>watched</span>`);
+  host.press('Escape');
+  host.advance(100);
+  expect(host.regions.status).toContain('<span>History</span><span>');
+  expect(host.regions.status).not.toContain('beta /');
+});
+
+test('the status bar names the queue while one is open and describes the run again once it is back (ADW-528, ADW-548)', () => {
+  page = boot(host);
   expect(host.regions.status ?? '').toBe('');
+  firstIndex();
   replay(host.open('run=')[0], GOLDEN());
   host.advance(100);
   expect(host.regions.status).toContain('calls <b>');
   host.click({ action: 'select-queue', queue: `beta/${QUEUE_WORKFLOW}` });
   host.advance(100);
-  expect(host.regions.status).toBe('');
+  expect(host.regions.status).toBe(
+    `<span>beta / ${QUEUE_WORKFLOW}</span><span>watched</span><span>waiting <b>1</b></span><span>running <b>1</b></span>`,
+  );
   host.click({ action: 'select-run', repo: 'alpha', run: GOLDEN_RUN_ID });
   host.advance(100);
   expect(host.regions.status).toContain('calls <b>');
@@ -3564,7 +3584,7 @@ describe('all clear', () => {
   test('one click empties the list and the count, shows nothing needs attention, posts nothing and leaves the failed run in the list', () => {
     bootOpen();
     expect(badge()).toBe('3');
-    expect(listed()).toContain('data-action="clear-attention" title="dismiss all (⇧E)">all clear</button>');
+    expect(listed()).toContain('data-action="clear-attention" title="all clear (⇧E)">all clear</button>');
     host.click({ action: 'clear-attention' });
     host.advance(100);
     expect(badge()).toBe('0');
@@ -3826,9 +3846,9 @@ test('Backspace in a step’s empty field lets go of nothing', async () => {
   host.advance(100);
   typeIn('restart');
   enter();
-  expect(stepLabel()).toBe('from');
+  expect(stepLabel()).toBe('From');
   expect(host.press('Backspace', true)).toBe(false);
-  expect(stepLabel()).toBe('from');
+  expect(stepLabel()).toBe('From');
   expect(menuHead()).toBe('FAKE-2 · Print the version with --version');
 });
 
@@ -3899,7 +3919,7 @@ test('typing filters the rows within one flush and lists go-to rows, and the fie
   expect(before.length).toBeGreaterThan(1);
   host.type('menu-query', FAKE_2_ID.slice(0, 8));
   host.advance(100);
-  expect(cmdk()).toContain('<div class="cmdk-grp" id="cmdk-grp-goto" role="presentation">go to</div>');
+  expect(cmdk()).toContain('<div class="cmdk-grp" id="cmdk-grp-goto" role="presentation">Go to</div>');
   expect(menuLeads()).toContain(FAKE_2_ID.replace(/-[^-]*$/, ''));
   expect(cmdk()).not.toContain('cmdk-id');
 });
@@ -3995,7 +4015,7 @@ test('Enter on a go-to row pushes the URL of what it opened, and a key that chan
   expect(host.urls).toEqual([]);
 });
 
-test('Enter on switch theme changes the theme and on toggle inspector the inspector, and Enter on a disabled row does nothing', async () => {
+test('Enter on switch theme changes the theme and on pin inspector the inspector, and Enter on a disabled row does nothing', async () => {
   await openRunPage(FAKE_2_ID);
   cmdK();
   host.type('menu-query', 'switch theme');
@@ -4003,7 +4023,7 @@ test('Enter on switch theme changes the theme and on toggle inspector the inspec
   host.press('Enter', true);
   expect(page?.ui.theme).toBe('light');
   cmdK();
-  host.type('menu-query', 'toggle inspector');
+  host.type('menu-query', 'pin inspector');
   host.advance(100);
   host.press('Enter', true);
   expect(page?.ui.pinned).toBe(true);
@@ -4089,7 +4109,7 @@ test('by keyboard alone: resume, the amount asked beside what was spent', async 
   await menuOn(FAKE_3_ROW);
   typeIn('resume');
   enter();
-  expect(stepLabel()).toBe('raise $');
+  expect(stepLabel()).toBe('Raise $');
   expect(cmdk()).toContain('<div class="cmdk-line">spent $1.06 of $1.00</div>');
   typeIn('5');
   expect(cmdk()).toContain('<div class="cmdk-line">raises the budget by $5.00</div>');
@@ -4112,7 +4132,7 @@ test('an invalid raise stays in the menu: its words shown, nothing sent and no d
   typeIn('0');
   enter();
   expect(cmdk()).toContain('<div class="cmdk-err">give the dollars to raise the budget by: at least 0.01</div>');
-  expect([stepLabel(), host.posts, host.dialog]).toEqual(['raise $', [], undefined]);
+  expect([stepLabel(), host.posts, host.dialog]).toEqual(['Raise $', [], undefined]);
   typeIn('3');
   expect(cmdk()).not.toContain('cmdk-err');
 });
@@ -4122,7 +4142,7 @@ test('by keyboard alone: restart from a chosen stage', async () => {
   await menuOn(FAKE_2_ROW);
   typeIn('restart');
   enter();
-  expect(stepLabel()).toBe('from');
+  expect(stepLabel()).toBe('From');
   const stages = [...cmdk().matchAll(/<span class="cmdk-label">([^<]*)<\/span>/g)].map(([, label]) => label);
   expect(stages.length).toBeGreaterThan(1);
   const start = cmdk().match(/class="cmdk-row sel"[^>]*><span class="cmdk-label">([^<]*)</)?.[1];
@@ -4209,7 +4229,7 @@ test('by keyboard alone: add, and add skipping its checks', async () => {
   await menuOn(WORKFLOW_ROW);
   typeIn('add');
   enter();
-  expect(stepLabel()).toBe('ticket key');
+  expect(stepLabel()).toBe('Ticket key');
   typeIn('FAKE-9');
   enter();
   expect(host.posts).toEqual([{ path: `${QUEUE_PATH}/add`, body: { ticketKey: 'FAKE-9' } }]);
@@ -4218,7 +4238,7 @@ test('by keyboard alone: add, and add skipping its checks', async () => {
   typeIn('add');
   host.press('ArrowDown', true);
   enter();
-  expect(stepLabel()).toBe('ticket key');
+  expect(stepLabel()).toBe('Ticket key');
   typeIn('FAKE-10');
   enter();
   expect([dialogTitle(), host.posts.length]).toEqual(['add FAKE-10, skipping its checks', 1]);
@@ -4282,13 +4302,13 @@ test('Esc steps back through add’s steps, then closes', async () => {
   host.advance(100);
   typeIn('add a ticket');
   enter();
-  expect(stepLabel()).toBe('queue');
+  expect(stepLabel()).toBe('Queue');
   enter();
-  expect(stepLabel()).toBe('ticket key');
+  expect(stepLabel()).toBe('Ticket key');
   typeIn('FAKE-9');
   host.press('Escape', true);
   host.advance(100);
-  expect(stepLabel()).toBe('queue');
+  expect(stepLabel()).toBe('Queue');
   host.press('Escape', true);
   host.advance(100);
   expect([stepLabel(), cmdk()]).toEqual([undefined, expect.stringContaining('switch theme')]);
@@ -4413,7 +4433,7 @@ test('a context menu asks a typed step in its own field, and Escape steps back t
   expect(menuSel()).toBe('resume');
   host.press('Enter');
   host.advance(100);
-  expect(stepLabel()).toBe('raise $');
+  expect(stepLabel()).toBe('Raise $');
   expect(cmdk()).toContain('<input class="cmdk-in" name="menu-query" type="number"');
   host.press('Escape', true);
   host.advance(100);
@@ -5289,14 +5309,14 @@ describe('start a run (ADW-524)', () => {
     host.advance(100);
     typeIn('start a run');
     enter();
-    expect(stepLabel()).toBe('repository');
+    expect(stepLabel()).toBe('Repository');
     enter();
-    expect([stepLabel(), menuSel()]).toEqual(['workflow', 'ticket-to-pr']);
+    expect([stepLabel(), menuSel()]).toEqual(['Workflow', 'ticket-to-pr']);
     enter();
-    expect(stepLabel()).toBe('ticket key or pull request');
+    expect(stepLabel()).toBe('Ticket key or pull request');
     typeIn(source);
     enter();
-    expect(stepLabel()).toBe('stop after');
+    expect(stepLabel()).toBe('Stop after');
     typeIn(until);
     host.postAnswer = { status: answer.status, body: JSON.stringify(answer.body) };
     enter();
@@ -6048,7 +6068,7 @@ describe('a key for every action, and the shortcut sheet (ADW-523)', () => {
     press('p');
     expect(host.posts.at(-1)).toEqual({ path: `${QUEUE_PATH}/poll`, body: {} });
     press('c');
-    expect(stepLabel()).toBe('ticket key');
+    expect(stepLabel()).toBe('Ticket key');
     expect(cmdk()).toContain(`beta › ${QUEUE_WORKFLOW}`);
   });
 

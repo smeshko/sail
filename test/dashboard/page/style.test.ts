@@ -97,9 +97,29 @@ test('the page starts with the inspector closed and unpinned (ADW-528)', () => {
 });
 
 test('the theme and inspector buttons carry an aria-label beside their title (ADW-508)', () => {
-  expect(html).toContain('data-action="toggle-theme" aria-label="switch theme" title="theme"');
+  expect(html).toContain('data-action="toggle-theme" aria-label="switch theme" title="switch theme"');
   expect(html).toContain(
-    'data-action="toggle-inspector" aria-label="pin inspector" aria-pressed="false" title="pin the inspector (i)"',
+    'data-action="toggle-inspector" aria-label="pin inspector" aria-pressed="false" title="pin inspector (I)"',
+  );
+});
+
+test('the pinned inspector toggle is drawn in the focus colour, not the error colour (ADW-548)', () => {
+  const rule = rules().find(([sel]) => sel === ':root[data-pinned="true"] [data-action="toggle-inspector"]');
+  expect(rule?.[1]).toContain('border-color: var(--focus)');
+  expect(rule?.[1]).not.toContain('--err');
+});
+
+test('the run view header is two rows that never wrap, and its actions never shrink (ADW-548)', () => {
+  const body = (selector: string) => rules().find(([sel]) => sel === selector)?.[1] ?? '';
+  expect(body('.run-h')).toContain('flex-wrap: nowrap');
+  expect(body('.run-h')).toContain('flex-direction: column');
+  expect(body('.h-row')).toContain('white-space: nowrap');
+  expect(body('.h-row')).not.toMatch(/flex-wrap:\s*wrap/);
+  expect(body('.h-row .h-acts')).toContain('flex: 0 0 auto');
+  expect(body('.h-row .d-agent')).toContain('text-overflow: ellipsis');
+  expect(body('.h-row .d-agent')).not.toContain('margin-left: auto');
+  expect(rules().filter(([sel, rule]) => /\.(run-h|h-row)\b/.test(sel) && /flex-wrap:\s*wrap\b/.test(rule))).toEqual(
+    [],
   );
 });
 
@@ -383,6 +403,11 @@ test('a field’s placeholder reads in the dimmest text token (ADW-506)', () => 
 
 test('a tickbox takes its accent from a theme variable (ADW-506)', () => {
   expect(declarationsOf('input[type="checkbox"]')).toContain('accent-color: var(--run);');
+});
+
+test("the run header's ⋯ menu wraps a reason the nowrap row around it would keep on one line (ADW-548)", () => {
+  expect(declarationsOf('.h-menu')).toContain('white-space: normal');
+  expect(declarationsOf('.h-menu')).toContain('overflow-wrap: anywhere');
 });
 
 test("the resize handles are focusable separators that start at their column's width, minimum and maximum (ADW-547)", () => {

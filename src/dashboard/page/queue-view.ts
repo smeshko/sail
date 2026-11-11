@@ -219,6 +219,14 @@ const LABELS: Record<QueueItemState, string> = {
   done: 'done',
 };
 
+/** The status bar with a queue open: the queue, its watch state, and how many items wait and run. */
+export function renderQueueStatus(panel: QueuePanel): SafeHtml {
+  // A queue whose file can't be read has nothing to count: its problem takes the counts' place.
+  if (panel.problem !== undefined && panel.queue === undefined)
+    return html`<span>${panel.repo} / ${panel.workflow}</span><span>${panel.watch.state}</span><span>${panel.problem}</span>`;
+  return html`<span>${panel.repo} / ${panel.workflow}</span><span>${panel.watch.state}</span><span>waiting <b>${panel.counts.queued}</b></span><span>running <b>${panel.counts.dispatched}</b></span>`;
+}
+
 /** The queue's recent events, folded under a toggle until opened. */
 function recentEvents(stream: QueueStream | undefined, ui: UiState): SafeHtml {
   const recent = stream?.recent ?? [];

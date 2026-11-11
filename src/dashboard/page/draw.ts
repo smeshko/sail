@@ -2,7 +2,7 @@
 // those whose markup changed, and the one-second tick that draws the running times again while anything runs. A region
 // that can't be drawn says so, and the others are still drawn.
 import { renderDrawer } from './drawer-view';
-import { renderEmpty } from './empty-view';
+import { renderEmpty, renderViewStatus } from './empty-view';
 import { syncOpen } from './focus';
 import { REGIONS, type Region } from './host';
 import { html } from './html';
@@ -13,7 +13,7 @@ import { filterRows, groupsOf, shownGroups, viewCounts } from './list-model';
 import { renderList } from './list-view';
 import { highlighted, modelOf } from './menu';
 import { renderMenu } from './menu-view';
-import { hasItemActions, offeredDrop, renderQueue } from './queue-view';
+import { hasItemActions, offeredDrop, renderQueue, renderQueueStatus } from './queue-view';
 import { renderRun, renderStatus } from './run-view';
 import { renderSidebar } from './sidebar-view';
 import {
@@ -31,9 +31,16 @@ import {
 } from './store';
 import { renderTimeline } from './timeline-view';
 import { renderToasts } from './toast-view';
+import { topButton } from './top-bar';
 
 /** How often a running time is drawn again. */
 export const TICK_MS = 1000;
+
+/** What the list shows, its filters applied, so the empty centre's counts and the status bar's are the rows beside them. */
+const emptyGroups = (store: Store) =>
+  store.index === undefined
+    ? undefined
+    : shownGroups(store.ui.view, listRepos(store.index, store.host.now()), store.ui, store.host.now(), listed(store));
 
 /** What each region is drawn from, field-keeping and open-dialog rules included. */
 export function regions(store: Store): Record<Region, () => string> {
@@ -60,9 +67,7 @@ export function regions(store: Store): Record<Region, () => string> {
           : [];
       return renderList(ui.view, repos, ui, host.now(), store.offers, items).value;
     },
-    link: () =>
-      html`<button class="btn" type="button" data-action="copy-link" aria-label="copy link" title="copy link">⧉</button>`
-        .value,
+    link: () => topButton('copy-link').value,
     main: () => {
       const panel = openQueue(store);
       if (panel !== undefined) {
@@ -86,16 +91,7 @@ export function regions(store: Store): Record<Region, () => string> {
         if (unwatched || menuItem === undefined || !hasItemActions(panel, menuItem)) delete ui.itemMenu;
         return renderQueue(panel, store.queues.get(ui.queue ?? '')?.stream, ui, host.now()).value;
       }
-      if (store.run === undefined)
-        return renderEmpty(
-          ui.view,
-          // What the list shows, its filters applied, so the counts are the rows beside them.
-          store.index === undefined
-            ? undefined
-            : shownGroups(ui.view, listRepos(store.index, host.now()), ui, host.now(), listed(store)),
-          ui,
-          store.index?.length,
-        ).value;
+      if (store.run === undefined) return renderEmpty(ui.view, emptyGroups(store), ui, store.index?.length).value;
       const error = store.run.error === undefined ? '' : html`<div class="code bad">${store.run.error}</div>`;
       const card = opened(store);
       const view =
@@ -108,7 +104,12 @@ export function regions(store: Store): Record<Region, () => string> {
       renderInspector(centreCard(store), centreRun(store)?.model.roster, store.result, store.log, ui).value,
     status: () => {
       const run = centreRun(store);
-      return run === undefined ? '' : renderStatus(run.model, summaryOf(store, run)).value;
+      if (run !== undefined) return renderStatus(run.model, summaryOf(store, run)).value;
+      const panel = openQueue(store);
+      if (panel !== undefined) return renderQueueStatus(panel).value;
+      // Nothing open: the view's name and counts, once an index lists a repository. Before one there is nothing to count.
+      const groups = emptyGroups(store);
+      return groups === undefined || store.index?.length === 0 ? '' : renderViewStatus(ui.view, groups, ui).value;
     },
     drawer: () => renderDrawer(ui, store.doc).value,
     menu: () => {
@@ -128,6 +129,8 @@ export function flush(store: Store): void {
   syncOpen(store);
   const draw = regions(store);
   store.flushTimer = undefined;
+  // The status bar follows what the centre shows, so it is drawn whenever the centre or the list is: an unchanged one isn't written.
+  if (store.dirty.has('main') || store.dirty.has('list')) store.dirty.add('status');
   const dirty = REGIONS.filter((region) => store.dirty.has(region));
   store.dirty.clear();
   // The run or queue beside the list, or the list alone: the host lays the centre out by it.

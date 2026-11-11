@@ -85,6 +85,14 @@ describe('audit 2: rows say what they are (ADW-543)', () => {
     expect(markup).toContain('>.sail-runs/a-bad/STATUS holds &quot;x&quot;, not one of running</span>');
   });
 
+  test("the all clear button says the registry's label as its text and its title, with its key", () => {
+    const markup = renderList('inbox', repos, ui(), NOW, undefined, [
+      { repo: 'alpha', runId: 'a-bad', kind: 'problem', about: 'a-bad', title: 'run', detail: 'x' },
+    ]).value;
+    expect(markup).toContain('data-action="clear-attention" title="all clear (⇧E)">all clear</button>');
+    expect(markup).not.toContain('dismiss all');
+  });
+
   test("a run row's problem shows its path from the clone, the whole of it in its tooltip", () => {
     const markup = renderList('active', unreadable, ui(), NOW).value;
     expect(markup).toContain(
