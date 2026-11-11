@@ -433,6 +433,7 @@ test('the header has a poll button for the workflow, and the add form shows only
   for (const markup of [draw('ticket'), draw('pr'), draw()]) expect(markup).toContain(poll);
   const form = draw('ticket');
   expect(form).toContain('<input class="txt" type="text" name="add-ticket" placeholder="ticket key"');
+  expect(form).toContain('<div class="qadd" data-enter="add-ticket">');
   expect(form).not.toContain('type="checkbox"');
   expect(form).toContain('<button class="btn" data-action="add-ticket" data-repo="beta" data-workflow="ticket-to-pr"');
   expect(form).toContain(
