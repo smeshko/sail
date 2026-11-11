@@ -17,7 +17,7 @@ import type { QueueEvent } from '../../events/types';
 import type { QueueItemState } from '../../watch/queue-store';
 import { ACTIONS, actionOf, type OfferSource, type Subject } from './action-registry';
 import { actionControl, subjectAttrs } from './action-view';
-import { ago, clock } from './format';
+import { ago, clock, minute } from './format';
 import { html, type SafeHtml, safeHref } from './html';
 import { type PanelItem, panelSource, QUEUE_STATES, type QueuePanel } from './index-model';
 import { withKey } from './keymap';
@@ -31,6 +31,17 @@ export interface QueueStream {
   /** What the workflow polls, from its last `queue:polled` event. */
   polls?: 'ticket' | 'pr' | undefined;
 }
+
+/** What a port's paused poll was polling, in a person's words. */
+const POLLS: Readonly<Record<string, string>> = { ticketSource: 'ticket polls', codeHost: 'pull request polls' };
+
+/** A paused poll, in plain words: `ticket polls paused — linear: the API key was refused (401)`. */
+export const pausedText = (paused: { port: string; adapter: string; message: string }): string =>
+  `${POLLS[paused.port] ?? `${paused.port} polls`} paused — ${paused.adapter}: ${paused.message}`;
+
+/** A held dispatch, in plain words, its end to the minute: `held until 18:52 — usage limit reached`. */
+export const heldText = (held: { until?: string | undefined; reason: string }, tz: number): string =>
+  `held${held.until === undefined ? '' : ` until ${minute(held.until, tz)}`} — ${held.reason}`;
 
 /** The key a queue's stream is kept under: `<repo>/<workflow>`. */
 export const queueId = (repo: string, workflow: string) => `${repo}/${workflow}`;
@@ -188,14 +199,14 @@ function itemRow(panel: QueuePanel, item: PanelItem, ui: UiState, why: string | 
         ? html`<button class="run-link" data-action="select-run" data-repo="${panel.repo}" data-run="${item.runId}" title="open ${item.runId}">${item.runId} ›</button>`
         : html`<span class="c-run">${item.runId}</span>`;
   const underway = ui.underway[`item:${panel.repo}/${panel.workflow}/${item.dedupKey}`];
-  return html`<div class="qrow2${item.state === 'done' ? ' done' : ''}"${subjectAttrs({ kind: 'item', repo: panel.repo, workflow: panel.workflow, item: item.dedupKey })}><span class="c-dot"><i class="${item.state}"></i></span><span class="c-ref">${item.dedupKey}</span><span class="c-main">${title}<span class="c-sub">${underway === undefined ? item.state : html`<span class="busy">${underway}</span>`} · ${plural(item.attempts, 'attempt')}${
+  return html`<div class="qrow2${item.state === 'done' ? ' done' : ''}"${subjectAttrs({ kind: 'item', repo: panel.repo, workflow: panel.workflow, item: item.dedupKey })}><span class="c-dot"><i class="${item.state}"></i></span><span class="c-ref">${item.dedupKey}</span><span class="c-main">${title}<span class="c-sub">${underway === undefined ? '' : html`<span class="busy">${underway}</span> · `}${plural(item.attempts, 'attempt')}${
     item.priority === undefined || item.priority === 'none' ? '' : ` · priority ${item.priority}`
   }${item.moved === true ? ' · moved' : ''}${
     item.retryAt === undefined ? '' : html` · retry at ${clock(item.retryAt, ui.tz)}`
   }${
     item.held === undefined
       ? ''
-      : html` · held until ${clock(item.held.until, ui.tz)} · <span class="why">${item.held.reason}</span>`
+      : html` · held until ${minute(item.held.until, ui.tz)} · <span class="why">${item.held.reason}</span>`
   }${item.waitingOn === undefined ? '' : html` · waiting on ${item.waitingOn.join(', ')}`}${item.reason === undefined ? '' : html` · <span class="why">${item.reason}</span>`}</span></span><span class="c-side">${run}${moveButtons(panel, item, why)}${itemMenu(panel, item, ui, why)}</span></div>`;
 }
 
@@ -256,27 +267,33 @@ function panelView(panel: QueuePanel, stream: QueueStream | undefined, ui: UiSta
     polling === undefined
       ? ''
       : html`<span class="dt">label ${polling.label} · polled ${ago(polling.lastPolledAt, now)} · ${polling.failures} failed polls</span>`
-  }${paused === undefined ? '' : html`<span class="warnchip">paused: ${paused.port} ${paused.adapter}: ${paused.message}</span>`}${
+  }${paused === undefined ? '' : html`<span class="warnchip">${pausedText(paused)}</span>`}${
     held === undefined
       ? ''
-      : html`<span class="warnchip">held${held.until === undefined ? '' : html` until ${clock(held.until, ui.tz)}`}: ${held.reason}</span>${held.harnessKey === undefined ? '' : releaseControl(panel, held.harnessKey, ui)}`
+      : html`<span class="warnchip">${heldText(held, ui.tz)}</span>${held.harnessKey === undefined ? '' : releaseControl(panel, held.harnessKey, ui)}`
   }${headerActions(panel, ui)}</div>
-${stream?.polls === 'ticket' && queueOffered(panel, 'add-ticket') ? addForm(panel, ui, why) : ''}
-${panel.problem === undefined ? '' : html`<div class="code bad">${panel.problem}</div>`}
+${stream?.polls === 'ticket' && queueOffered(panel, 'add-ticket') && panel.problem === undefined ? addForm(panel, ui, why) : ''}
 ${stream?.error === undefined ? '' : html`<div class="code bad">${stream.error}</div>`}
-<div class="statebar">${QUEUE_STATES.map((state) => html`<span class="sf"><i class="d ${state}"></i>${LABELS[state]} <span class="n">${panel.counts[state]}</span></span>`)}</div>
 ${
-  panel.items.length === 0
-    ? html`<div class="qempty">the queue is empty</div>`
-    : QUEUE_STATES.map((state) => {
-        const items = panel.items.filter((item) => item.state === state);
-        if (items.length === 0) return '';
-        const id = `${queueId(panel.repo, panel.workflow)}:${state}`;
-        const open = !ui.folded.includes(id);
-        const heading = html`<button class="qsec grp-t${open ? ' open' : ''}" data-action="toggle-queue-section" data-section="${id}" aria-expanded="${open ? 'true' : 'false'}"><span class="caret">›</span>${LABELS[state]} · ${items.length}</button>`;
-        if (!open) return heading;
-        return html`${heading}<div class="qbox">${items.map((item) => itemRow(panel, item, ui, why))}</div>`;
-      })
+  // A queue that can't be read has nothing to count and no items to list: its problem takes their place.
+  panel.problem !== undefined
+    ? html`<div class="qproblem"><div class="qproblem-t">this queue can't be read</div><div class="code bad">${panel.problem}</div></div>`
+    : html`<div class="statebar">${QUEUE_STATES.map((state) => html`<span class="sf"><i class="d ${state}"></i>${LABELS[state]} <span class="n">${panel.counts[state]}</span></span>`)}</div>`
+}
+${
+  panel.problem !== undefined
+    ? ''
+    : panel.items.length === 0
+      ? html`<div class="qempty">the queue is empty</div>`
+      : QUEUE_STATES.map((state) => {
+          const items = panel.items.filter((item) => item.state === state);
+          if (items.length === 0) return '';
+          const id = `${queueId(panel.repo, panel.workflow)}:${state}`;
+          const open = !ui.folded.includes(id);
+          const heading = html`<button class="qsec grp-t${open ? ' open' : ''}" data-action="toggle-queue-section" data-section="${id}" aria-expanded="${open ? 'true' : 'false'}"><span class="caret">›</span>${LABELS[state]} · ${items.length}</button>`;
+          if (!open) return heading;
+          return html`${heading}<div class="qbox">${items.map((item) => itemRow(panel, item, ui, why))}</div>`;
+        })
 }
 ${recentEvents(stream, ui)}
 </section>`;

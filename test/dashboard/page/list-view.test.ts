@@ -1,6 +1,6 @@
 // The list, drawn from hand-made repositories: its head and counts, its groups and rows, the run menu under a row, the
 // folded group, and the Queues view's watch buttons.
-import { expect, test } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 import type { AttentionItem } from '../../../src/dashboard/page/attention';
 import type { ListRepo, ListRun, ListWorkflow } from '../../../src/dashboard/page/index-model';
 import { renderList } from '../../../src/dashboard/page/list-view';
@@ -49,6 +49,7 @@ const repos: ListRepo[] = [
 ];
 
 const ui = (fields = {}) => ({ ...initialUi(0), ...fields });
+const drawHistoryHead = (list: ListRepo[], fields = {}) => renderList('history', list, ui(fields), NOW).value;
 const draw = (view: 'active' | 'queues' | 'history', fields = {}, offers = undefined as never) =>
   renderList(view, repos, ui(fields), NOW, offers).value;
 const heads = (markup: string) =>
@@ -57,6 +58,80 @@ const heads = (markup: string) =>
       /data-action="toggle-list-group" data-group="([^"]+)"[^>]*><span class="lcaret">›<\/span><span class="nm">([^<]*)<\/span><span class="c">(\d+)/g,
     ),
   ].map(([, id, label, n]) => `${id} ${label} ${n}`);
+
+describe('audit 2: rows say what they are (ADW-543)', () => {
+  const PATH = '/private/var/T/sail-dashboard-x/alpha/.sail-runs/a-bad/STATUS holds "x", not one of running';
+  const unreadable = [repo('alpha', [run('a-bad', 'unknown', '2026-10-01T08:00:00Z', { problem: PATH })])];
+
+  test('an Inbox row leads with what it is about, then what happened, then its detail', () => {
+    const items: AttentionItem[] = [
+      { repo: 'alpha', runId: 'r', kind: 'failed', about: 'PR #12', title: 'failed: stage_error', detail: 'broke' },
+      {
+        repo: 'alpha',
+        workflow: 'flow',
+        kind: 'parked',
+        about: 'ADW-9',
+        title: 'parked after 2 attempts',
+        detail: 'x',
+      },
+      { repo: 'alpha', runId: 'a-bad', kind: 'problem', about: 'a-bad', title: 'run', detail: PATH },
+    ];
+    const markup = renderList('inbox', repos, ui(), NOW, undefined, items).value;
+    expect(markup).toContain(
+      '<span class="r-line"><span class="r-id">PR #12</span><b class="r-title">failed: stage_error</b><span class="r-detail" title="broke">broke</span></span>',
+    );
+    expect(markup).toContain('<span class="r-id">ADW-9</span><b class="r-title">parked after 2 attempts</b>');
+    expect(markup).toContain('<span class="r-id">a-bad</span><b class="r-title">run</b></span><span class="r-problem"');
+    expect(markup).toContain('>.sail-runs/a-bad/STATUS holds &quot;x&quot;, not one of running</span>');
+  });
+
+  test("a run row's problem shows its path from the clone, the whole of it in its tooltip", () => {
+    const markup = renderList('active', unreadable, ui(), NOW).value;
+    expect(markup).toContain(
+      `<span class="r-problem" title="${PATH.replaceAll('"', '&quot;')}">.sail-runs/a-bad/STATUS holds &quot;x&quot;, not one of running</span>`,
+    );
+  });
+
+  test('a stop reason is amber on a suspended run and red only on a failed one', () => {
+    const list = [
+      repo('alpha', [
+        run('s', 'suspended', '2026-10-01T08:00:00Z', { stopReason: 'budget_exceeded' }),
+        run('f', 'failed', '2026-10-01T07:00:00Z', { stopReason: 'stage_error' }),
+      ]),
+    ];
+    expect(renderList('active', list, ui(), NOW).value).toContain('<span class="why">budget_exceeded</span>');
+    expect(renderList('history', list, ui(), NOW).value).toContain('<span class="why fail">stage_error</span>');
+  });
+
+  test("History's head is two lines: name, count and filter, then its controls, which a Selection's count and buttons take", () => {
+    const list = [
+      repo('alpha', [run('f', 'failed', '2026-10-01T07:00:00Z')], {
+        offers: { watch: { enabled: true }, workflows: {}, clean: { enabled: true, runs: [{ runId: 'f' }] } },
+      }),
+    ];
+    const head = (fields = {}) =>
+      /<div class="list-h">(.*?)<\/div><div class="lgrp">/s.exec(drawHistoryHead(list, fields))?.[1] ?? '';
+    const plain = head();
+    expect(plain).toContain(
+      '<span class="lh-end"><button class="btn" data-action="clean-failed">clean all failed</button>',
+    );
+    expect(plain).toMatch(
+      /^<div class="lh-row"><span class="lh-t">History<\/span><span class="c">1<\/span><input class="list-f"[^>]*><\/div><div class="lh-row lh-ctl"><select class="list-s" name="list-status"/,
+    );
+    expect(plain).not.toContain('lh-sel');
+    const picked = head({ listSelected: ['run:alpha/f'] });
+    expect(picked).toContain('<div class="lh-row lh-ctl"><span class="lh-sel">1 selected</span>');
+    expect(picked).not.toContain('clean-failed');
+    expect(picked).not.toContain('list-s');
+    expect(renderList('active', repos, ui(), NOW).value).not.toContain('lh-ctl');
+  });
+
+  test("a picked row carries a tick, and a Queues group's long repository name its whole in a tooltip", () => {
+    const markup = renderList('history', repos, ui({ listSelected: ['run:alpha/a-fail'] }), NOW).value;
+    expect(markup.match(/<span class="r-tick" aria-hidden="true">✓<\/span>/g)).toHaveLength(1);
+    expect(draw('queues')).toContain('<span class="nm" title="alpha">alpha</span>');
+  });
+});
 
 test('the Active list is headed Active with its count, then waiting on you and running with theirs', () => {
   const markup = draw('active');
@@ -77,7 +152,9 @@ test('a run row holds its status, id, title, repository › workflow, duration, 
   const susp = markup.match(/data-row="run:alpha\/a-susp"[^>]*>.*?<\/button>/s)?.[0] ?? '';
   expect(susp).toContain('<span class="why">usage_limit</span>');
   const bad = markup.match(/data-row="run:alpha\/a-bad"[^>]*>.*?<\/button>/s)?.[0] ?? '';
-  expect(bad).toContain('<span class="r-problem">run.json is not a run header</span>');
+  expect(bad).toContain(
+    '<span class="r-problem" title="run.json is not a run header">run.json is not a run header</span>',
+  );
 });
 
 test('the filter field narrows the list and the head reads n of m', () => {
@@ -356,12 +433,13 @@ const inboxItems: AttentionItem[] = [
     runId: 'a-run',
     key: 'build#1',
     kind: 'error',
+    about: 'ADW-7',
     title: 'build#1 ended in error',
     detail: 'it broke',
     opens: { repo: 'alpha', runId: 'a-run', key: 'build#1' },
   },
-  { repo: 'alpha', workflow: 'flow', kind: 'parked', title: 'ticket:ADW-9 parked', detail: 'no tests' },
-  { repo: 'beta', kind: 'problem', title: 'repository', detail: 'cannot <b>read</b>' },
+  { repo: 'alpha', workflow: 'flow', kind: 'parked', about: 'ADW-9', title: 'parked', detail: 'no tests' },
+  { repo: 'beta', kind: 'problem', about: 'beta', title: 'repository', detail: 'cannot <b>read</b>' },
 ];
 const inbox = (fields = {}, items = inboxItems) => renderList('inbox', repos, ui(fields), NOW, undefined, items).value;
 
@@ -369,10 +447,14 @@ test('the Inbox is headed Inbox with its count, and each row holds its title, wh
   const markup = inbox();
   expect(markup).toContain('<span class="lh-t">Inbox</span><span class="c">3</span>');
   expect(heads(markup)).toEqual(['inbox:runs runs 1', 'inbox:parked parked 1', 'inbox:problems problems 1']);
-  expect(markup).toContain('<b class="r-title">build#1 ended in error</b><span class="r-detail"');
+  expect(markup).toContain(
+    '<span class="r-id">ADW-7</span><b class="r-title">build#1 ended in error</b><span class="r-detail"',
+  );
   expect(markup).not.toContain('r-wf');
   expect(markup).toContain('title="it broke">it broke</span>');
-  expect(markup).toContain('<span class="r-problem">cannot &lt;b&gt;read&lt;/b&gt;</span>');
+  expect(markup).toContain(
+    '<span class="r-problem" title="cannot &lt;b&gt;read&lt;/b&gt;">cannot &lt;b&gt;read&lt;/b&gt;</span>',
+  );
 });
 
 test('an Inbox row opens its run at its call, or its queue, or nothing', () => {
@@ -402,7 +484,7 @@ test('each Inbox row carries a dismiss button naming its identity, beside its op
   ).toHaveLength(3);
   expect(markup).toContain('aria-label="dismiss" title="dismiss (E)">✕</button>');
   expect(markup).toContain(
-    `data-item="${JSON.stringify(['beta', 'problem', null, null, null, 'repository', 'cannot <b>read</b>']).replaceAll('"', '&quot;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')}"`,
+    `data-item="${JSON.stringify(['beta', 'problem', null, null, null, 'beta', 'repository', 'cannot <b>read</b>']).replaceAll('"', '&quot;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')}"`,
   );
   expect(draw('active')).not.toContain('r-dismiss');
 });
@@ -447,11 +529,15 @@ test('a queue row shows its pause and its hold with or without a time, escaping 
     paused: { port: 'ticketSource', adapter: 'linear', message: '503 <b>' },
     held: { until: '2026-10-01T12:00:00.000Z', reason: 'usage limit' },
   }).open;
-  expect(both).toContain('<span class="warnchip">paused: ticketSource linear: 503 &lt;b&gt;</span>');
-  expect(both).toContain('<span class="warnchip">held until 12:00:00: usage limit</span>');
+  expect(both).toContain('<span class="warnchip">ticket polls paused — linear: 503 &lt;b&gt;</span>');
+  expect(both).toContain('<span class="warnchip">held until 12:00 — usage limit</span>');
   expect(queueRowOf({ waiting: 0, held: { reason: 'needs a newer sail' } }).open).toContain(
-    '<span class="warnchip">held: needs a newer sail</span>',
+    '<span class="warnchip">held — needs a newer sail</span>',
   );
+  const pr = queueRowOf({ waiting: 0, paused: { port: 'codeHost', adapter: 'github', message: 'down' } }).open;
+  expect(pr).toContain('<span class="warnchip">pull request polls paused — github: down</span>');
+  const other = queueRowOf({ waiting: 0, paused: { port: 'jev', adapter: 'x', message: 'down' } }).open;
+  expect(other).toContain('<span class="warnchip">jev polls paused — x: down</span>');
 });
 
 test("a queue row carries poll and unwatch after its open button, with the workflow's repo and name", () => {
@@ -531,7 +617,7 @@ test('an unreadable queue row keeps its problem and buttons, with no counts or l
   );
   expect(row).toContain('class="q-row bad"');
   expect(open).toContain(
-    '<span class="n">unreadable</span><span class="r-problem">queue.json can&#39;t be read</span>',
+    '<span class="n">unreadable</span><span class="r-problem" title="queue.json can&#39;t be read">queue.json can&#39;t be read</span>',
   );
   expect(row).not.toContain('polled');
   expect(row).not.toContain('waiting');

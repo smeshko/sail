@@ -2,7 +2,7 @@
 // cursor, `w`'s switch of the keyed pane, `Enter`'s open of the row under the cursor, and the Inbox row `e` dismisses.
 import type { Subject } from './action-registry';
 import { actions } from './actions';
-import { openSubject, setFocus } from './focus';
+import { openSubject, setFocus, subjectFrom } from './focus';
 import { listRepos } from './index-model';
 import { type AttentionRow, attentionSubject, entries, type ListRow, shownGroups } from './list-model';
 import { opens } from './selection';
@@ -43,6 +43,26 @@ export function moveList(store: Store, by: number) {
   setFocus(ui, 'cursor', rowSubject(rowOf(store, next)));
   store.revealList = true;
   store.mark('list');
+}
+
+/**
+ * The focus reached a row, by Tab or a click: a list row takes the list's cursor and the keys, and its subject, or a row
+ * of the centre's, a queue item, is the cursor's subject. Nothing changes while the menu is open, or for an element on no
+ * row, and a row that already has them draws nothing again.
+ */
+export function focusRow(store: Store, data: Readonly<Record<string, string>> | undefined) {
+  const { ui } = store;
+  const subject = subjectFrom(data);
+  if (subject === undefined || ui.menu !== undefined) return;
+  const id = data?.row;
+  // The list takes the keys only while there is a keyed pane, as `w` gives them.
+  const pane = keyedPane(store) === undefined ? ui.pane : 'list';
+  if (id !== undefined && rowOf(store, id) !== undefined && (ui.listCursor !== id || ui.pane !== pane)) {
+    ui.listCursor = id;
+    ui.pane = pane;
+    store.mark('list');
+  }
+  setFocus(ui, 'cursor', subject);
 }
 
 /**

@@ -274,7 +274,7 @@ class FakeHost implements PageHost {
   private input?: (name: string, value: string) => void;
   focused: string[] = [];
   private point_?: (
-    kind: 'hover' | 'context',
+    kind: 'hover' | 'context' | 'focus',
     data: Record<string, string> | undefined,
     at: { x: number; y: number },
   ) => boolean | undefined;
@@ -282,7 +282,7 @@ class FakeHost implements PageHost {
     this.point_ = handler;
   }
   /** The pointer reaching a row's dataset (or no row), as the browser host reports it. */
-  point(kind: 'hover' | 'context', data: Record<string, string> | undefined, at = { x: 0, y: 0 }) {
+  point(kind: 'hover' | 'context' | 'focus', data: Record<string, string> | undefined, at = { x: 0, y: 0 }) {
     return this.point_?.(kind, data, at);
   }
   blurs = 0;
@@ -442,6 +442,85 @@ const firstIndex = (runId?: string) => {
 };
 const plainIndex = () => host.push(host.open('index')[0], indexMessage());
 
+describe('audit 2: rows say what they are (ADW-543)', () => {
+  const FAKE_1 = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N';
+  const FAKE_1_ROW = `run:alpha/${FAKE_1}`;
+  const FAKE_2_ROW = `run:alpha/${FAKE_2_ID}`;
+  /** The dataset of a run's row, as the browser host reads it from the element the focus reached. */
+  const runRowData = (runId: string) => ({ row: `run:alpha/${runId}`, subject: 'run', repo: 'alpha', run: runId });
+  /** History from 800px up, its first row FAKE-1 opened unasked: entries 09-25, FAKE-1, 09-23, FAKE-2, 09-22, FAKE-4. */
+  const onHistory = () => {
+    host.narrowed = false;
+    page = boot(host);
+    plainIndex();
+    host.press('4');
+    host.advance(100);
+    return page;
+  };
+
+  test('a view opens with the list cursor on the row it opened: x picks it, and the picked row carries a tick', () => {
+    const p = onHistory();
+    expect([p.ui.runId, p.ui.listCursor]).toEqual([FAKE_1, FAKE_1_ROW]);
+    expect(host.regions.list).toContain(`class="run lrow sel cur" data-row="${FAKE_1_ROW}"`);
+    host.press('x');
+    host.advance(100);
+    expect(p.ui.listSelected).toEqual([FAKE_1_ROW]);
+    expect(host.regions.list).toContain(
+      `data-run="${FAKE_1}"><span class="r-line"><span class="r-tick" aria-hidden="true">✓</span>`,
+    );
+    expect(host.regions.list?.match(/class="r-tick"/g)).toHaveLength(1);
+  });
+
+  test('a click that opens a row puts the list cursor on it', () => {
+    const p = onHistory();
+    host.click({ action: 'select-run', repo: 'alpha', run: FAKE_2_ID });
+    expect([p.ui.runId, p.ui.listCursor]).toEqual([FAKE_2_ID, FAKE_2_ROW]);
+  });
+
+  test('the focus reaching a row, by Tab, takes the list cursor, the keys and the subject, so . opens that row', () => {
+    const p = onHistory();
+    host.pressIn('main');
+    expect(p.ui.pane).toBe('centre');
+    host.point('focus', runRowData(FAKE_2_ID));
+    expect([p.ui.listCursor, p.ui.pane, p.ui.runId]).toEqual([FAKE_2_ROW, 'list', FAKE_1]);
+    expect(focused(p.ui)).toEqual({ kind: 'run', repo: 'alpha', runId: FAKE_2_ID });
+    host.advance(100);
+    expect(host.regions.list).toContain(`class="run lrow cur" data-row="${FAKE_2_ROW}"`);
+    host.press('.');
+    expect([p.ui.runId, p.ui.runMenu?.runId]).toEqual([FAKE_2_ID, FAKE_2_ID]);
+  });
+
+  test('a focus on the row that has the cursor, on no row, or while the menu is open changes nothing and draws nothing', () => {
+    const p = onHistory();
+    host.advance(100);
+    host.renders = [];
+    host.point('focus', runRowData(FAKE_1));
+    host.point('focus', undefined);
+    host.advance(100);
+    expect(host.renders).toEqual([]);
+    expect(p.ui.listCursor).toBe(FAKE_1_ROW);
+    host.press('k', false, undefined, true);
+    host.advance(100);
+    expect(p.ui.menu).toBeDefined();
+    host.point('focus', runRowData(FAKE_2_ID));
+    expect([p.ui.listCursor, focused(p.ui)]).toEqual([FAKE_1_ROW, { kind: 'run', repo: 'alpha', runId: FAKE_1 }]);
+  });
+
+  test('a queue item the focus reaches is the subject, and moves no list cursor; under 800px a row takes the cursor alone', () => {
+    host.narrowed = true;
+    page = boot(host);
+    plainIndex();
+    host.press('4');
+    host.advance(100);
+    const pane = page.ui.pane;
+    host.point('focus', runRowData(FAKE_2_ID));
+    expect([page.ui.listCursor, page.ui.pane]).toEqual([FAKE_2_ROW, pane]);
+    host.point('focus', { subject: 'item', repo: 'beta', workflow: QUEUE_WORKFLOW, item: 'ticket:FAKE-6' });
+    expect(page.ui.listCursor).toBe(FAKE_2_ROW);
+    expect(focused(page.ui)).toEqual({ kind: 'item', repo: 'beta', workflow: QUEUE_WORKFLOW, item: 'ticket:FAKE-6' });
+  });
+});
+
 test('boot draws the sidebar and the list from the first index and opens no run; a click on a row opens it beside the list with its eight cards, each region once a flush', () => {
   page = boot(host);
   expect(host.sockets.map((socket) => socket.query)).toEqual(['index=1']);
@@ -478,7 +557,7 @@ test('boot draws the sidebar and the list from the first index and opens no run;
   expect(host.renders).toEqual([]);
   host.advance(1);
   expect(host.renders.sort()).toEqual(['list', 'main', 'status']);
-  expect(host.regions.list).toContain(`class="run lrow sel" data-row="run:alpha/${GOLDEN_RUN_ID}"`);
+  expect(host.regions.list).toContain(`class="run lrow sel cur" data-row="run:alpha/${GOLDEN_RUN_ID}"`);
   expect(host.details).toEqual([false, true]);
   expect(cards(host.regions.main)).toEqual([
     'intake#1',
@@ -916,7 +995,7 @@ test("with no queue the list has no queue row and no queue socket opens; with be
   host.advance(100);
   expect(host.regions.main).toContain('<span class="c-ref">ticket:FAKE-4</span>');
   expect(host.regions.list).toContain(
-    `<div class="q-row sel" data-row="queue:beta/${QUEUE_WORKFLOW}" data-subject="workflow" data-repo="beta" data-workflow="${QUEUE_WORKFLOW}"><button class="q-open" data-action="select-queue"`,
+    `<div class="q-row sel cur" data-row="queue:beta/${QUEUE_WORKFLOW}" data-subject="workflow" data-repo="beta" data-workflow="${QUEUE_WORKFLOW}"><button class="q-open" data-action="select-queue"`,
   );
   expect(host.regions.list).not.toMatch(/<div class="run[^"]* sel">/);
   host.renders = [];
@@ -3568,7 +3647,7 @@ describe('all clear', () => {
     });
     // FAKE-3's cleared error row was pruned while its run's row read as failed, so it is listed again with the parked one.
     expect(badge()).toBe('2');
-    expect(listed()).toContain('ticket:FAKE-6 parked after 3 attempts');
+    expect(listed()).toContain('<span class="r-id">FAKE-6</span><b class="r-title">parked after 3 attempts</b>');
   });
 
   test('a failure that arrives before the Inbox is drawn again is not cleared with the rows on screen', () => {
@@ -3614,7 +3693,7 @@ describe('all clear', () => {
     page?.stop();
     bootOpen(changed);
     expect(badge()).toBe('1');
-    expect(listed()).toContain('ticket:FAKE-6 parked after 3 attempts');
+    expect(listed()).toContain('<span class="r-id">FAKE-6</span><b class="r-title">parked after 3 attempts</b>');
     expect(listed()).not.toContain('failed: stage_error');
   });
 
@@ -4174,7 +4253,7 @@ test('by keyboard alone: dismiss, which hides the Inbox row under the cursor, as
   host.advance(100);
   typeIn('dismiss');
   enter();
-  expect(toasts()).toEqual(['ok dismiss: failed: stage_error hidden']);
+  expect(toasts()).toEqual(['ok dismiss: FAKE-2 failed: stage_error hidden']);
   expect(host.posts).toEqual([]);
 });
 
@@ -4834,8 +4913,10 @@ describe('the Inbox view (ADW-527)', () => {
     host.click({ action: 'select-view', view: 'inbox' });
     host.advance(100);
     expect(host.regions.list).toContain('<span class="lh-t">Inbox</span><span class="c">3</span>');
-    expect(host.regions.list).toContain('failed: stage_error');
-    expect(host.regions.list).toContain('ticket:FAKE-6 parked after 2 attempts');
+    expect(host.regions.list).toContain('<span class="r-id">FAKE-2</span><b class="r-title">failed: stage_error</b>');
+    expect(host.regions.list).toContain(
+      '<span class="r-id">FAKE-6</span><b class="r-title">parked after 2 attempts</b>',
+    );
   });
 
   test('opening an Inbox row keeps the Inbox and opens its run at its call in error', () => {
@@ -4854,7 +4935,7 @@ describe('the Inbox view (ADW-527)', () => {
     host.advance(100);
     expect([page.ui.view, page.ui.runId, page.ui.key]).toEqual(['inbox', FAKE_2_ID, item.opens?.key]);
     expect(host.regions.list).toContain('<span class="lh-t">Inbox</span>');
-    expect(host.regions.list).toMatch(/class="lrow in-row in-failed sel" data-row="inbox:/);
+    expect(host.regions.list).toMatch(/class="lrow in-row in-failed sel cur" data-row="inbox:/);
   });
 
   test('Enter on an Inbox row under the cursor opens its run', () => {
@@ -4881,7 +4962,7 @@ describe('the Inbox view (ADW-527)', () => {
     host.click({ action: 'select-queue', queue: `beta/${QUEUE_WORKFLOW}` });
     host.advance(100);
     expect([page.ui.view, page.ui.queue]).toEqual(['inbox', `beta/${QUEUE_WORKFLOW}`]);
-    expect(host.regions.list).toMatch(/class="lrow in-row in-parked sel" data-row="inbox:/);
+    expect(host.regions.list).toMatch(/class="lrow in-row in-parked sel cur" data-row="inbox:/);
   });
 
   test('?view=inbox boots on the Inbox', () => {
@@ -4913,19 +4994,15 @@ describe('the Inbox view (ADW-527)', () => {
       expect(page?.ui.listCursor).toContain('inbox:');
       host.press('e');
       host.advance(100);
-      expect(rows()).toEqual(['implement#1 ended in error', 'ticket:FAKE-6 parked after 2 attempts']);
+      expect(rows()).toEqual(['implement#1 ended in error', 'parked after 2 attempts']);
       expect(count()).toBe('2');
-      expect(toasts()).toEqual(['ok dismiss: failed: stage_error hidden']);
+      expect(toasts()).toEqual(['ok dismiss: FAKE-2 failed: stage_error hidden']);
       expect(page?.ui.toasts[0]?.undo).toBe(true);
       expect(host.posts).toEqual([]);
       expect(page?.ui.listCursor).toContain('implement#1 ended in error');
       host.click({ action: 'undo-toast', toast: '1' });
       host.advance(100);
-      expect(rows()).toEqual([
-        'failed: stage_error',
-        'implement#1 ended in error',
-        'ticket:FAKE-6 parked after 2 attempts',
-      ]);
+      expect(rows()).toEqual(['failed: stage_error', 'implement#1 ended in error', 'parked after 2 attempts']);
       expect(count()).toBe('3');
     });
 
@@ -4945,7 +5022,7 @@ describe('the Inbox view (ADW-527)', () => {
     test('e on the last row moves the cursor to the previous row, and repeated e works through the list', () => {
       inbox();
       for (let i = 0; i < 5; i++) host.press('j');
-      expect(page?.ui.listCursor).toContain('ticket:FAKE-6');
+      expect(page?.ui.listCursor).toContain('parked after 2 attempts');
       host.press('e');
       host.advance(100);
       expect(page?.ui.listCursor).toContain('implement#1 ended in error');
@@ -4960,12 +5037,26 @@ describe('the Inbox view (ADW-527)', () => {
       inbox();
       host.click({ action: 'open', repo: 'alpha', run: FAKE_2_ID, key: 'implement#1' });
       host.advance(100);
-      expect(page?.ui.listCursor).toBeUndefined();
+      // The list's cursor goes to the row the click opened (ADW-543).
+      expect(page?.ui.listCursor).toContain('failed: stage_error');
       host.press('e');
       host.advance(100);
       expect(count()).toBe('2');
       expect(rows()).not.toContain('failed: stage_error');
       expect([page?.ui.runId, page?.ui.view]).toEqual([FAKE_2_ID, 'inbox']);
+    });
+
+    test('with the list cursor on no row, e dismisses the row of the open run', () => {
+      inbox();
+      host.click({ action: 'open', repo: 'alpha', run: FAKE_2_ID, key: 'implement#1' });
+      host.advance(100);
+      // A run opened with no row under the cursor, as one a URL names is: the open run's own row is the one dismissed.
+      if (page !== undefined) delete page.ui.listCursor;
+      host.press('e');
+      host.advance(100);
+      expect(count()).toBe('2');
+      expect(rows()).not.toContain('failed: stage_error');
+      expect(page?.ui.runId).toBe(FAKE_2_ID);
     });
 
     test("a click on a row's ✕ does what e does and does not open the row", () => {
@@ -4975,7 +5066,7 @@ describe('the Inbox view (ADW-527)', () => {
       if (item === undefined) throw new Error('no parked item');
       host.click({ action: 'dismiss-attention', item: identity(item) });
       host.advance(100);
-      expect([count(), toasts()]).toEqual(['2', ['ok dismiss: ticket:FAKE-6 parked after 2 attempts hidden']]);
+      expect([count(), toasts()]).toEqual(['2', ['ok dismiss: FAKE-6 parked after 2 attempts hidden']]);
       expect([page?.ui.runId, page?.ui.queue]).toEqual([undefined, undefined]);
     });
 
@@ -5443,11 +5534,13 @@ describe('the keyed pane: w gives the keys to the list or the open run beside it
     host.press('4');
     host.advance(100);
     expect(page.ui.runId).toBe(FAKE_1);
+    // The list's cursor is on the row the view opened with (ADW-543).
+    expect(page.ui.listCursor).toBe(`run:alpha/${FAKE_1}`);
     return page;
   };
-  /** Walks the list's cursor onto FAKE-2 and opens it with Enter, its cards replayed. */
+  /** Walks the list's cursor from FAKE-1 onto FAKE-2 and opens it with Enter, its cards replayed. */
   const openFake2 = () => {
-    for (let i = 0; i < 4; i++) host.press('j');
+    for (let i = 0; i < 2; i++) host.press('j');
     host.press('Enter');
     replay(host.open('run=').at(-1), fake2Dir(m));
     host.advance(100);
@@ -5457,8 +5550,6 @@ describe('the keyed pane: w gives the keys to the list or the open run beside it
     const p = onHistory();
     expect(p.ui.pane).toBe('list');
     expect(host.keyPanes.at(-1)).toBe('list');
-    host.press('j');
-    host.press('j');
     expect(p.ui.listCursor).toBe(`run:alpha/${FAKE_1}`);
     host.press('j');
     host.press('ArrowDown');
@@ -5468,7 +5559,7 @@ describe('the keyed pane: w gives the keys to the list or the open run beside it
 
   test('Enter in the list opens the row under the cursor and gives the centre the keys; Enter on a group folds it and keeps them', () => {
     const p = onHistory();
-    host.press('j');
+    host.press('k');
     host.press('Enter');
     expect(p.ui.listFolded).toEqual(['history:2026-09-25']);
     expect(p.ui.pane).toBe('list');
@@ -5484,8 +5575,6 @@ describe('the keyed pane: w gives the keys to the list or the open run beside it
 
   test('Enter or a click on the row open already gives the centre the keys, and the host is told', () => {
     const p = onHistory();
-    host.press('j');
-    host.press('j');
     host.press('Enter');
     host.advance(100);
     expect([p.ui.runId, host.keyPanes.at(-1)]).toEqual([FAKE_1, 'centre']);
@@ -5610,7 +5699,7 @@ describe('the keyed pane: w gives the keys to the list or the open run beside it
     const p = onHistory();
     host.press('w', true);
     host.press('j', true);
-    expect([p.ui.pane, p.ui.listCursor]).toEqual(['list', undefined]);
+    expect([p.ui.pane, p.ui.listCursor]).toEqual(['list', `run:alpha/${FAKE_1}`]);
   });
 
   test('under 800px the keys drive what shows, w does nothing and shuts no sidebar, and the host marks no pane', () => {
@@ -5618,9 +5707,7 @@ describe('the keyed pane: w gives the keys to the list or the open run beside it
     host.narrowed = true;
     host.press('Escape');
     host.press('j');
-    expect(p.ui.listCursor).toBe('history:2026-09-25');
-    host.press('j');
-    host.press('j');
+    expect(p.ui.listCursor).toBe('history:2026-09-23');
     host.press('j');
     host.press('Enter');
     replay(host.open('run=').at(-1), fake2Dir(m));

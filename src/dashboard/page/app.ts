@@ -16,6 +16,7 @@
 import { createActor } from './act';
 import { dispatch } from './actions';
 import { identity } from './attention';
+import { focusRow } from './cursor';
 import { startDraw } from './draw';
 import { setFocus, subjectFrom } from './focus';
 import type { PageHost } from './host';
@@ -107,7 +108,7 @@ export function boot(host: PageHost): Page {
           saveCleared(host, store.cleared);
           store.mark('sidebar', 'list');
           return {
-            text: `${item.title} hidden`,
+            text: `${item.about} ${item.title} hidden`,
             undo: () => {
               store.cleared = new Set([...storedCleared(host), ...store.cleared].filter((each) => each !== id));
               saveCleared(host, store.cleared);
@@ -146,6 +147,10 @@ export function boot(host: PageHost): Page {
     if (kind === 'hover') {
       // The subject is frozen while the menu is open.
       if (store.ui.menu === undefined) setFocus(store.ui, 'hover', subject);
+      return false;
+    }
+    if (kind === 'focus') {
+      focusRow(store, data);
       return false;
     }
     // A right-click on a row opens that row's actions in place; on no row, or under the dialog, the browser's own menu.

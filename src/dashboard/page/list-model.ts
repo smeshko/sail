@@ -196,7 +196,7 @@ export function groupsOf(
 
 const rowText = (row: ListRow): string =>
   row.kind === 'attention'
-    ? [row.item.title, row.repo, row.item.workflow, row.item.runId, row.item.key, row.item.detail]
+    ? [row.item.about, row.item.title, row.repo, row.item.workflow, row.item.runId, row.item.key, row.item.detail]
         .filter((part) => part !== undefined)
         .join(' ')
     : row.kind === 'queue'

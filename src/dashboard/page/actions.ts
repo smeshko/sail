@@ -11,7 +11,7 @@ import { syncUrl } from './location';
 import { closeMenu, runRow } from './menu';
 import { cleanSelected, closeFile, openedOutputKeys, openFile, readLog, readOutput, selectCard } from './reads';
 import { FILTER_KEY, LIST_KEY, THEME_KEY } from './saved';
-import { keepSelection, selectFirst } from './selection';
+import { cursorToOpen, keepSelection, selectFirst } from './selection';
 import type { Store } from './store';
 import { closeDetail, reopenQueue, selectRun } from './streams';
 import { dismissToast, toast, undoToast } from './toast';
@@ -356,7 +356,9 @@ export function dispatch(store: Store, action: string, data: Record<string, stri
   if (shuts || shutsRun) store.mark('main', 'list');
   if (acts) store.actor.act(action, data);
   else actions[action]?.(store, data);
-  // The centre takes the keys even from a click on the row open already, which draws nothing else.
+  // The list's cursor goes to the row opened, and the centre takes the keys even from a click on the row open already,
+  // which draws nothing else.
+  if (OPENS.has(action)) cursorToOpen(store);
   if (OPENS.has(action) && ui.pane !== 'centre') {
     ui.pane = 'centre';
     store.mark();

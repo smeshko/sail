@@ -281,19 +281,29 @@ const items: AttentionItem[] = [
     repo: 'alpha',
     runId: 'a-fail',
     kind: 'failed',
+    about: 'ADW-1',
     title: 'failed: stage_error',
     detail: 'broke',
     opens: { repo: 'alpha', runId: 'a-fail' },
   },
-  { repo: 'beta', runId: 'b-err', key: 'build#1', kind: 'error', title: 'build#1 ended in error', detail: 'oops' },
+  {
+    repo: 'beta',
+    runId: 'b-err',
+    key: 'build#1',
+    kind: 'error',
+    about: 'b-err',
+    title: 'build#1 ended in error',
+    detail: 'oops',
+  },
   {
     repo: 'alpha',
     workflow: 'flow',
     kind: 'parked',
-    title: 'ticket:ADW-9 parked after 2 attempts',
+    about: 'ADW-9',
+    title: 'parked after 2 attempts',
     detail: 'no tests',
   },
-  { repo: 'beta', kind: 'problem', title: 'repository', detail: 'cannot read' },
+  { repo: 'beta', kind: 'problem', about: 'beta', title: 'repository', detail: 'cannot read' },
 ];
 
 test('the Inbox lists one row per needs-attention item under the repository filter', () => {
@@ -317,12 +327,14 @@ test('an Inbox row is known by inbox: and the item identity, and its text is sea
   const groups = inboxGroups(items);
   const first = groups[0]?.rows[0];
   expect(first?.id).toBe(
-    `inbox:${JSON.stringify(['alpha', 'failed', 'a-fail', null, null, 'failed: stage_error', 'broke'])}`,
+    `inbox:${JSON.stringify(['alpha', 'failed', 'a-fail', null, null, 'ADW-1', 'failed: stage_error', 'broke'])}`,
   );
   const matches = (text: string) =>
     filterRows(groups, text).flatMap((g) => g.rows.map((r) => r.kind === 'attention' && r.item.title));
   expect(matches('OOPS')).toEqual(['build#1 ended in error']);
-  expect(matches('flow')).toEqual(['ticket:ADW-9 parked after 2 attempts']);
+  // What a row is about is searched too: a parked item's ticket key leads its row and no longer its title.
+  expect(matches('adw-9')).toEqual(['parked after 2 attempts']);
+  expect(matches('flow')).toEqual(['parked after 2 attempts']);
   expect(matches('a-fail')).toEqual(['failed: stage_error']);
   expect(matches('build#1')).toEqual(['build#1 ended in error']);
 });

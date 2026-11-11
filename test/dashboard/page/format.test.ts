@@ -1,7 +1,35 @@
 // The formats every view shares, at each tier's edges. They are built by hand, so every Bun gives the same strings,
 // and a time of day is shown at the offset the shell passes, so a snapshot renders the same on every machine.
-import { expect, test } from 'bun:test';
-import { ago, clock, cost, dayOf, dayOfMs, duration, percent, tokens } from '../../../src/dashboard/page/format';
+import { describe, expect, test } from 'bun:test';
+import {
+  ago,
+  clock,
+  cost,
+  dayOf,
+  dayOfMs,
+  duration,
+  fromClone,
+  minute,
+  percent,
+  tokens,
+} from '../../../src/dashboard/page/format';
+
+describe('audit 2: rows say what they are (ADW-543)', () => {
+  test('minute is clock without its seconds, and a dash for no time', () => {
+    expect(minute('2026-10-01T18:52:56.000Z', 60)).toBe('19:52');
+    expect(minute(undefined, 0)).toBe('—');
+  });
+
+  test('fromClone cuts each absolute path to the part from its .sail/ or .sail-runs/ on, and leaves any other path', () => {
+    expect(fromClone('/private/var/T/sail-x/beta/.sail-runs/FAKE-15/STATUS holds "x"')).toBe(
+      '.sail-runs/FAKE-15/STATUS holds "x"',
+    );
+    expect(fromClone('/work/gone/.sail no longer exists; /work/a/.sail/project.yaml too')).toBe(
+      '.sail no longer exists; .sail/project.yaml too',
+    );
+    expect(fromClone('/x/.sail-dashboard/y and /usr/bin stay')).toBe('/x/.sail-dashboard/y and /usr/bin stay');
+  });
+});
 
 test('duration gives ms, tenths of a second, minutes and seconds, then hours and minutes, at each edge', () => {
   const at = [0, 999, 1000, 1250, 59_999, 60_000, 184_000, 3_599_999, 3_600_000, 7_500_000];

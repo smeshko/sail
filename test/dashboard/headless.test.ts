@@ -135,7 +135,7 @@ test("the real bundle boots headless: both repositories, the golden run's eight 
   // The page opens on Active with its first row, FAKE-3 (suspended), selected in the list and open in the centre.
   expect(await until(() => page.text('main').includes('FAKE-3-01M39H4ZW0S46MV303CFX3T4PY'))).toBe(true);
   expect(page.text('main')).not.toContain('No run selected');
-  expect(page.text('list')).toMatch(/class="run lrow sel"/);
+  expect(page.text('list')).toMatch(/class="run lrow sel cur"/);
   page.click({ action: 'select-view', view: 'history' });
   expect(await until(() => page.text('list').includes(`data-run="${GOLDEN_RUN_ID}"`))).toBe(true);
   page.click({ action: 'select-run', repo: 'alpha', run: GOLDEN_RUN_ID });

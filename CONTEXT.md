@@ -666,11 +666,11 @@ The dashboard's navigation column, 180px wide and never growing with activity: I
 _Avoid_: rail, nav, menu
 
 **List**:
-The one component every dashboard view draws its rows on: a column of fixed width (340px from 800px up) beside the centre, whether or not a row is open, so opening or closing one moves nothing. Folding groups, one line per row in one narrow form, a keyboard cursor and a filter field. A clicked row opens its run or queue in the centre, and so does the view's first row (the first that opens something, in a group not folded) when the view is chosen or the page loads. History's head carries two more controls, a status and a workflow, and the count of the Selection.
+The one component every dashboard view draws its rows on: a column of fixed width (340px from 800px up) beside the centre, whether or not a row is open, so opening or closing one moves nothing. Folding groups, one line per row in one narrow form, a keyboard cursor and a filter field. A clicked row opens its run or queue in the centre, and so does the view's first row (the first that opens something, in a group not folded) when the view is chosen or the page loads; the cursor goes to the row opened. History's head carries a second line of two more controls, a status and a workflow, which the count of the Selection takes while rows are selected.
 _Avoid_: table, grid, feed
 
 **Keyed pane**:
-The pane `j`, `k`, the arrows and `Enter` drive while the list and an open run or queue both show, from 800px up: the list, whose cursor walks its rows, or the centre, whose cursor walks the stage cards. `w` gives the keys to the other pane, each cursor keeping its place; a click in a pane gives them to it, and opening a row, by `Enter` or a click, gives them to the centre. A view opened with its first row starts with them in the list, so moving the list's cursor leaves the open run as it is until `Enter`. The keyed pane is topped by a line in the focus colour, and only its cursor is drawn. Under 800px, or with nothing open, the keys drive what shows. Tab stays the browser's.
+The pane `j`, `k`, the arrows and `Enter` drive while the list and an open run or queue both show, from 800px up: the list, whose cursor walks its rows, or the centre, whose cursor walks the stage cards. `w` gives the keys to the other pane, each cursor keeping its place; a click in a pane gives them to it, and opening a row, by `Enter` or a click, gives them to the centre. A view opened with its first row starts with them in the list, so moving the list's cursor leaves the open run as it is until `Enter`. The keyed pane is topped by a line in the focus colour, and only its cursor is drawn. Under 800px, or with nothing open, the keys drive what shows. Tab stays the browser's, and a list row it reaches takes the list's cursor and the keys.
 _Avoid_: focus (the focused subject's word), active pane
 
 **Selection**:
@@ -706,7 +706,7 @@ One thing the dashboard's page can have done: stop, stop now, suspend and hold, 
 _Avoid_: command (the CLI's and the watcher's word), control, operation
 
 **Subject**:
-What a Dashboard action is done to: a run, a queue item, a workflow, a repository or nothing. The focused subject is the one last hovered, put under the cursor or opened, whichever changed last; it is the command menu's first line and frozen while the menu is open.
+What a Dashboard action is done to: a run, a queue item, a workflow, a repository or nothing. The focused subject is the one last hovered, put under the cursor (by the keys, or by Tab reaching its row) or opened, whichever changed last; it is the command menu's first line and frozen while the menu is open.
 _Avoid_: target, selection, context
 
 **Command menu**:

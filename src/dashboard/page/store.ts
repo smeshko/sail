@@ -198,6 +198,11 @@ export function createStore(host: PageHost): Store {
 export const summaryOf = (store: Store, open: OpenRun | undefined) =>
   store.index?.find((repo) => repo.name === open?.repo)?.runs.find((item) => item.runId === open?.runId)?.summary;
 
+/** Why the open run's files can't be read, as the index says. */
+export const problemOf = (store: Store) =>
+  store.index?.find((repo) => repo.name === store.run?.repo)?.runs.find((item) => item.runId === store.run?.runId)
+    ?.problem;
+
 export const selected = (store: Store) => store.run?.model.cards.find((entry) => entry.key === store.ui.key);
 
 /** The queue the centre shows in place of the run, while the index lists it. */
