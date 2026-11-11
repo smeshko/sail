@@ -3,12 +3,14 @@
 // a POST to resume it finishes it. Then its STATUS is made `failed`, and a POST to restart it from spec starts a seeded
 // run under a new id, whose run.json names the run it was seeded from. The seeded run, made suspended, is stopped from the
 // dashboard, and the failed one is cleaned: its branch and run directory go, and the archive holds the directory.
+// Each action waits for the run's closing `run:end`, which follows the release of its workspace and lease.
 import { expect, test } from 'bun:test';
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { EXIT_SUSPENDED } from '../../src/cli/exit-codes';
 import { startDashboard } from '../../src/dashboard/server';
 import { isRunIdOf } from '../../src/engine/run-id';
+import { readEvents } from '../../src/events/consumers/ndjson';
 import { machineDir, readRegistry, registryDir } from '../../src/watch/registry';
 import { copyFixture } from '../helpers/fixture';
 import { runCaptured } from '../helpers/run-captured';
@@ -17,6 +19,12 @@ import { withTempRepo } from '../helpers/temp-repo';
 const POST = { 'X-Sail-Dashboard': '1', 'Content-Type': 'application/json' };
 
 const statusOf = (dir: string) => readFileSync(join(dir, 'STATUS'), 'utf8').trim();
+
+/** Whether the last `run:end` of the run's events says `completed`: the process has let go of its workspace and lease. */
+const endedCompleted = (dir: string) => {
+  const ends = readEvents(dir).filter((event) => event.type === 'run:end');
+  return (ends.at(-1) as { status?: string } | undefined)?.status === 'completed';
+};
 
 async function until(what: string, holds: () => boolean, ms = 90_000): Promise<void> {
   const deadline = Date.now() + ms;
@@ -47,7 +55,7 @@ test('a suspended run resumes to completion from the dashboard, and a failed one
       const base = `http://127.0.0.1:${started.port}/api/repos/${name}/runs`;
       const resumed = await fetch(`${base}/${runId}/resume`, { method: 'POST', headers: POST, body: '{}' });
       expect([resumed.status, await resumed.json()]).toEqual([202, { runId }]);
-      await until('the resumed run to complete', () => statusOf(dir) === 'completed');
+      await until('the resumed run to end', () => statusOf(dir) === 'completed' && endedCompleted(dir));
 
       writeFileSync(join(dir, 'STATUS'), 'failed stage_error\n');
       const restarted = await fetch(`${base}/${runId}/restart`, {
@@ -60,25 +68,16 @@ test('a suspended run resumes to completion from the dashboard, and a failed one
       expect(seeded).not.toBe(runId);
       expect(isRunIdOf('FAKE-1', seeded)).toBe(true);
       expect(JSON.parse(readFileSync(join(runs, seeded, 'run.json'), 'utf8')).fromRun).toBe(runId);
-      await until('the seeded run to complete', () => statusOf(join(runs, seeded)) === 'completed');
+      await until(
+        'the seeded run to end',
+        () => statusOf(join(runs, seeded)) === 'completed' && endedCompleted(join(runs, seeded)),
+      );
       expect(existsSync(join(runs, 'dashboard', `${seeded}.log`))).toBe(true);
 
       // Only one run starts in this process, so the seeded run stands in for a suspended one.
       writeFileSync(join(runs, seeded, 'STATUS'), 'suspended until\n');
-      const deadline = Date.now() + 20_000;
-      // The process that ran it can still hold its lease for a moment after it wrote `completed`.
-      let stopped: { status: number; body: unknown };
-      do {
-        const response = await fetch(`${base}/${seeded}/stop`, {
-          method: 'POST',
-          headers: POST,
-          body: '{"now":false}',
-        });
-        stopped = { status: response.status, body: await response.json() };
-        if (JSON.stringify(stopped.body).includes('stopped"')) break;
-        await Bun.sleep(200);
-      } while (Date.now() < deadline);
-      expect([stopped.status, stopped.body]).toEqual([202, { message: `run ${seeded} stopped` }]);
+      const stopped = await fetch(`${base}/${seeded}/stop`, { method: 'POST', headers: POST, body: '{"now":false}' });
+      expect([stopped.status, await stopped.json()]).toEqual([202, { message: `run ${seeded} stopped` }]);
       expect(statusOf(join(runs, seeded))).toBe('failed stopped');
 
       const { branch } = JSON.parse(readFileSync(join(dir, 'run.json'), 'utf8')) as { branch: string };
