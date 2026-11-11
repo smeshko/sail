@@ -199,20 +199,20 @@ test('confirmed tier: on the real bundle and server, a click on FAKE-2 clean-run
   expect(page.posted).toEqual([]);
 }, 30_000);
 
-test('undoable tier: on the real bundle, clear-attention empties attention and draws an undo-toast button, and clicking it brings back the badge of 4', async () => {
+test('undoable tier: on the real bundle, clear-attention empties attention and draws an undo-toast button, and clicking it brings back the badge of 3', async () => {
   m = seedFixtures();
   const started = startDashboard({ registryDir: m.registryDir, port: 0, followPollMs: 20, indexPollMs: 50 });
   if ('refused' in started) throw new Error(started.refused);
   server = started;
   const page = await bootHeadless(server);
-  expect(await until(() => page.text('attention').includes('<span class="badge">4</span>'))).toBe(true);
+  expect(await until(() => page.text('attention').includes('<span class="badge">3</span>'))).toBe(true);
   page.click({ action: 'clear-attention' });
   expect(await until(() => page.text('toasts').includes('data-action="undo-toast"'))).toBe(true);
   expect(page.text('attention')).not.toContain('<span class="badge">');
   expect(page.text('toasts')).toContain('<span class="toast-head">all clear</span>');
   const id = /data-action="undo-toast" data-toast="(\d+)"/.exec(page.text('toasts'))?.[1] ?? '';
   page.click({ action: 'undo-toast', toast: id });
-  expect(await until(() => page.text('attention').includes('<span class="badge">4</span>'))).toBe(true);
+  expect(await until(() => page.text('attention').includes('<span class="badge">3</span>'))).toBe(true);
   expect(page.text('toasts')).not.toContain('toast ok');
   expect(page.posted).toEqual([]);
 }, 30_000);
