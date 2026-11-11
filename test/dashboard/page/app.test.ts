@@ -2732,7 +2732,7 @@ describe('all clear', () => {
     expect(listed()).toContain('ticket:FAKE-6 parked after 3 attempts');
   });
 
-  test('a failure that arrives before the pane is drawn again is not cleared with the rows on screen', () => {
+  test('a failure that arrives before the Inbox is drawn again is not cleared with the rows on screen', () => {
     bootOpen();
     host.push(host.open('index')[0], {
       kind: 'index',
