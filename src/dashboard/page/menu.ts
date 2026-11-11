@@ -231,6 +231,9 @@ export function runRow(store: Store, n: number): void {
   if ('goto' in run) {
     closeMenu(store);
     goTo(store, run.goto);
+  } else if ('show' in run) {
+    closeMenu(store);
+    actions['select-view']?.(store, { view: run.show });
   } else if ('view' in run) {
     closeMenu(store);
     actions[run.view]?.(store, {});

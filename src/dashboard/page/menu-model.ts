@@ -14,11 +14,13 @@ import {
   subjectName,
 } from './action-registry';
 import { listRepos, queuePanels, workflowOf } from './index-model';
+import { VIEWS, type ViewName } from './list-model';
 import type { MenuState, MenuStep } from './ui-state';
 
 export type MenuRun =
   | { act: string; subject: Subject; data: Record<string, string> }
   | { goto: Subject }
+  | { show: ViewName }
   | { view: string }
   | { pollAll: true }
   | { pick: string; of?: 'repo' }
@@ -173,17 +175,52 @@ export function subjectRows(subject: Subject, source: OfferSource): MenuRow[] {
   });
 }
 
+/** A view's go-to row: its name, its key, and the words that name it besides. */
+const VIEW_ROWS: Record<ViewName, { label: string; key: string; words: string[] }> = {
+  inbox: { label: 'Inbox', key: '1', words: ['inbox', 'attention'] },
+  active: { label: 'Active', key: '2', words: ['active', 'live'] },
+  queues: { label: 'Queues', key: '3', words: ['queues', 'queue'] },
+  history: { label: 'History', key: '4', words: ['history', 'finished'] },
+};
+
+/** Where a kind of go-to row stands among rows that match as well: a view first, a queue item last. */
+const KIND_ORDER = { view: 0, queue: 1, repo: 2, run: 3, item: 4 } as const;
+
+/** The words that name a kind of go-to row: typing one lists every row of the kind. */
+const KIND_WORDS: Partial<Record<Subject['kind'], string[]>> = {
+  repo: ['repository', 'repositories', 'repo', 'repos'],
+  workflow: ['queue', 'queues'],
+};
+
+/** A run that ended: it is listed after everything else, and only on a match better than a subsequence. */
+const finished = (status: string) => status === 'completed' || status === 'failed';
+
 /**
- * The eight best "go to" matches for `query`: runs, queues, queue items and repositories, ranked by `rank` and, when
- * equal, in the index's order. A query that is a run's ticket key in full (or its pull request) lists only the runs of
- * that ticket. None for an empty query.
+ * The eight best "go to" matches for `query`: views, queues, repositories, runs and queue items, ranked by `rank`,
+ * then by kind (`KIND_ORDER`) and, when equal, in the index's order. A kind's own word lists that kind: `queue` the
+ * Queues view and every queue, `repo` every repository. A run that ended comes after every other row, and is left out
+ * when it matches only as a subsequence. A query that is a run's ticket key in full (or its pull request) lists only
+ * the runs of that ticket. An empty query lists the four views.
  */
 export function gotoRows(query: string, index: readonly IndexRepo[], now: number): MenuRow[] {
   const needle = query.trim().toLowerCase();
-  if (needle === '') return [];
-  type Found = { rank: Rank; row: MenuRow };
+  const viewRow = (view: ViewName): MenuRow => ({
+    group: 'goto',
+    label: VIEW_ROWS[view].label,
+    hint: 'view',
+    key: VIEW_ROWS[view].key,
+    disabled: false,
+    run: { show: view },
+  });
+  if (needle === '') return VIEWS.map(viewRow);
+  type Found = { rank: Rank; row: MenuRow; kind: keyof typeof KIND_ORDER; late: boolean };
   const found: Found[] = [];
   const named: Found[] = [];
+  for (const view of VIEWS) {
+    const ranked = rank(query, VIEW_ROWS[view].words, []);
+    if (ranked !== undefined && ranked.tier < 2 && (ranked.tier === 0 || needle.length >= 3))
+      found.push({ rank: ranked, row: viewRow(view), kind: 'view', late: false });
+  }
   const add = (
     hint: string,
     label: string,
@@ -193,11 +230,17 @@ export function gotoRows(query: string, index: readonly IndexRepo[], now: number
     full = false,
     extra: Partial<MenuRow> = {},
   ) => {
-    const ranked = rank(query, keys, titles);
+    // A kind's own word, in full or from its third letter, lists the kind; it is no text for a subsequence to match.
+    const byWord = needle.length < 3 ? undefined : rank(query, KIND_WORDS[subject.kind] ?? [], []);
+    const ranked = byWord !== undefined && byWord.tier < 2 ? byWord : rank(query, keys, titles);
     if (ranked === undefined) return;
+    const late = subject.kind === 'run' && finished(extra.status ?? '');
+    if (late && ranked.tier === 3 && !full) return;
     const entry: Found = {
       rank: ranked,
       row: { group: 'goto', label, hint, disabled: false, run: { goto: subject }, ...extra },
+      kind: subject.kind === 'workflow' ? 'queue' : subject.kind === 'none' ? 'item' : subject.kind,
+      late,
     };
     found.push(entry);
     if (full) named.push(entry);
@@ -232,7 +275,13 @@ export function gotoRows(query: string, index: readonly IndexRepo[], now: number
     }
   }
   const rows = (named.length > 0 ? named : found)
-    .sort((a, b) => a.rank.tier - b.rank.tier || a.rank.score - b.rank.score)
+    .sort(
+      (a, b) =>
+        Number(a.late) - Number(b.late) ||
+        a.rank.tier - b.rank.tier ||
+        KIND_ORDER[a.kind] - KIND_ORDER[b.kind] ||
+        a.rank.score - b.rank.score,
+    )
     .slice(0, 8)
     .map((each) => each.row);
   // A run's row shows no run id; two rows that would read the same show the random part to tell them apart.
