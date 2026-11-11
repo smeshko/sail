@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
-import { fromQuery, toQuery } from '../../../src/dashboard/page/location';
+import { fromQuery, syncUrl, toQuery } from '../../../src/dashboard/page/location';
+import type { Store } from '../../../src/dashboard/page/store';
 import { initialUi, type UiState } from '../../../src/dashboard/page/ui-state';
 
 const ui = (over: Partial<UiState>): UiState => ({ ...initialUi(0), ...over });
@@ -157,4 +158,26 @@ test('fromQuery reads the filters, an unknown status and a status outside Histor
     timeline: false,
     view: 'history',
   });
+});
+
+test('syncUrl keeps the last query written when the host refuses a write, so the next sync tries it again (review R3)', () => {
+  const writes: string[] = [];
+  let takes = false;
+  const store = {
+    start: undefined,
+    url: '',
+    ui: ui({ listFilter: 'a' }),
+    host: {
+      setUrl: (query: string) => {
+        writes.push(query);
+        return takes;
+      },
+    },
+  } as unknown as Store;
+  syncUrl(store, false);
+  expect(store.url).toBe('');
+  takes = true;
+  syncUrl(store, false);
+  expect(store.url).toBe('q=a');
+  expect(writes).toEqual(['q=a', 'q=a']);
 });

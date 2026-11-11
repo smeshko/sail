@@ -109,8 +109,8 @@ export interface PageHost {
   offset(): number;
   /** What the page's URL asks it to open first, from `?repo=…&run=…&key=…&tab=…&timeline=1&file=…` or `?queue=…`, each with `&view=…` and the list's filters `&in=…&q=…&status=…&workflow=…`: empty when it asks nothing. */
   start(): Record<string, string>;
-  /** Writes the page's URL to `?query` (the path alone for an empty one), as a new history entry when `push`, else in place of the current one. */
-  setUrl(query: string, push: boolean): void;
+  /** Writes the page's URL to `?query` (the path alone for an empty one), as a new history entry when `push`, else in place of the current one: false when the browser refused it, as WebKit does past 100 writes in 30 seconds. */
+  setUrl(query: string, push: boolean): boolean;
   /** The page's whole URL, as the address bar shows it. */
   href(): string;
   /** Calls `handler` with the URL's query, parsed as `start()` parses it, when the browser moves to another history entry. */
@@ -666,8 +666,13 @@ export function browserHost(win: BrowserWindow): PageHost {
     },
     setUrl(query, push) {
       const url = query === '' ? win.location.pathname : `?${query}`;
-      if (push) win.history.pushState(null, '', url);
-      else win.history.replaceState(null, '', url);
+      try {
+        if (push) win.history.pushState(null, '', url);
+        else win.history.replaceState(null, '', url);
+        return true;
+      } catch {
+        return false;
+      }
     },
     setInspector(open, pinned) {
       doc.documentElement.dataset.inspector = open ? 'open' : 'closed';

@@ -331,6 +331,7 @@ class FakeHost implements PageHost {
   urls: { query: string; push: boolean }[] = [];
   setUrl(query: string, push: boolean) {
     this.urls.push({ query, push });
+    return true;
   }
 
   /** Moves the clock on by `ms`, running every timer that falls due, in order. */

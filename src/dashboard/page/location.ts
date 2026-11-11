@@ -36,14 +36,14 @@ export function toQuery(ui: UiState): string {
 
 /**
  * Writes the URL to what the page shows, once the first index has opened what the page was loaded with: nothing before
- * it, so a click cannot wipe the link the page came from. A query equal to the one last written writes nothing.
+ * it, so a click cannot wipe the link the page came from. A query equal to the one last written writes nothing, and a
+ * write the browser refused is not remembered, so the next sync tries it again.
  */
 export function syncUrl(store: Store, push: boolean): void {
   if (store.start !== undefined) return;
   const query = toQuery(store.ui);
   if (query === store.url) return;
-  store.url = query;
-  store.host.setUrl(query, push);
+  if (store.host.setUrl(query, push)) store.url = query;
 }
 
 /** What a query asks the page to show. */
