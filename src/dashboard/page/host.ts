@@ -57,7 +57,7 @@ export interface PageHost {
   onInput(handler: (name: string, value: string) => void): void;
   /** Focuses the field named `name`, in whichever region draws it. */
   focus(name: string): void;
-  /** Focuses the command menu's field, else the menu itself, remembering what had the focus for when it closes. */
+  /** Focuses the command menu's field, else its focusable listbox, else the menu itself, remembering what had the focus for when it closes. */
   focusMenu(): void;
   /** Takes the focus off the focused element. */
   blur(): void;
@@ -230,7 +230,8 @@ const FOCUSABLE = '[name], [data-action], a[href]';
 
 /**
  * What identifies a focusable element across a redraw, from what its markup carries: its `name`, else its `data-action`
- * with its other `data-*` values, else its `href`. An element with none has no key, and its focus is not restored.
+ * with its other `data-*` values, else its `href`, else its `id`, as a resize handle's. An element with none has no
+ * key, and its focus is not restored.
  */
 function focusKey(element: ElementLike): string | undefined {
   if (element.name !== undefined && element.name !== '') return `name=${element.name}`;
@@ -241,7 +242,9 @@ function focusKey(element: ElementLike): string | undefined {
     return `action=${JSON.stringify(entries)}`;
   }
   const href = element.getAttribute?.('href');
-  return href === null || href === undefined ? undefined : `href=${href}`;
+  if (href !== null && href !== undefined) return `href=${href}`;
+  const id = element.getAttribute?.('id');
+  return id === null || id === undefined || id === '' ? undefined : `id=${id}`;
 }
 
 const isTick = (field: ElementLike) => field.type === 'checkbox' || field.type === 'radio';
@@ -313,10 +316,25 @@ const HANDLE = 5;
 const LIST = 340;
 const CENTRE_MIN = 320;
 
+/** How far an arrow key moves a focused resize handle, in px. */
+const STEP = 16;
+
+/** The side of the handle a key of its own (an arrow, Home or End, with no Alt, Ctrl or Meta) is aimed at, if any. */
+function resizeKey(event: EventLike): Side | undefined {
+  if (event.altKey === true || event.ctrlKey === true || event.metaKey === true) return undefined;
+  if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight' && event.key !== 'Home' && event.key !== 'End')
+    return undefined;
+  const side = isElement(event.target) ? event.target.dataset.resize : undefined;
+  return side === 'left' || side === 'right' ? side : undefined;
+}
+
 /**
  * Drags the column of a `data-resize` handle, which sets its CSS variable on `#body`, never so wide that the list gives
- * up its width, the centre falls under its floor and the grid runs past the window (ADW-536). Answers the re-clamp a window resize runs, the inspector
- * first, for a change of layout the window doesn't announce, such as the inspector opening.
+ * up its width, the centre falls under its floor and the grid runs past the window (ADW-536). A focused handle takes
+ * ArrowLeft and ArrowRight, 16px the way they point, Home for the minimum and End for the widest, within the same
+ * clamp, and each handle keeps its `aria-valuenow`, `aria-valuemin` and `aria-valuemax` current. Answers the re-clamp
+ * a window resize runs, the inspector first, for a change of layout the window doesn't announce, such as the inspector
+ * opening.
  */
 function installResize(win: BrowserWindow): () => void {
   const doc = win.document;
@@ -334,14 +352,39 @@ function installResize(win: BrowserWindow): () => void {
     const beside = inGrid(other) ? widths[other] + HANDLE : 0;
     return Math.max(column.min, Math.min(column.max, width - beside - HANDLE - LIST - CENTRE_MIN));
   };
+  /** Tells each handle its column's width, minimum and widest: one column's widest depends on the other's width. */
+  const tell = () => {
+    for (const side of ['left', 'right'] as const) {
+      const handle = doc.getElementById(`resize-${side}`);
+      handle?.setAttribute?.('aria-valuenow', String(widths[side]));
+      handle?.setAttribute?.('aria-valuemin', String(COLUMNS[side].min));
+      handle?.setAttribute?.('aria-valuemax', String(widest(side)));
+    }
+  };
   const set = (side: Side, width: number) => {
     widths[side] = width;
     doc.getElementById('body')?.style?.setProperty(COLUMNS[side].variable, `${width}px`);
+    tell();
   };
   const fit = () => {
     for (const side of ['right', 'left'] as const) if (widths[side] > widest(side)) set(side, widest(side));
+    tell();
   };
+  tell();
   win.addEventListener('resize', fit);
+  doc.addEventListener('keydown', (event) => {
+    const side = resizeKey(event);
+    if (side === undefined) return;
+    const column = COLUMNS[side];
+    event.preventDefault?.();
+    const to =
+      event.key === 'Home'
+        ? column.min
+        : event.key === 'End'
+          ? widest(side)
+          : widths[side] + column.sign * (event.key === 'ArrowRight' ? STEP : -STEP);
+    set(side, Math.max(column.min, Math.min(widest(side), to)));
+  });
   doc.addEventListener('mousedown', (down) => {
     const side = isElement(down.target) ? down.target.dataset.resize : undefined;
     if (side !== 'left' && side !== 'right') return;
@@ -389,6 +432,13 @@ export function browserHost(win: BrowserWindow): PageHost {
   /** Gives the focus back to the element of the regions with `key`, the first, and answers whether there was one. */
   const refocusKey = (key: string | undefined) => {
     if (key === undefined) return false;
+    if (key.startsWith('id=')) {
+      // An element of the page's own markup, such as a resize handle, found by its id wherever it is.
+      const target = doc.getElementById(key.slice(3));
+      if (target === null || target === undefined) return false;
+      refocus(target);
+      return true;
+    }
     for (const region of REGIONS) {
       const root = doc.getElementById(region);
       const target = root === null ? undefined : keyed(root, key)[0];
@@ -406,7 +456,11 @@ export function browserHost(win: BrowserWindow): PageHost {
   };
   const menuTarget = () => {
     const menu = doc.getElementById('menu');
-    return menu?.querySelector?.('[name="menu-query"]') ?? menu?.querySelector?.('.cmdk');
+    return (
+      menu?.querySelector?.('[name="menu-query"]') ??
+      menu?.querySelector?.('.cmdk-rows[tabindex]') ??
+      menu?.querySelector?.('.cmdk')
+    );
   };
   /** Moves on a focus the write of `region` took away, from the row it was in, if any. */
   const moveOn = (region: Region, element: ElementLike, markup: string, row: ReturnType<typeof rowAround>) => {
@@ -625,6 +679,8 @@ export function browserHost(win: BrowserWindow): PageHost {
     },
     onKey(handler) {
       doc.addEventListener('keydown', (event) => {
+        // A focused resize handle's own keys move its column, not the list's cursor.
+        if (resizeKey(event) !== undefined) return;
         const target = isElement(event.target) ? event.target : undefined;
         const tag = target?.tagName;
         if (event.key === 'Enter' && target !== undefined && tag === 'INPUT' && !isTick(target)) {
