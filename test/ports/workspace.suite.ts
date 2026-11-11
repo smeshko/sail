@@ -341,6 +341,52 @@ export function workspaceSuite(label: string, make: MakeWorkspace): void {
     expectValidEvents(capture);
   });
 
+  test(`${label}: a released workspace whose HEAD a remote-tracking ref reaches keeps it at refs/sail/runs/<runId> all the same, and so does a swept one`, async () => {
+    const { adapter, world, capture } = await start();
+    const pushedRun = await world.run('pushed');
+    const pushed = (await adapter.create(pushedRun, { base: world.base, branch: BRANCH })).path;
+    const swept = (
+      await adapter.create(await world.run('swept-pushed', 'failed'), { base: world.base, branch: BRANCH })
+    ).path;
+    const header = { repository: { url: world.remote, defaultBranch: world.defaultBranch, baseSha: world.baseSha } };
+    const heads: string[] = [];
+    for (const [id, path] of [
+      ['pushed', pushed],
+      ['swept-pushed', swept],
+    ] as const) {
+      writeFileSync(join(world.runsDir, id, 'run.json'), JSON.stringify(header));
+      expect(world.git(path, 'commit', '-q', '--allow-empty', '-m', `${id} work`).code).toBe(0);
+      const head = world.git(path, 'rev-parse', 'HEAD').stdout;
+      heads.push(head);
+      // The state a push leaves: a remote-tracking ref reaching the head.
+      expect(world.git(path, 'update-ref', `refs/remotes/origin/sail/${id}`, head).code).toBe(0);
+    }
+    const [head = '', sweptHead = ''] = heads;
+    const released = await adapter.release(pushedRun, false);
+    expect(parseIssues(WorkspaceReleased, released)).toEqual([]);
+    expect(bare(released)).toEqual({ path: pushed, kept: false, ref: 'refs/sail/runs/pushed', head });
+    expect((await adapter.sweep(world.runsDir)).paths).toEqual([swept]);
+    expect(
+      world
+        .git(
+          world.repoDir,
+          'for-each-ref',
+          '--format=%(refname) %(objectname)',
+          'refs/sail/runs/pushed',
+          'refs/sail/runs/swept-pushed',
+        )
+        .stdout.split('\n'),
+    ).toEqual([`refs/sail/runs/pushed ${head}`, `refs/sail/runs/swept-pushed ${sweptHead}`]);
+    expect(capture.events.filter((event) => event.type === 'workspace:released')[0]).toEqual({
+      type: 'workspace:released',
+      path: pushed,
+      kept: false,
+      ref: 'refs/sail/runs/pushed',
+      head,
+    });
+    expectValidEvents(capture);
+  });
+
   test(`${label}: sweep removes the workspaces of completed and failed runs, and keeps the rest`, async () => {
     const { adapter, world } = await start();
     const statuses: (Status | 'none')[] = ['completed', 'failed', 'running', 'suspended', 'none'];
