@@ -3,6 +3,7 @@
 // A run's go-to row leads with the list's status dot, its ticket key or pull request and, to tell two alike apart, the random part of its run id.
 // The context menu is the subject's rows at the pointer with no field. The back button behind the menu closes it.
 import { html, raw, type SafeHtml } from './html';
+import { keyLabel } from './keymap';
 import type { MenuModel, MenuRow } from './menu-model';
 import { type MenuState, pillOf } from './ui-state';
 
@@ -77,7 +78,7 @@ function row(item: MenuRow, place: number, state: MenuState): SafeHtml {
         }`
   }<span class="cmdk-label">${item.label}</span>${item.hint === undefined ? '' : html`<span class="cmdk-hint">${item.hint}</span>`}${
     item.disabled && item.why !== undefined ? html`<span class="cmdk-why">${item.why}</span>` : ''
-  }${item.key === undefined ? '' : html`<kbd>${item.key}</kbd>`}${icon(item.run)}</button>`;
+  }${item.key === undefined ? '' : html`<kbd>${keyLabel(item.key)}</kbd>`}${icon(item.run)}</button>`;
 }
 
 function field(state: MenuState, model: MenuModel): SafeHtml | '' {

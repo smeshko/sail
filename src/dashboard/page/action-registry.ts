@@ -199,8 +199,16 @@ export interface ActionDef {
   label(subject: Subject): string;
   appliesTo: readonly SubjectKind[];
   tier: Tier;
-  /** The key that does it: declared, and no entry sets one yet. */
+  /**
+   * The key that does it to the focused subject, as the page's key handler receives it: `s`, `S` (Shift+S), `Backspace`
+   * (`keymap.ts` reads it, draws it and lists it in the shortcut sheet). Two actions share a key only for subjects of
+   * different kinds: `r` resumes a run and requeues a queue item.
+   */
   key?: string;
+  /** The keys of its rows, by the row's label, for an action that is more than one row: `move up` is `Alt+ArrowUp`. */
+  variantKeys?: Readonly<Record<string, string>>;
+  /** The view its key works in, for an action with no subject of its own: the Inbox's dismiss. */
+  keyIn?: 'inbox';
   /** A disabled offer stops the click before its request: otherwise the server's refusal comes with the POST. */
   holdsDisabled?: boolean;
   /** The id of the action whose drafts it reads and empties, when it shares its parameters with another's. */
@@ -569,6 +577,7 @@ function queueItemAction(id: string, op: 'requeue' | 'drop', tier: Tier, path: s
     label: () => op,
     appliesTo: ['item'],
     tier,
+    key: op === 'drop' ? 'Backspace' : 'r',
     holdsDisabled: true,
     place: 'queue',
     params: () => [],
@@ -618,6 +627,7 @@ function stopAction(id: string, now: boolean): ActionDef {
     label: () => (now ? 'stop now' : 'stop'),
     appliesTo: ['run'],
     tier: 'confirmed',
+    key: now ? 'S' : 's',
     place: 'run',
     holdsDisabled: true,
     params: () => [],
@@ -739,6 +749,7 @@ export const ACTIONS: readonly ActionDef[] = [
     label: () => 'resume',
     appliesTo: ['run'],
     tier: 'confirmed',
+    key: 'r',
     place: 'run',
     holdsDisabled: true,
     params: (_, source) => {
@@ -793,6 +804,7 @@ export const ACTIONS: readonly ActionDef[] = [
     label: () => 'restart',
     appliesTo: ['run'],
     tier: 'confirmed',
+    key: 'R',
     place: 'run',
     holdsDisabled: true,
     params: (_, source) => {
@@ -863,6 +875,7 @@ export const ACTIONS: readonly ActionDef[] = [
     label: () => 'clean',
     appliesTo: ['run'],
     tier: 'confirmed',
+    key: 'Backspace',
     place: 'run',
     holdsDisabled: true,
     params: (_, source) => {
@@ -1003,6 +1016,7 @@ export const ACTIONS: readonly ActionDef[] = [
     label: () => 'move',
     appliesTo: ['item'],
     tier: 'instant',
+    variantKeys: { 'move up': 'Alt+ArrowUp', 'move down': 'Alt+ArrowDown' },
     holdsDisabled: true,
     place: 'queue',
     params: () => [
@@ -1037,6 +1051,7 @@ export const ACTIONS: readonly ActionDef[] = [
     label: () => 'poll',
     appliesTo: ['workflow'],
     tier: 'instant',
+    key: 'p',
     holdsDisabled: true,
     place: 'queue',
     params: () => [],
@@ -1073,6 +1088,7 @@ export const ACTIONS: readonly ActionDef[] = [
     label: () => 'add',
     appliesTo: ['workflow'],
     tier: 'instant',
+    key: 'c',
     holdsDisabled: true,
     place: 'queue',
     params: addParams,
@@ -1206,6 +1222,8 @@ export const ACTIONS: readonly ActionDef[] = [
     label: () => 'all clear',
     appliesTo: ['none'],
     tier: 'undoable',
+    key: 'E',
+    keyIn: 'inbox',
     place: 'list',
     params: () => [],
     available: () => ({ offered: true, enabled: true }),
@@ -1216,6 +1234,8 @@ export const ACTIONS: readonly ActionDef[] = [
     label: () => 'dismiss',
     appliesTo: ['none'],
     tier: 'undoable',
+    key: 'e',
+    keyIn: 'inbox',
     place: 'list',
     params: () => [],
     available: () => ({ offered: true, enabled: true }),

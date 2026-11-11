@@ -84,7 +84,6 @@ test('ACTIONS has exactly the twenty-three ids, each with a label, appliesTo, a 
   for (const each of ACTIONS) {
     expect(each.appliesTo.length).toBeGreaterThan(0);
     expect(each.label(RUN)).not.toBe('');
-    expect(each.key).toBeUndefined();
     if (each.id === 'clear-attention' || each.id === 'dismiss-attention')
       expect([each.run, each.request, each.answer]).toEqual([each.id, undefined, undefined]);
     else expect([typeof each.request, typeof each.answer, each.run]).toEqual(['function', 'function', undefined]);

@@ -31,6 +31,7 @@ export interface PageHost {
   /**
    * `handler` is told each key, whether it was typed in an input, `on`, the `data-action` of the element the key
    * landed on, and `mod`, whether Cmd or Ctrl is held; answering true suppresses the key's default, as typing it would.
+   * A key held with Alt is the browser's, but for Alt with the up or down arrow, told as `Alt+ArrowUp` and `Alt+ArrowDown`.
    * Enter in a text field under a `data-enter` element arrives as the action of the button that element names, as a
    * click on it would, and is no key.
    */
@@ -90,6 +91,8 @@ export interface PageHost {
   save(key: string, value: string): void;
   /** Copies to the clipboard: false when it can't. */
   copy(text: string): Promise<boolean>;
+  /** Opens `url` in a new tab, with no opener and no referrer. */
+  openLink(url: string): void;
   setTheme(theme: string): void;
   /** Whether the inspector takes its room, and whether it is pinned open. */
   setInspector(open: boolean, pinned: boolean): void;
@@ -185,6 +188,8 @@ export interface BrowserWindow {
   WebSocket: new (url: string) => SocketLike;
   localStorage: { getItem(key: string): string | null; setItem(key: string, value: string): void };
   navigator: { clipboard?: { writeText(text: string): Promise<void> } };
+  /** Optional, so a window without it opens nothing. */
+  open?(url: string, target: string, features: string): unknown;
   setTimeout(fn: () => void, ms: number): number;
   clearTimeout(id: number): void;
   Date: { new (): { getTimezoneOffset(): number }; now(): number };
@@ -552,12 +557,14 @@ export function browserHost(win: BrowserWindow): PageHost {
             return;
           }
         }
-        // A key held with Alt is the browser's, and so is one held with Cmd or Ctrl but K, which the handler takes as
-        // the command menu's chord. A letter's case is Shift's, never Caps Lock's: `e` and `E` change saved state
-        // (review R5).
-        if (event.altKey === true) return;
-        const mod = event.metaKey === true || event.ctrlKey === true;
+        // A key held with Alt is the browser's, but for the up and down arrows, which move a queue item. A letter's
+        // case is Shift's, never Caps Lock's: `e` and `E` change saved state (review R5).
         let key = event.key ?? '';
+        if (event.altKey === true) {
+          if (key !== 'ArrowUp' && key !== 'ArrowDown') return;
+          key = `Alt+${key}`;
+        }
+        const mod = event.metaKey === true || event.ctrlKey === true;
         if (/^[a-z]$/i.test(key) && event.shiftKey !== undefined)
           key = event.shiftKey ? key.toUpperCase() : key.toLowerCase();
         if (handler(key, tag !== undefined && INPUTS.has(tag), actionOf(event.target)?.dataset.action, mod) === true)
@@ -620,6 +627,9 @@ export function browserHost(win: BrowserWindow): PageHost {
       } catch {
         // Storage that is full, disabled or private only loses the preference.
       }
+    },
+    openLink(url) {
+      win.open?.(url, '_blank', 'noopener,noreferrer');
     },
     async copy(text) {
       try {

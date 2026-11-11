@@ -322,6 +322,11 @@ export const actions: Record<string, Action> = {
   },
   'menu-run': (store, data) => runRow(store, Number(data.row)),
   'menu-close': (store) => closeMenu(store),
+  // The shortcut sheet's backdrop: a click outside the sheet closes it.
+  'close-sheet': (store) => {
+    store.ui.sheet = false;
+    store.mark('menu');
+  },
   'dialog-confirm': (store) => store.actor.confirm(),
   'dialog-cancel': (store) => store.actor.cancel(),
   // A field of the dialog changed: its lines follow it.

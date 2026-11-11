@@ -400,7 +400,7 @@ test('each Inbox row carries a dismiss button naming its identity, beside its op
   expect(
     markup.match(/<button class="r-dismiss" type="button" data-action="dismiss-attention" data-item="/g),
   ).toHaveLength(3);
-  expect(markup).toContain('aria-label="dismiss" title="dismiss (e)">✕</button>');
+  expect(markup).toContain('aria-label="dismiss" title="dismiss (E)">✕</button>');
   expect(markup).toContain(
     `data-item="${JSON.stringify(['beta', 'problem', null, null, null, 'repository', 'cannot <b>read</b>']).replaceAll('"', '&quot;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')}"`,
   );

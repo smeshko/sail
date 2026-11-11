@@ -62,7 +62,7 @@ export function openMenu(
     ...(chosen === undefined ? {} : { subject: chosen }),
     ...(point === undefined ? {} : { point }),
   };
-  if (chosen !== undefined) readSubjectOffers(store, chosen);
+  if (chosen !== undefined) void readSubjectOffers(store, chosen);
   store.menuFocus = true;
   store.fresh.add('menu');
   store.mark('menu');
@@ -177,6 +177,17 @@ function answer(store: Store, menu: MenuState, step: Extract<MenuStep, { action:
     return;
   }
   carryOut(store, step.action, step.data, values);
+}
+
+/**
+ * Opens the menu on `subject` at the first step `action` asks: what an action's key does when its parameter is typed
+ * beside its button, as its row does here.
+ */
+export function askInMenu(store: Store, action: string, subject: Subject, data: Record<string, string>): void {
+  openMenu(store, 'full', subject);
+  const { menu } = store.ui;
+  const first = firstStep(store, action, subject, data);
+  if (menu !== undefined && first !== undefined) push(store, menu, first);
 }
 
 /** Polls every queue that offers a poll and has it enabled, one request each. */

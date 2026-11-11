@@ -231,15 +231,16 @@ export function readOffers(store: Store) {
 
 /**
  * Reads what `subject` offers when it is a run that is not the open one, into `store.subjectOffers`, dropping an answer
- * a newer read replaced. The open run's offers are `store.offers`, and any other subject's are the index's.
+ * a newer read replaced. The open run's offers are `store.offers`, and any other subject's are the index's. Answers
+ * the read, settled once its answer is kept or dropped, or undefined when there is nothing to read.
  */
-export function readSubjectOffers(store: Store, subject: Subject): void {
-  if (subject.kind !== 'run') return;
-  if (store.run?.repo === subject.repo && store.run.runId === subject.runId) return;
+export function readSubjectOffers(store: Store, subject: Subject): Promise<void> | undefined {
+  if (subject.kind !== 'run') return undefined;
+  if (store.run?.repo === subject.repo && store.run.runId === subject.runId) return undefined;
   const asked = ++store.subjectOffersRead;
   const { repo, runId } = subject;
   store.subjectOffers = { repo, runId, offers: undefined };
-  void store.host.get(`/api/repos/${enc(repo)}/runs/${enc(runId)}/actions`).then((answer) => {
+  return store.host.get(`/api/repos/${enc(repo)}/runs/${enc(runId)}/actions`).then((answer) => {
     if (asked !== store.subjectOffersRead || store.stopped) return;
     let offers: RunActions | undefined;
     if (answer.status === 200) {

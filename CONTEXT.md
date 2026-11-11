@@ -713,6 +713,10 @@ _Avoid_: target, selection, context
 The menu Cmd+K or Ctrl+K opens, or a right-click on a row opens at the pointer: the focused subject's actions, "go to" (the four views, each with its key, then queues, repositories, runs and queue items, ranked by match: exact, prefix, whole title words, then fuzzy; a kind's own word, such as `queue`, lists the kind, and a run that ended comes last and never on a fuzzy match), and the actions that need no subject. An action's parameters are its steps, asked in the menu; a confirmed action then opens the confirmation dialog. A disabled action is drawn with its reason. Escape goes back one step, then lets go of the subject, whose chip and actions go, then closes the menu.
 _Avoid_: palette, launcher, omnibar
 
+**Shortcut sheet**:
+The overlay `?` opens over the dashboard, in the command menu's place and style: every key the page handles, grouped Global, List, Run, Queue item and Inbox. It is generated from the one table of navigation keys the key handler reads and from the Dashboard actions' keys, so it lists only keys that do something. A Dashboard action's key does it to the focused subject as its button does, opening its confirmation dialog when it has one, and a key whose action can't be done says why in a toast. `Escape`, `?` or a click outside closes it.
+_Avoid_: cheat sheet, help, keymap (the table's module)
+
 **Stage card**:
 One call's card in the dashboard's run view, with its outcome, tries, duration, cost and denials, or a pending card for a roster stage the run hasn't called yet. Cards come from the run's events and its roster alone, so a new stage shows with no dashboard change.
 _Avoid_: tile, step card, job
