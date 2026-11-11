@@ -734,6 +734,22 @@ describe('the confirmation dialog', () => {
     expect(fake.focus.active).toBe(dialog.els[0] as ElementLike);
   });
 
+  test('redrawDialog draws #dialog-body alone, so the confirm button a mousedown pressed is still there at its click', () => {
+    const { fake, dialog, host } = liveDialog();
+    const body = fake.live('dialog-body');
+    host.openDialog(
+      '<div id="dialog-body"><ul><li>one</li></ul><input class="num" type="number" name="raise" value=""></div><div class="dlg-acts"><button class="btn primary" data-action="dialog-confirm">resume</button></div>',
+    );
+    body.innerHTML = '<ul><li>one</li></ul><input class="num" type="number" name="raise" value="">';
+    const confirm = dialog.els.find((el) => el.dataset.action === 'dialog-confirm');
+    host.redrawDialog(
+      '<ul><li>raises the budget by $5.00</li></ul><input class="num" type="number" name="raise" value="">',
+    );
+    expect(body.innerHTML).toContain('<li>raises the budget by $5.00</li>');
+    expect(confirm).toBeDefined();
+    expect(dialog.els).toContain(confirm as LiveElement);
+  });
+
   test('a change inside #dialog is the action dialog-change', () => {
     const { fake, dialog, list, host } = liveDialog();
     const got: [string, Record<string, string>][] = [];

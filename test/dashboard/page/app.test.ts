@@ -101,8 +101,13 @@ class FakeHost implements PageHost {
   dialogValue(name: string) {
     return this.dialogFields[name];
   }
+  /** Draws `html` into the dialog's `#dialog-body`, as the browser host does, leaving its buttons. */
   redrawDialog(html: string) {
-    this.dialog = html;
+    const body = /<div id="dialog-body">[\s\S]*<\/div>(?=<div class="dlg-acts">)/;
+    this.dialog =
+      this.dialog !== undefined && body.test(this.dialog)
+        ? this.dialog.replace(body, () => `<div id="dialog-body">${html}</div>`)
+        : html;
     this.dialogRedraws++;
   }
   /** The reads of a run's actions: answered at once, and kept apart from the reads of its calls. */

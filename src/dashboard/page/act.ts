@@ -31,7 +31,7 @@ import {
   underwayId,
   type Values,
 } from './action-registry';
-import { type DialogAsk, renderDialog } from './dialog-view';
+import { type DialogAsk, renderDialog, renderDialogBody } from './dialog-view';
 import type { PageHost, Region } from './host';
 import type { UiState } from './ui-state';
 
@@ -265,9 +265,9 @@ export function createActor(deps: ActorDeps): Actor {
     const draw = (fresh: boolean) => {
       const view = dialogOf(subject, values, source);
       ui.dialog = view;
-      const html = renderDialog(view, { fields: asked, values, error } satisfies DialogAsk).value;
-      if (fresh) host.openDialog(html);
-      else host.redrawDialog(html);
+      const ask = { fields: asked, values, error } satisfies DialogAsk;
+      if (fresh) host.openDialog(renderDialog(view, ask).value);
+      else host.redrawDialog(renderDialogBody(view, ask).value);
     };
     dialog = {
       subject,

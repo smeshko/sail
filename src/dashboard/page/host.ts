@@ -48,7 +48,10 @@ export interface PageHost {
   openDialog(html: string): void;
   /** Closes the dialog and gives the focus back to what had it at the open. */
   closeDialog(): void;
-  /** Draws `html` into the open dialog as `render()` draws a region, keeping its focus, field values and caret. */
+  /**
+   * Draws `html` into the open dialog's `#dialog-body` (the whole dialog when it has none) as `render()` draws a region,
+   * keeping its focus, field values and caret. The buttons outside it stay, so a click a field's blur redrew under lands.
+   */
   redrawDialog(html: string): void;
   /** The current value of the field named `name` inside the dialog alone, or undefined when it holds none. A checkbox reads as `value()` reads it. */
   dialogValue(name: string): string | undefined;
@@ -362,7 +365,7 @@ export function browserHost(win: BrowserWindow): PageHost {
       }
     },
     redrawDialog(markup) {
-      const dialog = doc.getElementById('dialog');
+      const dialog = doc.getElementById('dialog-body') ?? doc.getElementById('dialog');
       if (dialog !== null) draw(dialog, markup, false);
     },
     dialogValue(name) {
