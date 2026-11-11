@@ -3710,6 +3710,40 @@ test('Cmd+K and Ctrl+K open the command menu from anywhere, an input included, a
   expect(cmdk()).toBe('');
 });
 
+test('Backspace in the menu’s empty field lets go of the subject once, and with text typed or no subject it is the field’s own', async () => {
+  await openRunPage(FAKE_2_ID);
+  cmdK();
+  host.advance(100);
+  expect(menuHead()).toBe('FAKE-2 · Print the version with --version');
+  // With text in the field Backspace deletes a character: the page takes no key, and the chip stays.
+  host.type('menu-query', 'cl');
+  host.advance(100);
+  expect(host.press('Backspace', true)).toBe(false);
+  expect(menuHead()).toBe('FAKE-2 · Print the version with --version');
+  host.type('menu-query', '');
+  host.advance(100);
+  expect(host.press('Backspace', true)).toBe(true);
+  host.advance(100);
+  expect(cmdk()).toContain('class="cmdk"');
+  expect(menuHead()).toBeUndefined();
+  expect(menuLabels()).not.toContain('clean');
+  // No subject is left to let go of: the key is the field's, and the menu stays open.
+  expect(host.press('Backspace', true)).toBe(false);
+  expect(cmdk()).toContain('class="cmdk"');
+});
+
+test('Backspace in a step’s empty field lets go of nothing', async () => {
+  await openRunPage(FAKE_2_ID);
+  cmdK();
+  host.advance(100);
+  typeIn('restart');
+  enter();
+  expect(stepLabel()).toBe('from');
+  expect(host.press('Backspace', true)).toBe(false);
+  expect(stepLabel()).toBe('from');
+  expect(menuHead()).toBe('FAKE-2 · Print the version with --version');
+});
+
 test('Cmd+K does nothing while the confirmation dialog is open, and another key with Cmd held does nothing at all', async () => {
   await openRunPage(FAKE_2_ID);
   host.click({ action: 'clean-run' });
