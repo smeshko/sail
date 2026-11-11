@@ -10,8 +10,9 @@
 //   holds the run's branch lease, since a run whose process died reads `running` and a hold would only strand it. A
 //   starting run has nothing to hold.
 // - Clean is offered for a `failed` run, beside Restart: enabled with what it removes and where the run directory goes,
-//   or disabled with `sail clean`'s refusal, or with why the clone's ports can't be resolved. It is not held back by
-//   the watcher check below, since the engine's checks refuse a leased branch and a queue item that names the run.
+//   or disabled with `sail clean`'s refusal, or with why the clone's ports can't be resolved. A queue item that names
+//   the run is the offer's `item`, which the clean requeues or drops: it is disabled, in `sail clean`'s words, only
+//   while no live watcher of this clone watches the item's workflow. It is not held back by the watcher check below.
 // - Resume is offered for a `suspended` run. For stop reason `budget_exceeded` it needs a raise: the budget the run
 //   suspended on (its `run:suspended`), else `usd` when the cost has reached the budget's dollars, else `minutes`.
 // - Restart is offered for a `failed` run, a stopped one included. It is a seeded run, so it is disabled for the runs
@@ -34,6 +35,7 @@ import { noIntakeRun, notTicketRun, noWorkspaceRun, seedEnd } from '../engine/se
 import { readEvents } from '../events/consumers/ndjson';
 import { summarize } from '../events/summary';
 import type { SailEvent } from '../events/types';
+import { locateRegistered, watcherOf } from '../watch/clean-runs';
 import { queueItemsNaming, startingRun } from '../watch/queue-store';
 import type { RegistryEntry } from '../watch/registry';
 import { clonePorts, type ResolveClonePorts } from './clone-ports';
@@ -77,6 +79,10 @@ export interface CleanOffer extends Offer {
   removes: string[];
   /** Where the run directory would go. */
   archive?: string;
+  /** The queue item that names the run, which a clean settles: requeues or drops. */
+  item?: { workflow: string; dedupKey: string; state: string };
+  /** The ticket of a ticket run, which a clean moves back from started to unstarted. */
+  ticketKey?: string;
 }
 
 export interface RunActions {
@@ -196,23 +202,52 @@ function restartOf(runId: string, header: RunHeader, entries: readonly JournalEn
   return { enabled: true, stages, ...(stage === undefined ? {} : { stage }), budget } satisfies RestartOffer;
 }
 
-/** Clean's offer for a failed run: `checkClean()`'s plan, or its refusal. */
+/**
+ * Clean's offer for a failed run, as `sail clean --requeue|--drop` would find it: `checkClean()`'s plan, or its refusal.
+ * A queue item that names the run is the offer's `item`, and the plan is made as if the clean settled it; with no live
+ * watcher of the item's workflow in this clone the offer is disabled in `sail clean`'s words.
+ */
 async function cleanOf(entry: RegistryEntry, runId: string, options: ActionsOptions): Promise<CleanOffer> {
   const refuse = (why: string): CleanOffer => ({ enabled: false, removes: [], why });
   try {
     const env = options.env ?? process.env;
     const ports = await (options.ports ?? ((each) => clonePorts(each, env)))(entry);
     if ('refused' in ports) return refuse(ports.refused);
+    const runs = runsDir(entry.sailDir);
+    const { source } = readRunHeader(join(runs, runId));
+    const ticketKey = source.kind === 'ticket' ? { ticketKey: source.ticketKey } : {};
+    const naming = queueItemsNaming(runs, runId);
+    const named = 'refused' in naming ? undefined : naming[0];
+    let item: CleanOffer['item'];
+    if (named !== undefined) {
+      item = { workflow: named.workflow, dedupKey: named.item.dedupKey, state: named.item.state };
+      const located = await locateRegistered(entry)();
+      const watching = await watcherOf(entry.sailDir, named.workflow, located);
+      if ('refused' in watching) return { ...refuse(`run ${runId}: ${watching.refused}`), item, ...ticketKey };
+    }
     const checked = await checkClean({
       sailDir: entry.sailDir,
       runId,
       workspace: ports.adapters.ports.workspace,
-      queueItems: (id) => queueItemsNaming(runsDir(entry.sailDir), id),
+      queueItems: (id) => {
+        const items = queueItemsNaming(runs, id);
+        if ('refused' in items || named === undefined) return items;
+        return items.filter(
+          (each) => !(each.workflow === named.workflow && each.item.dedupKey === named.item.dedupKey),
+        );
+      },
       codeHost: ports.codeHost,
       env,
     });
-    if ('refused' in checked) return refuse(checked.refused);
-    return { enabled: true, removes: checked.plan.removes, archive: checked.plan.archive };
+    if ('refused' in checked)
+      return { ...refuse(checked.refused), ...(item === undefined ? {} : { item }), ...ticketKey };
+    return {
+      enabled: true,
+      removes: checked.plan.removes,
+      archive: checked.plan.archive,
+      ...(item === undefined ? {} : { item }),
+      ...ticketKey,
+    };
   } catch (error) {
     return refuse(`run ${runId} can't be checked for a clean: ${messageOf(error)}`);
   }

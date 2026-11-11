@@ -3,6 +3,7 @@
 // server starts on port 0 and is stopped after its test.
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import {
+  appendFileSync,
   chmodSync,
   existsSync,
   mkdirSync,
@@ -20,13 +21,16 @@ import { join } from 'node:path';
 import { takeLease } from '../../src/adapters/leases';
 import { type Dashboard, guard, startDashboard } from '../../src/dashboard/server';
 import { isRunIdOf } from '../../src/engine/run-id';
+import { PortError } from '../../src/ports/errors';
 import {
   appendStageEnd,
+  betaWatcher,
   entryOf,
   FAKE_2_ID,
   FAKE_3_ID,
   fake2Dir,
   fakeClonePorts,
+  fakeTickets,
   GOLDEN_RUN,
   GOLDEN_RUN_ID,
   type Machine,
@@ -234,6 +238,7 @@ test("a run's actions route answers what the run offers as JSON, 404 for an unkn
           enabled: true,
           removes: ['run ref'],
           archive: expect.stringMatching(new RegExp(`/failed-runs/\\d{4}-\\d{2}-\\d{2}/${FAKE_2_ID}$`)),
+          ticketKey: 'FAKE-2',
         },
       },
     ]);
@@ -954,7 +959,7 @@ test('a POST to clean a failed run removes what the engine plans, archives its r
   expect(answer.removed).toEqual([`branch ${FAKE_2_BRANCH}`, 'run ref']);
   expect(answer.archived).toMatch(new RegExp(`/failed-runs/\\d{4}-\\d{2}-\\d{2}/${FAKE_2_ID}$`));
   expect(answer.message).toBe(
-    `cleaned ${FAKE_2_ID}: branch ${FAKE_2_BRANCH}, run ref; run directory -> ${answer.archived}`,
+    `cleaned ${FAKE_2_ID}: branch ${FAKE_2_BRANCH}, run ref; run directory -> ${answer.archived}\nreset FAKE-2 to Todo`,
   );
   expect(calls).toEqual([
     `removeBranch ${FAKE_2_BRANCH} local`,
@@ -1003,7 +1008,111 @@ test('a POST to clean a failed run whose branch has an open pull request is 409,
   expect(existsSync(fake2Dir(m))).toBe(true);
 });
 
-test('a POST to clean a failed run a queue item names is 409 with the engine words, and changes neither', async () => {
+test('a POST to clean a failed run with no queue item resets its ticket, and the message holds the lines `sail clean` prints', async () => {
+  m = seedFixtures();
+  const leasesDir = join(m.root, 'leases');
+  const tickets = fakeTickets(leasesDir);
+  expect((await tickets.get('FAKE-2')).state.type).toBe('started');
+  const server = startPorts({ ticketSource: tickets });
+  const cleaned = await post(server, CLEAN, startedBy('{}'));
+  const answer = (await cleaned.json()) as { message: string; archived: string; problems?: string[] };
+  expect(cleaned.status).toBe(200);
+  expect(answer.message.split('\n')).toEqual([
+    `cleaned ${FAKE_2_ID}: run ref; run directory -> ${answer.archived}`,
+    'reset FAKE-2 to Todo',
+  ]);
+  expect(answer.problems).toBeUndefined();
+  expect((await tickets.get('FAKE-2')).state).toEqual({ type: 'unstarted', name: 'Todo' });
+});
+
+test('a POST to clean whose ticket reset fails answers 200 with the problem, since the run is archived', async () => {
+  m = seedFixtures();
+  const tickets = fakeTickets(join(m.root, 'leases'));
+  const server = startPorts({
+    ticketSource: {
+      ...tickets,
+      update: async () => Promise.reject(new PortError('ticketSource', 'update', 'unavailable', 'down')),
+    } as never,
+  });
+  const cleaned = await post(server, CLEAN, startedBy('{}'));
+  const answer = (await cleaned.json()) as { message: string; problems?: string[] };
+  expect(cleaned.status).toBe(200);
+  expect(answer.problems).toEqual([expect.stringContaining(`${FAKE_2_ID}: its ticket FAKE-2 was not reset`)]);
+  expect(existsSync(fake2Dir(m))).toBe(false);
+});
+
+/** beta's FAKE-3 failed, its queue item parked, and a live watcher of ticket-to-pr in beta. */
+function parkedFailed() {
+  writeFileSync(join(betaRun(), 'STATUS'), 'failed workflow_failed\n');
+  const queue = join(queueDirOf(m), 'queue.json');
+  writeFileSync(queue, readFileSync(queue, 'utf8').replace('"dispatched"', '"parked",\n"reason": "gave up"'));
+  betaWatcher(m, { pid: process.pid, sailDir: m.beta.sailDir });
+  return queue;
+}
+
+/** The watcher's stand-in: takes the command file dropped in beta's inbox, and records the event it would emit. */
+async function watcherTakes(type: string): Promise<Record<string, unknown>> {
+  const inbox = join(m.beta.clone, '.sail-runs', 'watcher', 'commands');
+  const deadline = performance.now() + 5000;
+  for (;;) {
+    const name = existsSync(inbox) ? readdirSync(inbox).find((each) => each.endsWith('.json')) : undefined;
+    if (name !== undefined) {
+      const command = JSON.parse(readFileSync(join(inbox, name), 'utf8')) as Record<string, unknown>;
+      rmSync(join(inbox, name));
+      const stream = join(queueDirOf(m), 'events.ndjson');
+      const seq = readFileSync(stream, 'utf8').split('\n').filter(Boolean).length + 1;
+      appendFileSync(
+        stream,
+        `${JSON.stringify({ seq, ts: '2026-10-14T09:00:00.000Z', type, dedupKey: 'ticket:FAKE-3' })}\n`,
+      );
+      if (type === 'queue:dropped') {
+        const file = join(queueDirOf(m), 'queue.json');
+        const queue = JSON.parse(readFileSync(file, 'utf8')) as { items: { dedupKey: string }[] };
+        queue.items = queue.items.filter((each) => each.dedupKey !== 'ticket:FAKE-3');
+        writeFileSync(file, `${JSON.stringify(queue)}\n`);
+      }
+      return command;
+    }
+    if (performance.now() > deadline) throw new Error('no command was dropped within 5 s');
+    await Bun.sleep(2);
+  }
+}
+
+test('a POST to clean with item requeue cleans the run named by a parked item, then has the watcher requeue it', async () => {
+  m = seedFixtures();
+  parkedFailed();
+  const server = startPorts();
+  const [response, command] = await Promise.all([
+    post(server, `/api/repos/beta/runs/${FAKE_3_ID}/clean`, startedBy('{"item":"requeue"}')),
+    watcherTakes('queue:requeued'),
+  ]);
+  const answer = (await response.json()) as { message: string };
+  expect(response.status).toBe(200);
+  expect(command).toEqual({ op: 'requeue', workflow: 'ticket-to-pr', dedupKey: 'ticket:FAKE-3' });
+  const lines = answer.message.split('\n');
+  expect(lines[0]).toStartWith(`cleaned ${FAKE_3_ID}: `);
+  expect(lines[1]).toBe('reset FAKE-3 to Todo');
+  expect(lines[2]).toStartWith('requeued ');
+  expect(existsSync(betaRun())).toBe(false);
+});
+
+test("a POST to clean with item drop cleans the run, takes the watcher's label off its ticket and has the watcher drop the item", async () => {
+  m = seedFixtures();
+  parkedFailed();
+  const tickets = fakeTickets(join(m.root, 'leases'));
+  const server = startPorts({ ticketSource: tickets });
+  const [response, command] = await Promise.all([
+    post(server, `/api/repos/beta/runs/${FAKE_3_ID}/clean`, startedBy('{"item":"drop"}')),
+    watcherTakes('queue:dropped'),
+  ]);
+  const answer = (await response.json()) as { message: string };
+  expect(response.status).toBe(200);
+  expect(command).toEqual({ op: 'drop', workflow: 'ticket-to-pr', dedupKey: 'ticket:FAKE-3' });
+  expect(answer.message.split('\n').at(-1)).toBe('ticket:FAKE-3 dropped');
+  expect((await tickets.get('FAKE-3')).labels).toEqual(['ticket-to-pr']);
+});
+
+test('a POST to clean a failed run a queue item names, with no item, is 409 with the --requeue or --drop line, and changes neither', async () => {
   m = seedFixtures();
   writeFileSync(join(betaRun(), 'STATUS'), 'failed workflow_failed\n');
   const queue = join(queueDirOf(m), 'queue.json');
@@ -1013,7 +1122,7 @@ test('a POST to clean a failed run a queue item names is 409 with the engine wor
   expect([refused.status, await refused.json()]).toEqual([
     409,
     {
-      error: `queue item ticket:FAKE-3 of ticket-to-pr (dispatched) names run ${FAKE_3_ID}: requeue it or drop it: \`sail queue requeue|drop\``,
+      error: `queue item ticket:FAKE-3 of ticket-to-pr (dispatched) names run ${FAKE_3_ID}: clean it with --requeue or --drop, or \`sail queue requeue|drop\``,
     },
   ]);
   expect([readFileSync(queue, 'utf8'), existsSync(betaRun())]).toEqual([text, true]);
@@ -1024,6 +1133,7 @@ test.each([
   ['a stop with a now that is no boolean', STOP, '{"now":"yes"}'],
   ['a stop that is not JSON', STOP, 'nope'],
   ['a clean with a field it does not take', CLEAN, '{"x":1}'],
+  ['a clean with an item that is neither requeue nor drop', CLEAN, '{"item":"keep"}'],
   ['a clean that is not JSON', CLEAN, 'nope'],
 ])('%s is 400 as JSON, and changes no run', async (_, path, body) => {
   m = seedFixtures();

@@ -49,3 +49,14 @@ test('a workspace adapter that cannot be resolved is refused with its issue', as
   const ports = await clonePorts(entryAt(), {});
   expect('refused' in ports ? ports.refused : ports).toContain("no built-in adapter 'nonesuch' fills workspace");
 });
+
+test("a clone's ports carry its config and a ticket source resolved once, on the first ask", async () => {
+  cpSync(join(import.meta.dir, '..', 'fixtures', 'repo', '.sail'), join(root, '.sail'), { recursive: true });
+  const ports = await clonePorts(entryAt(), {});
+  if ('refused' in ports) throw new Error(ports.refused);
+  expect(ports.config.name).toBe('fixture');
+  const tickets = await ports.ticketSource();
+  if ('refused' in tickets) throw new Error(tickets.refused);
+  expect(tickets.name).toBe('fake');
+  expect(await ports.ticketSource()).toBe(tickets);
+});

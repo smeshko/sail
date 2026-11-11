@@ -15,12 +15,14 @@
 //    run offers (src/dashboard/actions.ts), then starts `sail resume <run>` or `sail run --from-run <run> --stage …`
 //    itself, detached in the clone, its output in `.sail-runs/dashboard/<run id>.log`, as a typed command would: it
 //    needs no watcher and skips the watcher's cap. It answers 202 once the run has started, or 409 with the line the
-//    start was refused with. The last two are `…/runs/<run>/stop` (body `{ now, suspend? }`) and `…/clean` (`{}`): each calls the
+//    start was refused with. The last two are `…/runs/<run>/stop` (body `{ now, suspend? }`) and `…/clean` (`{ item? }`): each calls the
 //    engine function `sail stop` or `sail clean` calls (src/engine/stop.ts, src/engine/clean.ts) in this process,
 //    with the clone's Workspace port, and is refused in the same words, 409. A `suspend` holds the run as `sail stop
 //    --suspend` does, and with `now` is a 400. A stop answers 202 `{ message }`, since a
-//    running run ends later, and a clean 200 `{ message, removed, archived }`; a clean whose removal failed is 409
-//    with the failures, and its run directory stays. The watch set is changed at `/api/repos/<repo>/watch` and
+//    running run ends later, and a clean 200 `{ message, removed, archived, problems? }`; a clean whose removal failed is
+//    409 with the failures, and its run directory stays. A clean also resets the run's ticket and, with `item: 'requeue'
+//    | 'drop'` in its body, settles the queue item that names the run, as `sail clean --requeue|--drop` does; a run a
+//    queue item names is refused without it. The watch set is changed at `/api/repos/<repo>/watch` and
 //    `…/unwatch` (body `{ workflows: string[] }`, none meaning all): each runs `sail watch` or `sail unwatch` in the
 //    clone and passes the CLI's line and refusals through. A watch with no live watcher starts one, detached, its
 //    output in `.sail-runs/dashboard/watcher.log`, and answers 202 `{ message, pid }` once the registry records it; any
@@ -36,14 +38,12 @@
 //
 // No answer carries a CORS header. Errors are JSON, `{ "error": "…" }`.
 import { existsSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import type { Server, ServerWebSocket } from 'bun';
 import { z } from 'zod';
 import { BUILTINS } from '../adapters/index';
 import { resolveAdapters } from '../engine/adapters';
 import { isPlainName } from '../engine/call-dir';
-import { cleanedMessage, cleanRun } from '../engine/clean';
 import { readConfig } from '../engine/config';
 import { credentialValues } from '../engine/redact';
 import { readStatus, runsDir } from '../engine/run-dir';
@@ -52,6 +52,7 @@ import { newRunId } from '../engine/run-id';
 import { formatIssue } from '../engine/schemas';
 import { stoppedMessage, stopRun } from '../engine/stop';
 import type { TicketSource } from '../ports/ticket-source';
+import { cleanRuns, locateRegistered } from '../watch/clean-runs';
 import { releasedLine, releaseHold } from '../watch/holds';
 import { commandTaken, dropCommand, NOT_TAKEN } from '../watch/inbox';
 import { commandFor, itemLine, outcomeOf, streamMark } from '../watch/queue-commands';
@@ -138,7 +139,7 @@ const WATCH_PATH = /^\/api\/repos\/[^/]+\/(watch|unwatch)$/;
 const WatchBody = z.strictObject({ workflows: z.array(z.string().min(1)) });
 
 const StopBody = z.strictObject({ now: z.boolean(), suspend: z.boolean().optional() });
-const CleanBody = z.strictObject({});
+const CleanBody = z.strictObject({ item: z.enum(['requeue', 'drop']).optional() });
 
 const ResumeBody = z.strictObject({
   raise: z
@@ -592,10 +593,18 @@ async function stopRoute(starts: Starts, segments: string[], request: Request): 
   }
 }
 
+/** The `commandTaken` options of the server's own settings. */
+const takenOptions = (options: DashboardOptions) => ({
+  ...(options.applyTimeoutMs === undefined ? {} : { timeoutMs: options.applyTimeoutMs }),
+  ...(options.applyPollMs === undefined ? {} : { pollMs: options.applyPollMs }),
+});
+
 /**
- * Cleans a failed run as `sail clean` does: the engine's `cleanRun()` in this process, which makes all its checks
- * before any removal. Answers 200 with the line `sail clean` prints, or 409 with the refusal or the failed removals.
- * Unlike `sail clean`, it resets no ticket and settles no queue item: a run a queue item names is refused.
+ * Cleans a failed run as `sail clean <run> [--requeue|--drop]` does: the shared `cleanRuns()` in this process, which
+ * makes all its checks before any removal, resets the run's ticket and settles the queue item that names it as `item`
+ * says. A run it did not clean is 409 with its lines joined by `; `. A cleaned run is 200 `{ message, removed,
+ * archived, problems? }`: `message` is the lines `sail clean` prints on stdout and `problems` those it prints on stderr,
+ * which a clean that went on after the archive (a ticket not reset, an item not settled) carries.
  */
 async function cleanRoute(starts: Starts, segments: string[], request: Request): Promise<Response> {
   const { options, underway } = starts;
@@ -609,22 +618,32 @@ async function cleanRoute(starts: Starts, segments: string[], request: Request):
   if (underway.has(key)) return error(409, `a clean of ${runId} is already under way`);
   underway.add(key);
   try {
-    const cleaned = await cleanRun({
+    const [result] = await cleanRuns({
       sailDir: entry.sailDir,
-      runId,
+      config: ports.config,
       workspace: ports.adapters.ports.workspace,
-      queueItems: (id) => queueItemsNaming(runsDir(entry.sailDir), id),
       codeHost: ports.codeHost,
+      ticketSource: ports.ticketSource,
       env,
+      runIds: [runId],
+      ...(parsed.body.item === undefined ? {} : { settle: parsed.body.item }),
+      locate: locateRegistered(entry),
+      taken: (file) => commandTaken(file, takenOptions(options)),
+      showPath: (file) => relative(entry.clone, file),
     });
-    if ('refused' in cleaned) return error(409, cleaned.refused);
-    if ('failed' in cleaned) {
-      const { failures } = cleaned.failed;
-      return error(409, `${failures.join('; ')}; its run directory stays at .sail-runs/${runId}; clean it again`);
-    }
-    const { removed, archived } = cleaned.cleaned;
-    const home = env.HOME ?? homedir();
-    return Response.json({ message: cleanedMessage(runId, cleaned.cleaned, home), removed, archived });
+    const lines = result?.lines ?? [];
+    if (result?.cleaned === undefined) return error(409, lines.map((line) => line.text).join('; '));
+    const { removed, archived } = result.cleaned;
+    const problems = lines.filter((line) => line.kind === 'warned').map((line) => line.text);
+    return Response.json({
+      message: lines
+        .filter((line) => line.kind !== 'warned')
+        .map((line) => line.text)
+        .join('\n'),
+      removed,
+      archived,
+      ...(problems.length === 0 ? {} : { problems }),
+    });
   } finally {
     underway.delete(key);
   }
