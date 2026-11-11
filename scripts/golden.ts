@@ -27,8 +27,10 @@ import { BUILTINS } from '../src/adapters/index';
 import { recordingHarness, writeJournalKeys } from '../src/adapters/recording';
 import { runActions } from '../src/dashboard/actions';
 import { findRepo, index } from '../src/dashboard/files';
+import { actionOf } from '../src/dashboard/page/action-registry';
 import { attention } from '../src/dashboard/page/attention';
 import { renderAttention } from '../src/dashboard/page/attention-view';
+import { renderDialog } from '../src/dashboard/page/dialog-view';
 import type { SafeHtml } from '../src/dashboard/page/html';
 import { pollKind, queuePanels, railRepos, watchState } from '../src/dashboard/page/index-model';
 import { renderInspector } from '../src/dashboard/page/inspector-view';
@@ -37,6 +39,7 @@ import { renderRail } from '../src/dashboard/page/rail-view';
 import { foldRun } from '../src/dashboard/page/run-model';
 import { renderRun, runControls } from '../src/dashboard/page/run-view';
 import { renderTimeline } from '../src/dashboard/page/timeline-view';
+import { renderToasts } from '../src/dashboard/page/toast-view';
 import { type InspectorTab, initialUi, type UiState } from '../src/dashboard/page/ui-state';
 import { resolveAdapters } from '../src/engine/adapters';
 import { type AdapterConfig, readConfig } from '../src/engine/config';
@@ -287,7 +290,28 @@ export async function renderDashboardViews(outDir: string): Promise<string[]> {
         const open = ui({ repo, runId, runMenu: runId });
         views[`rail-menu-${name}.html`] = renderRail(railRepos(repos, VIEWS_NOW), open, VIEWS_NOW, offers);
       }
+      // The dialog a clean of the failed run opens, built from its offers by the registry's own lines.
+      if (name === 'fake-2' && offers?.clean !== undefined) {
+        const subject = { kind: 'run', repo, runId } as const;
+        // The archive is where this machine would put the run directory, on today's date: the golden names a fixed one.
+        const archive = `~/.sail/failed-runs/2026-11-01/${runId}`;
+        const run = { ...offers, clean: { ...offers.clean, archive } };
+        const view = actionOf('clean-run')?.dialog?.(subject, {}, { run, index: [] });
+        if (view === undefined) throw new Error('clean-run has no dialog');
+        views['dialog-clean.html'] = renderDialog(view);
+      }
     }
+    // One toast of each kind: a success, one with an Undo, and a refusal.
+    views['toasts.html'] = renderToasts([
+      { id: 1, kind: 'ok', head: `clean ${FAKE_2_ID}`, text: `cleaned ${FAKE_2_ID}` },
+      { id: 2, kind: 'ok', head: 'all clear', text: '4 hidden', undo: true },
+      {
+        id: 3,
+        kind: 'bad',
+        head: `poll beta / ${QUEUE_WORKFLOW}`,
+        text: "no watcher is running for 'beta': sail watch ticket-to-pr first",
+      },
+    ]);
     const inspectors: [name: string, run: keyof typeof runDirs, key: string, tab: InspectorTab][] = [
       ['inspector-fake-2-implement-1-permissions.html', 'fake-2', 'implement#1', 'permissions'],
       ['inspector-golden-implement-2-overview.html', 'golden', 'implement#2', 'overview'],
