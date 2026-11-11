@@ -158,9 +158,15 @@ class FakeHost implements PageHost {
   save(key: string, value: string) {
     this.storage.set(key, value);
   }
+  /** What the clipboard answers. */
+  copyAnswer = true;
   async copy(text: string) {
     this.copied.push(text);
-    return true;
+    return this.copyAnswer;
+  }
+  href() {
+    const query = this.urls.at(-1)?.query ?? new URLSearchParams(this.startAt).toString();
+    return `http://dashboard/${query === '' ? '' : `?${query}`}`;
   }
   setTheme(theme: string) {
     this.theme = theme;
@@ -286,7 +292,7 @@ test('boot renders the rail with alpha and beta from the first index, opens the 
   page = boot(host);
   expect(host.sockets.map((socket) => socket.query)).toEqual(['index=1']);
   host.advance(100);
-  expect(host.renders.sort()).toEqual(['attention', 'drawer', 'inspector', 'main', 'rail', 'status']);
+  expect(host.renders.sort()).toEqual(['attention', 'drawer', 'inspector', 'link', 'main', 'rail', 'status']);
   host.push(host.open('index')[0], indexMessage());
   expect(host.open('run=').map((socket) => socket.query)).toEqual([runQuery('alpha', GOLDEN_RUN_ID)]);
   replay(host.open('run=')[0], GOLDEN());
@@ -2570,5 +2576,54 @@ describe('Back and forward open what an entry names, and push nothing (ADW-513)'
     expect(host.urls).toEqual([]);
     host.push(host.open('index')[0], indexMessage());
     expect(host.open('run=').map((socket) => socket.query)).toEqual([runQuery('alpha', FAKE_2_ID)]);
+  });
+});
+
+describe('Copy link (ADW-513)', () => {
+  const select = () => {
+    page = boot(host);
+    host.push(host.open('index')[0], indexMessage());
+    host.click({ action: 'select-run', repo: 'alpha', run: FAKE_2_ID });
+    host.click({ action: 'select-card', key: 'implement#1' });
+    host.advance(100);
+  };
+
+  test('the link region draws a Copy link button after the first flush', () => {
+    page = boot(host);
+    host.advance(100);
+    expect(host.regions.link).toContain(
+      '<button class="btn" type="button" data-action="copy-link" aria-label="copy link" title="copy link">',
+    );
+  });
+
+  test("a click copies the current URL and shows 'link copied', and no URL is written", async () => {
+    select();
+    const written = host.urls.length;
+    host.click({ action: 'copy-link' });
+    await settle();
+    host.advance(100);
+    expect(host.copied).toEqual([`http://dashboard/?repo=alpha&run=${FAKE_2_ID}&key=implement%231&timeline=1`]);
+    expect(host.regions.link).toContain('<span class="warnchip">link copied</span>');
+    expect(host.urls).toHaveLength(written);
+  });
+
+  test('the notice is gone two seconds later', async () => {
+    select();
+    host.click({ action: 'copy-link' });
+    await settle();
+    host.advance(1999);
+    expect(host.regions.link).toContain('link copied');
+    host.advance(1);
+    host.advance(100);
+    expect(host.regions.link).not.toContain('link copied');
+  });
+
+  test('a clipboard that refuses shows that the link could not be copied', async () => {
+    select();
+    host.copyAnswer = false;
+    host.click({ action: 'copy-link' });
+    await settle();
+    host.advance(100);
+    expect(host.regions.link).toContain('the link could not be copied');
   });
 });

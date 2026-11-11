@@ -79,7 +79,7 @@ export function markupWindow() {
       removeEventListener: () => {},
       documentElement: { dataset: {} },
     },
-    location: { host: '127.0.0.1:0', search: '', pathname: '/' },
+    location: { host: '127.0.0.1:0', search: '', pathname: '/', href: 'http://127.0.0.1/' },
     addEventListener() {},
     history: {
       pushState: (data, unused, url) => history.push({ kind: 'push', data, unused, url }),

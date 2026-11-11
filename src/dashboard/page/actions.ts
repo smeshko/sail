@@ -11,6 +11,9 @@ import type { Store } from './store';
 import { reopenQueue, selectRun } from './streams';
 import { FILTERS, type InspectorTab, TABS, THEMES, type TimelineFilter } from './ui-state';
 
+/** How long Copy link's answer is shown. */
+export const LINK_NOTICE_MS = 2000;
+
 export type Action = (store: Store, data: Record<string, string>) => void;
 
 /** Selects the card `by` places from the selected one. */
@@ -190,6 +193,21 @@ export const actions: Record<string, Action> = {
   'toggle-follow': (store) => {
     store.ui.follow = !store.ui.follow;
     store.mark('main', 'inspector');
+  },
+  // Copies the page's URL, and says for `LINK_NOTICE_MS` whether the clipboard took it.
+  'copy-link': (store) => {
+    const { ui, host } = store;
+    void host.copy(host.href()).then((copied) => {
+      if (store.stopped) return;
+      ui.linkNotice = copied ? 'link copied' : 'the link could not be copied';
+      store.mark('link');
+      if (store.linkTimer !== undefined) host.cancel(store.linkTimer);
+      store.linkTimer = host.later(() => {
+        store.linkTimer = undefined;
+        delete ui.linkNotice;
+        store.mark('link');
+      }, LINK_NOTICE_MS);
+    });
   },
   copy: (store, data) => {
     if (data.text !== undefined) void store.host.copy(data.text);

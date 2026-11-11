@@ -8,6 +8,9 @@
 //   drawn by `action-view.ts`), the only module that posts; `keys.ts` does what a key asks. Enter and Space on
 //   a focused stage card arrive as its action, and on a focused button or link not at all.
 //
+// The page's URL names the view and the selection (`location.ts`, opened by `navigate.ts`, also on Back and forward),
+// and the top bar's Copy link copies it (`actions.ts`).
+//
 // The rules each module follows are in its own header.
 import { createActor } from './act';
 import { dispatch } from './actions';
@@ -91,6 +94,7 @@ export function boot(host: PageHost): Page {
       store.stopped = true;
       stopStreams(store);
       if (store.flushTimer !== undefined) host.cancel(store.flushTimer);
+      if (store.linkTimer !== undefined) host.cancel(store.linkTimer);
       stopReads(store);
       if (store.tickTimer !== undefined) host.cancel(store.tickTimer);
     },

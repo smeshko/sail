@@ -4,7 +4,7 @@
 // members the page uses, since the project's TypeScript has no DOM library.
 
 /** The page's regions, each an element id in `index.html`. */
-export const REGIONS = ['rail', 'attention', 'main', 'inspector', 'status', 'drawer'] as const;
+export const REGIONS = ['rail', 'attention', 'link', 'main', 'inspector', 'status', 'drawer'] as const;
 export type Region = (typeof REGIONS)[number];
 
 export interface Connection {
@@ -54,6 +54,8 @@ export interface PageHost {
   start(): Record<string, string>;
   /** Writes the page's URL to `?query` (the path alone for an empty one), as a new history entry when `push`, else in place of the current one. */
   setUrl(query: string, push: boolean): void;
+  /** The page's whole URL, as the address bar shows it. */
+  href(): string;
   /** Calls `handler` with the URL's query, parsed as `start()` parses it, when the browser moves to another history entry. */
   onNavigate(handler: (asked: Record<string, string>) => void): void;
 }
@@ -105,7 +107,7 @@ export interface BrowserWindow {
     documentElement: { dataset: Record<string, string | undefined> };
     activeElement?: ElementLike | null;
   };
-  location: { host: string; search: string; pathname: string };
+  location: { host: string; search: string; pathname: string; href: string };
   history: {
     pushState(data: unknown, unused: string, url: string): void;
     replaceState(data: unknown, unused: string, url: string): void;
@@ -399,6 +401,7 @@ export function browserHost(win: BrowserWindow): PageHost {
       doc.documentElement.dataset.theme = theme;
     },
     start: () => Object.fromEntries(new URLSearchParams(win.location.search)),
+    href: () => win.location.href,
     onNavigate(handler) {
       win.addEventListener('popstate', () => handler(Object.fromEntries(new URLSearchParams(win.location.search))));
     },

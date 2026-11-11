@@ -54,7 +54,7 @@ async function bootHeadless(dashboard: Dashboard) {
       removeEventListener() {},
       documentElement: { dataset: {} },
     },
-    location: { host: `127.0.0.1:${dashboard.port}`, search: '', pathname: '/' },
+    location: { host: `127.0.0.1:${dashboard.port}`, search: '', pathname: '/', href: 'http://127.0.0.1/' },
     addEventListener() {},
     history: {
       pushState: (data, unused, url) => history.push({ kind: 'push', data, unused, url }),
@@ -92,7 +92,7 @@ async function bootHeadless(dashboard: Dashboard) {
       listener({ target: { innerHTML: '', dataset, parentElement: null } satisfies ElementLike });
     }
   };
-  return { ids, text, click };
+  return { ids, text, click, history };
 }
 
 test("the real bundle boots headless: both repositories, the golden run's eight cards and its $1.35, then FAKE-2's denial on the permissions tab", async () => {
@@ -101,14 +101,18 @@ test("the real bundle boots headless: both repositories, the golden run's eight 
   if ('refused' in started) throw new Error(started.refused);
   server = started;
   const page = await bootHeadless(server);
-  expect(page.ids).toEqual(expect.arrayContaining(['rail', 'attention', 'main', 'inspector', 'status']));
+  expect(page.ids).toEqual(expect.arrayContaining(['rail', 'attention', 'link', 'main', 'inspector', 'status']));
   expect(page.ids).not.toContain('queues');
   expect(await until(() => page.text('rail').includes('<span class="nm">beta</span>'))).toBe(true);
   expect(page.text('rail')).toContain('<span class="nm">alpha</span>');
   expect(await until(() => (page.text('main').match(/data-action="select-card"/g) ?? []).length === 8)).toBe(true);
   expect(page.text('main')).toContain('<div class="stat"><b>$1.35</b><span>of $25.00 (5.4%)</span></div>');
   expect(page.text('attention')).toContain('<span class="badge">4</span>');
+  expect(page.text('link')).toContain('data-action="copy-link"');
   page.click({ action: 'select-queue', queue: 'beta/ticket-to-pr' });
+  expect(page.history.filter((entry) => entry.kind === 'push').map((entry) => entry.url)).toContain(
+    '?queue=beta%2Fticket-to-pr',
+  );
   expect(await until(() => page.text('main').includes('<span class="pill p-skip">watcher not running</span>'))).toBe(
     true,
   );

@@ -236,7 +236,12 @@ function fakeWindow(
   const copied: string[] = [];
   const windowListeners: Record<string, (() => void)[]> = {};
   const history: { kind: string; data: unknown; unused: string; url: string }[] = [];
-  const location = { host: '127.0.0.1:4100', search: options.search ?? '', pathname: '/' };
+  const location = {
+    host: '127.0.0.1:4100',
+    search: options.search ?? '',
+    pathname: '/',
+    href: 'http://127.0.0.1:4100/?repo=a',
+  };
   const win: BrowserWindow = {
     document: {
       getElementById: (id) => elements[id] ?? null,
@@ -907,6 +912,10 @@ test('setUrl pushes or replaces the history entry with the query, and writes the
     { kind: 'replace', data: null, unused: '', url: '?repo=a' },
     { kind: 'replace', data: null, unused: '', url: '/' },
   ]);
+});
+
+test("href is the window's whole URL", () => {
+  expect(browserHost(fakeWindow().win).href()).toBe('http://127.0.0.1:4100/?repo=a');
 });
 
 test('onNavigate calls the handler with the query of a popstate, parsed as start() parses it', () => {

@@ -77,6 +77,7 @@ export interface Store {
   lastLogRead: number;
   lastOutputRead: number;
   flushTimer: number | undefined;
+  linkTimer: number | undefined;
   logTimer: number | undefined;
   outputTimer: number | undefined;
   tickTimer: number | undefined;
@@ -129,6 +130,7 @@ export function createStore(host: PageHost): Store {
     lastLogRead: Number.NEGATIVE_INFINITY,
     lastOutputRead: Number.NEGATIVE_INFINITY,
     flushTimer: undefined,
+    linkTimer: undefined,
     logTimer: undefined,
     outputTimer: undefined,
     tickTimer: undefined,
