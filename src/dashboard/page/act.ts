@@ -213,28 +213,23 @@ export function createActor(deps: ActorDeps): Actor {
   function actSeveral(id: string, runs: readonly SeveralRun[]): boolean {
     const def = actionOf(id, registry);
     if (def?.several === undefined) return false;
+    mark('list', 'main');
+    const head = severalHead(def, runs.length);
     if (runsOut > 0) {
-      effects.toast(
-        'bad',
-        severalHead(def, runs.length),
-        'another run action is under way: try again once it is answered',
-      );
-      mark('list', 'main');
+      effects.toast('bad', head, 'another run action is under way: try again once it is answered');
       return false;
     }
     const index = deps.source().index;
+    const source: OfferSource = { index };
     const goes = runs.filter(({ subject, offers }) => {
       const available = def.available(subject, { run: offers, index });
       return available.offered && available.enabled;
     });
-    const source: OfferSource = { index };
+    const view = def.several.dialog(runs, source);
     if (goes.length === 0) {
-      const lines = def.several.dialog(runs, source).lines.map((line) => line.replace(/^skips /, ''));
-      effects.toast('bad', severalHead(def, runs.length), lines.join('; '));
-      mark('list', 'main');
+      effects.toast('bad', head, view.lines.map((line) => line.replace(/^skips /, '')).join('; '));
       return true;
     }
-    const view = def.several.dialog(runs, source);
     const requests = goes.flatMap(({ subject, offers }) => {
       const request = def.request?.(subject, {}, { run: offers, index });
       return request === undefined || 'invalid' in request ? [] : [{ subject, request }];
@@ -253,7 +248,6 @@ export function createActor(deps: ActorDeps): Actor {
     };
     ui.dialog = view;
     host.openDialog(renderDialog(view).value);
-    mark('list', 'main');
     return true;
   }
 
