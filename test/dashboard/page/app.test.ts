@@ -3661,7 +3661,7 @@ async function openRunPage(runId: string) {
   host.advance(100);
 }
 
-test('Cmd+K and Ctrl+K open the command menu from anywhere, an input included, and the handler reports the key handled; the same key, Escape or the backdrop closes it', async () => {
+test('Cmd+K and Ctrl+K open the command menu from anywhere, an input included, and the handler reports the key handled; the same key or the backdrop closes it, and Escape lets go of the subject first', async () => {
   await openRunPage(FAKE_2_ID);
   expect(cmdK()).toBe(true);
   host.advance(100);
@@ -3673,6 +3673,15 @@ test('Cmd+K and Ctrl+K open the command menu from anywhere, an input included, a
   expect(host.press('k', true, undefined, true)).toBe(true);
   host.advance(100);
   expect(cmdk()).toContain('class="cmdk"');
+  // The first Escape lets go of the subject: its chip and its actions go, the menu stays, and the second closes it.
+  expect(menuHead()).toBe('FAKE-2 · Print the version with --version');
+  expect(menuLabels()).toContain('clean');
+  expect(host.press('Escape', true)).toBe(true);
+  host.advance(100);
+  expect(cmdk()).toContain('class="cmdk"');
+  expect(menuHead()).toBeUndefined();
+  expect(menuLabels()).not.toContain('clean');
+  expect(menuLabels()).toContain('switch theme');
   expect(host.press('Escape', true)).toBe(true);
   host.advance(100);
   expect(cmdk()).toBe('');

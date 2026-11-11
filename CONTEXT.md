@@ -706,7 +706,7 @@ What a Dashboard action is done to: a run, a queue item, a workflow, a repositor
 _Avoid_: target, selection, context
 
 **Command menu**:
-The menu Cmd+K or Ctrl+K opens, or a right-click on a row opens at the pointer: the focused subject's actions, "go to" ranked by match (exact, prefix, whole title words, then fuzzy), and the actions that need no subject. An action's parameters are its steps, asked in the menu; a confirmed action then opens the confirmation dialog. A disabled action is drawn with its reason.
+The menu Cmd+K or Ctrl+K opens, or a right-click on a row opens at the pointer: the focused subject's actions, "go to" ranked by match (exact, prefix, whole title words, then fuzzy), and the actions that need no subject. An action's parameters are its steps, asked in the menu; a confirmed action then opens the confirmation dialog. A disabled action is drawn with its reason. Escape goes back one step, then lets go of the subject, whose chip and actions go, then closes the menu.
 _Avoid_: palette, launcher, omnibar
 
 **Stage card**:
