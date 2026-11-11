@@ -2,7 +2,8 @@
 // clean, drop, requeue, move, poll, release a usage-limit hold, add, add skipping its checks, watch, unwatch, all clear) with its id and label, the subject it applies to, its
 // availability from the server's offers, its parameters, its tier, its request and what its answer means. Pure: it
 // holds no host, no state and no storage, so `act.ts` carries any entry out and `action-view.ts` draws any entry, and an
-// entry added here needs nothing else. This is the only page module that names a POST endpoint.
+// entry added here needs nothing else. An entry may also give the `several` form of its dialog, for the one action that
+// takes several runs at once (Clean over the History selection): the actor sends the entry's own request run by run. This is the only page module that names a POST endpoint.
 //
 // A subject is what an action is done to: a run, a queue item, a workflow, a repository, or nothing. The ids are the
 // `data-action` names the markup already carries, `watch-set` split into `watch` and `unwatch`. A local action has
@@ -126,6 +127,17 @@ export type ActResult = {
 };
 export type Effect = 'reopen' | 'leave' | 'took' | { open: string };
 
+/** A run of a selection with what the server says it offers, undefined when that could not be read. */
+export interface SeveralRun {
+  subject: Subject;
+  offers: RunActions | undefined;
+}
+
+/** The toast head of an action done to several runs: `clean 3 runs`. */
+export function severalHead(def: ActionDef, count: number): string {
+  return `${def.label({ kind: 'none' })} ${count} ${count === 1 ? 'run' : 'runs'}`;
+}
+
 export interface ActionDef {
   id: string;
   label(subject: Subject): string;
@@ -154,6 +166,8 @@ export interface ActionDef {
     source: OfferSource,
   ): { path: string; body: unknown } | { invalid: string } | undefined;
   answer?(status: number, body: string, subject: Subject): ActResult;
+  /** The form of the action over several runs: the one dialog that lists what each does. */
+  several?: { dialog(runs: readonly SeveralRun[], source: OfferSource): DialogView };
   /** The name of the effect a local action has the shell perform. */
   run?: string;
 }
@@ -537,6 +551,21 @@ export const ACTIONS: readonly ActionDef[] = [
               ],
         verb: 'clean',
       };
+    },
+    several: {
+      dialog: (runs) => ({
+        title: `clean ${runs.length} ${runs.length === 1 ? 'run' : 'runs'}`,
+        lines: runs.map(({ subject, offers }) => {
+          const offer = offers?.clean;
+          if (offer?.enabled === true) {
+            const removes = offer.removes.length === 0 ? 'removes nothing' : `removes ${offer.removes.join(', ')}`;
+            return `${runName(subject)}: ${removes}${offer.archive === undefined ? '' : `; run directory → ${offer.archive}`}`;
+          }
+          const why = offers === undefined ? 'what it offers could not be read' : (offer?.why ?? offers.why);
+          return `skips ${runName(subject)}: ${why ?? 'it cannot be cleaned'}`;
+        }),
+        verb: 'clean',
+      }),
     },
     request: (subject) => ({ path: runPath(subject, '/clean'), body: {} }),
     answer: (status, body) => {

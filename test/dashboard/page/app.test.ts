@@ -112,10 +112,14 @@ class FakeHost implements PageHost {
   }
   /** The reads of a run's actions: answered at once, and kept apart from the reads of its calls. */
   actionReads: string[] = [];
+  /** While set, the reads of a run's actions wait for it. */
+  actionsHold: Promise<void> | undefined;
   get(path: string) {
     if (path.endsWith('/actions')) {
       this.actionReads.push(path);
-      return this.actionsAnswer(path);
+      return this.actionsHold === undefined
+        ? this.actionsAnswer(path)
+        : this.actionsHold.then(() => this.actionsAnswer(path));
     }
     return new Promise<{ status: number; body: string }>((done) => {
       const read = { path, resolve: () => done(this.answer(path)) };
@@ -1801,6 +1805,87 @@ describe('the list by keyboard (ADW-522)', () => {
     expect(p.ui.listSelected).toEqual([]);
     host.press('x');
     host.press('1');
+    expect(p.ui.listSelected).toEqual([]);
+  });
+
+  /** Marks FAKE-1 (the first run row) and FAKE-2 (the second) in History. */
+  const markFirstTwo = () => {
+    host.press('j');
+    host.press('j');
+    host.press('x');
+    host.press('j');
+    host.press('j');
+    host.press('x');
+  };
+
+  test("clean on a selection reads each run's offers, reads checking… meanwhile, and drops a read of an older selection", async () => {
+    const p = bootHistory();
+    markFirstTwo();
+    host.advance(100);
+    expect(p.ui.listSelected).toHaveLength(2);
+    expect(host.regions.list).toContain('data-action="clean-selected">clean</button>');
+    let release = () => {};
+    host.actionsHold = new Promise<void>((done) => {
+      release = done;
+    });
+    host.actionReads = [];
+    host.click({ action: 'clean-selected' });
+    host.advance(100);
+    expect(host.actionReads.map((path) => path.replace(/-01M\w+/, '')).sort()).toEqual([
+      '/api/repos/alpha/runs/FAKE-1/actions',
+      '/api/repos/alpha/runs/FAKE-2/actions',
+    ]);
+    expect(host.regions.list).toContain('<span class="busy">checking 2 runs…</span>');
+    expect(host.regions.list).not.toContain('data-action="clean-selected"');
+    expect(host.dialog).toBeUndefined();
+    release();
+    host.actionsHold = undefined;
+    await Bun.sleep(50);
+    host.advance(100);
+    expect(dialogTitle()).toBe('clean 2 runs');
+    expect(dialogVerb()).toBe('clean');
+    const lines = dialogLines();
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toStartWith('skips FAKE-1-');
+    expect(lines[1]).toStartWith(`${FAKE_2_ID}: removes `);
+    expect(p.ui.listSelected).toEqual([]);
+    expect(host.regions.list).not.toContain('checking');
+    host.postAnswer = { status: 200, body: '{"message":"cleaned it"}' };
+    host.click({ action: 'dialog-confirm' });
+    await Bun.sleep(10);
+    host.advance(100);
+    expect(host.posts).toEqual([{ path: `${FAKE_2_PATH}/clean`, body: {} }]);
+    expect(toasts()).toEqual([`ok clean ${FAKE_2_ID}: cleaned it`]);
+
+    // A selection changed before the answers come opens no dialog.
+    host.posts = [];
+    markFirstTwo();
+    host.advance(100);
+    host.actionsHold = new Promise<void>((done) => {
+      release = done;
+    });
+    host.click({ action: 'clean-selected' });
+    host.press('Escape');
+    host.advance(100);
+    release();
+    host.actionsHold = undefined;
+    await Bun.sleep(50);
+    host.advance(100);
+    expect([host.dialog, p.ui.underway.selection, p.ui.listSelected]).toEqual([undefined, undefined, []]);
+    expect(host.regions.list).not.toContain('checking');
+  });
+
+  test('clean on a selection none of whose runs can be cleaned opens no dialog and toasts the reasons', async () => {
+    const p = bootHistory();
+    host.press('j');
+    host.press('j');
+    host.press('x');
+    host.click({ action: 'clean-selected' });
+    await Bun.sleep(50);
+    host.advance(100);
+    expect([host.dialog, host.posts]).toEqual([undefined, []]);
+    expect(toasts()).toHaveLength(1);
+    expect(toasts()[0]).toStartWith('bad clean 1 run: FAKE-1-');
     expect(p.ui.listSelected).toEqual([]);
   });
 

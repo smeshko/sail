@@ -379,6 +379,29 @@ export async function renderDashboardViews(outDir: string): Promise<string[]> {
         const view = actionOf('clean-run')?.dialog?.(subject, {}, { run, index: [] });
         if (view === undefined) throw new Error('clean-run has no dialog');
         views['dialog-clean.html'] = renderDialog(view);
+        // The dialog of a clean over a selection: the failed run goes, one a queue item names and a completed one skip.
+        const several = actionOf('clean-run')?.several?.dialog(
+          [
+            { subject, offers: { clean: { ...offers.clean, archive } } },
+            {
+              subject: { kind: 'run', repo: 'beta', runId: FAKE_3_ID },
+              offers: {
+                clean: {
+                  enabled: false,
+                  removes: [],
+                  why: `queue item ticket:FAKE-3 names run ${FAKE_3_ID}: requeue or drop it first`,
+                },
+              },
+            },
+            {
+              subject: { kind: 'run', repo: 'alpha', runId: GOLDEN_RUN_ID },
+              offers: { why: `run ${GOLDEN_RUN_ID} completed: there is nothing to start again` },
+            },
+          ],
+          { index: [] },
+        );
+        if (several === undefined) throw new Error('clean-run has no several form');
+        views['dialog-clean-several.html'] = renderDialog(several);
       }
       // The dialog a restart of the failed run opens: the stage is asked in it, at the offer's choice.
       if (name === 'fake-2' && offers?.restart !== undefined) {

@@ -7,12 +7,18 @@ import { actionOf } from './action-registry';
 import { listRepos } from './index-model';
 import { historyWorkflows, VIEWS, type ViewName } from './list-model';
 import { syncUrl } from './location';
-import { closeFile, openedOutputKeys, openFile, readLog, readOutput, selectCard } from './reads';
+import { cleanSelected, closeFile, openedOutputKeys, openFile, readLog, readOutput, selectCard } from './reads';
 import { FILTER_KEY, LIST_KEY, THEME_KEY } from './saved';
 import type { Store } from './store';
 import { closeDetail, reopenQueue, selectRun } from './streams';
 import { dismissToast, toast, undoToast } from './toast';
 import { FILTERS, type InspectorTab, TABS, THEMES, type TimelineFilter } from './ui-state';
+
+/** A read of the offers of an older selection is dropped when it answers, and its `checking…` goes. */
+function dropSelectionRead(store: Store) {
+  store.selectionRead++;
+  delete store.ui.underway.selection;
+}
 
 export type Action = (store: Store, data: Record<string, string>) => void;
 
@@ -121,6 +127,7 @@ export const actions: Record<string, Action> = {
     delete store.ui.historyStatus;
     delete store.ui.historyWorkflow;
     store.ui.listSelected = [];
+    dropSelectionRead(store);
     delete store.ui.listCursor;
     // The filter field gives up what was typed in it, so it reads as empty as the filter now is.
     store.fresh.add('list');
@@ -178,10 +185,12 @@ export const actions: Record<string, Action> = {
     store.mark('list');
   },
   'clear-selection': (store) => {
-    if (store.ui.listSelected.length === 0) return;
+    dropSelectionRead(store);
+    if (store.ui.listSelected.length === 0) return store.mark('list');
     store.ui.listSelected = [];
     store.mark('list');
   },
+  'clean-selected': (store) => cleanSelected(store),
   'item-menu': (store, data) => {
     if (store.ui.itemMenu === data.item || data.item === undefined) delete store.ui.itemMenu;
     else store.ui.itemMenu = data.item;

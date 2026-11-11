@@ -10,6 +10,7 @@ import {
   type OfferSource,
   refusal,
   type Subject,
+  severalHead,
   subjectName,
   subjectOf,
   underwayId,
@@ -448,4 +449,41 @@ test('actionOf finds an entry by id in a registry given, and none that is not th
   expect(actionOf('stop-run')?.id).toBe('stop-run');
   expect(actionOf('nope')).toBeUndefined();
   expect(actionOf('stop-run', [])).toBeUndefined();
+});
+
+test("clean of several opens one dialog with a line per run that goes and a skips line per run that can't", () => {
+  const runOf = (runId: string): Subject => ({ kind: 'run', repo: 'alpha', runId });
+  const several = def('clean-run').several;
+  expect(
+    several?.dialog(
+      [
+        { subject: runOf('R-a'), offers: runActions },
+        {
+          subject: runOf('R-b'),
+          offers: { clean: { enabled: false, why: 'ticket:FAKE-9 names it' } } as unknown as RunActions,
+        },
+        { subject: runOf('R-c'), offers: { why: 'run R-c completed: there is nothing to start again' } },
+        { subject: runOf('R-d'), offers: undefined },
+      ],
+      source(),
+    ),
+  ).toEqual({
+    title: 'clean 4 runs',
+    lines: [
+      'R-a: removes its worktree, its branch; run directory → /m/failed-runs/x',
+      'skips R-b: ticket:FAKE-9 names it',
+      'skips R-c: run R-c completed: there is nothing to start again',
+      'skips R-d: what it offers could not be read',
+    ],
+    verb: 'clean',
+  });
+  expect(
+    several?.dialog(
+      [{ subject: runOf('R-e'), offers: { clean: { ...on, removes: [] } } as unknown as RunActions }],
+      source(),
+    ),
+  ).toEqual({ title: 'clean 1 run', lines: ['R-e: removes nothing'], verb: 'clean' });
+  expect(severalHead(def('clean-run'), 3)).toBe('clean 3 runs');
+  expect(severalHead(def('clean-run'), 1)).toBe('clean 1 run');
+  expect(def('stop-run').several).toBeUndefined();
 });

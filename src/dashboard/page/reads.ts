@@ -3,8 +3,9 @@
 // the same kind has been asked for, and a running call's log and output are read again at most once a second.
 import type { RunActions } from '../actions';
 import { isMarkdown } from './drawer-view';
-import { statusOf } from './index-model';
+import { listRepos, statusOf } from './index-model';
 import { logTarget } from './inspector-view';
+import { selectedRows, shownGroups } from './list-model';
 import type { OpenRun, Store } from './store';
 import { outputKey, scriptId } from './timeline-view';
 import type { InspectorTab } from './ui-state';
@@ -214,6 +215,43 @@ export function readOffers(store: Store) {
       }
     }
     store.mark('list', 'main');
+  });
+}
+
+/**
+ * Clean over the selection: reads the actions of each selected run the list shows, together, while the head says
+ * `checking n runs…`, then hands what they offer to the actor, which asks once. A read that a later one or a change of
+ * the selection outran is dropped.
+ */
+export function cleanSelected(store: Store) {
+  const { ui, host } = store;
+  const rows = selectedRows(
+    shownGroups(ui.view, listRepos(store.index ?? [], host.now()), ui, host.now()),
+    ui.listSelected,
+  );
+  if (rows.length === 0) return;
+  const asked = ++store.selectionRead;
+  ui.underway.selection = `checking ${rows.length} ${rows.length === 1 ? 'run' : 'runs'}…`;
+  store.mark('list');
+  const reads = rows.map(async (row) => {
+    const subject = { kind: 'run', repo: row.repo, runId: row.run.runId } as const;
+    const answer = await host.get(`/api/repos/${enc(row.repo)}/runs/${enc(row.run.runId)}/actions`);
+    let offers: RunActions | undefined;
+    if (answer.status === 200) {
+      try {
+        offers = JSON.parse(answer.body) as RunActions;
+      } catch {
+        // An answer that isn't JSON offers nothing.
+      }
+    }
+    return { subject, offers };
+  });
+  void Promise.all(reads).then((runs) => {
+    if (asked !== store.selectionRead || store.stopped) return;
+    delete ui.underway.selection;
+    ui.listSelected = [];
+    store.mark('list');
+    store.actor.actSeveral('clean-run', runs);
   });
 }
 

@@ -164,10 +164,14 @@ function historyControls(repos: readonly ListRepo[], ui: UiState): SafeHtml {
 }
 
 /** What the head says of the selection: its count and a button that clears it, drawn only while a row is selected. */
-const selectionHead = (count: number): SafeHtml =>
+const selectionHead = (count: number, checking: string | undefined): SafeHtml =>
   count === 0
     ? html``
-    : html`<span class="lh-sel">${count} selected</span><button class="btn" data-action="clear-selection">clear</button>`;
+    : html`<span class="lh-sel">${count} selected</span>${
+        checking === undefined
+          ? html`<button class="btn" data-action="clean-selected">clean</button>`
+          : html`<span class="busy">${checking}</span>`
+      }<button class="btn" data-action="clear-selection">clear</button>`;
 
 const total = (groups: readonly ListGroup[]) => groups.reduce((sum, group) => sum + group.rows.length, 0);
 
@@ -188,7 +192,7 @@ export function renderList(
     ui.listFilter.trim() !== '' ||
     (view === 'history' && (ui.historyStatus !== undefined || ui.historyWorkflow !== undefined));
   const count = narrowed ? `${total(shown)} of ${total(all)}` : String(total(all));
-  const head = html`<div class="list-h"><span class="lh-t">${VIEW_LABELS[view]}</span><span class="c">${count}</span><input class="list-f" name="list-filter" type="search" value="${ui.listFilter}" placeholder="filter (/)" aria-label="filter the list" autocomplete="off" spellcheck="false">${view === 'history' ? historyControls(repos, ui) : ''}${view === 'history' ? selectionHead(selectedRows(shown, ui.listSelected).length) : ''}</div>`;
+  const head = html`<div class="list-h"><span class="lh-t">${VIEW_LABELS[view]}</span><span class="c">${count}</span><input class="list-f" name="list-filter" type="search" value="${ui.listFilter}" placeholder="filter (/)" aria-label="filter the list" autocomplete="off" spellcheck="false">${view === 'history' ? historyControls(repos, ui) : ''}${view === 'history' ? selectionHead(selectedRows(shown, ui.listSelected).length, ui.underway.selection) : ''}</div>`;
   const empty =
     repos.length === 0
       ? 'no repository is registered yet: run sail watch in one'

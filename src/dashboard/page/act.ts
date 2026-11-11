@@ -25,7 +25,9 @@ import {
   actionOf,
   type OfferSource,
   type Param,
+  type SeveralRun,
   type Subject,
+  severalHead,
   subjectName,
   subjectOf,
   underwayId,
@@ -65,6 +67,8 @@ export interface ActorDeps {
 export interface Actor {
   /** Carries out action `id` for the subject `data` names. */
   act(id: string, data: Readonly<Record<string, string>>): void;
+  /** Carries out action `id` over `runs`: one dialog listing each, then one request per run that can, in order. */
+  actSeveral(id: string, runs: readonly SeveralRun[]): void;
   /** Reads the drawn parameters of the actions shown in `place` into the drafts, before a draw. */
   keep(place: 'run' | 'queue', subject?: Subject): void;
   /** Forgets what a run's actions hold: an open dialog for it and the drafts. */
@@ -83,6 +87,7 @@ export interface Actor {
 export function inertActor(): Actor {
   return {
     act: () => {},
+    actSeveral: () => {},
     keep: () => {},
     forget: () => {},
     dialogFor: () => undefined,
@@ -186,11 +191,57 @@ export function createActor(deps: ActorDeps): Actor {
     if (effect === 'leave') mark('sidebar', 'inspector', 'status');
   }
 
-  function send(def: ActionDef, subject: Subject, request: { path: string; body: unknown }, undo: Undo | undefined) {
+  function send(
+    def: ActionDef,
+    subject: Subject,
+    request: { path: string; body: unknown },
+    undo: Undo | undefined,
+  ): Promise<void> {
     if (subject.kind === 'run') runsOut++;
     if (def.underway !== undefined) ui.underway[underwayId(def, subject)] = def.underway;
     mark('list', 'main');
-    void host.post(request.path, request.body).then(({ status, body }) => finish(def, subject, status, body, undo));
+    return host.post(request.path, request.body).then(({ status, body }) => finish(def, subject, status, body, undo));
+  }
+
+  /**
+   * One dialog for several runs: it lists what the server says each does, and its confirm cleans the runs that can, one
+   * after the other, each sent once the one before is answered. A selection with none that can opens no dialog.
+   */
+  function actSeveral(id: string, runs: readonly SeveralRun[]) {
+    const def = actionOf(id, registry);
+    if (def?.several === undefined || runsOut > 0) return;
+    const index = deps.source().index;
+    const goes = runs.filter(({ subject, offers }) => {
+      const available = def.available(subject, { run: offers, index });
+      return available.offered && available.enabled;
+    });
+    const source: OfferSource = { index };
+    if (goes.length === 0) {
+      const lines = def.several.dialog(runs, source).lines.map((line) => line.replace(/^skips /, ''));
+      effects.toast('bad', severalHead(def, runs.length), lines.join('; '));
+      mark('list', 'main');
+      return;
+    }
+    const view = def.several.dialog(runs, source);
+    const requests = goes.flatMap(({ subject, offers }) => {
+      const request = def.request?.(subject, {}, { run: offers, index });
+      return request === undefined || 'invalid' in request ? [] : [{ subject, request }];
+    });
+    dialog = {
+      subject: { kind: 'none' },
+      submit: () => () => {
+        // The first is sent now, each next one once the one before is answered.
+        const sendFrom = (at: number) => {
+          const next = requests[at];
+          if (next !== undefined && !deps.stopped())
+            void send(def, next.subject, next.request, undefined).then(() => sendFrom(at + 1));
+        };
+        sendFrom(0);
+      },
+    };
+    ui.dialog = view;
+    host.openDialog(renderDialog(view).value);
+    mark('list', 'main');
   }
 
   function act(id: string, data: Readonly<Record<string, string>>) {
@@ -301,6 +352,7 @@ export function createActor(deps: ActorDeps): Actor {
 
   return {
     act,
+    actSeveral,
     dialogFor: () => dialog?.subject,
     confirm() {
       // The dialog is cleared first, so the click a browser makes of Enter on its focused button finds nothing to do.

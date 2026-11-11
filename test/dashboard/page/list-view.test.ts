@@ -325,3 +325,13 @@ test("a selected row is drawn picked and History's head counts the selection wit
   expect(one).not.toContain('data-row="run:beta/b-done" aria-selected');
   expect(draw('active', { listSelected: ['run:alpha/a-run'] })).not.toContain('lh-sel');
 });
+
+test("the head's clean button is replaced by checking… while the selection's offers are read", () => {
+  const picked = { listSelected: ['run:alpha/a-fail'] };
+  expect(draw('history', picked)).toContain(
+    '<span class="lh-sel">1 selected</span><button class="btn" data-action="clean-selected">clean</button><button class="btn" data-action="clear-selection">clear</button>',
+  );
+  const busy = draw('history', { ...picked, underway: { selection: 'checking 1 run…' } });
+  expect(busy).toContain('<span class="busy">checking 1 run…</span>');
+  expect(busy).not.toContain('data-action="clean-selected"');
+});
