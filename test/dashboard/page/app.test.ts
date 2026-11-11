@@ -3899,7 +3899,7 @@ test('typing filters the rows within one flush and lists go-to rows, and the fie
   expect(before.length).toBeGreaterThan(1);
   host.type('menu-query', FAKE_2_ID.slice(0, 8));
   host.advance(100);
-  expect(cmdk()).toContain('<div class="cmdk-grp">go to</div>');
+  expect(cmdk()).toContain('<div class="cmdk-grp" id="cmdk-grp-goto" role="presentation">go to</div>');
   expect(menuLeads()).toContain(FAKE_2_ID.replace(/-[^-]*$/, ''));
   expect(cmdk()).not.toContain('cmdk-id');
 });
@@ -4941,7 +4941,7 @@ describe('audit 2: overlays behave (ADW-542)', () => {
       host.advance(100);
     }
     expect(host.revealedOpen.filter((region) => region === 'menu')).toHaveLength(11);
-    expect(cmdk()).toContain('<div class="cmdk-rows" data-scroll="menu-rows">');
+    expect(cmdk()).toContain('<div class="cmdk-rows" id="cmdk-rows" data-scroll="menu-rows" role="listbox"');
   });
 
   test('N20: Tab stays in the shortcut sheet, and the bare a opens no view', () => {
