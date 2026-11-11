@@ -1878,6 +1878,26 @@ describe('the list by keyboard (ADW-522)', () => {
     expect(host.regions.list).not.toContain('checking');
   });
 
+  test('narrowing to a repository drops a workflow filter it has no finished run of, and keeps one it has (review R6)', () => {
+    const p = bootHistory();
+    host.type('list-workflow', 'review');
+    host.advance(100);
+    expect(p.ui.historyWorkflow).toBe('review');
+    expect(host.regions.list).toContain('<span class="c">1 of 3</span>');
+    host.click({ action: 'filter-repo', repo: 'alpha' });
+    host.advance(100);
+    expect(p.ui.historyWorkflow).toBeUndefined();
+    expect(host.regions.list).not.toContain('nothing matches');
+    expect(host.regions.list).toContain('<span class="lh-t">History</span><span class="c">2</span>');
+    expect(host.regions.list).toContain('<option value="" selected>any workflow</option>');
+    host.type('list-workflow', 'ticket-to-pr');
+    host.click({ action: 'filter-repo', repo: 'alpha' });
+    host.click({ action: 'filter-repo', repo: 'alpha' });
+    host.advance(100);
+    expect(p.ui.historyWorkflow).toBe('ticket-to-pr');
+    expect(host.regions.list).toContain('<option value="ticket-to-pr" selected>ticket-to-pr</option>');
+  });
+
   test('a read of the offers is dropped when x or a filter changes the shown selection meanwhile, and the marks stay (review R4)', async () => {
     const p = bootHistory();
     const cleanWhile = async (change: () => void) => {
