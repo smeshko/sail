@@ -166,8 +166,7 @@ function leaveRun(store: Store) {
   delete ui.runId;
   delete ui.key;
   delete ui.runMenu;
-  delete ui.armed;
-  delete ui.runNotice;
+  store.actor.forget('run');
   ui.timeline = false;
   store.offers = undefined;
   store.mark('list', 'main', 'inspector', 'status');
@@ -188,12 +187,7 @@ export function selectRun(store: Store, repo: string, runId: string) {
   store.run = { repo, runId, model: emptyRun(), ended: false };
   store.offers = undefined;
   delete ui.runMenu;
-  delete ui.armed;
-  delete ui.runNotice;
-  delete ui.raise;
-  delete ui.restartStage;
-  delete ui.stopNow;
-  store.fieldsOwn = false;
+  store.actor.forget('run');
   store.fresh.add('list');
   openRunSocket(store, store.run);
   readOffers(store);
@@ -211,11 +205,9 @@ export function onQueueMessage(store: Store, id: string, open: OpenQueue, text: 
   if (message?.kind !== 'queue-event') return;
   const event = message.event as QueueEvent;
   const recent = [...open.stream.recent, event].slice(-RECENT_EVENTS);
-  const watch =
-    event.type === 'watch:added' ? 'watched' : event.type === 'watch:removed' ? 'not watched' : open.stream.watch;
   const polls =
     event.type === 'queue:polled' ? (event as Extract<QueueEvent, { type: 'queue:polled' }>).kind : open.stream.polls;
-  open.stream = { recent, watch, ...(polls === undefined ? {} : { polls }) };
+  open.stream = { recent, ...(polls === undefined ? {} : { polls }) };
   if (ui.queue === id) store.mark('main');
 }
 
@@ -230,7 +222,7 @@ export function connectQueue(store: Store, id: string, open: OpenQueue) {
       () => open.stream.error !== undefined,
       () => store.queues.get(id) === open && open.connection === connection,
       () => {
-        open.stream = { recent: [], watch: 'unknown' };
+        open.stream = { recent: [] };
         connectQueue(store, id, open);
         if (ui.queue === id) store.mark('main');
       },
@@ -240,7 +232,7 @@ export function connectQueue(store: Store, id: string, open: OpenQueue) {
 }
 
 export function openQueueSocket(store: Store, id: string) {
-  const open: OpenQueue = { stream: { recent: [], watch: 'unknown' } };
+  const open: OpenQueue = { stream: { recent: [] } };
   store.queues.set(id, open);
   connectQueue(store, id, open);
 }
@@ -282,7 +274,7 @@ export function onIndex(store: Store, text: string, onStart: (asked: Record<stri
   }
   if (store.run !== undefined) followAgain(store, store.run, true);
   if (store.run !== undefined && offerSignature(store, store.run) !== store.offersFor) {
-    delete ui.armed;
+    store.actor.disarm();
     readOffers(store);
   }
   if (ui.queue !== undefined && openQueue(store) === undefined) delete ui.queue;
@@ -308,7 +300,7 @@ export function openIndex(store: Store, onStart: (asked: Record<string, string>)
 export function reopenQueue(store: Store, id: string): void {
   const failed = store.queues.get(id);
   if (failed?.stream.error !== undefined) {
-    failed.stream = { recent: [], watch: 'unknown' };
+    failed.stream = { recent: [] };
     connectQueue(store, id, failed);
   }
 }

@@ -1,7 +1,10 @@
 // What a person has chosen on the page, which every view reads: the open run, card and tab, whether the card's timeline
 // is open, which of its tool calls and which kinds of its entries it hides, the queue open in its place with its folded
 // sections, the list's view, filter, cursor and folded groups, whether needs attention is open, the theme, the offset their
-// clock is at, and the file open in the drawer. It holds nothing about the runs themselves.
+// clock is at, and the file open in the drawer. `act` is the one state of carrying an action out: the pending action on
+// its subject, the last result and the parameters typed. It holds nothing about the runs themselves.
+
+import type { Subject } from './action-registry';
 import type { ViewName } from './list-model';
 
 export const TABS = ['overview', 'files', 'permissions', 'log'] as const;
@@ -13,6 +16,28 @@ export type TimelineFilter = (typeof FILTERS)[number];
 
 export const THEMES = ['dark', 'light', 'system'] as const;
 export type Theme = (typeof THEMES)[number];
+
+/** Where an action's answer is shown: the run's menu, the queue's header, on a repository's row, or the list's head. */
+export type ActPlace = 'run' | 'queue' | 'repo' | 'list';
+
+/** An action's answer as shown: for what, and where. */
+export interface ShownResult {
+  id: string;
+  subject: Subject;
+  text: string;
+  place: ActPlace;
+}
+
+/**
+ * Carrying an action out, for every action alike: the one pending, which a first click of a confirmed action arms
+ * (`sent: false`) and a second sends (`sent: true`, until its answer), the last result of each place, for what, so one
+ * place's answer leaves another's, and what was typed for each action's parameters, kept across a draw.
+ */
+export interface ActState {
+  pending?: { id: string; subject: Subject; values: Record<string, string>; sent: boolean };
+  results: Partial<Record<ActPlace, ShownResult>>;
+  drafts: Record<string, Record<string, string>>;
+}
 
 export interface UiState {
   repo?: string;
@@ -46,32 +71,10 @@ export interface UiState {
   folded: string[];
   /** Whether the queue view shows its recent events. */
   queueEvents: boolean;
-  /** The answer to the last queue change that wasn't a plain success, shown in the queue view until the next. */
-  queueNotice?: string;
   /** The item whose ⋯ menu is open, by dedup key. */
   itemMenu?: string;
-  /** The item whose drop a first click has armed, by dedup key, which a second click drops. */
-  armedDrop?: string;
-  /** The unwatch a first click has armed, as `<repo>` for every workflow or `<repo>/<workflow>`, which a second click makes. */
-  armedWatch?: string;
-  /** The answer to the last change of a repository's watch set, shown on its row until the next. */
-  watchNotice?: { repo: string; text: string };
-  /** What was typed in the queue view's add field, and whether Force is ticked, kept across a draw. */
-  addTicket?: string | undefined;
-  addForce?: boolean;
   /** The open run whose ⋯ menu is open in the list, by run id. */
   runMenu?: string;
-  /** The run action a first click has armed, which a second click makes. */
-  armed?: 'resume' | 'restart' | 'stop' | 'clean';
-  /** Why the last run action was refused, or what it did or that it is under way, shown beside the buttons. */
-  runNotice?: string;
-  /** Whether Stop now is ticked, kept across a draw. */
-  stopNow?: boolean;
-  /** What the last Clean removed, shown in the list's head until a run is selected. */
-  indexNotice?: string;
-  /** What was typed in the raise field and chosen in the stage list, kept across a draw. */
-  raise?: string | undefined;
-  restartStage?: string | undefined;
   theme: Theme;
   inspector: boolean;
   /** The card under the keyboard's cursor, by its place in the run view. */
@@ -80,6 +83,8 @@ export interface UiState {
   follow: boolean;
   /** The clock's offset east of UTC, in minutes: times are shown at it. */
   tz: number;
+  /** The action being carried out, the last result of each place and the parameters typed. */
+  act: ActState;
 }
 
 export function initialUi(tz: number): UiState {
@@ -99,6 +104,7 @@ export function initialUi(tz: number): UiState {
     cursor: 0,
     follow: false,
     tz,
+    act: { results: {}, drafts: {} },
   };
 }
 

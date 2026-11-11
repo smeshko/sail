@@ -2,9 +2,11 @@
 // runs newest first and its queue's waiting count, and every watched workflow's queue. It reads only the index the server streams, which already carries each run's
 // summary and each repository's queues, so nothing here opens a run. Nothing here names a stage, a workflow or a
 // repository: they all come from the index.
-import type { QueueEvent } from '../../events/types';
 import type { QueueItem, QueueItemState } from '../../watch/queue-store';
 import type { IndexRepo, RunItem } from '../files';
+import type { QueueOffers, RepoOffers } from '../offers';
+import type { QueueWatch, WatchState } from '../watch-state';
+import type { OfferSource } from './action-registry';
 
 /** One run as the list shows it. */
 export interface ListRun {
@@ -23,13 +25,16 @@ export interface ListRun {
   problem?: string;
 }
 
-/** One workflow of a repository as the list shows it: its runs newest first, its queue when it has one, and the change of the watch set it offers. */
+/** One workflow of a repository as the list shows it: its runs newest first and its queue when it has one. */
 export interface ListWorkflow {
   name: string;
   runs: ListRun[];
-  queue?: { waiting: number; lastPolledAt?: string };
-  /** `unwatch` while the live watcher watches it, `watch` when it has a queue and is not watched, else none. */
-  toggle?: 'watch' | 'unwatch';
+  queue?: { waiting?: number; lastPolledAt?: string; problem?: string };
+  /**
+   * Its watch state from the live watcher, with why it isn't watched: its queue view's, else `watched` while it is in the
+   * watch set, else none for a workflow with runs alone. Its Watch or Unwatch comes from the repository's offers.
+   */
+  watch?: { state: WatchState; why?: string };
 }
 
 /** One repository as the list shows it: `live` while any of its runs runs, and its runs by workflow. */
@@ -42,6 +47,8 @@ export interface ListRepo {
   workflows: ListWorkflow[];
   /** The workflows the repository's live watcher watches, or absent while none runs in this clone. */
   watching?: string[];
+  /** What the repository offers: its watch set, and each workflow's watch or unwatch. */
+  offers?: RepoOffers;
 }
 
 /** The workflow a run ran, without its version: `name@3` is `name`. A run that names none is `unknown`. */
@@ -116,12 +123,18 @@ function workflows(repo: IndexRepo, runs: readonly ListRun[]): ListWorkflow[] {
     const workflow: ListWorkflow = { name, runs: runs.filter((run) => workflowOf(run) === name) };
     const view = repo.queues.find((each) => each.workflow === name);
     if (view !== undefined) {
+      // A queue that can't be read has nothing to count: its problem is listed in place of its waiting count.
       const waiting = (view.queue?.items ?? []).filter((item) => item.state === 'queued').length;
       const polled = view.queue?.polling.lastPolledAt;
-      workflow.queue = polled === undefined ? { waiting } : { waiting, lastPolledAt: polled };
+      workflow.queue =
+        view.problem !== undefined
+          ? { problem: view.problem }
+          : polled === undefined
+            ? { waiting }
+            : { waiting, lastPolledAt: polled };
     }
-    if (watched.includes(name)) workflow.toggle = 'unwatch';
-    else if (view !== undefined) workflow.toggle = 'watch';
+    if (view !== undefined) workflow.watch = view.watch.state === 'watched' ? { state: 'watched' } : view.watch;
+    else if (watched.includes(name)) workflow.watch = { state: 'watched' };
     return workflow;
   });
 }
@@ -139,6 +152,7 @@ export function listRepos(index: readonly IndexRepo[], now: number): ListRepo[] 
     };
     if (repo.problem !== undefined) entry.problem = repo.problem;
     if (repo.watching !== undefined) entry.watching = repo.watching.workflows;
+    if (repo.offers !== undefined) entry.offers = repo.offers;
     return entry;
   });
 }
@@ -146,8 +160,8 @@ export function listRepos(index: readonly IndexRepo[], now: number): ListRepo[] 
 /** The states in the order the queue view lists them: what is running now comes first. */
 export const QUEUE_STATES: readonly QueueItemState[] = ['dispatched', 'queued', 'failed', 'parked', 'done'];
 
-/** A queue item, whether its run is one the list shows so the queue view can open it, and whether that run has ended. */
-export type PanelItem = QueueItem & { runListed: boolean; runEnded: boolean };
+/** A queue item, and whether its run is one the list shows so the queue view can open it. */
+export type PanelItem = QueueItem & { runListed: boolean };
 
 /** One watched workflow's queue in one repository. */
 export interface QueuePanel {
@@ -157,7 +171,16 @@ export interface QueuePanel {
   problem?: string;
   counts: Record<QueueItemState, number>;
   items: PanelItem[];
+  /** The workflow's watch state from the live watcher, and why it isn't watched. */
+  watch: QueueWatch;
+  /** What the queue offers: its own actions and each item's. */
+  offers?: QueueOffers;
 }
+
+/** The offers of `panel`, as a source the registry reads them from. */
+export const panelSource = (panel: QueuePanel): OfferSource => ({
+  index: [{ name: panel.repo, queues: [{ workflow: panel.workflow, offers: panel.offers }] }],
+});
 
 export type QueuePanelFile = Omit<NonNullable<IndexRepo['queues'][number]['queue']>, 'items'>;
 
@@ -166,39 +189,27 @@ export function queuePanels(index: readonly IndexRepo[]): QueuePanel[] {
   return byName(index).flatMap((repo) =>
     repo.queues.map((view) => {
       const listed = new Set(repo.runs.map((run) => run.runId));
-      const live = new Set(
-        repo.runs.filter((run) => ['running', 'suspended'].includes(statusOf(run))).map((run) => run.runId),
-      );
       const items = QUEUE_STATES.flatMap((state) =>
         (view.queue?.items ?? [])
           .filter((item) => item.state === state)
           .map((item) => ({
             ...item,
             runListed: item.runId !== undefined && listed.has(item.runId),
-            runEnded: item.runId === undefined || !live.has(item.runId),
           })),
       );
       const counts = Object.fromEntries(
         QUEUE_STATES.map((state) => [state, items.filter((item) => item.state === state).length]),
       ) as Record<QueueItemState, number>;
-      const panel: QueuePanel = { repo: repo.name, workflow: view.workflow, counts, items };
+      const panel: QueuePanel = { repo: repo.name, workflow: view.workflow, counts, items, watch: view.watch };
       if (view.queue !== undefined) {
         const { items: _, ...file } = view.queue;
         panel.queue = file;
       }
       if (view.problem !== undefined) panel.problem = view.problem;
+      if (view.offers !== undefined) panel.offers = view.offers;
       return panel;
     }),
   );
-}
-
-export type WatchState = 'watched' | 'not watched' | 'unknown';
-
-/** Whether the workflow is in the watch set, from the last `watch:added` or `watch:removed` of its queue's events. */
-export function watchState(events: readonly Pick<QueueEvent, 'type'>[]): WatchState {
-  const last = events.findLast((event) => event.type === 'watch:added' || event.type === 'watch:removed');
-  if (last === undefined) return 'unknown';
-  return last.type === 'watch:added' ? 'watched' : 'not watched';
 }
 
 /** What the workflow polls, from the last `queue:polled` event of its queue's events. */

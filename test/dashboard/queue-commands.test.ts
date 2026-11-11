@@ -4,6 +4,7 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { index } from '../../src/dashboard/files';
 import { type Dashboard, startDashboard } from '../../src/dashboard/server';
 import { writeStatus } from '../../src/engine/run-dir';
 import type { Command } from '../../src/watch/inbox';
@@ -270,6 +271,17 @@ test('an add to a workflow that polls pull requests is refused with the sail que
   expect(w.inbox()).toEqual([]);
 });
 
+test("a poll with no live watcher is 409 with the why the queue's offer carries", async () => {
+  world({ watcher: false });
+  const server = start();
+  const queues = (await (
+    await fetch(`http://127.0.0.1:${server.port}/api/repos/beta/queues`, { headers: HEADER })
+  ).json()) as { offers: { poll: { enabled: boolean; why: string } } }[];
+  const response = await post(server, path('poll'), {});
+  expect(queues[0]?.offers.poll.enabled).toBe(false);
+  expect(await answer(response)).toEqual([409, { error: queues[0]?.offers.poll.why }]);
+});
+
 test.each([
   ['poll', {}],
   ['add', { ticketKey: 'FAKE-1' }],
@@ -380,4 +392,20 @@ test('a queue change for an unregistered repository or a workflow with no queue 
   const server = start();
   expect((await post(server, '/api/repos/gamma/queues/ticket-to-pr/poll', {})).status).toBe(404);
   expect((await post(server, path('poll', 'other'), {})).status).toBe(404);
+});
+
+test('a queue change refused for want of a watcher says exactly the reason the index carries for that queue', async () => {
+  const w = world({ watcher: false });
+  const server = start();
+  const why = index(m.registryDir)
+    .find((repo) => repo.name === 'beta')
+    ?.queues.find((queue) => queue.workflow === WORKFLOW)?.watch;
+  expect(why).toEqual({
+    state: 'watcher not running',
+    why: expect.stringContaining("no watcher is running for 'beta'"),
+  });
+  const [status, body] = await answer(await post(server, path('poll'), {}));
+  expect(status).toBe(409);
+  expect(body).toEqual({ error: why && 'why' in why ? why.why : '' });
+  expect(w.inbox()).toEqual([]);
 });

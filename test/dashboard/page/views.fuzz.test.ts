@@ -8,7 +8,7 @@ import { dirname, join } from 'node:path';
 import { index } from '../../../src/dashboard/files';
 import { attention } from '../../../src/dashboard/page/attention';
 import { renderAttention } from '../../../src/dashboard/page/attention-view';
-import { listRepos, queuePanels, watchState } from '../../../src/dashboard/page/index-model';
+import { listRepos, queuePanels } from '../../../src/dashboard/page/index-model';
 import { renderInspector } from '../../../src/dashboard/page/inspector-view';
 import { viewCounts } from '../../../src/dashboard/page/list-model';
 import { renderList } from '../../../src/dashboard/page/list-view';
@@ -139,11 +139,50 @@ afterAll(() => m.remove());
 const NOW = Date.parse('2026-10-01T12:00:00.000Z');
 const ui = initialUi(0);
 
+/**
+ * `poisoned` with each queue item's dedup key made distinct again, and its offers keyed by it: the server keys an item's
+ * offers by its dedup key, and a queue's keys are unique, which poisoning every key to one payload would break.
+ */
+function rekeyed<T extends { queues: { queue?: { items: { dedupKey: string }[] }; offers?: { items: object } }[] }>(
+  poisoned: T[],
+  original: T[],
+): T[] {
+  return poisoned.map((repo, r) => ({
+    ...repo,
+    queues: repo.queues.map((view, q) => {
+      const before = original[r]?.queues[q];
+      const offered = before?.offers?.items as Record<string, unknown> | undefined;
+      if (view.queue === undefined || view.offers === undefined || before === undefined || offered === undefined) {
+        return view;
+      }
+      const keys = view.queue.items.map((item, i) => `${item.dedupKey}-${i}`);
+      const was = before.queue?.items.map((item) => item.dedupKey) ?? [];
+      return {
+        ...view,
+        queue: { ...view.queue, items: view.queue.items.map((item, i) => ({ ...item, dedupKey: keys[i] ?? '' })) },
+        offers: {
+          ...view.offers,
+          items: Object.fromEntries(keys.map((key, i) => [key, offered[was[i] ?? '']])),
+        },
+      };
+    }),
+  }));
+}
+
 test('the list, the sidebar, needs attention and the queue view keep their structure under a hostile payload in every untrusted field', async () => {
-  const repos = index(m.registryDir).map((repo) => (repo.name === 'beta' ? { ...repo, problem: 'a problem' } : repo));
+  const states = [
+    { state: 'watched' },
+    { state: 'not watched', why: 'it is not in the set' },
+    { state: 'watcher not running', why: 'no watcher' },
+  ] as const;
+  const repos = index(m.registryDir).map((repo, at) => ({
+    ...repo,
+    ...(repo.name === 'beta' ? { problem: 'a problem' } : {}),
+    queues: repo.queues.map((queue) => ({ ...queue, watch: states[at % states.length] ?? states[0] })),
+  }));
   const events = readEvents(queueDirOf(m)) as unknown as QueueEvent[];
   const views = (input: typeof repos, queue: QueueEvent[]) => {
-    const stream = { recent: queue, watch: watchState(queue) };
+    const stream = { recent: queue };
     return [
       renderList('active', listRepos(input, NOW), ui, NOW).value,
       renderList('queues', listRepos(input, NOW), ui, NOW).value,
@@ -155,7 +194,7 @@ test('the list, the sidebar, needs attention and the queue view keep their struc
   const benign = views(repos, events);
   for (const payload of PAYLOADS) {
     const hostile = views(
-      poison(repos, INDEX_FIELDS, payload),
+      rekeyed(poison(repos, INDEX_FIELDS, payload), repos),
       events.map((event) => poison(event, new Set(['title', 'reason', 'message', 'dedupKey', 'label']), payload)),
     );
     for (const [i, view] of benign.entries())

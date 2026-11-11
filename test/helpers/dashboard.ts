@@ -283,3 +283,27 @@ export function fakeClonePorts(
     return { adapters, codeHost: async () => codeHost };
   };
 }
+
+/**
+ * `m`'s beta entry with a watcher of `pid` in `sailDir`, and a queue stream for ticket-to-pr that adds it, then removes it
+ * when `removed`.
+ */
+export function betaWatcher(m: Machine, watcher: { pid: number; sailDir: string }, removed = false): void {
+  const event = (seq: number, type: string) =>
+    `${JSON.stringify({ seq, ts: '2026-10-14T09:00:00.000Z', type, workflow: 'ticket-to-pr', pid: watcher.pid, label: 'sail', everyMs: 300000, maxConcurrentRuns: 2 })}\n`;
+  const dir = join(m.beta.clone, '.sail-runs', 'queue', 'ticket-to-pr');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'events.ndjson'), event(1, 'watch:added') + (removed ? event(2, 'watch:removed') : ''));
+  writeFileSync(
+    join(m.registryDir, 'beta.json'),
+    `${JSON.stringify({
+      ...entryOf(m.beta),
+      watcher: {
+        ...watcher,
+        startedAt: '2026-10-14T09:00:00.000Z',
+        ticketSource: 'fake',
+        labels: ['sail'],
+      },
+    })}\n`,
+  );
+}

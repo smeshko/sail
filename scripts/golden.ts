@@ -30,7 +30,7 @@ import { findRepo, index } from '../src/dashboard/files';
 import { attention } from '../src/dashboard/page/attention';
 import { renderAttention } from '../src/dashboard/page/attention-view';
 import type { SafeHtml } from '../src/dashboard/page/html';
-import { listRepos, pollKind, queuePanels, watchState } from '../src/dashboard/page/index-model';
+import { listRepos, pollKind, queuePanels } from '../src/dashboard/page/index-model';
 import { renderInspector } from '../src/dashboard/page/inspector-view';
 import { viewCounts } from '../src/dashboard/page/list-model';
 import { renderList } from '../src/dashboard/page/list-view';
@@ -292,13 +292,50 @@ export async function renderDashboardViews(outDir: string): Promise<string[]> {
     views['list-active.html'] = renderList('active', listed, selected, VIEWS_NOW);
     views['list-history.html'] = renderList('history', listed, selected, VIEWS_NOW);
     views['list-queues.html'] = renderList('queues', listed, selected, VIEWS_NOW);
+    const unreadable = repos.map((repo) =>
+      repo.name === 'beta'
+        ? {
+            ...repo,
+            queues: [
+              ...repo.queues,
+              {
+                workflow: 'nightly',
+                problem: 'queue.json is not a queue: /version Invalid input',
+                watch: {
+                  state: 'watcher not running' as const,
+                  why: "no watcher is running for 'beta': sail watch nightly first",
+                },
+              },
+            ],
+            // The server offers a watch on a workflow it has a queue view for, unreadable or not.
+            ...(repo.offers === undefined
+              ? {}
+              : {
+                  offers: {
+                    ...repo.offers,
+                    workflows: { ...repo.offers.workflows, nightly: { watch: { enabled: true } } },
+                  },
+                }),
+          }
+        : repo,
+    );
+    views['list-queues-problem.html'] = renderList('queues', listRepos(unreadable, VIEWS_NOW), selected, VIEWS_NOW);
     views['attention.html'] = renderAttention(attention(repos), true);
     const queueEvents = readEvents(queueDirOf(machine)) as unknown as QueueEvent[];
-    const stream = { recent: queueEvents.slice(-20), watch: watchState(queueEvents), polls: pollKind(queueEvents) };
+    const stream = { recent: queueEvents.slice(-20), polls: pollKind(queueEvents) };
     const queue = queueId('beta', QUEUE_WORKFLOW);
     const panel = queuePanels(repos).find((each) => queueId(each.repo, each.workflow) === queue);
     if (panel === undefined) throw new Error(`beta has no ${QUEUE_WORKFLOW} queue`);
-    views['queue.html'] = renderQueue(panel, stream, { ...selected, queue }, VIEWS_NOW);
+    // The queue view's header carries its workflow's Watch or Unwatch, from the repository's offers.
+    const betaOffers = repos.find((each) => each.name === 'beta')?.offers;
+    views['queue.html'] = renderQueue(panel, stream, { ...selected, queue }, VIEWS_NOW, betaOffers);
+    views['queue-watched.html'] = renderQueue(
+      { ...panel, watch: { state: 'watched' } },
+      stream,
+      { ...selected, queue },
+      VIEWS_NOW,
+      betaOffers,
+    );
     for (const [name, [repo, dir]] of Object.entries(runDirs)) {
       const runId = runIdOf[name as keyof typeof runIdOf];
       const model = foldRun(readEvents(dir));

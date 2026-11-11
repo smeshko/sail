@@ -10,7 +10,7 @@ import { listRepos, statusOf } from './index-model';
 import { renderInspector } from './inspector-view';
 import { viewCounts } from './list-model';
 import { renderList } from './list-view';
-import { queueId, renderQueue } from './queue-view';
+import { hasItemActions, offeredDrop, renderQueue } from './queue-view';
 import { renderRun, renderStatus } from './run-view';
 import { renderSidebar } from './sidebar-view';
 import { listed, opened, openQueue, type Store, selected, summaryOf } from './store';
@@ -31,13 +31,7 @@ export function regions(store: Store): Record<Region, () => string> {
     list: () => {
       if (store.index === undefined) return html`<div class="qempty">connecting…</div>`.value;
       // A raise typed and a stage chosen in the open run's menu survive the draw, but not a switch of run.
-      if (store.fieldsOwn) {
-        ui.raise = host.value('raise') ?? ui.raise;
-        ui.restartStage = host.value('stage') ?? ui.restartStage;
-        const now = host.value('now');
-        if (now !== undefined) ui.stopNow = now !== '';
-      }
-      store.fieldsOwn = true;
+      store.actor.keep('run');
       return renderList(ui.view, listRepos(store.index, host.now()), ui, host.now(), store.offers).value;
     },
     attention: () => {
@@ -49,21 +43,26 @@ export function regions(store: Store): Record<Region, () => string> {
       const panel = openQueue(store);
       if (panel !== undefined) {
         // What was typed in the add field survives the draw, but not an add that took.
-        if (store.addFieldsOwn) {
-          ui.addTicket = host.value('add-ticket') ?? ui.addTicket;
-          const forced = host.value('add-force');
-          if (forced !== undefined) ui.addForce = forced !== '';
+        store.actor.keep('queue', { kind: 'workflow', repo: panel.repo, workflow: panel.workflow });
+        // An armed drop whose item can't be dropped now (it runs, or is gone) asks again once it can, and its menu shuts.
+        // So do both while the workflow isn't watched: the controls are disabled then.
+        const unwatched = panel.watch.state !== 'watched';
+        const armed = ui.act.pending;
+        if (armed?.id === 'drop-item' && armed.subject.kind === 'item') {
+          const { repo, workflow, item } = armed.subject;
+          const target = panel.items.find((each) => each.dedupKey === item);
+          if (
+            repo === panel.repo &&
+            workflow === panel.workflow &&
+            (unwatched || target === undefined || !offeredDrop(panel, target))
+          ) {
+            store.actor.disarm();
+          }
         }
-        store.addFieldsOwn = true;
-        // An armed drop whose item is running or gone asks again once the item can be dropped, and its menu shuts.
-        const armedItem = panel.items.find((item) => item.dedupKey === ui.armedDrop);
-        if (armedItem === undefined || armedItem.state === 'dispatched') delete ui.armedDrop;
         const menuItem = panel.items.find((item) => item.dedupKey === ui.itemMenu);
-        if (menuItem === undefined || menuItem.state === 'dispatched') delete ui.itemMenu;
-        const toggle = listRepos(store.index ?? [], host.now())
-          .find((repo) => repo.name === panel.repo)
-          ?.workflows.find((workflow) => queueId(panel.repo, workflow.name) === ui.queue)?.toggle;
-        return renderQueue(panel, store.queues.get(ui.queue ?? '')?.stream, ui, host.now(), toggle).value;
+        if (unwatched || menuItem === undefined || !hasItemActions(panel, menuItem)) delete ui.itemMenu;
+        const repoOffers = store.index?.find((repo) => repo.name === panel.repo)?.offers;
+        return renderQueue(panel, store.queues.get(ui.queue ?? '')?.stream, ui, host.now(), repoOffers).value;
       }
       if (store.run === undefined) return html`<div class="qempty">no run selected</div>`.value;
       const error = store.run.error === undefined ? '' : html`<div class="code bad">${store.run.error}</div>`;

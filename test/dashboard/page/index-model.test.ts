@@ -1,17 +1,17 @@
 // The list's repositories and runs and the queue panel's model, from the index alone (D8, D9). The input is `index()`
 // of the seeded fixtures: the very object the index stream sends, built server-side in the test.
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { index } from '../../../src/dashboard/files';
-import { listRepos, pollKind, queuePanels, watchState, workflowOf } from '../../../src/dashboard/page/index-model';
+import { listRepos, pollKind, queuePanels, workflowOf } from '../../../src/dashboard/page/index-model';
+import type { QueueWatch } from '../../../src/dashboard/watch-state';
 import {
   FAKE_2_ID,
   FAKE_3_ID,
   GOLDEN_RUN_ID,
   type Machine,
   QUEUE_WORKFLOW,
-  queueDirOf,
   RUNNING_ID,
   runningCopy,
   seedFixtures,
@@ -115,31 +115,19 @@ test("queuePanels gives beta's queue with its counts and its items by state, and
     ['ticket:FAKE-6', 'parked', false],
     ['ticket:FAKE-4', 'done', false],
   ]);
-  expect(panel?.items.map((item) => [item.dedupKey, item.runEnded])).toEqual([
-    ['ticket:FAKE-3', false],
-    ['ticket:FAKE-5', true],
-    ['ticket:FAKE-6', true],
-    ['ticket:FAKE-4', true],
-  ]);
   rmSync(join(m.beta.clone, '.sail-runs', 'queue'), { recursive: true });
   expect(queuePanels(index(m.registryDir))).toEqual([]);
 });
 
-test('an item has runEnded when it has no run, its run is not listed, or its run is listed and neither running nor suspended', () => {
-  const repos = index(m.registryDir);
-  const beta = repos.find((repo) => repo.name === 'beta');
-  const dispatched = beta?.queues[0]?.queue?.items.find((item) => item.state === 'dispatched');
-  const run = beta?.runs.find((each) => each.runId === dispatched?.runId);
-  if (beta === undefined || run === undefined) throw new Error('beta has no dispatched run');
-  const ended = (status: string) => {
-    const changed = { ...run, status: { ...(run.status as object), status } } as typeof run;
-    const panel = queuePanels([{ ...beta, runs: [changed] }])[0];
-    return panel?.items.find((item) => item.state === 'dispatched')?.runEnded;
-  };
-  expect(['running', 'suspended', 'completed', 'failed'].map(ended)).toEqual([false, false, true, true]);
-  expect(queuePanels([{ ...beta, runs: [] }])[0]?.items.find((item) => item.state === 'dispatched')?.runEnded).toBe(
-    true,
+test("a panel carries its queue's offers, each item's offers keyed by its dedup key", () => {
+  const beta = index(m.registryDir).find((repo) => repo.name === 'beta');
+  const panel = queuePanels(index(m.registryDir))[0];
+  expect(panel?.offers).toEqual(beta?.queues[0]?.offers);
+  expect(Object.keys(panel?.offers?.items ?? {}).sort()).toEqual(
+    (panel?.items ?? []).map((item) => item.dedupKey).sort(),
   );
+  const bare = queuePanels([{ ...beta, queues: [{ workflow: 'ticket-to-pr' }] } as typeof beta & object])[0];
+  expect(bare?.offers).toBeUndefined();
 });
 
 test('pollKind is the kind of the last queue:polled event, and undefined with none', () => {
@@ -151,20 +139,6 @@ test('pollKind is the kind of the last queue:polled event, and undefined with no
     pollKind([polled()]),
     pollKind([]),
   ]).toEqual(['ticket', 'pr', undefined, undefined, undefined]);
-});
-
-test('watchState is watched after watch:added, not watched after a later watch:removed, and unknown with no watch event', () => {
-  const events = readFileSync(join(queueDirOf(m), 'events.ndjson'), 'utf8')
-    .trimEnd()
-    .split('\n')
-    .map((line) => JSON.parse(line));
-  const removed = { seq: 10, ts: '2026-09-24T12:00:00.000Z', type: 'watch:removed', workflow: QUEUE_WORKFLOW };
-  expect([
-    watchState(events),
-    watchState([...events, removed]),
-    watchState([...events, removed, { ...removed, seq: 11, type: 'watch:added' }]),
-    watchState(events.filter((event) => !event.type.startsWith('watch:'))),
-  ]).toEqual(['watched', 'not watched', 'watched', 'unknown']);
 });
 
 test('a repository whose .sail/ is gone shows in the list with its problem and no runs', () => {
@@ -218,49 +192,88 @@ test('a run whose header or summary source is a pull request carries its number,
   expect([byId('ticket-1')?.pr, byId('ticket-1')?.ticketKey]).toEqual([undefined, 'FAKE-9']);
 });
 
-/** The list's beta when its index entry carries `watching`. */
-function betaList(watching?: { pid: number; workflows: string[] }) {
+/** The list's beta when its index entry carries `watching`, and its queue views' `watch` as `watch` says. */
+function betaList(watching?: { pid: number; workflows: string[] }, watch?: QueueWatch) {
   const repos = index(m.registryDir).map((repo) =>
-    repo.name === 'beta' && watching !== undefined ? { ...repo, watching } : repo,
+    repo.name === 'beta' && watching !== undefined
+      ? {
+          ...repo,
+          watching,
+          queues: repo.queues.map((queue) => ({ ...queue, ...(watch === undefined ? {} : { watch }) })),
+        }
+      : repo,
   );
   const beta = listRepos(repos, NOW).find((repo) => repo.name === 'beta');
   if (beta === undefined) throw new Error('no beta');
   return beta;
 }
 
-const togglesOf = (repo: ReturnType<typeof betaList>) =>
-  repo.workflows.map((workflow) => [workflow.name, workflow.toggle]);
+const watchesOf = (repo: ReturnType<typeof betaList>) =>
+  repo.workflows.map((workflow) => [workflow.name, workflow.watch?.state]);
 
-test('with no live watcher a workflow with a queue offers watch, one with runs alone offers nothing, and the repository has no watch set', () => {
+const WHY = "no watcher is running for 'beta': sail watch ticket-to-pr first";
+
+test('with no live watcher a workflow with a queue reads watcher not running, and one with runs alone has no state', () => {
   const beta = betaList();
-  expect(togglesOf(beta)).toEqual([
+  expect(watchesOf(beta)).toEqual([
     ['review', undefined],
-    [QUEUE_WORKFLOW, 'watch'],
+    [QUEUE_WORKFLOW, 'watcher not running'],
   ]);
-  expect(beta.watching).toBeUndefined();
+  expect(beta.workflows.find((workflow) => workflow.name === QUEUE_WORKFLOW)?.watch).toEqual({
+    state: 'watcher not running',
+    why: WHY,
+  });
 });
 
-test('a workflow in the live watch set offers unwatch, and a queued one outside it offers watch', () => {
-  const watched = betaList({ pid: 1, workflows: [QUEUE_WORKFLOW] });
-  expect(togglesOf(watched)).toEqual([
+test("a queue view's watch is its workflow's and its panel's: watched, or not watched with its reason", () => {
+  const live = { pid: 1, workflows: [QUEUE_WORKFLOW] };
+  expect(watchesOf(betaList(live, { state: 'watched' }))).toEqual([
     ['review', undefined],
-    [QUEUE_WORKFLOW, 'unwatch'],
+    [QUEUE_WORKFLOW, 'watched'],
   ]);
-  expect(watched.watching).toEqual([QUEUE_WORKFLOW]);
-  const empty = betaList({ pid: 1, workflows: [] });
-  expect(togglesOf(empty)).toEqual([
+  const not = { state: 'not watched' as const, why: 'it does not watch' };
+  const beta = betaList({ pid: 1, workflows: [] }, not);
+  expect(watchesOf(beta)).toEqual([
     ['review', undefined],
-    [QUEUE_WORKFLOW, 'watch'],
+    [QUEUE_WORKFLOW, 'not watched'],
   ]);
-  expect(empty.watching).toEqual([]);
+  expect(beta.workflows.find((workflow) => workflow.name === QUEUE_WORKFLOW)?.watch).toEqual(not);
+  const repos = index(m.registryDir).map((repo) => ({
+    ...repo,
+    queues: repo.queues.map((queue) => ({ ...queue, watch: not })),
+  }));
+  expect(queuePanels(repos).map((panel) => panel.watch)).toEqual([not]);
 });
 
-test('a workflow in the watch set with no queue view is listed too, and offers unwatch', () => {
-  const beta = betaList({ pid: 1, workflows: ['review', 'ghost', QUEUE_WORKFLOW] });
-  expect(togglesOf(beta)).toEqual([
-    ['ghost', 'unwatch'],
-    ['review', 'unwatch'],
-    [QUEUE_WORKFLOW, 'unwatch'],
+test("a repository's list entry carries the offers its index entry has, and a workflow's watch button comes from them alone", () => {
+  const entry = index(m.registryDir).find((repo) => repo.name === 'beta');
+  const beta = betaList();
+  expect(beta.offers).toEqual(entry?.offers);
+  expect(beta.offers?.workflows).toEqual({ [QUEUE_WORKFLOW]: { watch: { enabled: true } } });
+  expect(beta.workflows.map((workflow) => workflow.name)).toEqual(['review', QUEUE_WORKFLOW]);
+  expect(Object.keys(beta.workflows[0] ?? {}).sort()).toEqual(['name', 'runs']);
+  const { offers: _, ...without } = entry as NonNullable<typeof entry>;
+  expect(listRepos([without], NOW)[0]?.offers).toBeUndefined();
+});
+
+test('a workflow in the watch set with no queue view is listed too, with no runs, and reads watched', () => {
+  const beta = betaList({ pid: 1, workflows: ['review', 'ghost', QUEUE_WORKFLOW] }, { state: 'watched' });
+  expect(watchesOf(beta)).toEqual([
+    ['ghost', 'watched'],
+    ['review', 'watched'],
+    [QUEUE_WORKFLOW, 'watched'],
   ]);
   expect(beta.workflows.find((workflow) => workflow.name === 'ghost')?.runs).toEqual([]);
+});
+
+test("a queue whose queue.json can't be read has a problem and no waiting count in the list, and one not written yet has waiting 0", () => {
+  const queues = join(m.beta.clone, '.sail-runs', 'queue');
+  mkdirSync(join(queues, 'broken'));
+  writeFileSync(join(queues, 'broken', 'queue.json'), '{');
+  mkdirSync(join(queues, 'fresh'));
+  const queueOf = (name: string) => betaList().workflows.find((workflow) => workflow.name === name)?.queue;
+  const broken = queueOf('broken');
+  expect(broken?.problem?.startsWith("queue.json can't be read")).toBe(true);
+  expect(broken).not.toHaveProperty('waiting');
+  expect(queueOf('fresh')).toEqual({ waiting: 0 });
 });

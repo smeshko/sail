@@ -858,7 +858,11 @@ test('across a tick and a changed queue, the add field keeps its focus, its type
     fake.setClock(Date.parse(start.ts) + 1000);
     page = boot(browserHost(fake.win));
     const socketOf = (part: string) => fake.sockets.find((socket) => socket.url.includes(part));
-    socketOf('index=')?.onmessage?.({ data: JSON.stringify({ kind: 'index', repos: index(m.registryDir) }) });
+    const repos = index(m.registryDir).map((repo) => ({
+      ...repo,
+      queues: repo.queues.map((view) => ({ ...view, watch: { state: 'watched' as const } })),
+    }));
+    socketOf('index=')?.onmessage?.({ data: JSON.stringify({ kind: 'index', repos }) });
     for (const event of [...readEvents(dir), ...lines.slice(0, lines.indexOf(start) + 1)])
       socketOf('run=')?.onmessage?.({ data: JSON.stringify({ kind: 'event', event }) });
     const queue = socketOf('queue=');
@@ -887,7 +891,7 @@ test('across a tick and a changed queue, the add field keeps its focus, its type
     expect(again).not.toBe(typed);
     expect(fake.focus.active).toBe(again as ElementLike);
     expect([again.value, again.selectionStart, again.selectionEnd]).toEqual(['FAKE-9', 3, 3]);
-    expect(main.innerHTML).toContain('not watched');
+    expect(main.innerHTML).toContain('<span class="pill p-pass">watched</span>');
   } finally {
     page?.stop();
     m.remove();

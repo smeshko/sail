@@ -65,11 +65,11 @@ export const keys: Record<string, (store: Store) => void> = {
     const { ui } = store;
     if (ui.runMenu !== undefined) {
       delete ui.runMenu;
-      delete ui.armed;
+      store.actor.disarm();
       store.mark('list');
     } else if (ui.itemMenu !== undefined) {
       delete ui.itemMenu;
-      delete ui.armedDrop;
+      store.actor.disarm();
       store.mark('main');
     } else if (ui.attention) closeAttention(store);
     else if (ui.file !== undefined) closeFile(store);

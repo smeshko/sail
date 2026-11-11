@@ -1,7 +1,7 @@
 // The list's model: the index's repositories (from `listRepos`) turned into the grouped rows each view draws, and the
 // counts the sidebar shows. Pure, with no markup. The views are Active (live runs, those that wait on a person first),
 // Queues (one row per queue, under its repository) and History (finished runs, failed then done).
-import { type ListRepo, type ListRun, newestFirst, workflowOf } from './index-model';
+import { type ListRepo, type ListRun, type ListWorkflow, newestFirst, workflowOf } from './index-model';
 
 export const VIEWS = ['active', 'queues', 'history'] as const;
 export type ViewName = (typeof VIEWS)[number];
@@ -22,6 +22,10 @@ export interface QueueRow {
   workflow: string;
   waiting: number;
   lastPolledAt?: string;
+  /** Why its queue can't be read, listed in place of its waiting count. */
+  problem?: string;
+  /** Its watch state from the live watcher, with why it isn't watched. */
+  watch?: ListWorkflow['watch'];
 }
 
 export type ListRow = RunRow | QueueRow;
@@ -97,9 +101,11 @@ export function queueGroups(repos: readonly ListRepo[]): ListGroup[] {
         id: `queue:${repo.name}/${workflow.name}`,
         repo: repo.name,
         workflow: workflow.name,
-        waiting: workflow.queue.waiting,
+        waiting: workflow.queue.waiting ?? 0,
       };
       if (workflow.queue.lastPolledAt !== undefined) row.lastPolledAt = workflow.queue.lastPolledAt;
+      if (workflow.queue.problem !== undefined) row.problem = workflow.queue.problem;
+      if (workflow.watch !== undefined) row.watch = workflow.watch;
       return [row];
     }),
   }));

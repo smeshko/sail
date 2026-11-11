@@ -12,24 +12,26 @@ beforeEach(() => {
 });
 afterEach(() => m.remove());
 
-test("FAKE-2's failure and the two errors are buttons in one list whose data opens the run and the key", () => {
+test("one row per run: FAKE-2's failure and FAKE-3's error are buttons in one list whose data opens the run and the key", () => {
   const items = attention(index(m.registryDir));
   const button =
-    '<button class="btn att-btn on" type="button" data-action="toggle-attention" aria-expanded="true" title="needs attention (a)">⚑ needs attention<span class="badge">4</span></button>';
+    '<button class="btn att-btn on" type="button" data-action="toggle-attention" aria-expanded="true" title="needs attention (a)">⚑ needs attention<span class="badge">3</span></button>';
   const markup = renderAttention(items, true).value;
   expect(markup).toStartWith(
-    `${button}<div class="att-scrim" data-action="toggle-attention"></div><div class="att-pane"><div class="pane-h"><span>needs attention</span><span class="c">4</span><button class="btn att-clear" type="button" data-action="clear-attention">all clear</button></div><div class="att-list">`,
+    `${button}<div class="att-scrim" data-action="toggle-attention"></div><div class="att-pane"><div class="pane-h"><span>needs attention</span><span class="c">3</span><button class="btn att-clear" type="button" data-action="clear-attention">all clear</button></div><div class="att-list">`,
   );
   expect(renderAttention(items, false).value).toBe(
     button.replace(' on"', '"').replace('aria-expanded="true"', 'aria-expanded="false"'),
   );
   expect(markup).toContain(
-    `<button class="sig sig-failed" data-action="open" data-repo="alpha" data-run="${FAKE_2_ID}"><b>failed: stage_error</b><span class="w">alpha · ${FAKE_2_ID}</span><span class="p">FAKE-2 Print the version with --version · implement#1 ended in error: harness: the session ended before it submitted a result</span></button>`,
+    `<button class="sig sig-failed" data-action="open" data-repo="alpha" data-run="${FAKE_2_ID}" data-key="implement#1"><b>failed: stage_error</b><span class="w">alpha · ${FAKE_2_ID} · implement#1</span><span class="p">FAKE-2 Print the version with --version · implement#1 ended in error: harness: the session ended before it submitted a result · 1 denial</span></button>`,
   );
   expect(markup).toContain(
     '<div class="sig sig-parked"><b>ticket:FAKE-6 parked after 2 attempts</b><span class="w">beta · ticket-to-pr</span>',
   );
-  expect(markup.match(/data-action="open"/g)?.length).toBe(3);
+  expect(markup.match(/data-action="open"/g)?.length).toBe(2);
+  expect(markup.match(/sig-failed/g)?.length).toBe(1);
+  expect(markup.match(/sig-error/g)?.length).toBe(1);
   expect(markup).not.toContain('sig-denial');
   expect(markup).not.toContain('sig-suspended');
 });
@@ -55,7 +57,7 @@ test('an empty list has no count on the button, and the open pane says nothing n
 test('the open pane with items has an all clear button after its count, and the empty pane has none', () => {
   const items = attention(index(m.registryDir));
   expect(renderAttention(items, true).value).toContain(
-    '<span class="c">4</span><button class="btn att-clear" type="button" data-action="clear-attention">all clear</button></div>',
+    '<span class="c">3</span><button class="btn att-clear" type="button" data-action="clear-attention">all clear</button></div>',
   );
   expect(renderAttention(items, false).value).not.toContain('clear-attention');
   expect(renderAttention([], true).value).not.toContain('clear-attention');

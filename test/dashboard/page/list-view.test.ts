@@ -36,9 +36,15 @@ const repos: ListRepo[] = [
       run('a-bad', 'unknown', '2026-10-01T08:00:00Z', { problem: 'run.json is not a run header' }),
       run('a-fail', 'failed', '2026-10-01T07:00:00Z'),
     ],
-    { watching: ['flow'], workflows: [{ name: 'flow', runs: [], queue: { waiting: 3 } }] },
+    {
+      watching: ['flow'],
+      workflows: [{ name: 'flow', runs: [], queue: { waiting: 3 } }],
+      offers: { watch: { enabled: true }, unwatch: { enabled: true }, workflows: {} },
+    },
   ),
-  repo('beta', [run('b-done', 'completed', '2026-10-01T06:00:00Z', { title: 'Done work' })]),
+  repo('beta', [run('b-done', 'completed', '2026-10-01T06:00:00Z', { title: 'Done work' })], {
+    offers: { watch: { enabled: true }, workflows: {} },
+  }),
 ];
 
 const ui = (fields = {}) => ({ ...initialUi(0), ...fields });
@@ -125,16 +131,24 @@ test('History lists failed then done and Queues one row per queue under its repo
   expect(queues).toContain('<span class="lh-t">Queues</span><span class="c">1</span>');
   expect(queues.match(/data-action="select-queue" data-queue="alpha\/flow"/g)).toHaveLength(1);
   expect(queues).toContain('<span class="nm">alpha › flow</span><span class="n">3 waiting</span>');
-  expect(queues.match(/data-action="watch-set" data-repo="(\w+)" data-op="watch">watch all/g)).toHaveLength(2);
-  expect(queues.match(/data-op="unwatch">unwatch all</g)).toHaveLength(1);
-  expect(queues).toContain('data-repo="alpha" data-op="unwatch">unwatch all');
+  expect(queues.match(/data-action="watch" data-repo="(\w+)">watch all/g)).toHaveLength(2);
+  expect(queues.match(/data-action="unwatch" data-repo="\w+">unwatch all</g)).toHaveLength(1);
+  expect(queues).toContain('data-action="unwatch" data-repo="alpha">unwatch all');
 });
 
 test('an armed unwatch reads click again, and the watch notice and a problem show on the repository row', () => {
   const markup = renderList(
     'queues',
     [{ ...repos[0], problem: 'cannot read' } as ListRepo, repos[1] as ListRepo],
-    ui({ armedWatch: 'alpha', watchNotice: { repo: 'alpha', text: 'watching flow' } }),
+    ui({
+      act: {
+        pending: { id: 'unwatch', subject: { kind: 'repo', repo: 'alpha' }, values: {}, sent: false },
+        results: {
+          repo: { id: 'watch', subject: { kind: 'repo', repo: 'alpha' }, text: 'watching flow', place: 'repo' },
+        },
+        drafts: {},
+      },
+    }),
     NOW,
   ).value;
   expect(markup).toContain('unwatch all? click again');

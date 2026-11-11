@@ -3,7 +3,7 @@
 // fetch and WebSocket are Bun's own, aimed at the server, so the real bundle, server and streams are exercised, and
 // only the DOM is fake.
 import { afterEach, expect, test } from 'bun:test';
-import { rmSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { BrowserWindow, ElementLike, EventLike } from '../../src/dashboard/page/host';
 import { type Dashboard, startDashboard } from '../../src/dashboard/server';
@@ -107,10 +107,14 @@ test("the real bundle boots headless: both repositories, the golden run's eight 
   page.click({ action: 'select-run', repo: 'alpha', run: GOLDEN_RUN_ID });
   expect(await until(() => (page.text('main').match(/data-action="select-card"/g) ?? []).length === 8)).toBe(true);
   expect(page.text('main')).toContain('<div class="stat"><b>$1.35</b><span>of $25.00 (5.4%)</span></div>');
-  expect(page.text('attention')).toContain('<span class="badge">4</span>');
+  expect(page.text('attention')).toContain('<span class="badge">3</span>');
   page.click({ action: 'select-view', view: 'queues' });
   page.click({ action: 'select-queue', queue: 'beta/ticket-to-pr' });
-  expect(await until(() => page.text('main').includes('<span class="pill p-pass">watched</span>'))).toBe(true);
+  expect(await until(() => page.text('main').includes('<span class="pill p-skip">watcher not running</span>'))).toBe(
+    true,
+  );
+  expect(page.text('main')).toContain('<button class="btn" disabled');
+  expect(page.text('list')).toContain('watcher not running');
   page.click({ action: 'open', repo: 'alpha', run: FAKE_2_ID, key: 'implement#1', tab: 'permissions' });
   expect(await until(() => page.text('inspector').includes('<code>git push --force origin HEAD</code>'))).toBe(true);
   expect(page.text('inspector')).toContain('<dt>rule</dt><dd>commands</dd>');
@@ -143,4 +147,22 @@ test('the real bundle opens the view the URL names, and writes the view it is ch
   page.click({ action: 'select-view', view: 'queues' });
   expect(await until(() => page.text('list').includes('<span class="lh-t">Queues</span>'))).toBe(true);
   expect(page.urls).toEqual(['/?view=queues']);
+}, 30_000);
+
+test("a beta queue that can't be read is listed in the Queues view with its problem, and its row opens a queue view that shows it", async () => {
+  m = seedFixtures();
+  const broken = join(m.beta.clone, '.sail-runs', 'queue', 'broken');
+  mkdirSync(broken, { recursive: true });
+  writeFileSync(join(broken, 'queue.json'), '{');
+  const started = startDashboard({ registryDir: m.registryDir, port: 0, followPollMs: 20, indexPollMs: 50 });
+  if ('refused' in started) throw new Error(started.refused);
+  server = started;
+  const page = await bootHeadless(server);
+  expect(await until(() => page.text('sidebar').includes('<span class="nm">beta</span>'))).toBe(true);
+  page.click({ action: 'select-view', view: 'queues' });
+  expect(await until(() => page.text('list').includes('beta › broken'))).toBe(true);
+  expect(page.text('list')).toContain('<span class="n">unreadable</span>');
+  page.click({ action: 'select-queue', queue: 'beta/broken' });
+  expect(await until(() => page.text('main').includes('broken queue'))).toBe(true);
+  expect(page.text('main')).toContain('queue.json can&#39;t be read');
 }, 30_000);

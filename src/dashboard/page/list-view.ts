@@ -4,10 +4,14 @@
 // repository. A run's row is a `div` holding two sibling buttons: its own, which opens the run and shows on one line
 // its status, id, title, repository › workflow, stalled mark, duration, cost and stop reason, with a problem wrapping
 // inside it, and, but on a completed run, a ⋯ of its own that opens the run and, under the row, a menu of what it
-// offers: Resume, Restart, Stop and Clean. A queue's row opens its queue. A Queues group's header row also carries the
-// repository's Watch all and, while it watches something, Unwatch all, its problem and the answer to the last change of
-// its watch set; an Unwatch armed by a first click reads `click again`. A folded group draws its header alone.
+// offers: Resume, Restart, Stop and Clean. A queue's row opens its queue and names its watch state, the live watcher's;
+// a queue that can't be read shows its problem in place of its waiting count. A Queues group's header row also carries
+// the Watch all and Unwatch all the repository offers, drawn from the registry, its problem and the answer to the last
+// change of its watch set; an Unwatch armed by a first click reads `click again`. A folded group draws its header alone.
 import type { RunActions } from '../actions';
+import type { RepoOffers } from '../offers';
+import { ACTIONS, type OfferSource, type Subject } from './action-registry';
+import { actionControl, resultOf } from './action-view';
 import { ago, cost, duration } from './format';
 import { html, type SafeHtml } from './html';
 import { type ListRepo, type ListRun, workflowOf } from './index-model';
@@ -56,14 +60,24 @@ export function runMenu(repo: string, run: ListRun, ui: UiState, offers: RunActi
   return html`<div class="r-menu"><span class="act-why">${why}</span></div>`;
 }
 
-/** A watch or unwatch button for a workflow, or for the whole repository when `workflow` is left out. An armed unwatch asks for its second click. */
-export function watchButton(repo: string, op: 'watch' | 'unwatch', ui: UiState, workflow?: string): SafeHtml {
-  const all = workflow === undefined;
-  const armed = op === 'unwatch' && ui.armedWatch === (all ? repo : queueId(repo, workflow));
-  const word = all ? `${op} all` : op;
-  return html`<button class="wf-act${armed ? ' armed' : ''}" data-action="watch-set" data-repo="${repo}" data-op="${op}"${
-    all ? '' : html` data-workflow="${workflow}"`
-  }>${armed ? `${word}? click again` : word}</button>`;
+/**
+ * The watch or unwatch button each offered, drawn from the registry, for a workflow, or for the whole repository when
+ * `workflow` is left out. An armed unwatch asks for its second click.
+ */
+export function watchButtons(repo: string, offers: RepoOffers | undefined, ui: UiState, workflow?: string): SafeHtml {
+  const subject: Subject = workflow === undefined ? { kind: 'repo', repo } : { kind: 'workflow', repo, workflow };
+  const source: OfferSource = { index: [{ name: repo, queues: [], offers }] };
+  return html`${ACTIONS.filter((def) => def.place === 'repo' && def.appliesTo.includes(subject.kind)).map((def) =>
+    actionControl(def, subject, ui.act, source, { class: 'wf-act', data: true }),
+  )}`;
+}
+
+/** A queue's watch state as a word: the live watcher's, the same one its queue view's pill reads. */
+function watchWord(watch: QueueRow['watch']): SafeHtml | '' {
+  if (watch === undefined) return '';
+  if (watch.state === 'watched') return html`<span class="wf-watch on">watched</span>`;
+  const kind = watch.state === 'not watched' ? 'off' : 'down';
+  return html`<span class="wf-watch ${kind}" title="${watch.why ?? ''}">${watch.state}</span>`;
 }
 
 const cur = (id: string, ui: UiState) => (ui.listCursor === id ? ' cur' : '');
@@ -84,9 +98,14 @@ function runRow(row: RunRow, ui: UiState, offers: RunActions | undefined): SafeH
 
 function queueRow(row: QueueRow, ui: UiState, now: number): SafeHtml {
   const id = queueId(row.repo, row.workflow);
-  return html`<button class="q-row${ui.queue === id ? ' sel' : ''}${cur(row.id, ui)}" data-row="${row.id}"${
+  const sel = `${ui.queue === id ? ' sel' : ''}${cur(row.id, ui)}`;
+  // A queue that can't be read has nothing to count: its problem wraps inside its row in place of its waiting count.
+  if (row.problem !== undefined) {
+    return html`<button class="q-row bad${sel}" data-row="${row.id}" data-action="select-queue" data-queue="${id}"><span class="qd"></span><span class="nm">${row.repo} › ${row.workflow}</span>${watchWord(row.watch)}<span class="n">unreadable</span><span class="r-problem">${row.problem}</span></button>`;
+  }
+  return html`<button class="q-row${sel}" data-row="${row.id}"${
     row.lastPolledAt === undefined ? '' : html` title="polled ${ago(row.lastPolledAt, now)}"`
-  } data-action="select-queue" data-queue="${id}"><span class="qd"></span><span class="nm">${row.repo} › ${row.workflow}</span><span class="n">${row.waiting} waiting</span></button>`;
+  } data-action="select-queue" data-queue="${id}"><span class="qd"></span><span class="nm">${row.repo} › ${row.workflow}</span>${watchWord(row.watch)}<span class="n">${row.waiting} waiting</span></button>`;
 }
 
 const rowOf = (row: ListRow, ui: UiState, now: number, offers: RunActions | undefined): SafeHtml =>
@@ -94,13 +113,12 @@ const rowOf = (row: ListRow, ui: UiState, now: number, offers: RunActions | unde
 
 /** A Queues group's header row: the repository, its watch buttons, its problem and the answer to the last watch change. */
 function repoHeader(group: ListGroup, repo: ListRepo, open: boolean, ui: UiState): SafeHtml {
+  const said = resultOf(ui.act, 'repo', { repo: repo.name });
   return html`<div class="lgrp-row${cur(group.id, ui)}"><button class="lgh${open ? ' open' : ''}"${
     repo.remote === null ? '' : html` title="${repo.remote}"`
-  } data-action="toggle-list-group" data-group="${group.id}" aria-expanded="${open ? 'true' : 'false'}"><span class="lcaret">›</span><span class="nm">${group.label}</span><span class="c">${group.rows.length}</span></button>${watchButton(repo.name, 'watch', ui)}${
-    (repo.watching ?? []).length > 0 ? watchButton(repo.name, 'unwatch', ui) : ''
-  }</div>${repo.problem === undefined ? '' : html`<div class="lgrp-p">${repo.problem}</div>`}${
-    ui.watchNotice?.repo === repo.name ? html`<div class="lgrp-p">${ui.watchNotice.text}</div>` : ''
-  }`;
+  } data-action="toggle-list-group" data-group="${group.id}" aria-expanded="${open ? 'true' : 'false'}"><span class="lcaret">›</span><span class="nm">${group.label}</span><span class="c">${group.rows.length}</span></button>${watchButtons(repo.name, repo.offers, ui)}</div>${
+    repo.problem === undefined ? '' : html`<div class="lgrp-p">${repo.problem}</div>`
+  }${said === undefined ? '' : html`<div class="lgrp-p">${said}</div>`}`;
 }
 
 function groupBlock(group: ListGroup, ui: UiState, now: number, offers: RunActions | undefined): SafeHtml {
@@ -135,7 +153,8 @@ export function renderList(
   const shown = filterRows(all, ui.listFilter);
   const narrowed = ui.listFilter.trim() !== '';
   const count = narrowed ? `${total(shown)} of ${total(all)}` : String(total(all));
-  const notice = ui.indexNotice === undefined ? '' : html`<span class="warnchip list-notice">${ui.indexNotice}</span>`;
+  const left = resultOf(ui.act, 'list');
+  const notice = left === undefined ? '' : html`<span class="warnchip list-notice">${left}</span>`;
   const head = html`<div class="list-h"><span class="lh-t">${VIEW_LABELS[view]}</span><span class="c">${count}</span>${notice}<input class="list-f" name="list-filter" type="search" value="${ui.listFilter}" placeholder="filter (/)" aria-label="filter the list" autocomplete="off" spellcheck="false"></div>`;
   const empty =
     repos.length === 0
