@@ -1496,7 +1496,7 @@ test('select-view redraws the list with History and Queues rows, and filter-repo
         /data-view="(\w+)"[^>]*><span class="nm">\w+<\/span><span class="c">(\d+)<\/span>/g,
       ),
     ].map(([, view, n]) => `${view} ${n}`);
-  expect(counts()).toEqual(['active 1', 'queues 1', 'history 3']);
+  expect(counts()).toEqual(['inbox 3', 'active 1', 'queues 1', 'history 3']);
   host.click({ action: 'select-view', view: 'history' });
   host.advance(100);
   expect(host.regions.list).toContain('<span class="lh-t">History</span><span class="c">3</span>');
@@ -1506,7 +1506,7 @@ test('select-view redraws the list with History and Queues rows, and filter-repo
   expect(host.regions.list).toContain(`data-queue="beta/${QUEUE_WORKFLOW}"`);
   host.click({ action: 'filter-repo', repo: 'alpha' });
   host.advance(100);
-  expect(counts()).toEqual(['active 0', 'queues 0', 'history 2']);
+  expect(counts()).toEqual(['inbox 1', 'active 0', 'queues 0', 'history 2']);
   expect(host.regions.sidebar).toContain('data-repo="alpha" aria-pressed="true"');
   expect(host.regions.list).not.toContain('data-queue=');
   host.click({ action: 'select-view', view: 'history' });
@@ -1543,7 +1543,7 @@ test('select-view pushes the view into the URL, a view that is none writes nothi
   plainIndex();
   host.urls = [];
   host.click({ action: 'select-view', view: 'queues' });
-  host.press('3');
+  host.press('4');
   host.click({ action: 'select-view', view: 'bogus' });
   host.click({ action: 'select-view', view: 'active' });
   expect(host.urls).toEqual([
@@ -1574,7 +1574,7 @@ describe('the list by keyboard (ADW-522)', () => {
   const bootHistory = () => {
     page = boot(host);
     plainIndex();
-    host.press('3');
+    host.press('4');
     host.advance(100);
     return page;
   };
@@ -1635,7 +1635,7 @@ describe('the list by keyboard (ADW-522)', () => {
 
   test('Enter on a queue row opens the queue beside the list', () => {
     const p = bootHistory();
-    host.press('2');
+    host.press('3');
     for (let i = 0; i < 3; i++) host.press('j');
     expect(p.ui.listCursor).toBe(`queue:beta/${QUEUE_WORKFLOW}`);
     host.press('Enter');
@@ -1681,7 +1681,7 @@ describe('the list by keyboard (ADW-522)', () => {
     host.press('j');
     host.press('Escape', true);
     expect(host.blurs).toBe(1);
-    host.press('2', true);
+    host.press('3', true);
     host.press('j', true);
     host.press('Enter', true);
     host.press('/', true);
@@ -1711,22 +1711,26 @@ describe('the list by keyboard (ADW-522)', () => {
     host.type('list-filter', 'fake');
     host.advance(100);
     host.freshes = [];
-    host.press('1');
+    host.press('2');
     host.advance(100);
     expect(p.ui.listFilter).toBe('');
     expect(host.freshes).toContain('list');
   });
 
-  test('1, 2 and 3 change the view to Active, Queues and History, and clear the filter and the cursor', () => {
+  test("a and 1 to 4 select the views in the sidebar's order, and clear the filter and the cursor", () => {
     const p = bootHistory();
     host.type('list-filter', 'x');
     host.press('j');
-    host.press('1');
-    expect([p.ui.view, p.ui.listFilter, p.ui.listCursor]).toEqual(['active', '', undefined]);
     host.press('2');
-    expect(p.ui.view).toBe('queues');
+    expect([p.ui.view, p.ui.listFilter, p.ui.listCursor]).toEqual(['active', '', undefined]);
+    host.press('1');
+    expect(p.ui.view).toBe('inbox');
     host.press('3');
+    expect(p.ui.view).toBe('queues');
+    host.press('4');
     expect(p.ui.view).toBe('history');
+    host.press('a');
+    expect(p.ui.view).toBe('inbox');
   });
 
   test('with a run open, j and k move the card cursor as before and leave the list cursor alone, and Escape steps back to the list', () => {
@@ -1779,7 +1783,7 @@ describe('the list by keyboard (ADW-522)', () => {
   });
 });
 
-test('the needs attention button opens its pane, a and Escape toggle and close it, and opening an item closes it and leaves an open queue', () => {
+test('the needs attention button opens its pane, Escape closes it, and opening an item closes it and leaves an open queue', () => {
   page = boot(host);
   firstIndex();
   replay(host.open('run=')[0], GOLDEN());
@@ -1792,10 +1796,8 @@ test('the needs attention button opens its pane, a and Escape toggle and close i
   host.advance(100);
   expect([page.ui.attention, host.regions.attention?.includes('att-pane')]).toEqual([false, false]);
   expect(page.ui.key).toBeUndefined();
-  host.press('a');
+  host.click({ action: 'toggle-attention' });
   host.advance(100);
-  expect(page.ui.attention).toBe(true);
-  host.press('a', true);
   expect(page.ui.attention).toBe(true);
   host.click({ action: 'select-queue', queue: `beta/${QUEUE_WORKFLOW}` });
   host.click({ action: 'open', repo: 'alpha', run: FAKE_2_ID, key: 'implement#1', tab: 'permissions' });
@@ -3274,4 +3276,78 @@ test('once the index says the queue is no longer held, its banner, its button an
     true,
     [],
   ]);
+});
+
+describe('the Inbox view (ADW-527)', () => {
+  const items = () => attention(index(m.registryDir));
+  const failed = () => items().find((item) => item.kind === 'failed' && item.runId === FAKE_2_ID);
+
+  test('the sidebar draws the Inbox first, as a select-view button with the count of undismissed items', () => {
+    page = boot(host);
+    plainIndex();
+    host.advance(100);
+    expect(host.regions.sidebar).toMatch(
+      /^<div class="side-views"><button class="side-ent" type="button" data-action="select-view" data-view="inbox"><span class="nm">Inbox<\/span><span class="c">3<\/span>/,
+    );
+    host.click({ action: 'select-view', view: 'inbox' });
+    host.advance(100);
+    expect(host.regions.list).toContain('<span class="lh-t">Inbox</span><span class="c">3</span>');
+    expect(host.regions.list).toContain('failed: stage_error');
+    expect(host.regions.list).toContain('ticket:FAKE-6 parked after 2 attempts');
+  });
+
+  test('opening an Inbox row keeps the Inbox and opens its run at its call in error', () => {
+    page = boot(host);
+    plainIndex();
+    host.click({ action: 'select-view', view: 'inbox' });
+    host.advance(100);
+    const item = failed();
+    if (item === undefined) throw new Error('no failed item');
+    host.click({
+      action: 'open',
+      repo: 'alpha',
+      run: FAKE_2_ID,
+      ...(item.opens?.key === undefined ? {} : { key: item.opens.key }),
+    });
+    host.advance(100);
+    expect([page.ui.view, page.ui.runId, page.ui.key]).toEqual(['inbox', FAKE_2_ID, item.opens?.key]);
+    expect(host.regions.list).toContain('<span class="lh-t">Inbox</span>');
+    expect(host.regions.list).toMatch(/class="lrow in-row in-failed sel" data-row="inbox:/);
+  });
+
+  test('Enter on an Inbox row under the cursor opens its run', () => {
+    page = boot(host);
+    plainIndex();
+    host.press('a');
+    host.advance(100);
+    expect(page.ui.view).toBe('inbox');
+    host.press('j');
+    host.press('j');
+    host.press('Enter');
+    host.advance(100);
+    expect(page.ui.view).toBe('inbox');
+    expect(page.ui.runId).toBe(FAKE_2_ID);
+    expect(page.ui.listCursor).toContain('inbox:');
+    expect(host.regions.list).toMatch(/class="lrow in-row in-failed sel cur" data-row="inbox:/);
+  });
+
+  test('a parked row with no listed run opens its queue, the view staying Inbox', () => {
+    page = boot(host);
+    plainIndex();
+    host.click({ action: 'select-view', view: 'inbox' });
+    host.advance(100);
+    host.click({ action: 'select-queue', queue: `beta/${QUEUE_WORKFLOW}` });
+    host.advance(100);
+    expect([page.ui.view, page.ui.queue]).toEqual(['inbox', `beta/${QUEUE_WORKFLOW}`]);
+    expect(host.regions.list).toMatch(/class="lrow in-row in-parked sel" data-row="inbox:/);
+  });
+
+  test('?view=inbox boots on the Inbox', () => {
+    host.startAt = { view: 'inbox' };
+    page = boot(host);
+    plainIndex();
+    host.advance(100);
+    expect(page.ui.view).toBe('inbox');
+    expect(host.regions.list).toContain('<span class="lh-t">Inbox</span>');
+  });
 });

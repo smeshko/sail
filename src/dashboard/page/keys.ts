@@ -3,14 +3,14 @@
 // list's cursor over its entries (group headers and the rows of the groups not folded), `Enter` opens the row under it
 // or folds the group, and `.` opens the menu of the run under it. `Escape` shuts, in order, the run menu, the item menu,
 // needs attention, the drawer and the timeline, then the selection and, last, the open run or queue, which gives the
-// list the centre. `/` focuses the list's filter field, `1`, `2` and `3` open Active, Queues and History, and `i` and `a`
-// toggle the inspector and needs attention. A key typed in an input does nothing but, for Escape, take the focus off.
+// list the centre. `/` focuses the list's filter field, `1` to `4` open Inbox, Active, Queues and History, `a` opens the Inbox and `i`
+// toggles the inspector. A key typed in an input does nothing but, for Escape, take the focus off.
 import { actions, closeAttention, step } from './actions';
 import { listRepos } from './index-model';
 import { entries, filterRows, groupsOf, type ListRow, VIEWS } from './list-model';
 import { syncUrl } from './location';
 import { closeFile, selectCard } from './reads';
-import type { Store } from './store';
+import { listed, type Store } from './store';
 
 /** The keys that move the cursor, and by how much. */
 export const MOVES: Record<string, number> = { j: 1, ArrowDown: 1, ArrowRight: 1, k: -1, ArrowUp: -1, ArrowLeft: -1 };
@@ -18,7 +18,10 @@ export const MOVES: Record<string, number> = { j: 1, ArrowDown: 1, ArrowRight: 1
 /** What the list shows now: its groups under the repository filter and the filter field. */
 function shown(store: Store) {
   const { ui, host } = store;
-  return filterRows(groupsOf(ui.view, listRepos(store.index ?? [], host.now()), ui.repoFilter), ui.listFilter);
+  return filterRows(
+    groupsOf(ui.view, listRepos(store.index ?? [], host.now()), ui.repoFilter, listed(store)),
+    ui.listFilter,
+  );
 }
 
 /** The row with `id` in what the list shows. */
@@ -50,6 +53,15 @@ function openCursor(store: Store) {
   if (row === undefined) {
     if (ui.listCursor !== undefined && entries(shown(store), []).includes(ui.listCursor))
       actions['toggle-list-group']?.(store, { group: ui.listCursor });
+  } else if (row.kind === 'attention') {
+    const { opens, workflow } = row.item;
+    if (opens !== undefined)
+      actions.open?.(store, {
+        repo: opens.repo,
+        run: opens.runId,
+        ...(opens.key === undefined ? {} : { key: opens.key }),
+      });
+    else if (workflow !== undefined) actions['select-queue']?.(store, { queue: `${row.repo}/${workflow}` });
   } else if (row.kind === 'run') actions['select-run']?.(store, { repo: row.repo, run: row.run.runId });
   else actions['select-queue']?.(store, { queue: `${row.repo}/${row.workflow}` });
 }
@@ -79,15 +91,16 @@ export const keys: Record<string, (store: Store) => void> = {
   ']': (store) => step(store, 1),
   '[': (store) => step(store, -1),
   i: (store) => actions['toggle-inspector']?.(store, {}),
-  a: (store) => actions['toggle-attention']?.(store, {}),
+  a: (store) => actions['select-view']?.(store, { view: 'inbox' }),
   '.': (store) => {
     const row = rowOf(store, store.ui.listCursor);
     if (row?.kind === 'run') actions['run-menu']?.(store, { repo: row.repo, run: row.run.runId });
   },
   '/': (store) => store.host.focus('list-filter'),
-  1: (store) => actions['select-view']?.(store, { view: VIEWS[0] ?? 'active' }),
-  2: (store) => actions['select-view']?.(store, { view: VIEWS[1] ?? 'queues' }),
-  3: (store) => actions['select-view']?.(store, { view: VIEWS[2] ?? 'history' }),
+  1: (store) => actions['select-view']?.(store, { view: VIEWS[0] }),
+  2: (store) => actions['select-view']?.(store, { view: VIEWS[1] }),
+  3: (store) => actions['select-view']?.(store, { view: VIEWS[2] }),
+  4: (store) => actions['select-view']?.(store, { view: VIEWS[3] }),
 };
 
 /**

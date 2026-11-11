@@ -256,7 +256,8 @@ const VIEWS_TZ = 0;
 function renderDenseViews(): Record<string, SafeHtml> {
   const machine = seedDense();
   try {
-    const repos = listRepos(index(machine.registryDir), VIEWS_NOW).map((repo) => ({
+    const denseIndex = index(machine.registryDir);
+    const repos = listRepos(denseIndex, VIEWS_NOW).map((repo) => ({
       ...repo,
       runs: repo.runs.map((run) =>
         run.problem === undefined ? run : { ...run, problem: run.problem.replaceAll(machine.root, '<machine>') },
@@ -264,7 +265,7 @@ function renderDenseViews(): Record<string, SafeHtml> {
     }));
     const ui: UiState = { ...initialUi(VIEWS_TZ) };
     return {
-      'dense-sidebar.html': renderSidebar(repos, viewCounts(repos), 0, ui),
+      'dense-sidebar.html': renderSidebar(repos, viewCounts(repos, undefined, attention(denseIndex)), ui),
       'dense-active.html': renderList('active', repos, ui, VIEWS_NOW),
       'dense-history.html': renderList('history', repos, ui, VIEWS_NOW),
       'dense-queues.html': renderList('queues', repos, ui, VIEWS_NOW),
@@ -291,7 +292,8 @@ export async function renderDashboardViews(outDir: string): Promise<string[]> {
     const views: Record<string, SafeHtml> = {};
     const selected = ui({ repo: 'alpha', runId: GOLDEN_RUN_ID });
     const listed = listRepos(repos, VIEWS_NOW);
-    views['sidebar.html'] = renderSidebar(listed, viewCounts(listed), attention(repos).length, selected);
+    views['sidebar.html'] = renderSidebar(listed, viewCounts(listed, undefined, attention(repos)), selected);
+    views['list-inbox.html'] = renderList('inbox', listed, selected, VIEWS_NOW, undefined, attention(repos));
     views['list-active.html'] = renderList('active', listed, selected, VIEWS_NOW);
     views['list-history.html'] = renderList('history', listed, selected, VIEWS_NOW);
     views['list-queues.html'] = renderList('queues', listed, selected, VIEWS_NOW);

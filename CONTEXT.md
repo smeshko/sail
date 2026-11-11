@@ -674,7 +674,7 @@ The list of live runs: those that wait on a person, suspended or unreadable, fir
 _Avoid_: running block, live runs
 
 **Inbox**:
-The sidebar's first entry: it opens the needs attention pane, and its count is the pane's. It is no list view of its own.
+The list of what needs attention: a row for each run that failed or has a call in error, each parked item and each problem, under `runs`, `parked` and `problems`. It is the sidebar's first entry, whose count is its rows under the repository filter. A row opens its run, at its last call in error, or its queue beside the list, which stays on the Inbox.
 _Avoid_: alerts, notifications
 
 **History view**:

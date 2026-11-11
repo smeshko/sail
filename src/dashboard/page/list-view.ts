@@ -13,10 +13,12 @@ import type { RunActions } from '../actions';
 import type { RepoOffers } from '../offers';
 import { ACTIONS, type OfferSource, type Subject } from './action-registry';
 import { actionControl } from './action-view';
+import type { AttentionItem } from './attention';
 import { ago, cost, duration } from './format';
 import { html, type SafeHtml } from './html';
 import { type ListRepo, type ListRun, workflowOf } from './index-model';
 import {
+  type AttentionRow,
   filterRows,
   groupsOf,
   type ListGroup,
@@ -30,11 +32,18 @@ import { runControls } from './run-view';
 import { pillOf, type UiState } from './ui-state';
 
 /** What each view is headed with. */
-export const VIEW_LABELS: Record<ViewName, string> = { active: 'Active', queues: 'Queues', history: 'History' };
+export const VIEW_LABELS: Record<ViewName, string> = {
+  inbox: 'Inbox',
+  active: 'Active',
+  queues: 'Queues',
+  history: 'History',
+};
 
 /** Whether `run` of `repo` is the open run: not while a queue holds the centre. */
-export const isOpen = (repo: string, run: ListRun, ui: UiState) =>
-  ui.queue === undefined && ui.repo === repo && ui.runId === run.runId;
+export const isOpen = (repo: string, run: ListRun, ui: UiState) => isOpenRun(repo, run.runId, ui);
+
+const isOpenRun = (repo: string, runId: string, ui: UiState) =>
+  ui.queue === undefined && ui.repo === repo && ui.runId === runId;
 
 /** The ID a run is listed by: its pull request, else its ticket key, else its run id. */
 export const runLabel = (run: ListRun) => (run.pr === undefined ? (run.ticketKey ?? run.runId) : `PR #${run.pr}`);
@@ -119,8 +128,38 @@ function queueRow(row: QueueRow, ui: UiState, now: number): SafeHtml {
   } data-action="select-queue" data-queue="${id}"><span class="qd"></span><span class="nm">${row.repo} › ${row.workflow}</span>${watchWord(row.watch)}<span class="n">${row.waiting} waiting</span></button>`;
 }
 
+/** Where an Inbox item is: its repository, workflow, run and call. */
+const whereOf = (item: AttentionItem): string =>
+  [item.repo, item.workflow, item.runId, item.key].filter((part) => part !== undefined).join(' · ');
+
+/** An Inbox row: what needs attention, opening its run (at its call in error) or its queue, the view staying Inbox. */
+function attentionRow(row: AttentionRow, ui: UiState): SafeHtml {
+  const { item } = row;
+  const { opens } = item;
+  const queue = item.workflow === undefined ? undefined : queueId(row.repo, item.workflow);
+  const sel = opens === undefined ? queue !== undefined && ui.queue === queue : isOpenRun(opens.repo, opens.runId, ui);
+  const body = html`<span class="r-line"><b class="r-title">${item.title}</b><span class="r-wf">${whereOf(item)}</span>${
+    item.detail === '' || item.kind === 'problem'
+      ? ''
+      : html`<span class="r-detail" title="${item.detail}">${item.detail}</span>`
+  }</span>${item.kind === 'problem' ? html`<span class="r-problem">${item.detail}</span>` : ''}`;
+  const open =
+    opens !== undefined
+      ? html`<button class="r-open" data-action="open" data-repo="${opens.repo}" data-run="${opens.runId}"${
+          opens.key === undefined ? '' : html` data-key="${opens.key}"`
+        }>${body}</button>`
+      : queue !== undefined
+        ? html`<button class="r-open" data-action="select-queue" data-queue="${queue}">${body}</button>`
+        : html`<div class="r-open">${body}</div>`;
+  return html`<div class="lrow in-row in-${item.kind}${sel ? ' sel' : ''}${cur(row.id, ui)}" data-row="${row.id}">${open}</div>`;
+}
+
 const rowOf = (row: ListRow, ui: UiState, now: number, offers: RunActions | undefined): SafeHtml =>
-  row.kind === 'run' ? runRow(row, ui, offers) : queueRow(row, ui, now);
+  row.kind === 'attention'
+    ? attentionRow(row, ui)
+    : row.kind === 'run'
+      ? runRow(row, ui, offers)
+      : queueRow(row, ui, now);
 
 /** A Queues group's header row: the repository, its watch buttons and its problem. */
 function repoHeader(group: ListGroup, repo: ListRepo, open: boolean, ui: UiState): SafeHtml {
@@ -141,6 +180,7 @@ function groupBlock(group: ListGroup, ui: UiState, now: number, offers: RunActio
 }
 
 const EMPTY: Record<ViewName, string> = {
+  inbox: 'nothing needs attention',
   active: 'no live run',
   queues: 'no queue',
   history: 'no finished run',
@@ -158,8 +198,9 @@ export function renderList(
   ui: UiState,
   now: number,
   offers?: RunActions | undefined,
+  inbox: readonly AttentionItem[] = [],
 ): SafeHtml {
-  const all = groupsOf(view, repos, ui.repoFilter);
+  const all = groupsOf(view, repos, ui.repoFilter, inbox);
   const shown = filterRows(all, ui.listFilter);
   const narrowed = ui.listFilter.trim() !== '';
   const count = narrowed ? `${total(shown)} of ${total(all)}` : String(total(all));

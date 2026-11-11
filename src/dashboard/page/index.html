@@ -916,6 +916,24 @@
       .sig-problem {
         border-left-color: var(--del);
       }
+      .in-row {
+        border-left: 2px solid transparent;
+      }
+      .in-failed,
+      .in-error {
+        border-left-color: var(--err);
+      }
+      .in-parked,
+      .in-problem {
+        border-left-color: var(--del);
+      }
+      .r-detail {
+        color: var(--fg-3);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        min-width: 0;
+      }
       .att-empty,
       .qempty {
         padding: 18px;

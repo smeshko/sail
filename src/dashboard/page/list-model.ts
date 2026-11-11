@@ -1,9 +1,11 @@
 // The list's model: the index's repositories (from `listRepos`) turned into the grouped rows each view draws, and the
-// counts the sidebar shows. Pure, with no markup. The views are Active (live runs, those that wait on a person first),
-// Queues (one row per queue, under its repository) and History (finished runs, failed then done).
+// counts the sidebar shows. Pure, with no markup. The views are Inbox (what needs attention: runs, parked items and
+// problems, from the items it is given), Active (live runs, those that wait on a person first), Queues (one row per
+// queue, under its repository) and History (finished runs, failed then done).
+import { type AttentionItem, identity } from './attention';
 import { type ListRepo, type ListRun, type ListWorkflow, newestFirst, workflowOf } from './index-model';
 
-export const VIEWS = ['active', 'queues', 'history'] as const;
+export const VIEWS = ['inbox', 'active', 'queues', 'history'] as const;
 export type ViewName = (typeof VIEWS)[number];
 
 export interface RunRow {
@@ -28,7 +30,15 @@ export interface QueueRow {
   watch?: ListWorkflow['watch'];
 }
 
-export type ListRow = RunRow | QueueRow;
+export interface AttentionRow {
+  kind: 'attention';
+  /** `inbox:<identity>` */
+  id: string;
+  repo: string;
+  item: AttentionItem;
+}
+
+export type ListRow = RunRow | QueueRow | AttentionRow;
 
 export interface ListGroup {
   /** `<view>:<name>` */
@@ -111,8 +121,28 @@ export function queueGroups(repos: readonly ListRepo[]): ListGroup[] {
   }));
 }
 
-/** The view's groups, over `repoFilter`'s repository alone when one is given. */
-export function groupsOf(view: ViewName, repos: readonly ListRepo[], repoFilter?: string): ListGroup[] {
+/** The needs-attention items as the Inbox's groups: runs, parked items, problems. An empty group is left out. */
+export function inboxGroups(items: readonly AttentionItem[]): ListGroup[] {
+  const rowsOf = (kinds: readonly AttentionItem['kind'][]): AttentionRow[] =>
+    items
+      .filter((item) => kinds.includes(item.kind))
+      .map((item) => ({ kind: 'attention', id: `inbox:${identity(item)}`, repo: item.repo, item }));
+  return [
+    ...groupOf('inbox', 'runs', 'runs', rowsOf(['failed', 'error'])),
+    ...groupOf('inbox', 'parked', 'parked', rowsOf(['parked'])),
+    ...groupOf('inbox', 'problems', 'problems', rowsOf(['problem'])),
+  ];
+}
+
+/** The view's groups, over `repoFilter`'s repository alone when one is given. `inbox` is the Inbox's items. */
+export function groupsOf(
+  view: ViewName,
+  repos: readonly ListRepo[],
+  repoFilter?: string,
+  inbox: readonly AttentionItem[] = [],
+): ListGroup[] {
+  if (view === 'inbox')
+    return inboxGroups(repoFilter === undefined ? inbox : inbox.filter((item) => item.repo === repoFilter));
   const kept = repoFilter === undefined ? repos : repos.filter((repo) => repo.name === repoFilter);
   if (view === 'active') return activeGroups(kept);
   if (view === 'history') return historyGroups(kept);
@@ -120,20 +150,24 @@ export function groupsOf(view: ViewName, repos: readonly ListRepo[], repoFilter?
 }
 
 const rowText = (row: ListRow): string =>
-  row.kind === 'queue'
-    ? [row.repo, row.workflow].join(' ')
-    : [
-        row.run.runId,
-        row.run.ticketKey,
-        row.run.pr === undefined ? undefined : `PR #${row.run.pr}`,
-        row.run.title,
-        row.repo,
-        workflowOf(row.run),
-        row.run.status,
-        row.run.stopReason,
-      ]
+  row.kind === 'attention'
+    ? [row.item.title, row.repo, row.item.workflow, row.item.runId, row.item.key, row.item.detail]
         .filter((part) => part !== undefined)
-        .join(' ');
+        .join(' ')
+    : row.kind === 'queue'
+      ? [row.repo, row.workflow].join(' ')
+      : [
+          row.run.runId,
+          row.run.ticketKey,
+          row.run.pr === undefined ? undefined : `PR #${row.run.pr}`,
+          row.run.title,
+          row.repo,
+          workflowOf(row.run),
+          row.run.status,
+          row.run.stopReason,
+        ]
+          .filter((part) => part !== undefined)
+          .join(' ');
 
 /** The rows whose id, ticket key, title, repository, workflow, status or stop reason holds `text`, in any case. A group left empty goes. */
 export function filterRows(groups: readonly ListGroup[], text: string): ListGroup[] {
@@ -146,10 +180,14 @@ export function filterRows(groups: readonly ListGroup[], text: string): ListGrou
 }
 
 /** What each view lists under the repository filter: the sidebar's counts. */
-export function viewCounts(repos: readonly ListRepo[], repoFilter?: string): Record<ViewName, number> {
+export function viewCounts(
+  repos: readonly ListRepo[],
+  repoFilter?: string,
+  inbox: readonly AttentionItem[] = [],
+): Record<ViewName, number> {
   const count = (view: ViewName) =>
-    groupsOf(view, repos, repoFilter).reduce((sum, group) => sum + group.rows.length, 0);
-  return { active: count('active'), queues: count('queues'), history: count('history') };
+    groupsOf(view, repos, repoFilter, inbox).reduce((sum, group) => sum + group.rows.length, 0);
+  return { inbox: count('inbox'), active: count('active'), queues: count('queues'), history: count('history') };
 }
 
 /** A repository's dot: broken with a problem, watching while its watcher watches a workflow, else idle. */

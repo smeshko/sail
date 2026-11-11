@@ -27,13 +27,13 @@ export function regions(store: Store): Record<Region, () => string> {
     sidebar: () => {
       if (store.index === undefined) return '';
       const repos = listRepos(store.index, host.now());
-      return renderSidebar(repos, viewCounts(repos, ui.repoFilter), listed(store).length, ui).value;
+      return renderSidebar(repos, viewCounts(repos, ui.repoFilter, listed(store)), ui).value;
     },
     list: () => {
       if (store.index === undefined) return html`<div class="qempty">connecting…</div>`.value;
       // A raise typed and a stage chosen in the open run's menu survive the draw, but not a switch of run.
       store.actor.keep('run');
-      return renderList(ui.view, listRepos(store.index, host.now()), ui, host.now(), store.offers).value;
+      return renderList(ui.view, listRepos(store.index, host.now()), ui, host.now(), store.offers, listed(store)).value;
     },
     attention: () => {
       const items = listed(store);
