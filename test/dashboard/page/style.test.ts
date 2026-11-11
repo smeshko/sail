@@ -403,3 +403,8 @@ test('a field’s placeholder reads in the dimmest text token (ADW-506)', () => 
 test('a tickbox takes its accent from a theme variable (ADW-506)', () => {
   expect(declarationsOf('input[type="checkbox"]')).toContain('accent-color: var(--run);');
 });
+
+test("the run header's ⋯ menu wraps a reason the nowrap row around it would keep on one line (ADW-548)", () => {
+  expect(declarationsOf('.h-menu')).toContain('white-space: normal');
+  expect(declarationsOf('.h-menu')).toContain('overflow-wrap: anywhere');
+});
