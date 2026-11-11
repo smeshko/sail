@@ -3,11 +3,12 @@
 // resolves it, as it does for the command menu); with a queue item's ⋯ menu open, that item. The key goes through the
 // actor as the action's button does, so a confirmed action opens its confirmation dialog and one that asks in its
 // dialog asks there. One whose parameter is typed beside its button (add's ticket key) opens the command menu at that
-// step, as its command-menu row does. A key whose action can't be done says why in a red toast: no subject it applies
-// to, not offered, or disabled with the server's reason. A run that isn't open has its offers read first, and the key
-// is done once they land.
+// step, as its command-menu row does. A key whose action can't be done says why in a hint, a toast that leaves by itself:
+// no subject it applies to, not offered (while the run or item is in the state it is in), or disabled with the server's
+// reason. A run that isn't open has its offers read first, and the key is done once they land.
 import { type ActionDef, type Subject, subjectName } from './action-registry';
 import { focused, syncOpen } from './focus';
+import { statusOf } from './index-model';
 import { type ActionKey, actionKeys, keyLabel } from './keymap';
 import { askInMenu } from './menu';
 import { subjectData } from './menu-model';
@@ -34,6 +35,21 @@ const NEEDS: Record<string, string> = {
 
 const labelOf = ({ def, variant }: ActionKey) => variant ?? def.label({ kind: 'none' });
 
+/** Why an action isn't offered for `subject`, from what the index says of it: the run's status, or the item's state. */
+function notOffered(store: Store, subject: Subject): string {
+  const repo = (store.index ?? []).find((each) => subject.kind !== 'none' && each.name === subject.repo);
+  if (subject.kind === 'run') {
+    const run = repo?.runs.find((each) => each.runId === subject.runId);
+    if (run !== undefined) return `isn't offered while the run is ${statusOf(run)}`;
+  }
+  if (subject.kind === 'item') {
+    const queue = repo?.queues.find((each) => each.workflow === subject.workflow)?.queue;
+    const item = queue?.items.find((each) => each.dedupKey === subject.item);
+    if (item !== undefined) return `isn't offered while the item is ${item.state}`;
+  }
+  return "isn't offered here";
+}
+
 /** Whether `bound` can be done to `subject` in the view shown: an Inbox action anywhere in the Inbox. */
 const fits = (store: Store, def: ActionDef, subject: Subject | undefined) =>
   def.keyIn === undefined ? def.appliesTo.includes(subject?.kind ?? 'none') : def.keyIn === store.ui.view;
@@ -59,7 +75,7 @@ export function actOnKey(store: Store, key: string, retried = false): boolean {
           : `needs ${NEEDS[each.def.appliesTo[0] ?? ''] ?? 'a subject'}`;
       return bound.length === 1 ? needs : `${labelOf(each)} ${needs}`;
     });
-    toast(store, 'bad', `${bound.map(labelOf).join(' or ')} (${keyLabel(key)})`, why.join('; '));
+    toast(store, 'hint', `${bound.map(labelOf).join(' or ')} (${keyLabel(key)})`, why.join('; '));
     return true;
   }
   const { def, variant } = hit;
@@ -81,14 +97,14 @@ export function actOnKey(store: Store, key: string, retried = false): boolean {
   if (!available.offered || !available.enabled) {
     const why =
       available.why ??
-      (subject.kind === 'run' && source.run === undefined ? "its actions can't be read" : 'not offered');
-    toast(store, 'bad', head, why);
+      (subject.kind === 'run' && source.run === undefined ? "its actions can't be read" : notOffered(store, subject));
+    toast(store, 'hint', head, why);
     return true;
   }
   const row =
     variant === undefined ? undefined : def.variants?.(subject, source).find((each) => each.label === variant);
   if (variant !== undefined && row === undefined) {
-    toast(store, 'bad', head, `${subjectName(subject)} has no ${variant}`);
+    toast(store, 'hint', head, `${subjectName(subject)} has no ${variant}`);
     return true;
   }
   const data = { ...subjectData(subject), ...row?.data };

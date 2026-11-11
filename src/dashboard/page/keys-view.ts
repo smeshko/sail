@@ -1,7 +1,8 @@
 // The shortcut sheet `?` opens: every key the page handles, grouped, drawn over the page in the command menu's place
 // and style. Generated: the navigation keys from `keymap.ts`'s table and the actions' keys from the registry, the same
 // two lists the key handler reads, so the sheet can't list a key that does nothing or miss one that does something.
-// Pure. The backdrop behind it closes it, as `Escape` and `?` do.
+// Pure. The backdrop behind it closes it, as `Escape` and `?` do. Its groups fill columns in order, and its head stays
+// while they scroll.
 import type { ActionDef } from './action-registry';
 import { html, type SafeHtml } from './html';
 import { actionKeys, groupOf, KEY_GROUPS, type KeyGroup, keyLabels, NAV, type NavKey } from './keymap';
@@ -36,7 +37,7 @@ const keyBoxes = (key: string): SafeHtml =>
 
 export function renderSheet(registry?: readonly ActionDef[]): SafeHtml {
   const groups = sheetLines(registry).filter((each) => each.lines.length > 0);
-  return html`<button class="cmdk-back" type="button" data-action="close-sheet" aria-label="close the keyboard shortcuts" tabindex="-1"></button><div class="cmdk keys" role="dialog" aria-label="keyboard shortcuts" tabindex="-1"><div class="keys-h">keyboard shortcuts<span class="keys-close">${keyBoxes('?')} or ${keyBoxes('Escape')} to close</span></div><div class="keys-cols">${groups.map(
+  return html`<button class="cmdk-back" type="button" data-action="close-sheet" aria-label="close the keyboard shortcuts" tabindex="-1"></button><div class="cmdk keys" role="dialog" aria-modal="true" aria-label="keyboard shortcuts" tabindex="-1"><div class="keys-h">keyboard shortcuts<span class="keys-close">${keyBoxes('?')} or ${keyBoxes('Escape')} to close</span></div><div class="keys-cols">${groups.map(
     ({ group, lines }) =>
       html`<section class="keys-grp"><div class="cmdk-grp">${group}</div>${lines.map(
         (line) =>

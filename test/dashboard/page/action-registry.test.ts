@@ -1,6 +1,6 @@
 // The registry of the page's actions: its entries, what each posts, what each answer means and where each reads
 // its availability from the server's offers.
-import { expect, test } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 import type { RunActions } from '../../../src/dashboard/actions';
 import type { IndexRepo } from '../../../src/dashboard/files';
 import {
@@ -52,6 +52,18 @@ const def = (id: string) => {
 };
 const request = (id: string, subject: Subject, values: Record<string, string> = {}, from = source()) =>
   def(id).request?.(subject, values, from);
+
+describe('audit 2: overlays behave (ADW-542)', () => {
+  test("the clean dialog says what it removes in one sentence, in plain words, and where the run's directory goes", () => {
+    const lines = (removes: string[]) =>
+      def('clean-run').dialog?.(RUN, {}, source({ run: { clean: { ...on, removes } } as unknown as RunActions }))
+        ?.lines;
+    expect(lines([])).toEqual(['removes nothing']);
+    expect(lines(['worktree', 'branch sail/x', 'remote branch', 'run ref'])).toEqual([
+      'removes its worktree, its branch sail/x, its remote branch and the run ref that keeps its commits',
+    ]);
+  });
+});
 
 test('ACTIONS has exactly the twenty-three ids, each with a label, appliesTo, a tier and a request and answer or a local run', () => {
   expect(ACTIONS.map((each) => each.id).sort()).toEqual(
@@ -391,7 +403,7 @@ test('a confirmed run action opens a dialog naming the run and each consequence,
   expect([def('stop-run').params(RUN, source()), def('stop-run-now').params(RUN, source())]).toEqual([[], []]);
   expect(dialog('clean-run')).toEqual({
     title: 'clean FAKE-1-RUN',
-    lines: ['removes its worktree', 'removes its branch', 'run directory → /m/failed-runs/x'],
+    lines: ['removes its worktree and its branch', 'moves its run directory to /m/failed-runs/x'],
     verb: 'clean',
   });
 });
@@ -837,9 +849,9 @@ test('the clean dialog says what its ticket and the chosen queue choice do', () 
   const lines = (values: Record<string, string>) =>
     def('clean-run').dialog?.(RUN, values, source({ run: withItem }))?.lines;
   expect(lines({ item: 'requeue' })).toEqual([
-    'removes run ref',
-    'run directory → /m/failed-runs/x',
-    'moves FAKE-1 back to unstarted when it is started',
+    'removes the run ref that keeps its commits',
+    'moves its run directory to /m/failed-runs/x',
+    'moves FAKE-1 back to unstarted, if it is still started',
     "requeues ticket:FAKE-1 in wf's queue",
   ]);
   expect(lines({ item: 'drop' })?.at(-1)).toBe(

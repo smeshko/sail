@@ -239,14 +239,43 @@
       }
       .btn.primary {
         border-color: var(--fg);
+        background: var(--fg);
+        color: var(--bg);
+      }
+      .btn.primary:hover {
+        border-color: var(--fg-2);
+        background: var(--fg-2);
+        color: var(--bg);
       }
       .dlg {
+        margin: auto;
         border: 1px solid var(--line-2);
         border-radius: 8px;
         background: var(--inset);
         color: var(--fg);
         padding: 16px 18px;
-        max-width: min(460px, 90vw);
+        width: min(460px, 90vw);
+      }
+      .dlg h2 {
+        font-size: 15px;
+        font-weight: 600;
+        overflow-wrap: anywhere;
+      }
+      .dlg-sub {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 2px 8px;
+        margin-top: 4px;
+        color: var(--fg-3);
+        font-size: 12px;
+      }
+      .dlg-about {
+        color: var(--fg-2);
+      }
+      .dlg-id {
+        font-family: var(--mono);
+        font-size: 11px;
+        overflow-wrap: anywhere;
       }
       .dlg::backdrop {
         background: rgba(0, 0, 0, 0.5);
@@ -1268,7 +1297,7 @@
         transform: translateX(-50%);
         width: min(750px, 92vw);
         max-height: 70vh;
-        overflow-y: auto;
+        overflow: hidden;
         display: flex;
         flex-direction: column;
         border: 1px solid var(--line);
@@ -1289,6 +1318,27 @@
         padding: 6px;
         font-size: 13px;
         box-shadow: 0 12px 32px rgba(0, 0, 0, 0.24);
+      }
+      /* the chip, the step and the field stay; the rows (the sheet's groups) scroll under them, a shadow at an edge
+         that has more */
+      .cmdk > * {
+        flex-shrink: 0;
+      }
+      .cmdk-rows,
+      .keys-cols {
+        flex: 0 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+        background:
+          linear-gradient(var(--panel) 30%, transparent) center top / 100% 32px no-repeat local,
+          linear-gradient(transparent, var(--panel) 70%) center bottom / 100% 32px no-repeat local,
+          radial-gradient(farthest-side at 50% 0, var(--line-2), transparent) center top / 100% 10px no-repeat scroll,
+          radial-gradient(farthest-side at 50% 100%, var(--line-2), transparent) center bottom / 100% 10px no-repeat
+            scroll;
+      }
+      .cmdk-rows {
+        display: flex;
+        flex-direction: column;
       }
       .cmdk-subj {
         align-self: flex-start;
@@ -1485,10 +1535,15 @@
         color: var(--fg-3);
         font-size: 13px;
       }
+      .cmdk.keys {
+        max-height: 84vh;
+      }
       .keys-cols {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-        gap: 0 24px;
+        columns: 3 240px;
+        column-gap: 24px;
+      }
+      .keys-grp {
+        break-inside: avoid;
       }
       .keys-grp .cmdk-grp {
         padding: 16px 8px 6px;
@@ -1529,25 +1584,55 @@
         z-index: 50;
         display: flex;
         flex-direction: column;
+        align-items: flex-end;
         gap: 6px;
         max-width: min(420px, 90vw);
       }
       .toast {
-        padding: 8px 10px;
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        padding: 8px 6px 8px 10px;
         border-radius: 6px;
         border: 1px solid var(--line);
         background: var(--inset);
         font-size: 12px;
+        line-height: 18px;
       }
       .toast.bad {
         border-color: var(--del);
         color: var(--del);
+      }
+      .toast.quiet {
+        color: var(--fg-2);
+      }
+      .toast-msg {
+        flex: 1;
+        min-width: 0;
+        padding-top: 3px;
+        overflow-wrap: anywhere;
       }
       .toast-head {
         font-weight: 600;
       }
       .toast-text {
         white-space: pre-line;
+      }
+      .toast-x {
+        flex: none;
+        width: 24px;
+        border-radius: 5px;
+        color: var(--fg-3);
+        text-align: center;
+      }
+      .toast-x:hover {
+        background: var(--hover);
+        color: var(--fg);
+      }
+      .toast-more {
+        padding: 0 4px;
+        color: var(--fg-3);
+        font-size: 12px;
       }
       .hint {
         margin-bottom: 8px;
@@ -2041,6 +2126,21 @@
           opacity: 0;
         }
       }
+      /* asked for less motion: nothing pulses, slides or turns; after every rule that moves, so it wins */
+      @media (prefers-reduced-motion: reduce) {
+        .st.p-run,
+        .t-running .mark,
+        .streaming i,
+        .drawer {
+          animation: none;
+        }
+        .resize-handle,
+        .qsec .caret,
+        .qrecent-h .caret,
+        .lgh .lcaret {
+          transition: none;
+        }
+      }
       .drawer-h {
         display: flex;
         align-items: center;
@@ -2284,7 +2384,7 @@
         <div class="spacer"></div>
         <div id="link"></div>
         <button class="btn" type="button" data-action="toggle-theme" aria-label="switch theme" title="theme">◐</button>
-        <button class="btn" type="button" data-action="toggle-inspector" aria-label="pin inspector" title="pin the inspector (i)">⇥</button>
+        <button id="pin-inspector" class="btn" type="button" data-action="toggle-inspector" aria-label="pin inspector" aria-pressed="false" title="pin the inspector (i)">⇥</button>
       </header>
       <div class="body" id="body">
         <nav class="side">

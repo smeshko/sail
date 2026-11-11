@@ -1,5 +1,5 @@
 // The page's stylesheet, read from index.html: the text tokens' contrast on every surface in each theme block.
-import { expect, test } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 
 const html = readFileSync(new URL('../../../src/dashboard/page/index.html', import.meta.url), 'utf8');
@@ -98,7 +98,9 @@ test('the page starts with the inspector closed and unpinned (ADW-528)', () => {
 
 test('the theme and inspector buttons carry an aria-label beside their title (ADW-508)', () => {
   expect(html).toContain('data-action="toggle-theme" aria-label="switch theme" title="theme"');
-  expect(html).toContain('data-action="toggle-inspector" aria-label="pin inspector" title="pin the inspector (i)"');
+  expect(html).toContain(
+    'data-action="toggle-inspector" aria-label="pin inspector" aria-pressed="false" title="pin the inspector (i)"',
+  );
 });
 
 test('--focus is at least 3:1 on every surface in each theme block (ADW-508)', () => {
@@ -186,6 +188,30 @@ const inBlock = (block: string, selector: string): string =>
     )
     .map(([, , body]) => body)
     .join('\n');
+
+describe('audit 2: overlays behave (ADW-542)', () => {
+  test("the dialog is centred, as the global reset's zero margin would not have it, and its primary button is filled from the tokens", () => {
+    expect(declarationsOf('.dlg')).toContain('margin: auto;');
+    expect(declarationsOf('.btn.primary')).toContain('background: var(--fg);');
+    expect(declarationsOf('.btn.primary')).toContain('color: var(--bg);');
+  });
+
+  test('the command menu scrolls its rows alone, the sheet its groups, laid out in columns, and the chip and field stay', () => {
+    expect(declarationsOf('.cmdk')).toContain('overflow: hidden;');
+    expect(declarationsOf('.cmdk > *')).toContain('flex-shrink: 0;');
+    expect(declarationsOf('.cmdk-rows')).toContain('overflow-y: auto;');
+    expect(declarationsOf('.keys-cols')).toContain('overflow-y: auto;');
+    expect(declarationsOf('.keys-cols')).toContain('columns: 3 240px;');
+  });
+
+  test('asked for less motion, nothing that pulses, slides or turns moves', () => {
+    const reduced = mediaBlock('prefers-reduced-motion: reduce');
+    for (const selector of ['.st.p-run', '.t-running .mark', '.streaming i', '.drawer'])
+      expect(inBlock(reduced, selector)).toContain('animation: none;');
+    for (const selector of ['.resize-handle', '.qsec .caret', '.lgh .lcaret'])
+      expect(inBlock(reduced, selector)).toContain('transition: none;');
+  });
+});
 
 test('the sidebar is 180px wide by default, and the list is always 340px with the centre at least 320px (ADW-537)', () => {
   expect(declarationsOf('.body')).toContain(

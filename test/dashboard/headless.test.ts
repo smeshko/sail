@@ -261,7 +261,9 @@ test('confirmed tier: on the real bundle and server, a click on FAKE-2 clean-run
   expect(await until(() => page.text('list').includes('data-action="clean-run"'))).toBe(true);
   page.click({ action: 'clean-run', repo: 'alpha', run: FAKE_2_ID });
   expect(await until(() => page.text('dialog').includes('data-action="dialog-confirm"'))).toBe(true);
-  expect(page.text('dialog')).toContain(`<h2 id="dialog-title">clean ${FAKE_2_ID}</h2>`);
+  expect(page.text('dialog')).toContain(
+    `<h2 id="dialog-title">clean FAKE-2</h2><p class="dlg-sub"><span class="dlg-about">Print the version with --version</span><span class="dlg-id">${FAKE_2_ID}</span></p>`,
+  );
   expect(page.text('dialog')).toContain('autofocus>clean</button>');
   expect(page.text('list')).not.toContain('armed');
   expect(page.posted).toEqual([]);
@@ -347,7 +349,7 @@ test('on the real bundle and server, restart from the menu lists the stages and 
   expect(await until(() => page.text('menu').includes('<div class="cmdk-step">from</div>'))).toBe(true);
   expect((page.text('menu').match(/class="cmdk-row/g) ?? []).length).toBeGreaterThan(1);
   page.press('Enter');
-  expect(await until(() => page.text('dialog').includes(`<h2 id="dialog-title">restart ${FAKE_2_ID}</h2>`))).toBe(true);
+  expect(await until(() => page.text('dialog').includes('<h2 id="dialog-title">restart FAKE-2</h2>'))).toBe(true);
   expect(page.text('dialog')).toContain('name="only" autofocus>');
   expect(page.text('dialog')).toContain('data-action="dialog-confirm">restart</button>');
   expect(await until(() => page.text('menu') === '')).toBe(true);

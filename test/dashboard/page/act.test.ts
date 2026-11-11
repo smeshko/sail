@@ -355,7 +355,7 @@ test('a first click on Clean opens a dialog with a removes line per thing and th
   r.actor.act('clean-run', {});
   expect([r.posts, r.ui.dialog]).toEqual([
     [],
-    { title: 'clean R1', lines: ['removes a', 'run directory → /x'], verb: 'clean' },
+    { title: 'clean R1', lines: ['removes a', 'moves its run directory to /x'], verb: 'clean' },
   ]);
   r.actor.confirm();
   r.actor.confirm();
@@ -823,7 +823,13 @@ test('the inert actor, the store holds until the shell wires the real one, does 
   expect(actor.act('stop-run', {})).toBeUndefined();
   expect(actor.keep('run')).toBeUndefined();
   expect(actor.forget('run')).toBeUndefined();
-  expect([actor.dialogFor(), actor.confirm(), actor.cancel()]).toEqual([undefined, undefined, undefined]);
+  expect([actor.dialogFor(), actor.dialogAction(), actor.confirm(), actor.cancel()]).toEqual([
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+  ]);
+  expect([actor.actSeveral('clean-run', []), actor.changed()]).toEqual([false, undefined]);
 });
 
 const runOf = (runId: string, repo = 'alpha') => ({ kind: 'run', repo, runId }) as const;
@@ -933,7 +939,11 @@ test('a run that is not open is acted on with its own offers', () => {
   expect([r.ui.dialog, r.dialogs]).toEqual([undefined, []]);
   r.others.R2 = { clean: { ...on, removes: ['b'], archive: '/y' } } as unknown as RunActions;
   r.actor.act('clean-run', other);
-  expect(r.ui.dialog).toEqual({ title: 'clean R2', lines: ['removes b', 'run directory → /y'], verb: 'clean' });
+  expect(r.ui.dialog).toEqual({
+    title: 'clean R2',
+    lines: ['removes b', 'moves its run directory to /y'],
+    verb: 'clean',
+  });
   r.actor.confirm();
   expect(r.posts).toEqual([{ path: '/api/repos/alpha/runs/R2/clean', body: {} }]);
 });
@@ -1091,7 +1101,11 @@ const NAMED = {
 test('a clean whose offer names a queue item asks requeue or drop in its dialog, redraws the line at a change and posts the choice', async () => {
   const r = rig(NAMED);
   r.actor.act('clean-run', {});
-  expect(r.ui.dialog?.lines).toEqual(['removes a', 'run directory → /x', "requeues ticket:FAKE-1 in wf's queue"]);
+  expect(r.ui.dialog?.lines).toEqual([
+    'removes a',
+    'moves its run directory to /x',
+    "requeues ticket:FAKE-1 in wf's queue",
+  ]);
   expect(r.dialogs[0]).toContain('<select name="clean-item" autofocus>');
   expect(r.dialogs[0]).toContain('<option value="requeue" selected>requeue</option>');
   expect(r.dialogs[0]).toContain('<option value="drop">drop</option>');

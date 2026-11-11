@@ -24,6 +24,8 @@ import { browserHost, type ConnectHandlers, type PageHost, type Region } from '.
 import { listRepos, newestFirst } from '../../../src/dashboard/page/index-model';
 import { offerSignature, readSubjectOffers } from '../../../src/dashboard/page/reads';
 import { sourceFor } from '../../../src/dashboard/page/store';
+import { toast } from '../../../src/dashboard/page/toast';
+import { HINT_MS } from '../../../src/dashboard/page/toasts';
 import type { QueueWatch } from '../../../src/dashboard/watch-state';
 import { readEvents } from '../../../src/events/consumers/ndjson';
 import {
@@ -1152,7 +1154,7 @@ test('a copy that took draws one ok toast reading what it copied, and 4,000 ms o
   host.advance(100);
   expect(host.regions.toasts).toContain('<div class="toast ok" role="status" data-toast="1">');
   expect(host.regions.toasts).toContain(
-    '<span class="toast-head">copy</span> <span class="toast-text">copied sail show X</span>',
+    '<span class="toast-head">copy</span> — <span class="toast-text">copied sail show X</span>',
   );
   host.advance(3899);
   expect(host.regions.toasts).toContain('copied sail show X');
@@ -2335,7 +2337,7 @@ describe('the list by keyboard (ADW-522)', () => {
     expect(host.freshes).toContain('list');
   });
 
-  test("a and 1 to 4 select the views in the sidebar's order, and clear the filter and the cursor", () => {
+  test("1 to 4 select the views in the sidebar's order, and clear the filter and the cursor", () => {
     const p = bootHistory();
     host.type('list-filter', 'x');
     host.press('j');
@@ -2347,8 +2349,12 @@ describe('the list by keyboard (ADW-522)', () => {
     expect(p.ui.view).toBe('queues');
     host.press('4');
     expect(p.ui.view).toBe('history');
+    // A bare `a` is no key of its own: `g` then `a` opens Active, and Inbox is `1` or `g` then `i` (ADW-542).
     host.press('a');
-    expect(p.ui.view).toBe('inbox');
+    expect(p.ui.view).toBe('history');
+    host.press('g');
+    host.press('a');
+    expect(p.ui.view).toBe('active');
   });
 
   test('with a run open, j and k move the card cursor as before and leave the list cursor alone, and Escape steps back to the list', () => {
@@ -2573,7 +2579,7 @@ test("a failed run's view offers Restart with its stages and the failed one chos
   expect(host.dialog).toContain(
     '<option value="implement" title="implement#1 and everything after it, in loop fix from iteration 1" selected>',
   );
-  expect([host.posts, dialogTitle(), dialogVerb()]).toEqual([[], `restart ${FAKE_2_ID}`, 'restart']);
+  expect([host.posts, dialogTitle(), dialogVerb()]).toEqual([[], `restart FAKE-2`, 'restart']);
   expect(dialogLines()).toEqual([
     'runs again: implement#1 and everything after it, in loop fix from iteration 1',
     'budget $25.00',
@@ -2636,7 +2642,7 @@ test("a refusal is a red toast in the dashboard's words that stays until dismiss
 test("a click on another control while the run's dialog is open can't confirm it, and the run menu toggled closes it with nothing sent", async () => {
   await openOffering('alpha', FAKE_2_ID, fake2Dir(m));
   host.click({ action: 'restart-run' });
-  expect(dialogTitle()).toBe(`restart ${FAKE_2_ID}`);
+  expect(dialogTitle()).toBe(`restart FAKE-2`);
   host.click({ action: 'run-menu', repo: 'alpha', run: FAKE_2_ID });
   host.advance(100);
   expect([host.dialog, page?.ui.runMenu, host.posts]).toEqual([undefined, undefined, []]);
@@ -2644,7 +2650,7 @@ test("a click on another control while the run's dialog is open can't confirm it
   host.advance(100);
   host.click({ action: 'restart-run' });
   await settle();
-  expect(dialogTitle()).toBe(`restart ${FAKE_2_ID}`);
+  expect(dialogTitle()).toBe(`restart FAKE-2`);
   expect(host.posts).toEqual([]);
 });
 test("a run's ⋯ opens the run and its menu under its row, reading what it offers; its ⋯ again or Escape shuts it, and another run's ⋯ moves it there (ADW-466)", async () => {
@@ -2704,7 +2710,7 @@ test('a suspended run over its dollars offers Resume and no Restart; its dialog 
   host.click({ action: 'resume-run' });
   host.advance(100);
   expect([dialogTitle(), dialogLines(), dialogVerb(), host.posts]).toEqual([
-    `resume ${FAKE_3_ID}`,
+    'resume FAKE-3',
     ['spent $1.06 of $1.00'],
     'resume',
     [],
@@ -2716,7 +2722,7 @@ test('a suspended run over its dollars offers Resume and no Restart; its dialog 
   host.dialogFields.raise = '5';
   host.click({ action: 'dialog-change' });
   expect([dialogTitle(), dialogLines(), dialogVerb()]).toEqual([
-    `resume ${FAKE_3_ID}`,
+    'resume FAKE-3',
     ['spent $1.06 of $1.00', 'raises the budget by $5.00'],
     'resume',
   ]);
@@ -3052,7 +3058,7 @@ test('Stop opens the dialog on a first click and posts nothing; its confirm post
   host.advance(100);
   expect([host.posts, dialogTitle(), dialogLines(), dialogVerb()]).toEqual([
     [],
-    `stop ${FAKE_3_ID}`,
+    'stop FAKE-3',
     ['stops at its next call boundary', 'the run fails as stopped'],
     'stop',
   ]);
@@ -3081,7 +3087,7 @@ test('the run menu offers stop and stop now as two buttons; Stop now opens its o
   expect(host.regions.list).not.toContain('type="checkbox"');
   host.click({ action: 'stop-run-now' });
   expect([dialogTitle(), dialogLines()[0], dialogVerb(), host.posts]).toEqual([
-    `stop ${FAKE_3_ID} now`,
+    'stop FAKE-3 now',
     'ends its running call now',
     'stop now',
     [],
@@ -3101,7 +3107,7 @@ test('Suspend and hold opens its dialog and posts nothing; its confirm posts { n
   host.advance(100);
   expect([host.posts, dialogTitle(), dialogLines(), dialogVerb()]).toEqual([
     [],
-    `suspend and hold ${FAKE_3_ID}`,
+    'suspend and hold FAKE-3',
     [
       'ends its running call now',
       'the run is suspended and held: it keeps its workspace and its branch, and the watcher leaves it until Resume',
@@ -3253,7 +3259,7 @@ test("the header's stop, behind its ⋯, opens the dialog and its confirm posts 
   await openRun('beta', FAKE_3_ID, m.beta.runDir);
   host.click({ action: 'run-menu', repo: 'beta', run: FAKE_3_ID, at: 'header' });
   host.click({ action: 'stop-run' });
-  expect([host.posts, dialogTitle()]).toEqual([[], `stop ${FAKE_3_ID}`]);
+  expect([host.posts, dialogTitle()]).toEqual([[], `stop FAKE-3`]);
   host.click({ action: 'dialog-confirm' });
   await settle();
   expect(host.posts).toEqual([{ path: `${FAKE_3_PATH}/stop`, body: { now: false } }]);
@@ -3291,9 +3297,9 @@ test('Clean opens the dialog with what it removes and where the run directory go
   await openOffering('alpha', FAKE_2_ID, fake2Dir(m));
   host.click({ action: 'clean-run' });
   host.advance(100);
-  expect([host.posts, dialogTitle(), dialogVerb()]).toEqual([[], `clean ${FAKE_2_ID}`, 'clean']);
-  expect(dialogLines()[0]).toBe('removes run ref');
-  expect(dialogLines()[1]).toStartWith('run directory → ');
+  expect([host.posts, dialogTitle(), dialogVerb()]).toEqual([[], `clean FAKE-2`, 'clean']);
+  expect(dialogLines()[0]).toBe('removes the run ref that keeps its commits');
+  expect(dialogLines()[1]).toStartWith('moves its run directory to ');
   const cleaned = `cleaned ${FAKE_2_ID}: run ref; run directory -> ~/.sail/failed-runs/2026-11-01/${FAKE_2_ID}`;
   host.postAnswer = { status: 200, body: JSON.stringify({ message: cleaned, removed: ['run ref'], archived: '/x' }) };
   const before = host.open('run=')[0];
@@ -3495,7 +3501,7 @@ describe('all clear', () => {
     expect(badge()).toBe('2');
     host.click({ action: 'clear-attention' });
     host.advance(100);
-    expect(toasts()).toEqual(['ok all clear: 2 hidden']);
+    expect(toasts()).toEqual(['ok all clear: 2 rows are hidden from the Inbox']);
     host.click({ action: 'filter-repo', repo: 'beta' });
     host.advance(100);
     expect(badge()).toBe('1');
@@ -3519,7 +3525,7 @@ describe('all clear', () => {
     host.storage.set(CLEARED_KEY, JSON.stringify([other]));
     host.click({ action: 'clear-attention' });
     host.advance(100);
-    expect(toasts()).toEqual(['ok all clear: 3 hidden']);
+    expect(toasts()).toEqual(['ok all clear: 3 rows are hidden from the Inbox']);
     expect(page?.ui.toasts[0]?.undo).toBe(true);
     expect(badge()).toBe('0');
     const saved: string[] = JSON.parse(host.storage.get(CLEARED_KEY) ?? '[]');
@@ -3975,7 +3981,7 @@ test('by keyboard alone: stop', async () => {
   await menuOn(FAKE_3_ROW);
   typeIn('stop');
   enter();
-  expect(dialogTitle()).toBe(`stop ${FAKE_3_ID}`);
+  expect(dialogTitle()).toBe(`stop FAKE-3`);
   expect(host.posts).toEqual([]);
   host.press('Enter');
   expect(host.posts).toEqual([{ path: `${FAKE_3_PATH}/stop`, body: { now: false } }]);
@@ -3988,7 +3994,7 @@ test('by keyboard alone: stop now', async () => {
   typeIn('stop');
   host.press('ArrowDown', true);
   enter();
-  expect(dialogTitle()).toBe(`stop ${FAKE_3_ID} now`);
+  expect(dialogTitle()).toBe(`stop FAKE-3 now`);
   expect(dialogLines()[0]).toBe('ends its running call now');
   expect(host.posts).toEqual([]);
   host.press('Enter');
@@ -4007,7 +4013,7 @@ test('by keyboard alone: resume, the amount asked beside what was spent', async 
   expect(cmdk()).toContain('<div class="cmdk-line">raises the budget by $5.00</div>');
   enter();
   expect([dialogTitle(), dialogLines(), host.posts]).toEqual([
-    `resume ${FAKE_3_ID}`,
+    'resume FAKE-3',
     ['spent $1.06 of $1.00', 'raises the budget by $5.00'],
     [],
   ]);
@@ -4047,7 +4053,7 @@ test('by keyboard alone: restart from a chosen stage', async () => {
   expect(chosen).not.toBe(start);
   expect(other).toBeDefined();
   enter();
-  expect(dialogTitle()).toBe(`restart ${FAKE_2_ID}`);
+  expect(dialogTitle()).toBe(`restart FAKE-2`);
   expect(host.posts).toEqual([]);
   host.press('Enter');
   expect(host.posts).toEqual([{ path: `/api/repos/alpha/runs/${FAKE_2_ID}/restart`, body: { stage: chosen } }]);
@@ -4058,7 +4064,7 @@ test('by keyboard alone: clean', async () => {
   await menuOn(FAKE_2_ROW);
   typeIn('clean');
   enter();
-  expect(dialogTitle()).toBe(`clean ${FAKE_2_ID}`);
+  expect(dialogTitle()).toBe(`clean FAKE-2`);
   expect(host.posts).toEqual([]);
   host.press('Enter');
   expect(host.posts).toEqual([{ path: `/api/repos/alpha/runs/${FAKE_2_ID}/clean`, body: {} }]);
@@ -4153,19 +4159,19 @@ test('by keyboard alone: watch and unwatch', async () => {
 
 test('by keyboard alone: all clear, which hides the rows the Inbox shows', async () => {
   bootIndexed();
-  host.press('a');
+  host.press('1');
   host.advance(100);
   cmdK();
   host.advance(100);
   typeIn('all clear');
   enter();
-  expect(toasts()).toEqual(['ok all clear: 3 hidden']);
+  expect(toasts()).toEqual(['ok all clear: 3 rows are hidden from the Inbox']);
   expect(host.posts).toEqual([]);
 });
 
 test('by keyboard alone: dismiss, which hides the Inbox row under the cursor, as e does', async () => {
   bootIndexed();
-  host.press('a');
+  host.press('1');
   host.press('j');
   host.press('j');
   host.advance(100);
@@ -4174,13 +4180,13 @@ test('by keyboard alone: dismiss, which hides the Inbox row under the cursor, as
   host.advance(100);
   typeIn('dismiss');
   enter();
-  expect(toasts()).toEqual(['ok dismiss: failed: stage_error hidden']);
+  expect(toasts()).toEqual(['ok dismiss: FAKE-2 is hidden from the Inbox']);
   expect(host.posts).toEqual([]);
 });
 
 test('a cursor on an Inbox row makes its run the subject', async () => {
   bootIndexed();
-  host.press('a');
+  host.press('1');
   host.press('j');
   host.press('j');
   cmdK();
@@ -4312,7 +4318,7 @@ test('a right-click while the confirmation dialog is open is the browser’s, an
   await menuOn(FAKE_3_ROW);
   typeIn('stop');
   enter();
-  expect(dialogTitle()).toBe(`stop ${FAKE_3_ID}`);
+  expect(dialogTitle()).toBe(`stop FAKE-3`);
   expect(host.point('context', ITEM_6)).toBe(false);
 });
 
@@ -4659,7 +4665,7 @@ describe('Copy link (ADW-513)', () => {
     );
   });
 
-  test("a click copies the current URL and toasts 'link copied', and no URL is written", async () => {
+  test('a click copies the current URL and toasts that it copied the link, and no URL is written', async () => {
     select();
     const written = host.urls.length;
     host.click({ action: 'copy-link' });
@@ -4667,7 +4673,7 @@ describe('Copy link (ADW-513)', () => {
     host.advance(100);
     expect(host.copied).toEqual([`http://dashboard/?repo=alpha&run=${FAKE_2_ID}&key=implement%231&timeline=1`]);
     expect(host.regions.toasts).toContain('<span class="toast-head">copy link</span>');
-    expect(host.regions.toasts).toContain('link copied');
+    expect(host.regions.toasts).toContain('copied this page&#39;s link');
     expect(host.urls).toHaveLength(written);
   });
 
@@ -4676,7 +4682,7 @@ describe('Copy link (ADW-513)', () => {
     host.click({ action: 'copy-link' });
     await settle();
     host.advance(3999);
-    expect(host.regions.toasts).toContain('link copied');
+    expect(host.regions.toasts).toContain('copied this page&#39;s link');
     host.advance(1);
     host.advance(100);
     expect(host.regions.toasts).not.toContain('link copied');
@@ -4729,6 +4735,144 @@ function openHeldBetaQueue() {
   host.advance(100);
   return socket;
 }
+
+describe('audit 2: overlays behave (ADW-542)', () => {
+  const NO_WATCHER: QueueWatch = {
+    state: 'watcher not running',
+    why: "no watcher is running for 'beta': sail watch ticket-to-pr first",
+  };
+  /** The index with beta's queue held on claude-code and no watcher running. */
+  const heldUnwatched = () => {
+    const held = heldIndex(true, 'claude-code');
+    const off = indexMessage(NO_WATCHER);
+    return {
+      ...held,
+      repos: held.repos.map((repo, at) => ({
+        ...repo,
+        queues: repo.queues.map((queue, place) => {
+          const unwatched = off.repos[at]?.queues[place];
+          return { ...queue, watch: NO_WATCHER, offers: unwatched?.offers };
+        }),
+      })),
+    };
+  };
+  const press = (key: string) => {
+    const handled = host.press(key);
+    host.advance(100);
+    return handled;
+  };
+
+  test('N1: release opens its dialog on a held queue with no watcher running, it stays open across draws, and its confirm posts', async () => {
+    openBetaQueue();
+    host.push(host.open('index')[0], heldUnwatched());
+    host.advance(100);
+    expect(host.regions.main).toContain('data-harness="claude-code"');
+    host.click({ action: 'release-hold', ...BETA, harness: 'claude-code' });
+    host.advance(100);
+    host.push(host.open('index')[0], heldUnwatched());
+    host.advance(100);
+    expect([dialogTitle(), host.dialogCloses, page?.store.actor.dialogAction()]).toEqual([
+      'release the usage-limit hold on claude-code',
+      0,
+      'release-hold',
+    ]);
+    host.postAnswer = { status: 200, body: JSON.stringify({ message: 'released' }) };
+    host.click({ action: 'dialog-confirm' });
+    await settle();
+    expect(host.posts).toEqual([{ path: `${QUEUE_PATH}/release`, body: { harnessKey: 'claude-code' } }]);
+  });
+
+  test("N1: an add skipping its checks keeps its dialog across a draw of a watched queue that isn't held", () => {
+    openBetaQueue();
+    host.fields['add-ticket'] = 'FAKE-10';
+    host.click({ action: 'add-ticket-force', ...BETA });
+    host.push(host.open('index')[0], indexMessage());
+    host.advance(100);
+    expect([dialogTitle(), host.dialogCloses]).toEqual(['add FAKE-10, skipping its checks', 0]);
+  });
+
+  test("N3: a run's dialog names it by its ticket key, with its title and full id on a quiet line under it", async () => {
+    await openOffering('alpha', FAKE_2_ID, fake2Dir(m));
+    host.click({ action: 'restart-run' });
+    expect(dialogTitle()).toBe('restart FAKE-2');
+    expect(host.dialog).toContain(
+      `<p class="dlg-sub"><span class="dlg-about">Print the version with --version</span><span class="dlg-id">${FAKE_2_ID}</span></p>`,
+    );
+  });
+
+  test("N6: a key's hint is neutral, replaces the hint before it and leaves by itself; refusals stay, three show under a count of the rest, and Escape dismisses the newest", () => {
+    bootIndexed();
+    press('p');
+    press('o');
+    expect(toasts()).toEqual(['hint open (O): needs an open run']);
+    expect(host.regions.toasts).toContain('<div class="toast quiet" role="status"');
+    host.advance(HINT_MS);
+    expect(toasts()).toEqual([]);
+    for (const n of [1, 2, 3, 4, 5]) if (page !== undefined) toast(page.store, 'bad', `stop R${n}`, 'refused');
+    host.advance(60_000);
+    expect(toasts()).toHaveLength(5);
+    expect(host.regions.toasts).toStartWith('<div class="toast-more">+2 more</div>');
+    expect(host.regions.toasts?.match(/class="toast bad"/g)).toHaveLength(3);
+    expect(host.regions.toasts).not.toContain('stop R2');
+    press('Escape');
+    expect(toasts().map((each) => each.split(':')[0])).toEqual([
+      'bad stop R1',
+      'bad stop R2',
+      'bad stop R3',
+      'bad stop R4',
+    ]);
+    expect(host.regions.toasts).toStartWith('<div class="toast-more">+1 more</div>');
+  });
+
+  test('N6: with a run open, Escape dismisses the toasts first, then closes the run', async () => {
+    await openOffering('alpha', FAKE_2_ID, fake2Dir(m));
+    // The run's menu shuts first.
+    press('Escape');
+    expect([page?.ui.runMenu, page?.ui.runId]).toEqual([undefined, FAKE_2_ID]);
+    if (page !== undefined) toast(page.store, 'bad', 'stop', 'refused');
+    press('Escape');
+    expect([toasts(), page?.ui.runId]).toEqual([[], FAKE_2_ID]);
+    press('Escape');
+    expect(page?.ui.runId).toBeUndefined();
+  });
+
+  test("N16: a key not offered says why from the item's state, or that it isn't offered here, in a hint that replaces the last", () => {
+    bootIndexed();
+    host.point('hover', ITEM_ROW);
+    press('r');
+    expect(toasts()).toEqual(["hint requeue ticket:FAKE-5: isn't offered while the item is queued"]);
+    host.point('hover', WORKFLOW_ROW);
+    page?.store.index?.forEach((repo) => {
+      for (const queue of repo.queues) delete (queue as { offers?: unknown }).offers;
+    });
+    press('p');
+    expect(toasts()).toEqual([`hint poll beta / ${QUEUE_WORKFLOW}: isn't offered here`]);
+  });
+
+  test('N4: the menu reveals its highlighted row after each move, inside its own scroller', () => {
+    bootIndexed();
+    cmdK();
+    host.advance(100);
+    host.revealedOpen = [];
+    for (let i = 0; i < 11; i++) {
+      host.press('ArrowDown', true);
+      host.advance(100);
+    }
+    expect(host.revealedOpen.filter((region) => region === 'menu')).toHaveLength(11);
+    expect(cmdk()).toContain('<div class="cmdk-rows" data-scroll="menu-rows">');
+  });
+
+  test('N20: Tab stays in the shortcut sheet, and the bare a opens no view', () => {
+    bootIndexed();
+    expect(press('Tab')).toBe(false);
+    press('?');
+    expect(press('Tab')).toBe(true);
+    press('Escape');
+    const view = page?.ui.view;
+    press('a');
+    expect(page?.ui.view).toBe(view);
+  });
+});
 
 test('the first click on release opens the dialog saying what it does and posts nothing, and its cancel and Escape close it with nothing sent (ADW-517)', () => {
   openHeldBetaQueue();
@@ -4860,7 +5004,7 @@ describe('the Inbox view (ADW-527)', () => {
   test('Enter on an Inbox row under the cursor opens its run', () => {
     page = boot(host);
     plainIndex();
-    host.press('a');
+    host.press('1');
     host.advance(100);
     expect(page.ui.view).toBe('inbox');
     host.press('j');
@@ -4901,7 +5045,7 @@ describe('the Inbox view (ADW-527)', () => {
     const inbox = () => {
       page = boot(host);
       plainIndex();
-      host.press('a');
+      host.press('1');
       host.advance(100);
     };
     const rows = () => [...(host.regions.list ?? '').matchAll(/<b class="r-title">([^<]*)<\/b>/g)].map(([, t]) => t);
@@ -4915,7 +5059,7 @@ describe('the Inbox view (ADW-527)', () => {
       host.advance(100);
       expect(rows()).toEqual(['implement#1 ended in error', 'ticket:FAKE-6 parked after 2 attempts']);
       expect(count()).toBe('2');
-      expect(toasts()).toEqual(['ok dismiss: failed: stage_error hidden']);
+      expect(toasts()).toEqual(['ok dismiss: FAKE-2 is hidden from the Inbox']);
       expect(page?.ui.toasts[0]?.undo).toBe(true);
       expect(host.posts).toEqual([]);
       expect(page?.ui.listCursor).toContain('implement#1 ended in error');
@@ -4975,7 +5119,10 @@ describe('the Inbox view (ADW-527)', () => {
       if (item === undefined) throw new Error('no parked item');
       host.click({ action: 'dismiss-attention', item: identity(item) });
       host.advance(100);
-      expect([count(), toasts()]).toEqual(['2', ['ok dismiss: ticket:FAKE-6 parked after 2 attempts hidden']]);
+      expect([count(), toasts()]).toEqual([
+        '2',
+        ['ok dismiss: “ticket:FAKE-6 parked after 2 attempts” is hidden from the Inbox'],
+      ]);
       expect([page?.ui.runId, page?.ui.queue]).toEqual([undefined, undefined]);
     });
 
@@ -4983,7 +5130,7 @@ describe('the Inbox view (ADW-527)', () => {
       inbox();
       host.press('E');
       host.advance(100);
-      expect([count(), rows(), toasts()]).toEqual(['0', [], ['ok all clear: 3 hidden']]);
+      expect([count(), rows(), toasts()]).toEqual(['0', [], ['ok all clear: 3 rows are hidden from the Inbox']]);
       host.click({ action: 'undo-toast', toast: '1' });
       host.advance(100);
       expect(count()).toBe('3');
@@ -5004,7 +5151,8 @@ describe('the Inbox view (ADW-527)', () => {
       host.advance(100);
       expect([count(), toasts()]).toEqual([
         '3',
-        ['bad dismiss (E): works in the Inbox', 'bad all clear (⇧E): works in the Inbox'],
+        // A hint replaces the hint before it: one is shown at a time (ADW-542).
+        ['hint all clear (⇧E): works in the Inbox'],
       ]);
     });
 
@@ -5654,7 +5802,9 @@ describe('a key for every action, and the shortcut sheet (ADW-523)', () => {
   test('? opens the sheet in the command menu’s place, grouped, with the boxed keys; ?, Escape and a click outside close it, and meanwhile no other key does anything', () => {
     bootIndexed();
     press('?');
-    expect(sheet()).toContain('<div class="cmdk keys" role="dialog" aria-label="keyboard shortcuts" tabindex="-1">');
+    expect(sheet()).toContain(
+      '<div class="cmdk keys" role="dialog" aria-modal="true" aria-label="keyboard shortcuts" tabindex="-1">',
+    );
     expect([...sheet().matchAll(/<div class="cmdk-grp">([^<]*)<\/div>/g)].map(([, group]) => group)).toEqual([
       'Global',
       'List',
@@ -5703,7 +5853,7 @@ describe('a key for every action, and the shortcut sheet (ADW-523)', () => {
     settleQueue();
     await openRun('beta', FAKE_3_ID, m.beta.runDir);
     expect(press('r')).toBe(true);
-    expect(dialogTitle()).toBe(`resume ${FAKE_3_ID}`);
+    expect(dialogTitle()).toBe(`resume FAKE-3`);
     expect(host.dialog).toContain('name="raise"');
     press('Escape');
     expect([host.dialog, host.posts]).toEqual([undefined, []]);
@@ -5713,10 +5863,10 @@ describe('a key for every action, and the shortcut sheet (ADW-523)', () => {
     holdLive();
     await openRun('beta', FAKE_3_ID, m.beta.runDir);
     press('s');
-    expect(dialogTitle()).toBe(`stop ${FAKE_3_ID}`);
+    expect(dialogTitle()).toBe(`stop FAKE-3`);
     press('Escape');
     press('S');
-    expect(dialogTitle()).toBe(`stop ${FAKE_3_ID} now`);
+    expect(dialogTitle()).toBe(`stop FAKE-3 now`);
     press('Escape');
     expect([host.dialog, host.posts]).toEqual([undefined, []]);
     press('s');
@@ -5727,12 +5877,12 @@ describe('a key for every action, and the shortcut sheet (ADW-523)', () => {
   test('on a failed run Shift+R opens Restart’s dialog and Backspace Clean’s; Backspace in a field does nothing', async () => {
     await openRun('alpha', FAKE_2_ID, fake2Dir(m));
     press('R');
-    expect(dialogTitle()).toBe(`restart ${FAKE_2_ID}`);
+    expect(dialogTitle()).toBe(`restart FAKE-2`);
     press('Escape');
     expect(press('Backspace', true)).toBe(false);
     expect(host.dialog).toBeUndefined();
     expect(press('Backspace')).toBe(true);
-    expect(dialogTitle()).toBe(`clean ${FAKE_2_ID}`);
+    expect(dialogTitle()).toBe(`clean FAKE-2`);
     press('Escape');
     expect(host.posts).toEqual([]);
   });
@@ -5740,7 +5890,7 @@ describe('a key for every action, and the shortcut sheet (ADW-523)', () => {
   test('a key whose action is unavailable says why in a red toast and posts nothing: not offered, or nothing it applies to', async () => {
     await openRun('alpha', FAKE_2_ID, fake2Dir(m));
     press('s');
-    expect(toasts()).toEqual([`bad stop ${FAKE_2_ID}: not offered`]);
+    expect(toasts()).toEqual([`hint stop ${FAKE_2_ID}: isn't offered while the run is failed`]);
     press('Escape');
     press('Escape');
     expect(page?.store.run).toBeUndefined();
@@ -5748,10 +5898,10 @@ describe('a key for every action, and the shortcut sheet (ADW-523)', () => {
     unfocus();
     press('r');
     expect(toasts().at(-1)).toBe(
-      "bad resume or requeue (R): resume needs a run: open one, or put the list's cursor on one; requeue needs a queue item: point at one, or open its ⋯",
+      "hint resume or requeue (R): resume needs a run: open one, or put the list's cursor on one; requeue needs a queue item: point at one, or open its ⋯",
     );
     press('p');
-    expect(toasts().at(-1)).toBe("bad poll (P): needs a queue: open one, or put the list's cursor on one");
+    expect(toasts().at(-1)).toBe("hint poll (P): needs a queue: open one, or put the list's cursor on one");
     expect(host.posts).toEqual([]);
   });
 
@@ -5759,7 +5909,7 @@ describe('a key for every action, and the shortcut sheet (ADW-523)', () => {
     await openRun('beta', FAKE_3_ID, m.beta.runDir);
     press('r');
     expect(host.dialog).toBeUndefined();
-    expect(toasts().at(-1)).toMatch(new RegExp(`^bad resume ${FAKE_3_ID}: .+`));
+    expect(toasts().at(-1)).toMatch(new RegExp(`^hint resume ${FAKE_3_ID}: .+`));
   });
 
   test('the key of a run that is not open reads its offers first, then opens its dialog', async () => {
@@ -5770,7 +5920,7 @@ describe('a key for every action, and the shortcut sheet (ADW-523)', () => {
     expect(host.dialog).toBeUndefined();
     await settle();
     host.advance(100);
-    expect(dialogTitle()).toBe(`stop ${FAKE_3_ID}`);
+    expect(dialogTitle()).toBe(`stop FAKE-3`);
     press('Escape');
     expect(host.posts).toEqual([]);
   });
@@ -5782,7 +5932,7 @@ describe('a key for every action, and the shortcut sheet (ADW-523)', () => {
     press('s');
     await settle();
     host.advance(100);
-    expect(toasts().at(-1)).toBe("bad stop gone-1: its actions can't be read");
+    expect(toasts().at(-1)).toBe("hint stop gone-1: its actions can't be read");
   });
 
   test('on a queue item: r requeues, Backspace opens the drop dialog, Alt+Down and Alt+Up move it; on the queue p polls and c asks the ticket in the command menu', async () => {
@@ -5803,7 +5953,7 @@ describe('a key for every action, and the shortcut sheet (ADW-523)', () => {
       { path: `${QUEUE_PATH}/move`, body: { dedupKey: 'ticket:FAKE-7', before: 'ticket:FAKE-5' } },
     ]);
     press('Alt+ArrowDown');
-    expect(toasts().at(-1)).toBe('bad move down ticket:FAKE-7: ticket:FAKE-7 has no move down');
+    expect(toasts().at(-1)).toBe('hint move down ticket:FAKE-7: ticket:FAKE-7 has no move down');
     host.point('hover', WORKFLOW_ROW);
     press('p');
     expect(host.posts.at(-1)).toEqual({ path: `${QUEUE_PATH}/poll`, body: {} });
@@ -5848,7 +5998,7 @@ describe('a key for every action, and the shortcut sheet (ADW-523)', () => {
     unfocus();
     press('.', false, true);
     expect(host.copied).toEqual([FAKE_3_ID]);
-    expect(toasts().at(-1)).toBe('bad copy: nothing is focused to copy');
+    expect(toasts().at(-1)).toBe('hint copy (⌘.): needs a focused run, queue or queue item');
   });
 
   test('o opens the open run’s pull request, else says it has none; l and f open its call’s log and files', async () => {
@@ -5868,15 +6018,14 @@ describe('a key for every action, and the shortcut sheet (ADW-523)', () => {
     host = new FakeHost(m);
     await openRun('beta', FAKE_3_ID, m.beta.runDir);
     press('o');
-    expect(toasts().at(-1)).toBe(`bad open ${FAKE_3_ID}: it has no pull request or ticket link`);
+    expect(toasts().at(-1)).toBe(`hint open (O): ${FAKE_3_ID} has no pull request or ticket link`);
     press('Escape');
     press('Escape');
     press('o');
+    expect(toasts().at(-1)).toBe('hint open (O): needs an open run');
     press('l');
-    expect(toasts().slice(-2)).toEqual([
-      'bad open: open needs an open run',
-      'bad log: log needs an open run with a call',
-    ]);
+    // A hint replaces the one before it.
+    expect(toasts().filter((each) => each.startsWith('hint'))).toEqual(['hint log (L): needs an open run with a call']);
   });
 
   test('z undoes what the newest toast with an Undo did, and says so when none has one', () => {
@@ -5885,7 +6034,7 @@ describe('a key for every action, and the shortcut sheet (ADW-523)', () => {
     host.click({ action: 'select-view', view: 'inbox' });
     host.advance(100);
     press('z');
-    expect(toasts().at(-1)).toBe('bad undo: no toast has an undo');
+    expect(toasts().at(-1)).toBe('hint undo (Z): finds no toast with an undo');
     const before = page.store.cleared.size;
     press('E');
     expect(page.store.cleared.size).toBeGreaterThan(before);

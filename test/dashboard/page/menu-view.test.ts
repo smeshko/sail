@@ -41,7 +41,11 @@ test('the full menu draws the head, a field, one row per row with the highlight,
   );
   expect(markup).toContain('<div class="cmdk-grp">general</div>');
   expect(markup).toContain('<button class="cmdk-back" type="button" data-action="menu-close"');
-  expect(markup.match(/class="cmdk-row/g)).toHaveLength(4);
+  expect(markup.match(/class="cmdk-row[ "]/g)).toHaveLength(4);
+  // The rows scroll in their own box, after the chip and the field, which stay (ADW-542).
+  expect(markup).toMatch(
+    /<div class="cmdk-subj">.*<input class="cmdk-in".*<div class="cmdk-rows" data-scroll="menu-rows"><button class="cmdk-row"/,
+  );
 });
 
 test("a run's go-to row draws the list's dot, its key and its title after its icon", () => {
@@ -79,7 +83,7 @@ test('context mode is placed at the pointer and has no field', () => {
     rows: [row('drop')],
   }).value;
   expect(markup).toContain(
-    '<div class="cmdk ctx" role="dialog" aria-label="command menu" tabindex="-1" style="left:240px;top:120px">',
+    '<div class="cmdk ctx" role="dialog" aria-modal="true" aria-label="command menu" tabindex="-1" style="left:240px;top:120px">',
   );
   expect(markup).not.toContain('<input');
 });
