@@ -459,6 +459,10 @@ export async function renderDashboardViews(outDir: string): Promise<string[]> {
         );
         if (several === undefined) throw new Error('clean-run has no several form');
         views['dialog-clean-several.html'] = renderDialog(several);
+        // The dialog of a clean of every failed run: the fixture's failed runs of every repository, in one list.
+        const everyFailed = actionOf('clean-failed')?.dialog?.({ kind: 'none' }, {}, { index: repos });
+        if (everyFailed === undefined) throw new Error('clean-failed has no dialog');
+        views['dialog-clean-failed.html'] = renderDialog(everyFailed);
       }
       // The command menu of the failed run: its subject line and its offered actions, then the general ones.
       if (name === 'fake-2' && offers !== undefined) {
