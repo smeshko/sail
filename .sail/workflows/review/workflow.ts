@@ -10,6 +10,7 @@
 // can't land in the passes left, comments why, takes the label off and fails, leaving the pull request to a human; so
 // does one a stage blocked, which also puts needs-human on, since no run of it would get further.
 // A pull request that changes a gate file is handed to a human before any merge.
+// The leak check's findings are grouped: one per tracker-key prefix, denylist term or Jev line, with its count.
 // Composition only: every contract lives on its stage, and every check that needs no judgment is a script.
 import { workflow, type z } from 'sail';
 import { pr } from 'sail/intakes';
@@ -58,11 +59,14 @@ const LENSES = [
 
 const FIX_PASSES = 3;
 
+/** `word` for one, `words` otherwise. */
+const plural = (count: number, word: string) => (count === 1 ? word : `${word}s`);
+
 export default workflow(
   'review',
   {
     intake: pr,
-    version: 8,
+    version: 9,
     watch: { every: '5m' },
     // Two pull requests at a time, though each merge moves the base the other is being reviewed against.
     maxConcurrentRuns: 2,
@@ -113,25 +117,32 @@ export default workflow(
           .join('\n\n'),
       });
     }
-    for (const [index, hit] of leaks.output.hits.entries()) {
+    // One finding per group the leak check made: a tracker-key prefix, a denylist term or a Jev line, however many hits.
+    for (const [index, group] of leaks.output.groups.entries()) {
+      const [first] = group.examples;
+      const where = group.examples.map((each) => `${each.file}:${each.line}${each.match ? ` (${each.match})` : ''}`);
+      const files = `${group.files} ${plural(group.files, 'file')}`;
+      const occurrences = `${group.count} ${plural(group.count, 'occurrence')}`;
+      const rule = 'Committed text names only sail and its ADW-<n> issues.';
+      const search = `\`git diff ${base}...HEAD\``;
       findings.push({
         id: `L${index + 1}`,
         source: 'leak-check',
         severity: 'high',
-        file: `${hit.file}:${hit.line}`,
+        file: first ? `${first.file}:${first.line}` : '',
         title:
-          hit.kind === 'key'
-            ? `A tracker key other than ADW: ${hit.match}`
-            : hit.kind === 'jev'
+          group.kind === 'key'
+            ? `A tracker key other than ADW: prefix ${group.prefix}, ${occurrences} in ${files}`
+            : group.kind === 'jev'
               ? 'Jev reads a line as naming another project'
-              : 'A term from the private denylist',
+              : `A term from the private denylist: ${occurrences} in ${files}`,
         // Denylist and Jev findings name the line, never its potentially private text.
         detail:
-          hit.kind === 'key'
-            ? `${hit.file}:${hit.line} adds ${hit.match}. Committed text names only sail and its ADW-<n> issues.`
-            : hit.kind === 'jev'
-              ? `${hit.file}:${hit.line}: the leak check's Jev pass answers yes at ${hit.yes} (hit from ${leaks.output.jev.threshold}). Committed text names only sail and its ADW-<n> issues.`
-              : `${hit.file}:${hit.line} adds a term on the leak denylist. Committed text names only sail and its ADW-<n> issues.`,
+          group.kind === 'key'
+            ? `The change adds ${group.count} tracker ${plural(group.count, 'key')} with the prefix ${group.prefix} in ${files}, such as ${where.join(', ')}. These are examples: find every one in ${search} with the pattern \`\\b${group.prefix}-\\d+\\b\`. ${rule}`
+            : group.kind === 'jev'
+              ? `${first?.file}:${first?.line}: the leak check's Jev pass answers yes at ${group.yes} (hit from ${leaks.output.jev.threshold}). ${rule}`
+              : `The change adds a term on the leak denylist ${group.count} ${plural(group.count, 'time')} in ${files}, such as ${where.join(', ')}. These are examples: read them to see the term, then find every added line that holds it in ${search}. ${rule}`,
       });
     }
     for (const [index, hit] of banned.output.hits.entries()) {

@@ -2,6 +2,9 @@ Fix this pull request's findings. A judge has read every finding of its review a
 `$STAGE_IN/findings.json` holds them, each with its id, severity, file and detail. What the pull request should do is
 at `{{requirements}}`, and its change so far is `git diff {{base}}...HEAD`.
 
+A leak-check finding that gives a count stands for every occurrence, not only its examples: run the search its detail
+names and fix them all in the finding's one commit.
+
 A finding from `checks` is a check that failed on the pushed pull request after a rerun: its detail is the tail of the
 check's log. Find the failing test or step in it, reproduce it by running that test file by name, and fix the cause.
 A test that fails only on timing is still yours to make deterministic.
