@@ -1,6 +1,6 @@
 // What a person has chosen on the page, which every view reads: the open run, card and tab, whether the card's timeline
 // is open, which of its tool calls and which kinds of its entries it hides, the queue open in its place with its folded
-// sections, the list's view, filter, cursor and folded groups, whether needs attention is open, the theme, the offset their
+// sections, the list's view, filter, cursor and folded groups, the theme, the offset their
 // clock is at, and the file open in the drawer. `act` is the one state of carrying an action out: the parameters typed. It
 // holds nothing about the runs themselves.
 
@@ -49,8 +49,6 @@ export interface UiState {
   listFilter: string;
   listCursor?: string;
   listFolded: string[];
-  /** Whether the needs attention pane is open. */
-  attention: boolean;
   /** The queue view's folded sections, as `<repo>/<workflow>:<state>`. */
   folded: string[];
   /** Whether the queue view shows its recent events. */
@@ -86,7 +84,6 @@ export function initialUi(tz: number): UiState {
     view: 'active',
     listFilter: '',
     listFolded: [],
-    attention: false,
     folded: [],
     queueEvents: false,
     theme: 'dark',

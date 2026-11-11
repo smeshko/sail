@@ -4,17 +4,7 @@
 // members the page uses, since the project's TypeScript has no DOM library.
 
 /** The page's regions, each an element id in `index.html`. */
-export const REGIONS = [
-  'sidebar',
-  'list',
-  'attention',
-  'link',
-  'main',
-  'inspector',
-  'status',
-  'drawer',
-  'toasts',
-] as const;
+export const REGIONS = ['sidebar', 'list', 'link', 'main', 'inspector', 'status', 'drawer', 'toasts'] as const;
 export type Region = (typeof REGIONS)[number];
 
 export interface Connection {
@@ -133,6 +123,10 @@ export interface ElementLike {
 export interface EventLike {
   target: unknown;
   key?: string;
+  shiftKey?: boolean;
+  ctrlKey?: boolean;
+  metaKey?: boolean;
+  altKey?: boolean;
   clientX?: number;
   preventDefault?(): void;
 }
@@ -444,10 +438,13 @@ export function browserHost(win: BrowserWindow): PageHost {
             return;
           }
         }
-        if (
-          handler(event.key ?? '', tag !== undefined && INPUTS.has(tag), actionOf(event.target)?.dataset.action) ===
-          true
-        )
+        // A key held with Cmd, Ctrl or Alt is the browser's, and a letter's case is Shift's, never Caps Lock's: `e`
+        // and `E` change saved state (review R5).
+        if (event.ctrlKey === true || event.metaKey === true || event.altKey === true) return;
+        let key = event.key ?? '';
+        if (/^[a-z]$/i.test(key) && event.shiftKey !== undefined)
+          key = event.shiftKey ? key.toUpperCase() : key.toLowerCase();
+        if (handler(key, tag !== undefined && INPUTS.has(tag), actionOf(event.target)?.dataset.action) === true)
           event.preventDefault?.();
       });
     },

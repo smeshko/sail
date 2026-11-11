@@ -31,13 +31,6 @@ export function leaveQueue(store: Store) {
   store.mark('list', 'main');
 }
 
-export function closeAttention(store: Store) {
-  const { ui } = store;
-  if (!ui.attention) return;
-  ui.attention = false;
-  store.mark('attention');
-}
-
 export const actions: Record<string, Action> = {
   'select-run': (store, data) => {
     if (data.repo === undefined || data.run === undefined) return;
@@ -53,7 +46,6 @@ export const actions: Record<string, Action> = {
   'select-card': (store, data) => selectCard(store, data.key, undefined, true),
   open: (store, data) => {
     if (data.repo === undefined || data.run === undefined) return;
-    closeAttention(store);
     leaveQueue(store);
     selectRun(store, data.repo, data.run);
     const tab = (TABS as readonly string[]).includes(data.tab ?? '') ? (data.tab as InspectorTab) : 'overview';
@@ -180,10 +172,6 @@ export const actions: Record<string, Action> = {
       ? store.ui.folded.filter((id) => id !== section)
       : [...store.ui.folded, section];
     store.mark('main');
-  },
-  'toggle-attention': (store) => {
-    store.ui.attention = !store.ui.attention;
-    store.mark('attention');
   },
   'toggle-inspector': (store) => {
     store.ui.inspector = !store.ui.inspector;

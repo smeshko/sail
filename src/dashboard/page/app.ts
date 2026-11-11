@@ -14,15 +14,18 @@
 // The rules each module follows are in its own header.
 import { createActor } from './act';
 import { dispatch } from './actions';
+import { identity } from './attention';
 import { startDraw } from './draw';
 import type { PageHost } from './host';
 import { REGIONS } from './host';
+import { listRepos } from './index-model';
 import { onKey } from './keys';
+import { entries, filterRows, groupsOf } from './list-model';
 import { syncUrl } from './location';
 import { navigate, showView } from './navigate';
 import { stopReads } from './reads';
 import { saveCleared, storedCleared } from './saved';
-import { createStore } from './store';
+import { createStore, listed } from './store';
 import { closeRun, openIndex, selectRun, stopStreams } from './streams';
 import { toast } from './toast';
 import type { UiState } from './ui-state';
@@ -63,12 +66,47 @@ export function boot(host: PageHost): Page {
       took: () => store.fresh.add('main'),
       toast: (kind, head, text, undo) => toast(store, kind, head, text, undo),
       local: {
+        'dismiss-attention': (data) => {
+          const item = listed(store).find((each) => identity(each) === data.item);
+          if (item === undefined) return undefined;
+          const id = identity(item);
+          const { ui } = store;
+          // The cursor leaves the row for the next entry of the Inbox, else the previous row, else it is deleted.
+          const groups = filterRows(
+            groupsOf('inbox', listRepos(store.index ?? [], host.now()), ui.repoFilter, listed(store)),
+            ui.listFilter,
+          );
+          if (ui.listCursor === `inbox:${id}`) {
+            const ids = entries(groups, ui.listFolded);
+            const at = ids.indexOf(ui.listCursor);
+            const rows = new Set(groups.flatMap((group) => group.rows.map((row) => row.id)));
+            const next =
+              ids[at + 1] ??
+              ids
+                .slice(0, at)
+                .reverse()
+                .find((each) => rows.has(each));
+            if (next === undefined) delete ui.listCursor;
+            else ui.listCursor = next;
+          }
+          store.cleared = new Set([...storedCleared(host), ...store.cleared, id]);
+          saveCleared(host, store.cleared);
+          store.mark('sidebar', 'list');
+          return {
+            text: `${item.title} hidden`,
+            undo: () => {
+              store.cleared = new Set([...storedCleared(host), ...store.cleared].filter((each) => each !== id));
+              saveCleared(host, store.cleared);
+              store.mark('sidebar', 'list');
+            },
+          };
+        },
         'clear-attention': () => {
           const before = new Set([...storedCleared(host), ...store.cleared]);
           const added = new Set(store.drawn.filter((each) => !before.has(each)));
           store.cleared = new Set([...before, ...store.drawn]);
           saveCleared(host, store.cleared);
-          store.mark('attention');
+          store.mark('sidebar', 'list');
           if (added.size === 0) return undefined;
           return {
             text: `${added.size} hidden`,
@@ -77,7 +115,7 @@ export function boot(host: PageHost): Page {
             undo: () => {
               store.cleared = new Set([...storedCleared(host), ...store.cleared].filter((each) => !added.has(each)));
               saveCleared(host, store.cleared);
-              store.mark('attention');
+              store.mark('sidebar', 'list');
             },
           };
         },

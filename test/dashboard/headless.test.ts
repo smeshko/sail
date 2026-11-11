@@ -112,9 +112,7 @@ test("the real bundle boots headless: both repositories, the golden run's eight 
   if ('refused' in started) throw new Error(started.refused);
   server = started;
   const page = await bootHeadless(server);
-  expect(page.ids).toEqual(
-    expect.arrayContaining(['sidebar', 'list', 'attention', 'link', 'main', 'inspector', 'status']),
-  );
+  expect(page.ids).toEqual(expect.arrayContaining(['sidebar', 'list', 'link', 'main', 'inspector', 'status']));
   expect(page.ids).not.toContain('queues');
   expect(await until(() => page.text('sidebar').includes('<span class="nm">beta</span>'))).toBe(true);
   expect(page.text('sidebar')).toContain('<span class="nm">alpha</span>');
@@ -124,7 +122,9 @@ test("the real bundle boots headless: both repositories, the golden run's eight 
   page.click({ action: 'select-run', repo: 'alpha', run: GOLDEN_RUN_ID });
   expect(await until(() => (page.text('main').match(/data-action="select-card"/g) ?? []).length === 8)).toBe(true);
   expect(page.text('main')).toContain('<div class="stat"><b>$1.35</b><span>of $25.00 (5.4%)</span></div>');
-  expect(page.text('attention')).toContain('<span class="badge">3</span>');
+  expect(page.text('sidebar')).toMatch(
+    /data-view="inbox"[^>]*><span class="nm">Inbox<\/span><span class="c">3<\/span>/,
+  );
   expect(page.text('link')).toContain('data-action="copy-link"');
   page.click({ action: 'select-view', view: 'queues' });
   page.click({ action: 'select-queue', queue: 'beta/ticket-to-pr' });
@@ -241,21 +241,55 @@ test('confirmed tier: on the real bundle and server, a click on FAKE-2 clean-run
   expect(page.posted).toEqual([]);
 }, 30_000);
 
-test('undoable tier: on the real bundle, clear-attention empties attention and draws an undo-toast button, and clicking it brings back the badge of 3', async () => {
+test('undoable tier: on the real bundle, clear-attention empties the Inbox and draws an undo-toast button, and clicking it brings back the count of 3', async () => {
   m = seedFixtures();
   const started = startDashboard({ registryDir: m.registryDir, port: 0, followPollMs: 20, indexPollMs: 50 });
   if ('refused' in started) throw new Error(started.refused);
   server = started;
   const page = await bootHeadless(server);
-  expect(await until(() => page.text('attention').includes('<span class="badge">3</span>'))).toBe(true);
+  const count = () =>
+    /data-view="inbox"[^>]*><span class="nm">Inbox<\/span><span class="c">(\d+)<\/span>/.exec(
+      page.text('sidebar'),
+    )?.[1];
+  expect(await until(() => count() === '3')).toBe(true);
+  page.click({ action: 'select-view', view: 'inbox' });
+  expect(await until(() => page.text('list').includes('data-action="clear-attention"'))).toBe(true);
   page.click({ action: 'clear-attention' });
   expect(await until(() => page.text('toasts').includes('data-action="undo-toast"'))).toBe(true);
-  expect(page.text('attention')).not.toContain('<span class="badge">');
+  expect(count()).toBe('0');
+  expect(page.text('list')).toContain('nothing needs attention');
   expect(page.text('toasts')).toContain('<span class="toast-head">all clear</span>');
   const id = /data-action="undo-toast" data-toast="(\d+)"/.exec(page.text('toasts'))?.[1] ?? '';
   page.click({ action: 'undo-toast', toast: id });
-  expect(await until(() => page.text('attention').includes('<span class="badge">3</span>'))).toBe(true);
+  expect(await until(() => count() === '3')).toBe(true);
   expect(page.text('toasts')).not.toContain('toast ok');
+  expect(page.posted).toEqual([]);
+}, 30_000);
+
+test('undoable tier: on the real bundle, dismiss-attention hides one row and Undo brings it back', async () => {
+  m = seedFixtures();
+  const started = startDashboard({ registryDir: m.registryDir, port: 0, followPollMs: 20, indexPollMs: 50 });
+  if ('refused' in started) throw new Error(started.refused);
+  server = started;
+  const page = await bootHeadless(server);
+  const count = () =>
+    /data-view="inbox"[^>]*><span class="nm">Inbox<\/span><span class="c">(\d+)<\/span>/.exec(
+      page.text('sidebar'),
+    )?.[1];
+  expect(await until(() => count() === '3')).toBe(true);
+  page.click({ action: 'select-view', view: 'inbox' });
+  expect(await until(() => page.text('list').includes('data-action="dismiss-attention"'))).toBe(true);
+  const first = /data-action="dismiss-attention" data-item="([^"]*)"/.exec(page.text('list'))?.[1] ?? '';
+  page.click({
+    action: 'dismiss-attention',
+    item: first.replaceAll('&quot;', '"').replaceAll('&lt;', '<').replaceAll('&gt;', '>').replaceAll('&amp;', '&'),
+  });
+  expect(await until(() => page.text('toasts').includes('data-action="undo-toast"'))).toBe(true);
+  expect(count()).toBe('2');
+  expect(page.text('toasts')).toContain('<span class="toast-head">dismiss</span>');
+  const id = /data-action="undo-toast" data-toast="(\d+)"/.exec(page.text('toasts'))?.[1] ?? '';
+  page.click({ action: 'undo-toast', toast: id });
+  expect(await until(() => count() === '3')).toBe(true);
   expect(page.posted).toEqual([]);
 }, 30_000);
 

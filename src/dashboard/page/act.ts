@@ -47,7 +47,7 @@ export interface ActorEffects {
   /** Puts a toast on the stack. */
   toast(kind: 'ok' | 'bad', head: string, text: string, undo?: () => void): void;
   /** The local actions' effects, by the name their entry's `run` gives: the text of their toast and what undoes them. */
-  local: Record<string, () => { text: string; undo: () => void } | undefined>;
+  local: Record<string, (data: Readonly<Record<string, string>>) => { text: string; undo: () => void } | undefined>;
 }
 
 export interface ActorDeps {
@@ -200,7 +200,7 @@ export function createActor(deps: ActorDeps): Actor {
     if (subject === undefined) return;
     if (subject.kind === 'run' && runsOut > 0) return;
     if (def.run !== undefined) {
-      const done = effects.local[def.run]?.();
+      const done = effects.local[def.run]?.(data);
       if (done !== undefined) effects.toast('ok', headOf(def, subject), done.text, done.undo);
       return;
     }

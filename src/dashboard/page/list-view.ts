@@ -1,7 +1,8 @@
 // The list: the one component every view draws its rows on, in the centre. A head names the view with its count, which
 // reads `n of m` while the filter field narrows it, and carries the field itself. Under it,
 // folding groups: Active's `waiting on you` and `running`, History's `failed` and `done`, and in Queues one per
-// repository. A run's row is a `div` holding two sibling buttons: its own, which opens the run and shows on one line
+// repository, and the Inbox's one group each of runs, parked items and problems, whose rows open their run (at its last
+// call in error) or queue, the view staying Inbox, and carry a ✕ that dismisses them. A run's row is a `div` holding two sibling buttons: its own, which opens the run and shows on one line
 // its status, id, title, repository › workflow, stalled mark, duration, cost and stop reason, with a problem wrapping
 // inside it, and, but on a completed run, a ⋯ of its own that opens the run and a menu of what it offers: Resume,
 // Restart, Stop and Clean. The menu is drawn inside its row and floats over the rows under it, pushing none down. A
@@ -16,10 +17,12 @@ import type { RunActions } from '../actions';
 import type { RepoOffers } from '../offers';
 import { ACTIONS, actionOf, type OfferSource, type Subject } from './action-registry';
 import { actionControl } from './action-view';
+import { type AttentionItem, identity } from './attention';
 import { ago, clock, cost, duration } from './format';
 import { html, type SafeHtml } from './html';
 import { type ListRepo, type ListRun, workflowOf } from './index-model';
 import {
+  type AttentionRow,
   filterRows,
   groupsOf,
   type ListGroup,
@@ -33,11 +36,18 @@ import { runControls } from './run-view';
 import { pillOf, type UiState } from './ui-state';
 
 /** What each view is headed with. */
-export const VIEW_LABELS: Record<ViewName, string> = { active: 'Active', queues: 'Queues', history: 'History' };
+export const VIEW_LABELS: Record<ViewName, string> = {
+  inbox: 'Inbox',
+  active: 'Active',
+  queues: 'Queues',
+  history: 'History',
+};
 
 /** Whether `run` of `repo` is the open run: not while a queue holds the centre. */
-export const isOpen = (repo: string, run: ListRun, ui: UiState) =>
-  ui.queue === undefined && ui.repo === repo && ui.runId === run.runId;
+export const isOpen = (repo: string, run: ListRun, ui: UiState) => isOpenRun(repo, run.runId, ui);
+
+const isOpenRun = (repo: string, runId: string, ui: UiState) =>
+  ui.queue === undefined && ui.repo === repo && ui.runId === runId;
 
 /** The ID a run is listed by: its pull request, else its ticket key, else its run id. */
 export const runLabel = (run: ListRun) => (run.pr === undefined ? (run.ticketKey ?? run.runId) : `PR #${run.pr}`);
@@ -154,13 +164,44 @@ function queueRow(row: QueueRow, ui: UiState, now: number, repoOffers: RepoOffer
   return html`<div class="q-row${row.problem === undefined ? '' : ' bad'}${sel}" data-row="${row.id}"><button class="q-open" data-action="select-queue" data-queue="${id}">${body}</button>${queueActions(row, ui, repoOffers)}</div>`;
 }
 
+/** Where an Inbox item is: its repository, workflow, run and call. */
+const whereOf = (item: AttentionItem): string =>
+  [item.repo, item.workflow, item.runId, item.key].filter((part) => part !== undefined).join(' · ');
+
+/** An Inbox row: what needs attention, opening its run (at its call in error) or its queue, the view staying Inbox. */
+function attentionRow(row: AttentionRow, ui: UiState): SafeHtml {
+  const { item } = row;
+  const { opens } = item;
+  const queue = item.workflow === undefined ? undefined : queueId(row.repo, item.workflow);
+  const sel = opens === undefined ? queue !== undefined && ui.queue === queue : isOpenRun(opens.repo, opens.runId, ui);
+  const body = html`<span class="r-line"><b class="r-title">${item.title}</b><span class="r-wf">${whereOf(item)}</span>${
+    item.detail === '' || item.kind === 'problem'
+      ? ''
+      : html`<span class="r-detail" title="${item.detail}">${item.detail}</span>`
+  }</span>${item.kind === 'problem' ? html`<span class="r-problem">${item.detail}</span>` : ''}`;
+  const open =
+    opens !== undefined
+      ? html`<button class="r-open" data-action="open" data-repo="${opens.repo}" data-run="${opens.runId}"${
+          opens.key === undefined ? '' : html` data-key="${opens.key}"`
+        }>${body}</button>`
+      : queue !== undefined
+        ? html`<button class="r-open" data-action="select-queue" data-queue="${queue}">${body}</button>`
+        : html`<div class="r-open">${body}</div>`;
+  return html`<div class="lrow in-row in-${item.kind}${sel ? ' sel' : ''}${cur(row.id, ui)}" data-row="${row.id}">${open}<button class="r-dismiss" type="button" data-action="dismiss-attention" data-item="${identity(item)}" aria-label="dismiss" title="dismiss (e)">✕</button></div>`;
+}
+
 const rowOf = (
   row: ListRow,
   ui: UiState,
   now: number,
   offers: RunActions | undefined,
   repoOffers: RepoOffers | undefined,
-): SafeHtml => (row.kind === 'run' ? runRow(row, ui, offers) : queueRow(row, ui, now, repoOffers));
+): SafeHtml =>
+  row.kind === 'attention'
+    ? attentionRow(row, ui)
+    : row.kind === 'run'
+      ? runRow(row, ui, offers)
+      : queueRow(row, ui, now, repoOffers);
 
 /** A Queues group's header row: the repository, its watch buttons and its problem. */
 function repoHeader(group: ListGroup, repo: ListRepo, open: boolean, ui: UiState): SafeHtml {
@@ -181,6 +222,7 @@ function groupBlock(group: ListGroup, ui: UiState, now: number, offers: RunActio
 }
 
 const EMPTY: Record<ViewName, string> = {
+  inbox: 'nothing needs attention',
   active: 'no live run',
   queues: 'no queue',
   history: 'no finished run',
@@ -198,12 +240,17 @@ export function renderList(
   ui: UiState,
   now: number,
   offers?: RunActions | undefined,
+  inbox: readonly AttentionItem[] = [],
 ): SafeHtml {
-  const all = groupsOf(view, repos, ui.repoFilter);
+  const all = groupsOf(view, repos, ui.repoFilter, inbox);
   const shown = filterRows(all, ui.listFilter);
   const narrowed = ui.listFilter.trim() !== '';
   const count = narrowed ? `${total(shown)} of ${total(all)}` : String(total(all));
-  const head = html`<div class="list-h"><span class="lh-t">${VIEW_LABELS[view]}</span><span class="c">${count}</span><input class="list-f" name="list-filter" type="search" value="${ui.listFilter}" placeholder="filter (/)" aria-label="filter the list" autocomplete="off" spellcheck="false"></div>`;
+  const clear =
+    view === 'inbox' && total(shown) > 0
+      ? html`<button class="btn" type="button" data-action="clear-attention" title="dismiss all (Shift+E)">all clear</button>`
+      : '';
+  const head = html`<div class="list-h"><span class="lh-t">${VIEW_LABELS[view]}</span><span class="c">${count}</span>${clear}<input class="list-f" name="list-filter" type="search" value="${ui.listFilter}" placeholder="filter (/)" aria-label="filter the list" autocomplete="off" spellcheck="false"></div>`;
   const empty =
     repos.length === 0
       ? 'no repository is registered yet: run sail watch in one'

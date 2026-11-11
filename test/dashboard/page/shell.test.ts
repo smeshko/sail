@@ -161,7 +161,6 @@ test("the shell's actions are exactly the page's view actions: every action of t
       'run-menu',
       'toggle-queue-events',
       'toggle-queue-section',
-      'toggle-attention',
       'toggle-inspector',
       'toggle-theme',
       'toggle-follow',

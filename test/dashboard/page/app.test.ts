@@ -362,22 +362,12 @@ test('boot draws the sidebar and the list from the first index and opens no run;
   page = boot(host);
   expect(host.sockets.map((socket) => socket.query)).toEqual(['index=1']);
   host.advance(100);
-  expect(host.renders.sort()).toEqual([
-    'attention',
-    'drawer',
-    'inspector',
-    'link',
-    'list',
-    'main',
-    'sidebar',
-    'status',
-    'toasts',
-  ]);
+  expect(host.renders.sort()).toEqual(['drawer', 'inspector', 'link', 'list', 'main', 'sidebar', 'status', 'toasts']);
   plainIndex();
   expect(host.open('run=')).toEqual([]);
   host.renders = [];
   host.advance(100);
-  expect(host.renders.sort()).toEqual(['attention', 'list', 'sidebar']);
+  expect(host.renders.sort()).toEqual(['list', 'sidebar']);
   expect(host.regions.sidebar).toContain('<span class="nm">alpha</span>');
   expect(host.regions.sidebar).toContain('<span class="nm">beta</span>');
   expect(host.regions.list).toContain('<span class="lh-t">Active</span><span class="c">1</span>');
@@ -407,8 +397,8 @@ test('boot draws the sidebar and the list from the first index and opens no run;
     'publish#1',
   ]);
   expect(host.regions.status).toContain('<span>ended completed</span>');
-  expect(host.regions.attention).toContain('⚑ needs attention<span class="badge">3</span></button>');
-  expect(host.regions.attention).not.toContain('att-pane');
+  expect(host.regions.sidebar).toContain('data-view="inbox"');
+  expect(Object.keys(host.regions)).not.toContain('attention');
 });
 
 test("opening FAKE-2's denial closes the golden run's socket, opens FAKE-2's, reads implement#1's result, and renders its permissions tab", async () => {
@@ -1350,7 +1340,7 @@ test("a region whose draw throws shows that it couldn't be drawn, and every othe
   host.renders = [];
   host.push(host.open('index')[0], broken);
   expect(() => host.advance(100)).not.toThrow();
-  expect(host.renders.sort()).toEqual(['attention', 'list', 'sidebar']);
+  expect(host.renders.sort()).toEqual(['list', 'sidebar']);
   expect(host.regions.list).toContain('this part of the page could not be drawn');
   expect(cards(host.regions.main)).toHaveLength(8);
 });
@@ -1510,7 +1500,7 @@ test('select-view redraws the list with History and Queues rows, and filter-repo
         /data-view="(\w+)"[^>]*><span class="nm">\w+<\/span><span class="c">(\d+)<\/span>/g,
       ),
     ].map(([, view, n]) => `${view} ${n}`);
-  expect(counts()).toEqual(['active 1', 'queues 1', 'history 3']);
+  expect(counts()).toEqual(['inbox 3', 'active 1', 'queues 1', 'history 3']);
   host.click({ action: 'select-view', view: 'history' });
   host.advance(100);
   expect(host.regions.list).toContain('<span class="lh-t">History</span><span class="c">3</span>');
@@ -1520,7 +1510,7 @@ test('select-view redraws the list with History and Queues rows, and filter-repo
   expect(host.regions.list).toContain(`data-queue="beta/${QUEUE_WORKFLOW}"`);
   host.click({ action: 'filter-repo', repo: 'alpha' });
   host.advance(100);
-  expect(counts()).toEqual(['active 0', 'queues 0', 'history 2']);
+  expect(counts()).toEqual(['inbox 1', 'active 0', 'queues 0', 'history 2']);
   expect(host.regions.sidebar).toContain('data-repo="alpha" aria-pressed="true"');
   expect(host.regions.list).not.toContain('data-queue=');
   host.click({ action: 'select-view', view: 'history' });
@@ -1557,7 +1547,7 @@ test('select-view pushes the view into the URL, a view that is none writes nothi
   plainIndex();
   host.urls = [];
   host.click({ action: 'select-view', view: 'queues' });
-  host.press('3');
+  host.press('4');
   host.click({ action: 'select-view', view: 'bogus' });
   host.click({ action: 'select-view', view: 'active' });
   expect(host.urls).toEqual([
@@ -1588,7 +1578,7 @@ describe('the list by keyboard (ADW-522)', () => {
   const bootHistory = () => {
     page = boot(host);
     plainIndex();
-    host.press('3');
+    host.press('4');
     host.advance(100);
     return page;
   };
@@ -1649,7 +1639,7 @@ describe('the list by keyboard (ADW-522)', () => {
 
   test('Enter on a queue row opens the queue beside the list', () => {
     const p = bootHistory();
-    host.press('2');
+    host.press('3');
     for (let i = 0; i < 3; i++) host.press('j');
     expect(p.ui.listCursor).toBe(`queue:beta/${QUEUE_WORKFLOW}`);
     host.press('Enter');
@@ -1695,7 +1685,7 @@ describe('the list by keyboard (ADW-522)', () => {
     host.press('j');
     host.press('Escape', true);
     expect(host.blurs).toBe(1);
-    host.press('2', true);
+    host.press('3', true);
     host.press('j', true);
     host.press('Enter', true);
     host.press('/', true);
@@ -1725,22 +1715,26 @@ describe('the list by keyboard (ADW-522)', () => {
     host.type('list-filter', 'fake');
     host.advance(100);
     host.freshes = [];
-    host.press('1');
+    host.press('2');
     host.advance(100);
     expect(p.ui.listFilter).toBe('');
     expect(host.freshes).toContain('list');
   });
 
-  test('1, 2 and 3 change the view to Active, Queues and History, and clear the filter and the cursor', () => {
+  test("a and 1 to 4 select the views in the sidebar's order, and clear the filter and the cursor", () => {
     const p = bootHistory();
     host.type('list-filter', 'x');
     host.press('j');
-    host.press('1');
-    expect([p.ui.view, p.ui.listFilter, p.ui.listCursor]).toEqual(['active', '', undefined]);
     host.press('2');
-    expect(p.ui.view).toBe('queues');
+    expect([p.ui.view, p.ui.listFilter, p.ui.listCursor]).toEqual(['active', '', undefined]);
+    host.press('1');
+    expect(p.ui.view).toBe('inbox');
     host.press('3');
+    expect(p.ui.view).toBe('queues');
+    host.press('4');
     expect(p.ui.view).toBe('history');
+    host.press('a');
+    expect(p.ui.view).toBe('inbox');
   });
 
   test('with a run open, j and k move the card cursor as before and leave the list cursor alone, and Escape steps back to the list', () => {
@@ -1793,34 +1787,24 @@ describe('the list by keyboard (ADW-522)', () => {
   });
 });
 
-test('the needs attention button opens its pane, a and Escape toggle and close it, and opening an item closes it and leaves an open queue', () => {
+test('Escape with a run open in the Inbox closes the timeline, the selection, then the run, and the view stays inbox', () => {
   page = boot(host);
   firstIndex();
-  replay(host.open('run=')[0], GOLDEN());
+  host.click({ action: 'select-view', view: 'inbox' });
+  host.click({ action: 'open', repo: 'alpha', run: FAKE_2_ID, key: 'implement#1', tab: 'permissions' });
+  replay(host.open('run=')[0], fake2Dir(m));
   host.advance(100);
-  host.click({ action: 'toggle-attention' });
+  expect([page.ui.view, page.ui.runId, page.ui.key]).toEqual(['inbox', FAKE_2_ID, 'implement#1']);
+  host.click({ action: 'select-card', key: 'implement#1' });
   host.advance(100);
-  expect(host.regions.attention).toContain('<div class="att-pane">');
-  expect(host.regions.attention).toContain(`data-action="open" data-repo="alpha" data-run="${FAKE_2_ID}"`);
+  expect(page.ui.timeline).toBe(true);
+  host.press('Escape');
+  expect([page.ui.timeline, page.ui.key, page.ui.runId]).toEqual([false, 'implement#1', FAKE_2_ID]);
+  host.press('Escape');
+  expect([page.ui.key, page.ui.runId]).toEqual([undefined, FAKE_2_ID]);
   host.press('Escape');
   host.advance(100);
-  expect([page.ui.attention, host.regions.attention?.includes('att-pane')]).toEqual([false, false]);
-  expect(page.ui.key).toBeUndefined();
-  host.press('a');
-  host.advance(100);
-  expect(page.ui.attention).toBe(true);
-  host.press('a', true);
-  expect(page.ui.attention).toBe(true);
-  host.click({ action: 'select-queue', queue: `beta/${QUEUE_WORKFLOW}` });
-  host.click({ action: 'open', repo: 'alpha', run: FAKE_2_ID, key: 'implement#1', tab: 'permissions' });
-  host.advance(100);
-  expect([page.ui.attention, page.ui.queue, page.ui.runId, page.ui.key]).toEqual([
-    false,
-    undefined,
-    FAKE_2_ID,
-    'implement#1',
-  ]);
-  expect(host.regions.attention).not.toContain('att-pane');
+  expect([page.ui.runId, page.ui.view]).toEqual([undefined, 'inbox']);
 });
 
 test('a group folds and opens again from its header, remembered across a boot, and opening a run from the list gives the centre back from a queue', () => {
@@ -2311,9 +2295,9 @@ test('Escape and the cancel button close the dialog and post nothing, and Enter 
 test('while the dialog is open, j, a and i change nothing', () => {
   openBetaQueue();
   host.click({ action: 'drop-item', ...BETA, item: 'ticket:FAKE-6' });
-  const before = [page?.ui.attention, page?.ui.inspector, page?.ui.cursor];
+  const before = [page?.ui.view, page?.ui.inspector, page?.ui.cursor];
   for (const key of ['j', 'a', 'i']) host.press(key);
-  expect([page?.ui.attention, page?.ui.inspector, page?.ui.cursor]).toEqual(before);
+  expect([page?.ui.view, page?.ui.inspector, page?.ui.cursor]).toEqual(before);
   expect(dialogTitle()).toBe('drop ticket:FAKE-6');
 });
 
@@ -2772,7 +2756,11 @@ test('a 202 toasts its waiting line, a 409 the CLI refusal, and no answer says s
 });
 
 describe('all clear', () => {
-  const badge = () => host.regions.attention?.match(/<span class="badge">(\d+)<\/span>/)?.[1];
+  const badge = () =>
+    host.regions.sidebar?.match(
+      /data-view="inbox"[^>]*><span class="nm">Inbox<\/span><span class="c">(\d+)<\/span>/,
+    )?.[1];
+  const listed = () => host.regions.list ?? '';
   const pushIndex = (change?: (repos: ReturnType<typeof index>) => void) => {
     const repos = index(m.registryDir);
     change?.(repos);
@@ -2782,24 +2770,48 @@ describe('all clear', () => {
   const bootOpen = (change?: (repos: ReturnType<typeof index>) => void) => {
     page = boot(host);
     pushIndex(change);
-    host.click({ action: 'toggle-attention' });
+    host.click({ action: 'select-view', view: 'inbox' });
     host.advance(100);
   };
 
   test('one click empties the list and the count, shows nothing needs attention, posts nothing and leaves the failed run in the list', () => {
     bootOpen();
+    expect(badge()).toBe('3');
+    expect(listed()).toContain('data-action="clear-attention" title="dismiss all (Shift+E)">all clear</button>');
+    host.click({ action: 'clear-attention' });
+    host.advance(100);
+    expect(badge()).toBe('0');
+    expect(listed()).toContain('nothing needs attention');
+    expect(listed()).not.toContain('all clear</button>');
+    expect(host.posts).toEqual([]);
     host.click({ action: 'select-view', view: 'history' });
     host.advance(100);
     expect(host.regions.list).toContain(`data-run="${FAKE_2_ID}"`);
-    expect(badge()).toBe('3');
-    expect(host.regions.attention).toContain('data-action="clear-attention">all clear</button>');
+  });
+
+  test('with a repository filter on, all clear hides only that repository, and the others are listed once the filter is off', () => {
+    bootOpen();
+    host.click({ action: 'filter-repo', repo: 'beta' });
+    host.advance(100);
+    expect(badge()).toBe('2');
     host.click({ action: 'clear-attention' });
     host.advance(100);
-    expect(badge()).toBeUndefined();
-    expect(host.regions.attention).toContain('nothing needs attention');
-    expect(host.regions.attention).not.toContain('all clear');
-    expect(host.posts).toEqual([]);
-    expect(host.regions.list).toContain(`data-run="${FAKE_2_ID}"`);
+    expect(toasts()).toEqual(['ok all clear: 2 hidden']);
+    host.click({ action: 'filter-repo', repo: 'beta' });
+    host.advance(100);
+    expect(badge()).toBe('1');
+    expect(listed()).toContain('failed: stage_error');
+    expect(listed()).not.toContain('ticket:FAKE-6');
+  });
+
+  test('clear-attention while another view is shown hides nothing and draws no toast', () => {
+    bootOpen();
+    host.click({ action: 'select-view', view: 'active' });
+    host.advance(100);
+    host.click({ action: 'clear-attention' });
+    host.advance(100);
+    expect([badge(), toasts()]).toEqual(['3', []]);
+    expect(host.storage.get(CLEARED_KEY)).toBe('[]');
   });
 
   test('all clear answers in a toast with an undo, which lists the same items again and takes only its own identities out of storage', async () => {
@@ -2810,7 +2822,7 @@ describe('all clear', () => {
     host.advance(100);
     expect(toasts()).toEqual(['ok all clear: 3 hidden']);
     expect(page?.ui.toasts[0]?.undo).toBe(true);
-    expect(badge()).toBeUndefined();
+    expect(badge()).toBe('0');
     const saved: string[] = JSON.parse(host.storage.get(CLEARED_KEY) ?? '[]');
     expect(saved).toContain(other);
     expect(saved).toHaveLength(4);
@@ -2822,7 +2834,7 @@ describe('all clear', () => {
     expect(host.posts).toEqual([]);
   });
 
-  test('a cleared run whose row gains another call in error is listed again, with it in the row', () => {
+  test('a dismissed row returns when its detail changes: a cleared run whose row gains another call in error is listed again, with it in the row', () => {
     bootOpen();
     host.click({ action: 'clear-attention' });
     pushIndex((repos) => {
@@ -2830,7 +2842,7 @@ describe('all clear', () => {
       for (const call of run?.summary?.calls ?? []) if (call.key === 'spec#1') call.outcome = 'error';
     });
     expect(badge()).toBe('1');
-    expect(host.regions.attention).toContain('also in error: spec#1');
+    expect(listed()).toContain('also in error: spec#1');
   });
 
   test('the clear survives a reboot over the same storage', () => {
@@ -2838,8 +2850,8 @@ describe('all clear', () => {
     host.click({ action: 'clear-attention' });
     page?.stop();
     bootOpen();
-    expect(badge()).toBeUndefined();
-    expect(host.regions.attention).toContain('nothing needs attention');
+    expect(badge()).toBe('0');
+    expect(listed()).toContain('nothing needs attention');
   });
 
   test('a new failure, and a cleared parked item whose attempts changed, are listed after a clear', () => {
@@ -2850,17 +2862,17 @@ describe('all clear', () => {
       if (run) run.status = { status: 'failed', stopReason: 'stage_error' };
     });
     expect(badge()).toBe('1');
-    expect(host.regions.attention).toContain('failed: stage_error');
+    expect(listed()).toContain('failed: stage_error');
     pushIndex((repos) => {
       for (const view of repos.find((repo) => repo.name === 'beta')?.queues ?? [])
         for (const item of view.queue?.items ?? []) if (item.state === 'parked') item.attempts = 3;
     });
     // FAKE-3's cleared error row was pruned while its run's row read as failed, so it is listed again with the parked one.
     expect(badge()).toBe('2');
-    expect(host.regions.attention).toContain('ticket:FAKE-6 parked after 3 attempts');
+    expect(listed()).toContain('ticket:FAKE-6 parked after 3 attempts');
   });
 
-  test('a failure that arrives before the pane is drawn again is not cleared with the rows on screen', () => {
+  test('a failure that arrives before the Inbox is drawn again is not cleared with the rows on screen', () => {
     bootOpen();
     host.push(host.open('index')[0], {
       kind: 'index',
@@ -2874,7 +2886,7 @@ describe('all clear', () => {
     host.click({ action: 'clear-attention' });
     host.advance(100);
     expect(badge()).toBe('1');
-    expect(host.regions.attention).toContain('failed: stage_error');
+    expect(listed()).toContain('failed: stage_error');
   });
 
   test('a prune keeps what another tab cleared in storage since this one loaded it', () => {
@@ -2903,8 +2915,8 @@ describe('all clear', () => {
     page?.stop();
     bootOpen(changed);
     expect(badge()).toBe('1');
-    expect(host.regions.attention).toContain('ticket:FAKE-6 parked after 3 attempts');
-    expect(host.regions.attention).not.toContain('failed: stage_error');
+    expect(listed()).toContain('ticket:FAKE-6 parked after 3 attempts');
+    expect(listed()).not.toContain('failed: stage_error');
   });
 
   test('identities the newest index no longer lists are dropped from storage, and the listed ones stay', () => {
@@ -3414,4 +3426,208 @@ test('once the index says the queue is no longer held, its banner, its button an
     true,
     [],
   ]);
+});
+
+describe('the Inbox view (ADW-527)', () => {
+  const items = () => attention(index(m.registryDir));
+  const failed = () => items().find((item) => item.kind === 'failed' && item.runId === FAKE_2_ID);
+
+  test('the sidebar draws the Inbox first, as a select-view button with the count of undismissed items', () => {
+    page = boot(host);
+    plainIndex();
+    host.advance(100);
+    expect(host.regions.sidebar).toMatch(
+      /^<div class="side-views"><button class="side-ent" type="button" data-action="select-view" data-view="inbox"><span class="nm">Inbox<\/span><span class="c">3<\/span>/,
+    );
+    host.click({ action: 'select-view', view: 'inbox' });
+    host.advance(100);
+    expect(host.regions.list).toContain('<span class="lh-t">Inbox</span><span class="c">3</span>');
+    expect(host.regions.list).toContain('failed: stage_error');
+    expect(host.regions.list).toContain('ticket:FAKE-6 parked after 2 attempts');
+  });
+
+  test('opening an Inbox row keeps the Inbox and opens its run at its call in error', () => {
+    page = boot(host);
+    plainIndex();
+    host.click({ action: 'select-view', view: 'inbox' });
+    host.advance(100);
+    const item = failed();
+    if (item === undefined) throw new Error('no failed item');
+    host.click({
+      action: 'open',
+      repo: 'alpha',
+      run: FAKE_2_ID,
+      ...(item.opens?.key === undefined ? {} : { key: item.opens.key }),
+    });
+    host.advance(100);
+    expect([page.ui.view, page.ui.runId, page.ui.key]).toEqual(['inbox', FAKE_2_ID, item.opens?.key]);
+    expect(host.regions.list).toContain('<span class="lh-t">Inbox</span>');
+    expect(host.regions.list).toMatch(/class="lrow in-row in-failed sel" data-row="inbox:/);
+  });
+
+  test('Enter on an Inbox row under the cursor opens its run', () => {
+    page = boot(host);
+    plainIndex();
+    host.press('a');
+    host.advance(100);
+    expect(page.ui.view).toBe('inbox');
+    host.press('j');
+    host.press('j');
+    host.press('Enter');
+    host.advance(100);
+    expect(page.ui.view).toBe('inbox');
+    expect(page.ui.runId).toBe(FAKE_2_ID);
+    expect(page.ui.listCursor).toContain('inbox:');
+    expect(host.regions.list).toMatch(/class="lrow in-row in-failed sel cur" data-row="inbox:/);
+  });
+
+  test('a parked row with no listed run opens its queue, the view staying Inbox', () => {
+    page = boot(host);
+    plainIndex();
+    host.click({ action: 'select-view', view: 'inbox' });
+    host.advance(100);
+    host.click({ action: 'select-queue', queue: `beta/${QUEUE_WORKFLOW}` });
+    host.advance(100);
+    expect([page.ui.view, page.ui.queue]).toEqual(['inbox', `beta/${QUEUE_WORKFLOW}`]);
+    expect(host.regions.list).toMatch(/class="lrow in-row in-parked sel" data-row="inbox:/);
+  });
+
+  test('?view=inbox boots on the Inbox', () => {
+    host.startAt = { view: 'inbox' };
+    page = boot(host);
+    plainIndex();
+    host.advance(100);
+    expect(page.ui.view).toBe('inbox');
+    expect(host.regions.list).toContain('<span class="lh-t">Inbox</span>');
+  });
+
+  describe('dismissing', () => {
+    const count = () =>
+      host.regions.sidebar?.match(
+        /data-view="inbox"[^>]*><span class="nm">Inbox<\/span><span class="c">(\d+)<\/span>/,
+      )?.[1];
+    const inbox = () => {
+      page = boot(host);
+      plainIndex();
+      host.press('a');
+      host.advance(100);
+    };
+    const rows = () => [...(host.regions.list ?? '').matchAll(/<b class="r-title">([^<]*)<\/b>/g)].map(([, t]) => t);
+
+    test("e dismisses the row under the cursor and its toast's Undo lists it again", () => {
+      inbox();
+      host.press('j');
+      host.press('j');
+      expect(page?.ui.listCursor).toContain('inbox:');
+      host.press('e');
+      host.advance(100);
+      expect(rows()).toEqual(['implement#1 ended in error', 'ticket:FAKE-6 parked after 2 attempts']);
+      expect(count()).toBe('2');
+      expect(toasts()).toEqual(['ok dismiss: failed: stage_error hidden']);
+      expect(page?.ui.toasts[0]?.undo).toBe(true);
+      expect(host.posts).toEqual([]);
+      expect(page?.ui.listCursor).toContain('implement#1 ended in error');
+      host.click({ action: 'undo-toast', toast: '1' });
+      host.advance(100);
+      expect(rows()).toEqual([
+        'failed: stage_error',
+        'implement#1 ended in error',
+        'ticket:FAKE-6 parked after 2 attempts',
+      ]);
+      expect(count()).toBe('3');
+    });
+
+    test('an identity another tab saved meanwhile stays hidden after Undo', () => {
+      inbox();
+      host.press('j');
+      host.press('j');
+      host.press('e');
+      host.storage.set(
+        CLEARED_KEY,
+        JSON.stringify([...JSON.parse(host.storage.get(CLEARED_KEY) ?? '[]'), 'other tab']),
+      );
+      host.click({ action: 'undo-toast', toast: '1' });
+      expect(JSON.parse(host.storage.get(CLEARED_KEY) ?? '[]')).toEqual(['other tab']);
+    });
+
+    test('e on the last row moves the cursor to the previous row, and repeated e works through the list', () => {
+      inbox();
+      for (let i = 0; i < 5; i++) host.press('j');
+      expect(page?.ui.listCursor).toContain('ticket:FAKE-6');
+      host.press('e');
+      host.advance(100);
+      expect(page?.ui.listCursor).toContain('implement#1 ended in error');
+      host.press('e');
+      host.press('e');
+      host.advance(100);
+      expect([count(), rows()]).toEqual(['0', []]);
+      expect(page?.ui.listCursor).toBeUndefined();
+    });
+
+    test('with a row opened by a click, e dismisses the open run row and the run stays open', () => {
+      inbox();
+      host.click({ action: 'open', repo: 'alpha', run: FAKE_2_ID, key: 'implement#1' });
+      host.advance(100);
+      expect(page?.ui.listCursor).toBeUndefined();
+      host.press('e');
+      host.advance(100);
+      expect(count()).toBe('2');
+      expect(rows()).not.toContain('failed: stage_error');
+      expect([page?.ui.runId, page?.ui.view]).toEqual([FAKE_2_ID, 'inbox']);
+    });
+
+    test("a click on a row's ✕ does what e does and does not open the row", () => {
+      inbox();
+      expect(host.regions.list).toContain('data-action="dismiss-attention" data-item="');
+      const item = attention(index(m.registryDir)).find((each) => each.kind === 'parked');
+      if (item === undefined) throw new Error('no parked item');
+      host.click({ action: 'dismiss-attention', item: identity(item) });
+      host.advance(100);
+      expect([count(), toasts()]).toEqual(['2', ['ok dismiss: ticket:FAKE-6 parked after 2 attempts hidden']]);
+      expect([page?.ui.runId, page?.ui.queue]).toEqual([undefined, undefined]);
+    });
+
+    test('Shift+E hides every row the Inbox shows, and its Undo lists them again', () => {
+      inbox();
+      host.press('E');
+      host.advance(100);
+      expect([count(), rows(), toasts()]).toEqual(['0', [], ['ok all clear: 3 hidden']]);
+      host.click({ action: 'undo-toast', toast: '1' });
+      host.advance(100);
+      expect(count()).toBe('3');
+    });
+
+    test('e and E do nothing outside the Inbox, and e does nothing in an input', () => {
+      inbox();
+      host.press('2');
+      host.press('e');
+      host.press('E');
+      host.press('4');
+      host.press('e');
+      host.press('E');
+      host.press('1');
+      host.press('j');
+      host.press('e', true);
+      host.press('E', true);
+      host.advance(100);
+      expect([count(), toasts()]).toEqual(['3', []]);
+    });
+
+    test('e with no row under the cursor and no open run does nothing and draws no toast', () => {
+      inbox();
+      host.press('e');
+      expect([count(), toasts()]).toEqual(['3', []]);
+    });
+
+    test('a dismissed row stays hidden after the page boots again on the same storage', () => {
+      inbox();
+      host.press('j');
+      host.press('j');
+      host.press('e');
+      page?.stop();
+      inbox();
+      expect(count()).toBe('2');
+      expect(rows()).not.toContain('failed: stage_error');
+    });
+  });
 });

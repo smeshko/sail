@@ -1,5 +1,6 @@
 // The list's model: the Active, History and Queues views as grouped rows, the sidebar's counts and the cursor's entries.
 import { expect, test } from 'bun:test';
+import type { AttentionItem } from '../../../src/dashboard/page/attention';
 import type { ListRepo, ListRun } from '../../../src/dashboard/page/index-model';
 import {
   activeGroups,
@@ -7,6 +8,7 @@ import {
   filterRows,
   groupsOf,
   historyGroups,
+  inboxGroups,
   queueGroups,
   repoDot,
   VIEWS,
@@ -122,12 +124,12 @@ test('groupsOf with a repository filter keeps only that repository, and viewCoun
     ['waiting on you', ['run:alpha/a-run2']],
     ['running', ['run:alpha/a-run1']],
   ]);
-  expect(viewCounts([alpha, beta])).toEqual({ active: 6, queues: 0, history: 4 });
-  expect(viewCounts([alpha, beta], 'alpha')).toEqual({ active: 2, queues: 0, history: 2 });
+  expect(viewCounts([alpha, beta])).toEqual({ inbox: 0, active: 6, queues: 0, history: 4 });
+  expect(viewCounts([alpha, beta], 'alpha')).toEqual({ inbox: 0, active: 2, queues: 0, history: 2 });
   const q = repo('q', [], { workflows: [{ name: 'w', runs: [], queue: { waiting: 0 } }] });
   expect(viewCounts([q, alpha], 'q').queues).toBe(1);
   expect(groupsOf('queues', [q, alpha], 'q').map((g) => g.id)).toEqual(['queues:q']);
-  expect(VIEWS).toEqual(['active', 'queues', 'history']);
+  expect(VIEWS).toEqual(['inbox', 'active', 'queues', 'history']);
 });
 
 test('repoDot gives broken, watching and idle', () => {
@@ -170,4 +172,55 @@ test('entries lists group ids and visible row ids in order, leaving out the rows
     'run:alpha/a-run1',
     'run:beta/b-run2',
   ]);
+});
+
+const items: AttentionItem[] = [
+  {
+    repo: 'alpha',
+    runId: 'a-fail',
+    kind: 'failed',
+    title: 'failed: stage_error',
+    detail: 'broke',
+    opens: { repo: 'alpha', runId: 'a-fail' },
+  },
+  { repo: 'beta', runId: 'b-err', key: 'build#1', kind: 'error', title: 'build#1 ended in error', detail: 'oops' },
+  {
+    repo: 'alpha',
+    workflow: 'flow',
+    kind: 'parked',
+    title: 'ticket:ADW-9 parked after 2 attempts',
+    detail: 'no tests',
+  },
+  { repo: 'beta', kind: 'problem', title: 'repository', detail: 'cannot read' },
+];
+
+test('the Inbox lists one row per needs-attention item under the repository filter', () => {
+  const rows = (filter?: string) =>
+    groupsOf('inbox', [alpha, beta], filter, items).map((g) => [g.id, g.label, g.rows.map((r) => r.repo)]);
+  expect(rows()).toEqual([
+    ['inbox:runs', 'runs', ['alpha', 'beta']],
+    ['inbox:parked', 'parked', ['alpha']],
+    ['inbox:problems', 'problems', ['beta']],
+  ]);
+  expect(rows('alpha')).toEqual([
+    ['inbox:runs', 'runs', ['alpha']],
+    ['inbox:parked', 'parked', ['alpha']],
+  ]);
+  expect(viewCounts([alpha, beta], undefined, items).inbox).toBe(4);
+  expect(viewCounts([alpha, beta], 'alpha', items).inbox).toBe(2);
+  expect(groupsOf('inbox', [alpha, beta])).toEqual([]);
+});
+
+test('an Inbox row is known by inbox: and the item identity, and its text is searchable', () => {
+  const groups = inboxGroups(items);
+  const first = groups[0]?.rows[0];
+  expect(first?.id).toBe(
+    `inbox:${JSON.stringify(['alpha', 'failed', 'a-fail', null, null, 'failed: stage_error', 'broke'])}`,
+  );
+  const matches = (text: string) =>
+    filterRows(groups, text).flatMap((g) => g.rows.map((r) => r.kind === 'attention' && r.item.title));
+  expect(matches('OOPS')).toEqual(['build#1 ended in error']);
+  expect(matches('flow')).toEqual(['ticket:ADW-9 parked after 2 attempts']);
+  expect(matches('a-fail')).toEqual(['failed: stage_error']);
+  expect(matches('build#1')).toEqual(['build#1 ended in error']);
 });
