@@ -339,7 +339,7 @@ The commit a run's workspace starts from: the default branch's tip on the remote
 _Avoid_: start point, fork point
 
 **Run ref**:
-`refs/sail/runs/<runId>` in the repository: where a run's commits are kept when its workspace is removed with its `HEAD` past its base and on no remote-tracking ref, recorded as `ref` on `workspace:released`. A failed run never pushed its branch, so this is where its work survives. `git branch` doesn't list it and gc keeps what it reaches; `git branch <name> refs/sail/runs/<runId>` recovers the work.
+`refs/sail/runs/<runId>` in the repository: where a run's commits are kept when its workspace is removed with its `HEAD` past its base, whether or not its branch was pushed, recorded as `ref` on `workspace:released`. A failed run that never pushed its branch has its work nowhere else, and a seeded run carries from the ref, which pins the commit the run ended on though the remote branch is deleted or moved. `git branch` doesn't list it and gc keeps what it reaches; `git branch <name> refs/sail/runs/<runId>` recovers the work.
 _Avoid_: backup branch, rescue ref
 
 **Clean**:
