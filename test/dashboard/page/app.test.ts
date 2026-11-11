@@ -5356,6 +5356,26 @@ describe('start a run (ADW-524)', () => {
     expect([page?.ui.runId, toasts()]).toEqual([NEW_ID, [`ok start a run…: started ${NEW_ID}`]]);
   });
 
+  test('the chip keeps the run the menu opened on until the repository is chosen, then names that repository, and Escape brings the run back', async () => {
+    bootStartable();
+    host.point('hover', FAKE_3_ROW);
+    cmdK();
+    host.advance(100);
+    const run = menuHead();
+    expect(run).toContain('FAKE-3');
+    typeIn('start a run');
+    enter();
+    expect([stepLabel(), menuHead()]).toEqual(['Repository', run]);
+    enter();
+    expect([stepLabel(), menuHead()]).toEqual(['Workflow', 'alpha']);
+    enter();
+    expect([stepLabel(), menuHead()]).toEqual(['Ticket key or pull request', 'alpha']);
+    host.press('Escape', true);
+    host.press('Escape', true);
+    host.advance(100);
+    expect([stepLabel(), menuHead()]).toEqual(['Repository', run]);
+  });
+
   test('a refused start is a red toast with a start anyway button, the menu then lists it, and its dialog names the check it overrides', async () => {
     bootStartable();
     const line = 'sail FAKE-3: the ticket is not designated. --force runs it anyway';
@@ -5927,6 +5947,9 @@ describe('a key for every action, and the shortcut sheet (ADW-523)', () => {
     );
     expect(sheet()).toContain('<kbd>G</kbd><span class="keys-then">then</span><kbd>Q</kbd>');
     expect(sheet()).toContain(
+      '<span class="keys-t">move to the top</span><span class="keys-ks"><span class="keys-k"><kbd>⇧T</kbd>',
+    );
+    expect(sheet()).toContain(
       '<span class="keys-t">move up</span><span class="keys-ks"><span class="keys-k"><kbd>⌥↑</kbd>',
     );
     expect(host.menuFocuses).toBe(1);
@@ -6043,6 +6066,20 @@ describe('a key for every action, and the shortcut sheet (ADW-523)', () => {
     await settle();
     host.advance(100);
     expect(toasts().at(-1)).toBe("hint stop gone-1: its actions can't be read");
+  });
+
+  test('Shift+T moves a waiting item before the first one, and says so on the first', async () => {
+    twoWaiting();
+    openBetaQueue();
+    host.point('hover', { ...ITEM_ROW, item: 'ticket:FAKE-7' });
+    press('T');
+    expect(host.posts).toEqual([
+      { path: `${QUEUE_PATH}/move`, body: { dedupKey: 'ticket:FAKE-7', before: 'ticket:FAKE-5' } },
+    ]);
+    host.point('hover', ITEM_ROW);
+    press('T');
+    expect(host.posts.length).toBe(1);
+    expect(toasts().at(-1)).toBe('hint move to the top ticket:FAKE-5: ticket:FAKE-5 has no move to the top');
   });
 
   test('on a queue item: r requeues, Backspace opens the drop dialog, Alt+Down and Alt+Up move it; on the queue p polls and c asks the ticket in the command menu', async () => {

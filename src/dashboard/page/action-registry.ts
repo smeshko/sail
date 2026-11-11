@@ -1033,7 +1033,7 @@ export const ACTIONS: readonly ActionDef[] = [
     label: () => 'move',
     appliesTo: ['item'],
     tier: 'instant',
-    variantKeys: { 'move up': 'Alt+ArrowUp', 'move down': 'Alt+ArrowDown' },
+    variantKeys: { 'move up': 'Alt+ArrowUp', 'move down': 'Alt+ArrowDown', 'move to the top': 'T' },
     holdsDisabled: true,
     place: 'queue',
     params: () => [
@@ -1051,6 +1051,9 @@ export const ACTIONS: readonly ActionDef[] = [
       return [
         ...(above === undefined ? [] : [{ label: 'move up', data: { dir: 'up', target: above.dedupKey } }]),
         ...(below === undefined ? [] : [{ label: 'move down', data: { dir: 'down', target: below.dedupKey } }]),
+        ...(at === 0 || waiting[0] === undefined
+          ? []
+          : [{ label: 'move to the top', data: { dir: 'up', target: waiting[0].dedupKey } }]),
       ];
     },
     request: (subject, values) => ({

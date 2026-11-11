@@ -597,11 +597,40 @@ test('a move says its rows from the waiting neighbours', () => {
   expect(rows(1, all)).toEqual([
     { label: 'move up', data: { dir: 'up', target: 'ticket:FAKE-0' } },
     { label: 'move down', data: { dir: 'down', target: 'ticket:FAKE-2' } },
+    { label: 'move to the top', data: { dir: 'up', target: 'ticket:FAKE-0' } },
   ]);
   expect(rows(0, all)).toEqual([{ label: 'move down', data: { dir: 'down', target: 'ticket:FAKE-1' } }]);
-  expect(rows(2, all)).toEqual([{ label: 'move up', data: { dir: 'up', target: 'ticket:FAKE-1' } }]);
+  expect(rows(2, all)).toEqual([
+    { label: 'move up', data: { dir: 'up', target: 'ticket:FAKE-1' } },
+    { label: 'move to the top', data: { dir: 'up', target: 'ticket:FAKE-0' } },
+  ]);
   expect(rows(3, all)).toEqual([]);
   expect(move?.variants?.(WORKFLOW, source(all))).toEqual([]);
+});
+
+test('move to the top posts the first waiting item as the one to go before', () => {
+  const move = actionOf('move-item');
+  const source: OfferSource = {
+    index: [
+      {
+        name: 'alpha',
+        queues: [
+          {
+            workflow: 'wf',
+            queue: {
+              items: [0, 1, 2].map((at) => ({ dedupKey: `ticket:FAKE-${at}`, state: 'queued', attempts: 0 })),
+            },
+          },
+        ],
+      },
+    ],
+  };
+  const subject: Subject = { ...ITEM, item: 'ticket:FAKE-2' };
+  const top = move?.variants?.(subject, source)?.find((row) => row.label === 'move to the top');
+  expect(request('move-item', subject, top?.data ?? {})).toEqual({
+    path: '/api/repos/alpha/queues/wf/move',
+    body: { dedupKey: 'ticket:FAKE-2', before: 'ticket:FAKE-0' },
+  });
 });
 
 // Start a run (ADW-524): the command, its confirmed go, and the two "start anyway" actions.

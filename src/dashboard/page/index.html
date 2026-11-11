@@ -2575,10 +2575,19 @@
           display: inline-flex;
         }
       }
-      /* under 800px the page is one column: the list, or the open run or queue with a way back */
+      /* under 800px the page is one column: the list, or the open run or queue with one way back (the timeline's replaces the
+         list's); a queue row wraps so its title takes the row; the status bar wraps rather than clips, and the overlays stop above it */
       @media (max-width: 799px) {
         .body {
           grid-template-columns: minmax(0, 1fr);
+          position: relative;
+        }
+        .inspector,
+        :root[data-sidebar="open"] .side {
+          /* the overlays end where the body row does, so a status bar wrapped to more lines is never under them */
+          position: absolute;
+          top: 0;
+          bottom: 0;
         }
         :root:not([data-detail="open"]) .main {
           display: none;
@@ -2594,9 +2603,33 @@
         .brand-t {
           display: none;
         }
+        :root[data-detail="open"] .main:has(.tl-top) > .back {
+          display: none;
+        }
+        .qrow2 {
+          flex-wrap: wrap;
+        }
+        .qrow2 .c-main {
+          order: 1;
+          flex: 1 0 100%;
+        }
+        .qrow2 .c-side {
+          margin-left: auto;
+          flex: 0 1 auto;
+          min-width: 0;
+        }
+        .qrow2 .run-link {
+          flex: 0 1 auto;
+          min-width: 0;
+        }
+        .shell {
+          grid-template-rows: 46px 1fr auto;
+        }
         .status {
-          overflow: hidden;
-          white-space: nowrap;
+          flex-wrap: wrap;
+          min-height: 26px;
+          row-gap: 2px;
+          padding: 4px 12px;
         }
       }
     </style>

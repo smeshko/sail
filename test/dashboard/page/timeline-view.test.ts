@@ -303,3 +303,10 @@ test('a tool row and a script row say whether they are open, and the previous an
   expect(closed).toContain('data-by="-1" aria-label="previous call" title="previous call ([)">');
   expect(closed).toContain('data-by="1" aria-label="next call" title="next call (])">');
 });
+
+test('the timeline is drawn in a .tl-top holding the close-timeline button, the markup the narrow back-control rule reads', () => {
+  const markup = renderTimeline(spec([]), ui(), NOW).value;
+  expect(markup).toContain('<div class="tl-top">');
+  expect(markup).toContain('data-action="close-timeline"');
+  expect(markup.indexOf('class="tl-top"')).toBeLessThan(markup.indexOf('data-action="close-timeline"'));
+});
