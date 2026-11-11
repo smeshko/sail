@@ -3,17 +3,20 @@
 // folding groups: Active's `waiting on you` and `running`, History's `failed` and `done`, and in Queues one per
 // repository. A run's row is a `div` holding two sibling buttons: its own, which opens the run and shows on one line
 // its status, id, title, repository › workflow, stalled mark, duration, cost and stop reason, with a problem wrapping
-// inside it, and, but on a completed run, a ⋯ of its own that opens the run and, under the row, a menu of what it
-// offers: Resume, Restart, Stop and Clean. A queue's row opens its queue and names its watch state, the live watcher's;
-// a queue that can't be read shows its problem in place of its waiting count. A Queues group's header row also carries
+// inside it, and, but on a completed run, a ⋯ of its own that opens the run and a menu of what it offers: Resume,
+// Restart, Stop and Clean. The menu is drawn inside its row and floats over the rows under it, pushing none down. A
+// queue's row is a `div` holding its open button and, beside it, poll, watch and unwatch from the registry. The button
+// names the live watcher's watch state, what waits, runs, failed and is parked (a zero count left out), when the queue
+// was last polled, and a pause and a hold; a queue that can't be read shows its problem in place of its counts. A
+// Queues group's header row also carries
 // the Watch all and Unwatch all the repository offers, drawn from the registry, and its problem; each runs at once, its
 // answer is a toast, and while its request is out the buttons read the word under way, as a run's row reads it in place
 // of its status. A folded group draws its header alone.
 import type { RunActions } from '../actions';
 import type { RepoOffers } from '../offers';
-import { ACTIONS, type OfferSource, type Subject } from './action-registry';
+import { ACTIONS, actionOf, type OfferSource, type Subject } from './action-registry';
 import { actionControl, subjectAttrs } from './action-view';
-import { ago, cost, duration } from './format';
+import { ago, clock, cost, duration } from './format';
 import { html, type SafeHtml } from './html';
 import { type ListRepo, type ListRun, workflowOf } from './index-model';
 import {
@@ -44,7 +47,8 @@ export const tooltipOf = (run: ListRun): string | undefined =>
   run.pr === undefined ? run.title : run.title === undefined ? run.runId : `${run.runId} · ${run.title}`;
 
 /** Whether `run`'s menu is open: only the open run's can be. */
-const isMenuOpen = (repo: string, run: ListRun, ui: UiState) => isOpen(repo, run, ui) && ui.runMenu === run.runId;
+const isMenuOpen = (repo: string, run: ListRun, ui: UiState) =>
+  isOpen(repo, run, ui) && ui.runMenu?.runId === run.runId && ui.runMenu.at === 'row';
 
 /** A row's ⋯: on any run but a completed one, which offers nothing. */
 export function more(repo: string, run: ListRun, ui: UiState): SafeHtml | '' {
@@ -52,7 +56,7 @@ export function more(repo: string, run: ListRun, ui: UiState): SafeHtml | '' {
   return html`<button class="r-more${isMenuOpen(repo, run, ui) ? ' open' : ''}" type="button" data-action="run-menu" data-repo="${repo}" data-run="${run.runId}" aria-label="actions for ${run.runId}" aria-expanded="${isMenuOpen(repo, run, ui) ? 'true' : 'false'}" title="actions for ${run.runId}">⋯</button>`;
 }
 
-/** The open menu under `run`'s row: what the run offers, once its actions are read. */
+/** The open menu over the rows under `run`'s row: what the run offers, once its actions are read. */
 export function runMenu(repo: string, run: ListRun, ui: UiState, offers: RunActions | undefined): SafeHtml | '' {
   if (!isMenuOpen(repo, run, ui)) return '';
   const controls = runControls(offers, ui);
@@ -62,8 +66,9 @@ export function runMenu(repo: string, run: ListRun, ui: UiState, offers: RunActi
 }
 
 /**
- * The watch or unwatch button each offered, drawn from the registry, for a workflow, or for the whole repository when
- * `workflow` is left out. While a request for it is out, the word under way takes their place.
+ * The repository's watch or unwatch button each offered, drawn from the registry, for all its workflows at once, or, given
+ * a workflow, for that one alone, as a queue's row draws them. While a request for it is out, the word under way takes
+ * their place. A queue view draws its workflow's own in its view header.
  */
 export function watchButtons(repo: string, offers: RepoOffers | undefined, ui: UiState, workflow?: string): SafeHtml {
   const subject: Subject = workflow === undefined ? { kind: 'repo', repo } : { kind: 'workflow', repo, workflow };
@@ -104,24 +109,58 @@ function runRow(row: RunRow, ui: UiState, offers: RunActions | undefined): SafeH
       : ''
   }<span class="r-el">${duration(run.durationMs)}</span><span class="r-cost">${cost(run.costUsd)}</span>${
     run.stopReason === undefined ? '' : html`<span class="why">${run.stopReason}</span>`
-  }</span>${run.problem === undefined ? '' : html`<span class="r-problem">${run.problem}</span>`}</button>${more(repo, run, ui)}</div>${runMenu(repo, run, ui, offers)}`;
+  }</span>${run.problem === undefined ? '' : html`<span class="r-problem">${run.problem}</span>`}</button>${more(repo, run, ui)}${runMenu(repo, run, ui, offers)}</div>`;
 }
 
-function queueRow(row: QueueRow, ui: UiState, now: number): SafeHtml {
+/** The ` · ` free chips of a queue's row: its pause and its hold, in the words its queue view uses. */
+function queueChips(row: QueueRow, ui: UiState): SafeHtml {
+  const { paused, held } = row;
+  return html`${paused === undefined ? '' : html`<span class="warnchip">paused: ${paused.port} ${paused.adapter}: ${paused.message}</span>`}${
+    held === undefined
+      ? ''
+      : html`<span class="warnchip">held${held.until === undefined ? '' : html` until ${clock(held.until, ui.tz)}`}: ${held.reason}</span>`
+  }`;
+}
+
+/** A queue row's poll, then its workflow's watch or unwatch: each drawn from the registry, the poll only when offered. */
+function queueActions(row: QueueRow, ui: UiState, repoOffers: RepoOffers | undefined): SafeHtml {
+  const subject: Subject = { kind: 'workflow', repo: row.repo, workflow: row.workflow };
+  const def = actionOf('poll-queue');
+  const source: OfferSource = { index: [{ name: row.repo, queues: [{ workflow: row.workflow, offers: row.offers }] }] };
+  const available = def?.available(subject, source);
+  const underway = ui.underway[`queue:${row.repo}/${row.workflow}`];
+  const poll =
+    def === undefined || available === undefined || !available.offered
+      ? ''
+      : underway !== undefined
+        ? html`<span class="busy">${underway}</span>`
+        : available.enabled
+          ? actionControl(def, subject, ui.act, source, { class: 'wf-act', data: true, title: 'poll now' })
+          : html`<button class="wf-act" disabled title="${available.why}">poll</button>`;
+  return html`${poll}${watchButtons(row.repo, repoOffers, ui, row.workflow)}`;
+}
+
+function queueRow(row: QueueRow, ui: UiState, now: number, repoOffers: RepoOffers | undefined): SafeHtml {
   const id = queueId(row.repo, row.workflow);
   const sel = `${ui.queue === id ? ' sel' : ''}${cur(row.id, ui)}`;
-  const subject = subjectAttrs({ kind: 'workflow', repo: row.repo, workflow: row.workflow });
-  // A queue that can't be read has nothing to count: its problem wraps inside its row in place of its waiting count.
-  if (row.problem !== undefined) {
-    return html`<button class="q-row bad${sel}" data-row="${row.id}"${subject} data-action="select-queue" data-queue="${id}"><span class="qd"></span><span class="nm">${row.repo} › ${row.workflow}</span>${watchWord(row.watch)}<span class="n">unreadable</span><span class="r-problem">${row.problem}</span></button>`;
-  }
-  return html`<button class="q-row${sel}" data-row="${row.id}"${
-    row.lastPolledAt === undefined ? '' : html` title="polled ${ago(row.lastPolledAt, now)}"`
-  }${subject} data-action="select-queue" data-queue="${id}"><span class="qd"></span><span class="nm">${row.repo} › ${row.workflow}</span>${watchWord(row.watch)}<span class="n">${row.waiting} waiting</span></button>`;
+  const name = html`<span class="qd"></span><span class="nm">${row.repo} › ${row.workflow}</span>${watchWord(row.watch)}`;
+  // A queue that can't be read has nothing to count: its problem wraps inside its row in place of the counts.
+  const body =
+    row.problem !== undefined
+      ? html`${name}<span class="n">unreadable</span><span class="r-problem">${row.problem}</span>`
+      : html`${name}<span class="n">${row.waiting} waiting</span>${(['running', 'failed', 'parked'] as const).map(
+          (state) => (row[state] === undefined ? '' : html`<span class="q-c ${state}">${row[state]} ${state}</span>`),
+        )}<span class="q-polled">${row.lastPolledAt === undefined ? 'never polled' : `polled ${ago(row.lastPolledAt, now)}`}</span>${queueChips(row, ui)}`;
+  return html`<div class="q-row${row.problem === undefined ? '' : ' bad'}${sel}" data-row="${row.id}"${subjectAttrs({ kind: 'workflow', repo: row.repo, workflow: row.workflow })}><button class="q-open" data-action="select-queue" data-queue="${id}">${body}</button>${queueActions(row, ui, repoOffers)}</div>`;
 }
 
-const rowOf = (row: ListRow, ui: UiState, now: number, offers: RunActions | undefined): SafeHtml =>
-  row.kind === 'run' ? runRow(row, ui, offers) : queueRow(row, ui, now);
+const rowOf = (
+  row: ListRow,
+  ui: UiState,
+  now: number,
+  offers: RunActions | undefined,
+  repoOffers: RepoOffers | undefined,
+): SafeHtml => (row.kind === 'run' ? runRow(row, ui, offers) : queueRow(row, ui, now, repoOffers));
 
 /** A Queues group's header row: the repository, its watch buttons and its problem. */
 function repoHeader(group: ListGroup, repo: ListRepo, open: boolean, ui: UiState): SafeHtml {
@@ -138,7 +177,7 @@ function groupBlock(group: ListGroup, ui: UiState, now: number, offers: RunActio
     group.repo === undefined
       ? html`<button class="lgh${open ? ' open' : ''}${cur(group.id, ui)}" data-action="toggle-list-group" data-group="${group.id}" aria-expanded="${open ? 'true' : 'false'}"><span class="lcaret">›</span><span class="nm">${group.label}</span><span class="c">${group.rows.length}</span></button>`
       : repoHeader(group, group.repo, open, ui);
-  return html`<div class="lgrp">${head}${open ? group.rows.map((row) => rowOf(row, ui, now, offers)) : ''}</div>`;
+  return html`<div class="lgrp">${head}${open ? group.rows.map((row) => rowOf(row, ui, now, offers, group.repo?.offers)) : ''}</div>`;
 }
 
 const EMPTY: Record<ViewName, string> = {

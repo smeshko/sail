@@ -210,6 +210,7 @@ export function selectRun(store: Store, repo: string, runId: string) {
   delete ui.runMenu;
   store.actor.forget('run');
   store.fresh.add('list');
+  store.fresh.add('main');
   openRunSocket(store, store.run);
   readOffers(store);
   store.mark('list', 'main', 'inspector', 'status');

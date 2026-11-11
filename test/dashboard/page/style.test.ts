@@ -85,6 +85,13 @@ test("a run's ⋯ shows on hover and on focus inside the row, and is never hidde
   expect(forMore.filter(([, body]) => /visibility:\s*hidden/.test(body))).toEqual([]);
 });
 
+test("a row's menu floats: .r-menu is absolute inside a relative .run (ADW-516)", () => {
+  const body = (selector: string) => rules().find(([sel]) => sel === selector)?.[1] ?? '';
+  expect(body('.run')).toContain('position: relative');
+  expect(body('.r-menu')).toContain('position: absolute');
+  expect(body('.r-menu')).toContain('top: 100%');
+});
+
 test('the theme and inspector buttons carry an aria-label beside their title (ADW-508)', () => {
   expect(html).toContain('data-action="toggle-theme" aria-label="switch theme" title="theme"');
   expect(html).toContain('data-action="toggle-inspector" aria-label="toggle inspector" title="inspector (i)"');
@@ -123,10 +130,10 @@ test('buttons, selects, text inputs and role=button have a 24px minimum height i
 
 test('no control class is given a height under 24px (ADW-508)', () => {
   const controls =
-    /\.(btn|wf-act|qbadge|hist-t|r-more|r-open|tab|tog|run-link|art-open|q-row|trow|qsec|qrecent-h|lgrp-h|wf-t|sig)\b/;
+    /\.(btn|wf-act|qbadge|hist-t|r-more|r-open|tab|tog|run-link|art-open|q-open|trow|qsec|qrecent-h|lgrp-h|wf-t|sig)\b/;
   const small: string[] = [];
   for (const [selector, body] of rules()) {
-    // A decoration inside a control (`.q-row .qd`) is no target: only a selector that ends on the control counts.
+    // A decoration inside a control (`.q-open .qd`) is no target: only a selector that ends on the control counts.
     if (!selector.split(',').some((each) => controls.test(each.trim().split(/\s+/).pop() ?? ''))) continue;
     for (const m of body.matchAll(/(?<![\w-])(height|max-height|min-height):\s*(\d+(?:\.\d+)?)px/g)) {
       if (Number(m[2]) < 24) small.push(`${selector} { ${m[1]}: ${m[2]}px }`);

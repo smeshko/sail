@@ -35,7 +35,8 @@ function withOffers(panel: QueuePanel, ended: (key: string) => boolean = () => t
       },
     ]),
   );
-  return { ...panel, offers: { poll: on, add: on, items } };
+  const repoOffers = { watch: on, workflows: { [panel.workflow]: { unwatch: on } } };
+  return { ...panel, offers: { poll: on, add: on, items }, repoOffers };
 }
 
 const NOW = Date.parse('2026-09-24T11:10:00.000Z');
@@ -426,7 +427,7 @@ test('the header has a poll button for the workflow, and the add form shows only
   const [panel] = watchedPanels();
   if (panel === undefined) throw new Error('beta has no queue');
   const draw = (polls?: 'ticket' | 'pr') =>
-    renderQueue(panel, { recent: [], ...(polls === undefined ? {} : { polls }) }, initialUi(0), NOW).value;
+    renderQueue(withOffers(panel), { recent: [], ...(polls === undefined ? {} : { polls }) }, initialUi(0), NOW).value;
   const poll =
     '<button class="btn" data-action="poll-queue" data-repo="beta" data-workflow="ticket-to-pr" title="poll now">poll</button>';
   for (const markup of [draw('ticket'), draw('pr'), draw()]) expect(markup).toContain(poll);
@@ -475,27 +476,60 @@ test('a queue section, the recent events fold and an item ⋯ say whether they a
   expect(moves).toContain('aria-label="move down, after ticket:FAKE-7"');
 });
 
-test("the queue view's header carries the watch or unwatch the repository offers its workflow, never armed, the word under way while its request is out, and none when nothing is offered (ADW-522)", () => {
-  const panel = waiting();
-  const stream = { recent: [], polls: 'ticket' as const };
-  const header = (markup: string) => markup.match(/<div class="srcbar"[^>]*>.*?<\/div>/s)?.[0] ?? '';
-  const offering = (op: 'watch' | 'unwatch') => ({
-    watch: { enabled: true },
-    workflows: { [QUEUE_WORKFLOW]: { [op]: { enabled: true } } },
-  });
-  expect(header(renderQueue(panel, stream, initialUi(0), NOW).value)).not.toContain('wf-act');
-  expect(header(renderQueue(panel, stream, initialUi(0), NOW, offering('watch')).value)).toContain(
-    `<button class="wf-act" data-action="watch" data-repo="beta" data-workflow="${QUEUE_WORKFLOW}">watch</button></div>`,
+const headerOf = (markup: string) => markup.match(/<div class="srcbar"[^>]*>.*?<\/span><\/span><\/div>/s)?.[0] ?? '';
+const ON = { enabled: true };
+
+test("a queue's header draws poll and unwatch for a watched workflow, and no watch", () => {
+  const header = headerOf(renderQueue(waiting(), { recent: [], polls: 'ticket' }, initialUi(0), NOW).value);
+  expect(header).toContain(
+    '<button class="btn" data-action="poll-queue" data-repo="beta" data-workflow="ticket-to-pr" title="poll now">poll</button>',
   );
-  const unwatch = header(renderQueue(panel, stream, initialUi(0), NOW, offering('unwatch')).value);
-  expect(unwatch).toContain(
-    `<button class="wf-act" data-action="unwatch" data-repo="beta" data-workflow="${QUEUE_WORKFLOW}">unwatch</button>`,
+  expect(header).toContain(
+    `<button class="btn" data-action="unwatch" data-repo="beta" data-workflow="${QUEUE_WORKFLOW}">unwatch</button>`,
   );
-  expect(unwatch).not.toContain('armed');
+  expect(header).not.toContain('data-action="watch"');
+  expect(header).not.toContain('disabled');
+});
+
+test("a queue whose workflow is not watched draws watch, no unwatch, and poll disabled with the server's reason", () => {
+  const panel = {
+    ...waiting(),
+    watch: { state: 'not watched' as const, why: WHY },
+    offers: { ...(waiting().offers as NonNullable<QueuePanel['offers']>), poll: { enabled: false, why: WHY } },
+    repoOffers: { watch: ON, workflows: { [QUEUE_WORKFLOW]: { watch: ON } } },
+  };
+  const header = headerOf(renderQueue(panel, { recent: [] }, initialUi(0), NOW).value);
+  expect(header).toContain(
+    '<span class="act"><button class="btn" disabled>poll</button><span class="act-why">no watcher is running &lt;x&gt;</span></span>',
+  );
+  expect(header).toContain(`data-action="watch" data-repo="beta" data-workflow="${QUEUE_WORKFLOW}">watch</button>`);
+  expect(header).not.toContain('unwatch');
+});
+
+test('a disabled watch offer is drawn disabled with its reason in the queue header', () => {
+  const panel = {
+    ...waiting(),
+    repoOffers: {
+      watch: ON,
+      workflows: { [QUEUE_WORKFLOW]: { watch: { enabled: false, why: 'the repository has no clone' } } },
+    },
+  };
+  const header = headerOf(renderQueue(panel, { recent: [] }, initialUi(0), NOW).value);
+  expect(header).toContain(
+    '<span class="act"><button class="btn" disabled>watch</button><span class="act-why">the repository has no clone</span></span>',
+  );
+});
+
+test("a queue of a repository that offers nothing draws poll alone, and the word under way takes watch's place", () => {
+  const { repoOffers: _, ...panel } = waiting();
+  const header = headerOf(renderQueue(panel, { recent: [] }, initialUi(0), NOW).value);
+  expect(header).toContain('data-action="poll-queue"');
+  expect(header).not.toContain('data-action="watch"');
+  expect(header).not.toContain('data-action="unwatch"');
   const underway = { ...initialUi(0), underway: { [`watch:beta/${QUEUE_WORKFLOW}`]: 'unwatching…' } };
-  expect(header(renderQueue(panel, stream, underway, NOW, offering('unwatch')).value)).toContain(
-    '<span class="busy">unwatching…</span>',
-  );
+  const busy = headerOf(renderQueue(waiting(), { recent: [] }, underway, NOW).value);
+  expect(busy).toContain('<span class="busy">unwatching…</span>');
+  expect(busy).not.toContain('data-action="unwatch"');
 });
 
 const WHY = 'no watcher is running <x>';
@@ -507,13 +541,18 @@ test.each([
 ] as const)(
   'a workflow in state %s has its pill, a disabled poll with the reason beside it, and no queue control',
   (state) => {
-    const panel = { ...waiting(), watch: { state, why: WHY } };
+    const panel = {
+      ...waiting(),
+      watch: { state, why: WHY },
+      offers: { ...(waiting().offers as NonNullable<QueuePanel['offers']>), poll: { enabled: false, why: WHY } },
+      repoOffers: { watch: ON, workflows: { [QUEUE_WORKFLOW]: { watch: ON } } },
+    };
     const ui = { ...initialUi(0), itemMenu: 'ticket:FAKE-6', armedDrop: 'ticket:FAKE-6' };
     const markup = renderQueue(panel, { recent: [], polls: 'ticket' }, ui, NOW).value;
     expect(markup).toContain(`<span class="h held"></span>`);
     expect(markup).toContain(`<span class="pill p-skip">${state}</span>`);
     expect(markup).toContain(
-      '<span class="act"><button class="btn" disabled title="no watcher is running &lt;x&gt;">poll</button><span class="act-why">no watcher is running &lt;x&gt;</span></span>',
+      '<span class="act"><button class="btn" disabled>poll</button><span class="act-why">no watcher is running &lt;x&gt;</span></span>',
     );
     for (const action of ACTIONS) expect(markup).not.toContain(`data-action="${action}"`);
     expect(markup).toContain(

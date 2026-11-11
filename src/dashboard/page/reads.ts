@@ -4,6 +4,7 @@
 import type { RunActions } from '../actions';
 import type { Subject } from './action-registry';
 import { isMarkdown } from './drawer-view';
+import type { Region } from './host';
 import { statusOf } from './index-model';
 import { logTarget } from './inspector-view';
 import type { OpenRun, Store } from './store';
@@ -198,10 +199,13 @@ export function offerSignature(store: Store, open: OpenRun) {
   return `${item === undefined ? '' : statusOf(item)}|${queued.join(',')}`;
 }
 
-/** Marks what draws offers: the list, and the command menu while it is open, which draws its rows from them. */
-export function markOffers(store: Store): void {
-  if (store.ui.menu === undefined) store.mark('list');
-  else store.mark('list', 'menu');
+/**
+ * Marks what draws offers: the list, the regions `also` names (the open run's view header draws its offers in `main`),
+ * and the command menu while it is open, which draws its rows from them.
+ */
+export function markOffers(store: Store, ...also: Region[]): void {
+  if (store.ui.menu === undefined) store.mark('list', ...also);
+  else store.mark('list', ...also, 'menu');
 }
 
 export function readOffers(store: Store) {
@@ -220,7 +224,7 @@ export function readOffers(store: Store) {
         // An answer that isn't JSON offers nothing.
       }
     }
-    markOffers(store);
+    markOffers(store, 'main');
   });
 }
 

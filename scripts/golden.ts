@@ -325,21 +325,71 @@ export async function renderDashboardViews(outDir: string): Promise<string[]> {
         : repo,
     );
     views['list-queues-problem.html'] = renderList('queues', listRepos(unreadable, VIEWS_NOW), selected, VIEWS_NOW);
+    // A watched queue that is paused and held, with its poll and unwatch offered: the row at its fullest.
+    const held = repos.map((repo) =>
+      repo.name === 'beta'
+        ? {
+            ...repo,
+            watching: { pid: 1, workflows: [QUEUE_WORKFLOW] },
+            queues: repo.queues.map((view) =>
+              view.workflow === QUEUE_WORKFLOW && view.queue !== undefined && view.offers !== undefined
+                ? {
+                    ...view,
+                    watch: { state: 'watched' as const },
+                    offers: { ...view.offers, poll: { enabled: true } },
+                    queue: {
+                      ...view.queue,
+                      polling: {
+                        ...view.queue.polling,
+                        paused: {
+                          port: 'ticketSource' as const,
+                          adapter: 'fake',
+                          message: 'the provider did not answer',
+                          at: '2026-09-24T11:05:00.000Z',
+                        },
+                      },
+                      held: {
+                        until: '2026-09-24T12:00:00.000Z',
+                        runId: FAKE_3_ID,
+                        reason: 'usage limit',
+                        at: '2026-09-24T11:05:00.000Z',
+                      },
+                    },
+                  }
+                : view,
+            ),
+            ...(repo.offers === undefined
+              ? {}
+              : {
+                  offers: {
+                    ...repo.offers,
+                    workflows: { ...repo.offers.workflows, [QUEUE_WORKFLOW]: { unwatch: { enabled: true } } },
+                  },
+                }),
+          }
+        : repo,
+    );
+    views['list-queues-held.html'] = renderList('queues', listRepos(held, VIEWS_NOW), selected, VIEWS_NOW);
     views['attention.html'] = renderAttention(attention(repos), true);
     const queueEvents = readEvents(queueDirOf(machine)) as unknown as QueueEvent[];
     const stream = { recent: queueEvents.slice(-20), polls: pollKind(queueEvents) };
     const queue = queueId('beta', QUEUE_WORKFLOW);
     const panel = queuePanels(repos).find((each) => queueId(each.repo, each.workflow) === queue);
     if (panel === undefined) throw new Error(`beta has no ${QUEUE_WORKFLOW} queue`);
-    // The queue view's header carries its workflow's Watch or Unwatch, from the repository's offers.
-    const betaOffers = repos.find((each) => each.name === 'beta')?.offers;
-    views['queue.html'] = renderQueue(panel, stream, { ...selected, queue }, VIEWS_NOW, betaOffers);
+    // The queue view's header carries its poll and its workflow's Watch or Unwatch, from the repository's offers: the
+    // watched variant is the one the server gives while the workflow's watcher runs.
+    views['queue.html'] = renderQueue(panel, stream, { ...selected, queue }, VIEWS_NOW);
+    const on = { enabled: true };
     views['queue-watched.html'] = renderQueue(
-      { ...panel, watch: { state: 'watched' } },
+      {
+        ...panel,
+        watch: { state: 'watched' },
+        ...(panel.offers === undefined ? {} : { offers: { ...panel.offers, poll: on } }),
+        repoOffers: { watch: on, unwatch: on, workflows: { [panel.workflow]: { unwatch: on } } },
+      },
       stream,
       { ...selected, queue },
       VIEWS_NOW,
-      betaOffers,
     );
     // A right-click on a waiting queue item: its offered actions alone, at the pointer.
     const itemMenu: MenuState = {
@@ -362,10 +412,10 @@ export async function renderDashboardViews(outDir: string): Promise<string[]> {
         entry === undefined
           ? undefined
           : await runActions(entry, runId, { leasesDir, ports: fakeClonePorts(leasesDir) });
-      views[`run-${name}.html`] = renderRun(model, summaryOf(repo, runId), ui({ repo, runId }), VIEWS_NOW);
+      views[`run-${name}.html`] = renderRun(model, summaryOf(repo, runId), ui({ repo, runId }), VIEWS_NOW, offers);
       // What a run offers shows in the list, under its row, once its ⋯ is opened.
       if (offers !== undefined && runControls(offers, ui()) !== undefined) {
-        const open = ui({ repo, runId, runMenu: runId });
+        const open = ui({ repo, runId, runMenu: { runId, at: 'row' } });
         const status = listed.find((each) => each.name === repo)?.runs.find((each) => each.runId === runId)?.status;
         const view = status === 'failed' || status === 'completed' ? 'history' : 'active';
         views[`list-menu-${name}.html`] = renderList(view, listed, open, VIEWS_NOW, offers);

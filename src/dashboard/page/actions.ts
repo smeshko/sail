@@ -152,21 +152,23 @@ export const actions: Record<string, Action> = {
   'run-menu': (store, data) => {
     const { repo, run: runId } = data;
     if (repo === undefined || runId === undefined) return;
+    const at = data.at === 'header' ? 'header' : 'row';
     // A dialog open for a run closes with nothing sent when its menu is toggled or another run's opened.
     if (store.actor.dialogFor()?.kind === 'run') store.actor.cancel();
     if (
-      store.ui.runMenu === runId &&
+      store.ui.runMenu?.runId === runId &&
+      store.ui.runMenu.at === at &&
       store.ui.queue === undefined &&
       store.run?.repo === repo &&
       store.run.runId === runId
     ) {
       delete store.ui.runMenu;
-      store.mark('list');
+      store.mark('list', 'main');
       return;
     }
     actions['select-run']?.(store, data);
-    store.ui.runMenu = runId;
-    store.mark('list');
+    store.ui.runMenu = { runId, at };
+    store.mark('list', 'main');
   },
   'toggle-queue-events': (store) => {
     store.ui.queueEvents = !store.ui.queueEvents;
