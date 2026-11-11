@@ -596,8 +596,8 @@ function standing(rows: readonly MenuRow[], query: string): number {
  * What the menu draws: its head, its rows and the step open, if any. Without a step: the subject's group, then, in the
  * full menu, "go to" and the general group, which leaves out what the subject's group has. A query filters the action
  * groups by label, each ordered by how well its rows match (`labelTier`), and orders the groups by `standing`, so an
- * action the query names comes before every "go to" row. A reason two or more disabled rows of the subject share is said
- * once, under the head, and leaves those rows. While a step is asked, the head names the subject the step's action is
+ * action the query names comes before every "go to" row. A reason two or more disabled rows of the subject that are listed
+ * share is said once, under the head, and leaves those rows. While a step is asked, the head names the subject the step's action is
  * done to (the repository chosen for a start), else the subject the menu opened on. The context menu is the subject's group alone, unfiltered.
  */
 export function menuRows(state: MenuState, source: OfferSource, index: readonly IndexRepo[], now: number): MenuModel {
@@ -609,21 +609,22 @@ export function menuRows(state: MenuState, source: OfferSource, index: readonly 
     return { ...(head === undefined ? {} : { head }), rows: model.rows, step: model };
   }
   const all = state.subject === undefined ? [] : subjectRows(state.subject, source);
-  const why = sharedWhy(all);
-  const subject = why === undefined ? all : all.map((row) => (row.why === why ? withoutWhy(row) : row));
-  const top = { ...(head === undefined ? {} : { head }), ...(why === undefined ? {} : { why }) };
-  if (state.mode === 'context') return { ...top, rows: subject };
-  const shown = new Set(subject.map((row) => row.label));
-  const general = generalRows(source).filter((row) => !shown.has(row.label));
-  const query = state.query.trim();
-  if (query === '') return { ...top, rows: [...subject, ...gotoRows(query, index, now), ...general] };
+  const query = state.mode === 'context' ? '' : state.query.trim();
   const matching = (rows: MenuRow[]) =>
     rows
       .map((row) => ({ row, tier: labelTier(query, row.label) }))
       .filter((each) => each.tier !== undefined)
       .sort((a, b) => (a.tier ?? 3) - (b.tier ?? 3))
       .map((each) => each.row);
-  const groups = [matching(subject), gotoRows(query, index, now), matching(general)]
+  const listed = query === '' ? all : matching(all);
+  const why = sharedWhy(listed);
+  const subject = why === undefined ? listed : listed.map((row) => (row.why === why ? withoutWhy(row) : row));
+  const top = { ...(head === undefined ? {} : { head }), ...(why === undefined ? {} : { why }) };
+  if (state.mode === 'context') return { ...top, rows: subject };
+  const shown = new Set(all.map((row) => row.label));
+  const general = generalRows(source).filter((row) => !shown.has(row.label));
+  if (query === '') return { ...top, rows: [...subject, ...gotoRows(query, index, now), ...general] };
+  const groups = [subject, gotoRows(query, index, now), matching(general)]
     .filter((rows) => rows.length > 0)
     .sort((a, b) => standing(a, query) - standing(b, query));
   return { ...top, rows: groups.flat() };

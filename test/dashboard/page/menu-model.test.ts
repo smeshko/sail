@@ -449,6 +449,23 @@ describe('audit 2: the menu ranks across groups, matches within words and says a
       ]);
     });
 
+    test('a query that hides the rows sharing a reason drops the note, and one that keeps one row gives it back its reason', () => {
+      const repos = withOffers({ drop: { enabled: true }, move: { enabled: false, why: reason } });
+      const typed = (query: string) => {
+        const model = menuRows(state({ subject: six, query }), { index: repos }, repos, NOW);
+        return { model, rows: model.rows.filter((row) => row.group === 'subject') };
+      };
+      const drop = typed('drop');
+      expect(drop.model.why).toBeUndefined();
+      expect(drop.rows.map((row) => [row.label, row.disabled])).toEqual([['drop', false]]);
+      const move = typed('move');
+      expect(move.model.why).toBe(reason);
+      expect(move.rows.every((row) => row.why === undefined)).toBe(true);
+      const top = typed('move to the top');
+      expect(top.model.why).toBeUndefined();
+      expect(top.rows.map((row) => [row.label, row.why])).toEqual([['move to the top', reason]]);
+    });
+
     test('one disabled row alone keeps its reason and the model says none', () => {
       const { model, rows } = own(withOffers({ drop: { enabled: false, why: reason }, move: { enabled: true } }));
       expect(model.why).toBeUndefined();
