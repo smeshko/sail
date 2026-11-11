@@ -402,6 +402,26 @@ test("a click on a child of a data-action element is delegated once, with the el
   expect(got).toEqual([['open', { action: 'open', repo: 'alpha', run: 'FAKE-2', key: 'implement#1' }]]);
 });
 
+test('a mouse button going down is told the region it lands in, or none, and setKeys marks the keyed pane on the root (ADW-535)', () => {
+  const fake = fakeWindow();
+  const row = element();
+  const card = element();
+  fake.elements.list = element({ contains: (other) => other === row });
+  fake.elements.main = element({ contains: (other) => other === card });
+  const host = browserHost(fake.win);
+  const got: (string | undefined)[] = [];
+  host.onPress((region) => got.push(region));
+  fake.fire('mousedown', { target: row });
+  fake.fire('mousedown', { target: card });
+  fake.fire('mousedown', { target: element() });
+  fake.fire('mousedown', { target: 'not an element' });
+  expect(got).toEqual(['list', 'main', undefined, undefined]);
+  host.setKeys('centre');
+  expect(fake.root.dataset.keys).toBe('centre');
+  host.setKeys(undefined);
+  expect(fake.root.dataset.keys).toBe('none');
+});
+
 test('scrollToEnd scrolls the element holding a region to its height, and does nothing for a region with no element or no parent', () => {
   const fake = fakeWindow();
   const box = element({ scrollTop: 0, scrollHeight: 900 });

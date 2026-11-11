@@ -247,6 +247,19 @@ class FakeHost implements PageHost {
   setDetail(open: boolean) {
     this.details.push(open);
   }
+  /** What the host was told of the keyed pane, in order: `none` while only one pane shows. */
+  keyPanes: string[] = [];
+  setKeys(pane: 'list' | 'centre' | undefined) {
+    this.keyPanes.push(pane ?? 'none');
+  }
+  private press_?: (region: Region | undefined) => void;
+  onPress(handler: (region: Region | undefined) => void) {
+    this.press_ = handler;
+  }
+  /** A mouse button going down in `region`, before the click it makes. */
+  pressIn(region: Region | undefined) {
+    this.press_?.(region);
+  }
   /** Whether the window is under 800px, where no first row is selected: most tests leave it so, and the ones about selecting set it false. */
   narrowed = true;
   narrow() {
@@ -5365,5 +5378,213 @@ describe('the open row is scrolled into sight when it changes (ADW-537)', () => 
     host.advance(100);
     expect(host.revealedOpen).toEqual(['list']);
     expect(page.store.revealOpen).toBe(false);
+  });
+});
+
+describe('the keyed pane: w gives the keys to the list or the open run beside it (ADW-535)', () => {
+  const FAKE_1 = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N';
+  const FAKE_4 = 'FAKE-4-01M348XP801GH3GKJT2MNM2NR9';
+  const FAKE_2_ROW = `run:alpha/${FAKE_2_ID}`;
+  /** History from 800px up, its first row FAKE-1 opened unasked: entries 09-25, FAKE-1, 09-23, FAKE-2, 09-22, FAKE-4. */
+  const onHistory = () => {
+    host.narrowed = false;
+    page = boot(host);
+    plainIndex();
+    host.press('4');
+    host.advance(100);
+    expect(page.ui.runId).toBe(FAKE_1);
+    return page;
+  };
+  /** Walks the list's cursor onto FAKE-2 and opens it with Enter, its cards replayed. */
+  const openFake2 = () => {
+    for (let i = 0; i < 4; i++) host.press('j');
+    host.press('Enter');
+    replay(host.open('run=').at(-1), fake2Dir(m));
+    host.advance(100);
+  };
+
+  test('a view opened with its first row unasked starts with the keys in the list: j walks it and leaves the open run alone', () => {
+    const p = onHistory();
+    expect(p.ui.pane).toBe('list');
+    expect(host.keyPanes.at(-1)).toBe('list');
+    host.press('j');
+    host.press('j');
+    expect(p.ui.listCursor).toBe(`run:alpha/${FAKE_1}`);
+    host.press('j');
+    host.press('ArrowDown');
+    expect(p.ui.listCursor).toBe(FAKE_2_ROW);
+    expect([p.ui.runId, p.ui.cursor]).toEqual([FAKE_1, 0]);
+  });
+
+  test('Enter in the list opens the row under the cursor and gives the centre the keys; Enter on a group folds it and keeps them', () => {
+    const p = onHistory();
+    host.press('j');
+    host.press('Enter');
+    expect(p.ui.listFolded).toEqual(['history:2026-09-25']);
+    expect(p.ui.pane).toBe('list');
+    host.press('Enter');
+    host.press('j');
+    host.press('j');
+    host.press('j');
+    host.press('Enter');
+    expect([p.ui.runId, p.ui.pane]).toEqual([FAKE_2_ID, 'centre']);
+    host.advance(100);
+    expect(host.keyPanes.at(-1)).toBe('centre');
+  });
+
+  test('Enter or a click on the row open already gives the centre the keys, and the host is told', () => {
+    const p = onHistory();
+    host.press('j');
+    host.press('j');
+    host.press('Enter');
+    host.advance(100);
+    expect([p.ui.runId, host.keyPanes.at(-1)]).toEqual([FAKE_1, 'centre']);
+    host.press('w');
+    host.advance(100);
+    expect(host.keyPanes.at(-1)).toBe('list');
+    host.click({ action: 'select-run', repo: 'alpha', run: FAKE_1 });
+    host.advance(100);
+    expect([p.ui.runId, host.keyPanes.at(-1)]).toEqual([FAKE_1, 'centre']);
+  });
+
+  test('j and k move only the pane that has the keys, w switches it, and each cursor keeps its place', () => {
+    const p = onHistory();
+    openFake2();
+    host.press('j');
+    host.press('j');
+    expect([p.ui.cursor, p.ui.listCursor]).toEqual([2, FAKE_2_ROW]);
+    host.press('w');
+    expect(p.ui.pane).toBe('list');
+    host.advance(100);
+    expect(host.keyPanes.at(-1)).toBe('list');
+    host.press('j');
+    expect([p.ui.cursor, p.ui.listCursor]).toEqual([2, 'history:2026-09-22']);
+    expect(p.ui.runId).toBe(FAKE_2_ID);
+    host.press('w');
+    host.advance(100);
+    host.press('k');
+    expect([p.ui.cursor, p.ui.listCursor]).toEqual([1, 'history:2026-09-22']);
+    host.press('w');
+    host.advance(100);
+    host.press('k');
+    expect([p.ui.cursor, p.ui.listCursor]).toEqual([1, FAKE_2_ROW]);
+    expect(host.keyPanes).toEqual(['list', 'centre', 'list', 'centre', 'list']);
+  });
+
+  test('Enter with the keys in the centre opens the card under its cursor, as before', () => {
+    const p = onHistory();
+    openFake2();
+    host.press('j');
+    host.press('Enter');
+    expect([p.ui.key, p.ui.timeline]).toEqual([cards(host.regions.main)[1], true]);
+    expect(p.ui.runId).toBe(FAKE_2_ID);
+  });
+
+  test("the command menu's subject follows the keys: the row under the list's cursor, or the open run", () => {
+    const p = onHistory();
+    openFake2();
+    host.press('w');
+    host.press('j');
+    host.press('j');
+    expect(p.ui.listCursor).toBe(`run:beta/${FAKE_4}`);
+    expect(focused(p.ui)).toEqual({ kind: 'run', repo: 'beta', runId: FAKE_4 });
+    host.press('w');
+    expect(focused(p.ui)).toEqual({ kind: 'run', repo: 'alpha', runId: FAKE_2_ID });
+    host.press('w');
+    expect(focused(p.ui)).toEqual({ kind: 'run', repo: 'beta', runId: FAKE_4 });
+  });
+
+  test('a press in a pane gives it the keys, one that opens a row gives them to the centre, and one elsewhere changes nothing', () => {
+    const p = onHistory();
+    host.pressIn('main');
+    expect(p.ui.pane).toBe('centre');
+    host.pressIn('sidebar');
+    host.pressIn(undefined);
+    expect(p.ui.pane).toBe('centre');
+    host.pressIn('list');
+    expect(p.ui.pane).toBe('list');
+    host.pressIn('list');
+    host.advance(100);
+    expect(host.keyPanes.at(-1)).toBe('list');
+    host.click({ action: 'select-run', repo: 'alpha', run: FAKE_2_ID });
+    expect(p.ui.pane).toBe('centre');
+    host.pressIn('list');
+    host.click({ action: 'run-menu', repo: 'beta', run: FAKE_4 });
+    expect([p.ui.runId, p.ui.pane]).toEqual([FAKE_4, 'list']);
+    host.click({ action: 'select-queue', queue: `beta/${QUEUE_WORKFLOW}` });
+    expect(p.ui.pane).toBe('centre');
+  });
+
+  test('a change of view gives the list the keys again', () => {
+    const p = onHistory();
+    openFake2();
+    expect(p.ui.pane).toBe('centre');
+    host.press('2');
+    expect(p.ui.pane).toBe('list');
+    host.pressIn('main');
+    host.click({ action: 'select-view', view: 'history' });
+    expect(p.ui.pane).toBe('list');
+  });
+
+  test('Escape steps back as before whichever pane has the keys, and with nothing open the list alone takes them', () => {
+    const p = onHistory();
+    openFake2();
+    host.click({ action: 'select-card', key: cards(host.regions.main)[1] ?? '' });
+    host.press('w');
+    host.press('Escape');
+    expect([p.ui.timeline, p.ui.key, p.ui.runId]).toEqual([false, 'spec#1', FAKE_2_ID]);
+    host.press('Escape');
+    expect([p.ui.key, p.ui.runId]).toEqual([undefined, FAKE_2_ID]);
+    host.press('Escape');
+    host.advance(100);
+    expect([p.ui.runId, host.keyPanes.at(-1)]).toEqual([undefined, 'none']);
+    host.press('w');
+    host.press('j');
+    expect(p.ui.listCursor).toBe('history:2026-09-22');
+    host.press('j');
+    host.press('Enter');
+    expect([p.ui.runId, p.ui.pane]).toEqual([FAKE_4, 'centre']);
+  });
+
+  test('x marks the History run under the cursor with the keys in the list, and not with them in the centre', () => {
+    const p = onHistory();
+    openFake2();
+    host.press('x');
+    expect(p.ui.listSelected).toEqual([]);
+    host.press('w');
+    host.press('x');
+    expect(p.ui.listSelected).toEqual([FAKE_2_ROW]);
+  });
+
+  test('a key typed in an input does nothing: w switches no pane and j moves no cursor', () => {
+    const p = onHistory();
+    host.press('w', true);
+    host.press('j', true);
+    expect([p.ui.pane, p.ui.listCursor]).toEqual(['list', undefined]);
+  });
+
+  test('under 800px the keys drive what shows, w does nothing and shuts no sidebar, and the host marks no pane', () => {
+    const p = onHistory();
+    host.narrowed = true;
+    host.press('Escape');
+    host.press('j');
+    expect(p.ui.listCursor).toBe('history:2026-09-25');
+    host.press('j');
+    host.press('j');
+    host.press('j');
+    host.press('Enter');
+    replay(host.open('run=').at(-1), fake2Dir(m));
+    p.ui.pane = 'list';
+    host.press('j');
+    expect([p.ui.cursor, p.ui.listCursor]).toEqual([1, FAKE_2_ROW]);
+    host.press('w');
+    expect(p.ui.pane).toBe('list');
+    host.press('j');
+    expect(p.ui.cursor).toBe(2);
+    host.click({ action: 'toggle-sidebar' });
+    host.press('w');
+    expect(host.sidebars.at(-1)).toBe(true);
+    host.advance(100);
+    expect(host.keyPanes.at(-1)).toBe('none');
   });
 });
