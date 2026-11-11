@@ -1,7 +1,8 @@
 // `sail dashboard [--port N]`: serves every registered repository's runs and queues on 127.0.0.1, in the foreground,
 // until Ctrl-C. `--install [--port N]`, `--uninstall` and `--restart` run it as a login service instead (macOS only,
 // one machine-wide launchd agent, `sail.dashboard`): at most one of the three, the platform checked before anything is
-// written, and a refusal (exit code 3) when there is nothing to uninstall or restart, or the port is no port. A
+// written, and a refusal (exit code 3) when there is nothing to uninstall or restart, or the port is no port. `--install`
+// also refuses port 0 and, while no agent is installed, a port another process holds. A
 // restart prints `sail dashboard: restarted the login service`: the dashboard records no pid anywhere. `--service`,
 // which only the installed agent passes, also reads sail's code version at start and every minute and, once it
 // changes, prints a line starting `sail dashboard: sail changed (`, stops the server and exits 6, so launchd starts the
@@ -10,6 +11,7 @@
 // 3400, and 0 picks a free one. A port that isn't a whole number from 0 to 65535, or one in use, is refused with exit
 // code 3.
 
+import { existsSync } from 'node:fs';
 import { startDashboard } from '../../dashboard/server';
 import { systemTimers, type Timers } from '../../watch/poll';
 import { machineDir, registryDir as registryDirOf } from '../../watch/registry';
@@ -22,6 +24,7 @@ import {
   installAgent,
   logPath,
   platformRefusal,
+  plistPath,
   restartAgent,
   type ServiceDeps,
   serviceDeps,
@@ -39,6 +42,17 @@ function portOf(value: string): number | undefined {
   return port <= 65535 ? port : undefined;
 }
 
+/** Whether nothing serves on 127.0.0.1:`port` now: it binds the port and lets it go. */
+export async function portFree(port: number): Promise<boolean> {
+  try {
+    const server = Bun.serve({ hostname: '127.0.0.1', port, fetch: () => new Response() });
+    await server.stop(true);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** What the command runs on: the system's unless a test hands its own. */
 export interface DashboardDeps {
   service?: Partial<ServiceDeps>;
@@ -47,6 +61,8 @@ export interface DashboardDeps {
   /** How often it reads it: 60 000 ms by default. */
   sailVersionEveryMs?: number;
   timers?: Timers;
+  /** Whether `--install`'s port is free: `portFree` by default. */
+  portFree?: (port: number) => Promise<boolean>;
 }
 
 const NOT_INSTALLED = `no login service is installed: ${COMMAND} --install installs it`;
@@ -66,6 +82,16 @@ export function dashboardCommand(deps: DashboardDeps = {}) {
       if (platform !== undefined) return refuse(platform);
       if (operation === 'install') {
         if (port === undefined) return refuse('--port takes a port number, 0 to 65535');
+        if (port === 0) {
+          return refuse(
+            '--install takes a fixed port, 1 to 65535: with 0 the login service would serve on another port at each start',
+          );
+        }
+        // A port another process holds would refuse the agent's every start, once a minute: the install refuses it
+        // first. An installed agent's own dashboard may hold it, and is replaced.
+        if (!existsSync(plistPath(service.home, DASHBOARD_LABEL)) && !(await (deps.portFree ?? portFree)(port))) {
+          return refuse(`port ${port} is in use: is another sail dashboard running? --port picks another`);
+        }
         const machine = machineDir(env);
         const result = await installAgent(service, {
           label: DASHBOARD_LABEL,

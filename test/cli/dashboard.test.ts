@@ -4,7 +4,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { type DashboardDeps, dashboardCommand } from '../../src/cli/commands/dashboard';
+import { type DashboardDeps, dashboardCommand, portFree } from '../../src/cli/commands/dashboard';
 import { EXIT_OK, EXIT_REFUSED, EXIT_RESTART, type ExitCode } from '../../src/cli/exit-codes';
 import { type Io, run } from '../../src/cli/index';
 import type { Launchctl } from '../../src/cli/service';
@@ -130,7 +130,7 @@ test('the usage lists sail dashboard', async () => {
 // --- the login service ---
 
 /** A dashboard command on a recording launchctl, platform and uid injected, with a HOME of its own. */
-function service(platform = 'darwin') {
+function service(platform = 'darwin', portFree: (port: number) => Promise<boolean> = async () => true) {
   const calls: string[][] = [];
   const launchctl: Launchctl = async (args) => {
     calls.push(args);
@@ -138,7 +138,10 @@ function service(platform = 'darwin') {
   };
   const home = sailHome();
   const machine = sailHome();
-  const deps: DashboardDeps = { service: { platform, uid: 501, launchctl, home, sail: ['/bin/bun', '/sail/main.ts'] } };
+  const deps: DashboardDeps = {
+    service: { platform, uid: 501, launchctl, home, sail: ['/bin/bun', '/sail/main.ts'] },
+    portFree,
+  };
   const plist = join(home, 'Library', 'LaunchAgents', 'sail.dashboard.plist');
   const sail = async (values: Record<string, boolean | string>) => {
     let stdout = '';
@@ -185,6 +188,33 @@ test("sail dashboard --install --port nope exits 3 with today's port refusal and
   expect([got.code, got.stderr]).toEqual([EXIT_REFUSED, 'sail dashboard: --port takes a port number, 0 to 65535\n']);
   expect(existsSync(s.plist)).toBe(false);
   expect(s.calls).toEqual([]);
+});
+
+test('sail dashboard --install --port 0 exits 3, since the agent would serve on another port at each start, and writes nothing', async () => {
+  const s = service();
+  const got = await s.sail({ install: true, port: '0' });
+  expect([got.code, got.stderr]).toEqual([
+    EXIT_REFUSED,
+    'sail dashboard: --install takes a fixed port, 1 to 65535: with 0 the login service would serve on another port at each start\n',
+  ]);
+  expect(existsSync(s.plist)).toBe(false);
+  expect(s.calls).toEqual([]);
+});
+
+test('sail dashboard --install on a port in use exits 3 naming it and writes nothing, so the agent does not loop', async () => {
+  const holder = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('held') });
+  try {
+    const s = service('darwin', portFree);
+    const got = await s.sail({ install: true, port: String(holder.port) });
+    expect([got.code, got.stderr]).toEqual([
+      EXIT_REFUSED,
+      `sail dashboard: port ${holder.port} is in use: is another sail dashboard running? --port picks another\n`,
+    ]);
+    expect(existsSync(s.plist)).toBe(false);
+    expect(s.calls).toEqual([]);
+  } finally {
+    await holder.stop(true);
+  }
 });
 
 test('sail dashboard --restart kickstarts the agent and prints that it restarted; with none installed it exits 3 and launchctl sees nothing', async () => {
