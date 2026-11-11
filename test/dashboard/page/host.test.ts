@@ -234,6 +234,7 @@ function fakeWindow(
   const root = { dataset: {} as Record<string, string | undefined> };
   const stored = new Map<string, string>();
   const copied: string[] = [];
+  const history: { kind: string; data: unknown; unused: string; url: string }[] = [];
   const win: BrowserWindow = {
     document: {
       getElementById: (id) => elements[id] ?? null,
@@ -248,7 +249,11 @@ function fakeWindow(
         return focus.active;
       },
     },
-    location: { host: '127.0.0.1:4100', search: options.search ?? '' },
+    location: { host: '127.0.0.1:4100', search: options.search ?? '', pathname: '/' },
+    history: {
+      pushState: (data, unused, url) => history.push({ kind: 'push', data, unused, url }),
+      replaceState: (data, unused, url) => history.push({ kind: 'replace', data, unused, url }),
+    },
     async fetch(url, init) {
       fetched.push({
         url,
@@ -328,6 +333,7 @@ function fakeWindow(
     root,
     stored,
     copied,
+    history,
     fire,
     listeners,
     focus,
@@ -881,4 +887,17 @@ test('across a tick and a changed queue, the add field keeps its focus, its type
     page?.stop();
     m.remove();
   }
+});
+
+test('setUrl pushes or replaces the history entry with the query, and writes the path for an empty one', () => {
+  const fake = fakeWindow();
+  const host = browserHost(fake.win);
+  host.setUrl('repo=a&run=b', true);
+  host.setUrl('repo=a', false);
+  host.setUrl('', false);
+  expect(fake.history).toEqual([
+    { kind: 'push', data: null, unused: '', url: '?repo=a&run=b' },
+    { kind: 'replace', data: null, unused: '', url: '?repo=a' },
+    { kind: 'replace', data: null, unused: '', url: '/' },
+  ]);
 });

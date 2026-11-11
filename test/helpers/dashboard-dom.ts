@@ -71,6 +71,7 @@ export function markupWindow() {
   const regions: Record<string, ReturnType<typeof regionElement>> = {};
   for (const name of REGIONS) regions[name] = regionElement();
   const body = regionElement();
+  const history: { kind: string; data: unknown; unused: string; url: string }[] = [];
   const win: BrowserWindow = {
     document: {
       getElementById: (id) => (id === 'body' ? body : (regions[id] ?? null)),
@@ -78,7 +79,11 @@ export function markupWindow() {
       removeEventListener: () => {},
       documentElement: { dataset: {} },
     },
-    location: { host: '127.0.0.1:0', search: '' },
+    location: { host: '127.0.0.1:0', search: '', pathname: '/' },
+    history: {
+      pushState: (data, unused, url) => history.push({ kind: 'push', data, unused, url }),
+      replaceState: (data, unused, url) => history.push({ kind: 'replace', data, unused, url }),
+    },
     fetch: async () => ({ status: 200, text: async () => '' }),
     WebSocket: class {
       onmessage = null;
@@ -105,5 +110,5 @@ export function markupWindow() {
     if (found === undefined) throw new Error(`no field "${fieldName}" in #${name}`);
     return found;
   };
-  return { win, region, field: (regionName: string, fieldName: string) => field(regionName, fieldName) };
+  return { win, history, region, field: (regionName: string, fieldName: string) => field(regionName, fieldName) };
 }

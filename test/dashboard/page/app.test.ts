@@ -174,6 +174,11 @@ class FakeHost implements PageHost {
   start() {
     return this.startAt;
   }
+  /** The URL writes made, in order. */
+  urls: { query: string; push: boolean }[] = [];
+  setUrl(query: string, push: boolean) {
+    this.urls.push({ query, push });
+  }
 
   /** Moves the clock on by `ms`, running every timer that falls due, in order. */
   advance(ms: number) {
@@ -2283,4 +2288,103 @@ test('an index that turns the open queue to watcher not running redraws main wit
   host.click({ action: 'poll-queue', repo: 'beta', workflow: QUEUE_WORKFLOW });
   await settle();
   expect(host.posts.length).toBe(posts);
+});
+
+describe('the page keeps its URL in step with what it shows (ADW-513)', () => {
+  const QUEUE = `beta/${QUEUE_WORKFLOW}`;
+  const open = () => {
+    page = boot(host);
+    host.push(host.open('index')[0], indexMessage());
+    replay(host.open('run=')[0], GOLDEN());
+    host.advance(100);
+  };
+
+  test('the first index writes the run it opened, in place of the current entry', () => {
+    open();
+    expect(host.urls).toEqual([{ query: `repo=alpha&run=${GOLDEN_RUN_ID}`, push: false }]);
+  });
+
+  test('selecting a run, a queue, a card, a tab, a file and closing it each push one entry naming the selection', () => {
+    open();
+    host.urls = [];
+    host.click({ action: 'select-run', repo: 'alpha', run: FAKE_2_ID });
+    expect(host.urls).toEqual([{ query: `repo=alpha&run=${FAKE_2_ID}`, push: true }]);
+    host.urls = [];
+    host.click({ action: 'select-queue', queue: QUEUE });
+    expect(host.urls).toEqual([{ query: 'queue=beta%2Fticket-to-pr', push: true }]);
+    host.urls = [];
+    host.click({ action: 'select-run', repo: 'alpha', run: FAKE_2_ID });
+    host.urls = [];
+    host.click({ action: 'select-card', key: 'implement#1' });
+    expect(host.urls).toEqual([{ query: `repo=alpha&run=${FAKE_2_ID}&key=implement%231&timeline=1`, push: true }]);
+    host.urls = [];
+    host.click({ action: 'tab', tab: 'files' });
+    expect(host.urls).toEqual([
+      { query: `repo=alpha&run=${FAKE_2_ID}&key=implement%231&tab=files&timeline=1`, push: true },
+    ]);
+    host.urls = [];
+    host.click({ action: 'open-file', name: 'x.md', path: 'implement#1/out/x.md' });
+    expect(host.urls.map((url) => [url.push, url.query.endsWith('&file=implement%231%2Fout%2Fx.md')])).toEqual([
+      [true, true],
+    ]);
+    host.urls = [];
+    host.click({ action: 'close-file' });
+    expect(host.urls).toEqual([
+      { query: `repo=alpha&run=${FAKE_2_ID}&key=implement%231&tab=files&timeline=1`, push: true },
+    ]);
+  });
+
+  test('the keys Enter, ] and Escape push one entry each', () => {
+    open();
+    host.click({ action: 'select-run', repo: 'alpha', run: FAKE_2_ID });
+    replay(host.open('run=')[0], fake2Dir(m));
+    host.urls = [];
+    host.press('Enter');
+    expect(host.urls).toEqual([{ query: `repo=alpha&run=${FAKE_2_ID}&key=intake%231&timeline=1`, push: true }]);
+    host.urls = [];
+    host.press(']');
+    expect(host.urls).toEqual([{ query: `repo=alpha&run=${FAKE_2_ID}&key=spec%231&timeline=1`, push: true }]);
+    host.urls = [];
+    host.press('Escape');
+    host.press('Escape');
+    expect(host.urls).toEqual([
+      { query: `repo=alpha&run=${FAKE_2_ID}&key=spec%231`, push: true },
+      { query: `repo=alpha&run=${FAKE_2_ID}`, push: true },
+    ]);
+  });
+
+  test('toggling the theme, a group or follow writes nothing, and nothing is written before the first index', () => {
+    page = boot(host);
+    host.click({ action: 'toggle-theme' });
+    host.click({ action: 'select-card', key: 'implement#1' });
+    host.push(host.open('index')[0], indexMessage());
+    expect(host.urls.map((url) => url.push)).toEqual([false]);
+    host.urls = [];
+    host.click({ action: 'toggle-theme' });
+    host.click({ action: 'toggle-group', group: 'alpha' });
+    host.click({ action: 'toggle-follow' });
+    expect(host.urls).toEqual([]);
+  });
+
+  test('an index that no longer lists the open queue replaces the entry with the run', () => {
+    open();
+    host.click({ action: 'select-queue', queue: QUEUE });
+    host.urls = [];
+    const listed = indexMessage();
+    host.push(host.open('index')[0], {
+      ...listed,
+      repos: listed.repos.map((repo) => ({ ...repo, queues: [] })),
+    });
+    expect(host.urls).toEqual([{ query: `repo=alpha&run=${GOLDEN_RUN_ID}`, push: false }]);
+  });
+
+  test("a restart's answer naming a new run replaces the entry with that run", async () => {
+    await openOffering('alpha', FAKE_2_ID, fake2Dir(m));
+    host.postAnswer = { status: 202, body: JSON.stringify({ runId: NEW_ID }) };
+    host.click({ action: 'restart-run' });
+    host.urls = [];
+    host.click({ action: 'restart-run' });
+    await settle();
+    expect(host.urls).toEqual([{ query: `repo=alpha&run=${NEW_ID}`, push: false }]);
+  });
 });

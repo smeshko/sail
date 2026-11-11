@@ -3,6 +3,7 @@
 // selection, `]` and `[` step to the next and previous card, and `i` and `a` toggle the inspector and needs attention. A
 // key typed in an input does nothing.
 import { actions, closeAttention, step } from './actions';
+import { syncUrl } from './location';
 import { closeFile, selectCard } from './reads';
 import type { Store } from './store';
 
@@ -43,6 +44,7 @@ export function onKey(store: Store, key: string, inInput: boolean): void {
   const by = MOVES[key];
   if (by === undefined) {
     keys[key]?.(store);
+    syncUrl(store, true);
     return;
   }
   const last = (store.run?.model.cards.length ?? 0) - 1;

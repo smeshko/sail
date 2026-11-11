@@ -63,6 +63,8 @@ export interface Store {
   cursorPending: boolean;
   /** What the URL asks to open, until the first index: then it is opened, or dropped when its run isn't listed. */
   start: Record<string, string> | undefined;
+  /** The query last written to the URL, `undefined` until one is. */
+  url: string | undefined;
   stopped: boolean;
   /** Bumped on every change of the selected call: a read made for an older one is dropped. */
   selection: number;
@@ -116,6 +118,7 @@ export function createStore(host: PageHost): Store {
     drawn: [],
     cursorPending: false,
     start: host.start(),
+    url: undefined,
     stopped: false,
     selection: 0,
     resultRead: 0,

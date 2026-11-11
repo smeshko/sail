@@ -43,6 +43,7 @@ async function bootHeadless(dashboard: Dashboard) {
   const listeners: Record<string, ((event: EventLike) => void)[]> = {};
   const origin = `http://127.0.0.1:${dashboard.port}`;
   const sockets: WebSocket[] = [];
+  const history: { kind: string; data: unknown; unused: string; url: string }[] = [];
   const timers = new Set<ReturnType<typeof setTimeout>>();
   const win: BrowserWindow = {
     document: {
@@ -53,7 +54,11 @@ async function bootHeadless(dashboard: Dashboard) {
       removeEventListener() {},
       documentElement: { dataset: {} },
     },
-    location: { host: `127.0.0.1:${dashboard.port}`, search: '' },
+    location: { host: `127.0.0.1:${dashboard.port}`, search: '', pathname: '/' },
+    history: {
+      pushState: (data, unused, url) => history.push({ kind: 'push', data, unused, url }),
+      replaceState: (data, unused, url) => history.push({ kind: 'replace', data, unused, url }),
+    },
     fetch: (path, init) => fetch(`${origin}${path}`, init),
     // Bun's own WebSocket, with the Origin a browser would send.
     WebSocket: class extends WebSocket {

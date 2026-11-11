@@ -15,6 +15,7 @@ import { startDraw } from './draw';
 import type { PageHost } from './host';
 import { REGIONS } from './host';
 import { onKey } from './keys';
+import { syncUrl } from './location';
 import { stopReads } from './reads';
 import { saveCleared, storedCleared } from './saved';
 import { createStore } from './store';
@@ -47,8 +48,12 @@ export function boot(host: PageHost): Page {
         selectRun(store, repo, runId);
         // The menu the action was made from stays open on the run read again, with the answer.
         if (keepMenu && menu !== undefined) store.ui.runMenu = menu;
+        syncUrl(store, false);
       },
-      open: (repo, runId) => selectRun(store, repo, runId),
+      open: (repo, runId) => {
+        selectRun(store, repo, runId);
+        syncUrl(store, false);
+      },
       leave: () => closeRun(store),
       took: () => store.fresh.add('main'),
       local: {

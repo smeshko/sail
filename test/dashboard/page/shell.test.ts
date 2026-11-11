@@ -27,6 +27,7 @@ const SPLIT = [
   'actions.ts',
   'act.ts',
   'keys.ts',
+  'location.ts',
   'app.ts',
 ];
 
@@ -52,6 +53,7 @@ function fakeHost(stored: Record<string, string>) {
     setInspector: () => {},
     offset: () => 120,
     start: () => ({ run: 'r-1' }),
+    setUrl: () => {},
     later: (_fn: () => void, ms: number) => timers.push({ ms }),
     cancel: () => {},
   } as unknown as PageHost;

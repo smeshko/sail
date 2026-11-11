@@ -10,6 +10,7 @@ import type { Message } from '../streams';
 import { attention, identity } from './attention';
 import { tick } from './draw';
 import { newestFirst, railRepos, statusOf } from './index-model';
+import { syncUrl } from './location';
 import { queueId } from './queue-view';
 import { clearCall, closeFile, offerSignature, readOffers, readResult, refreshLog, refreshOutput } from './reads';
 import { applyEvent, emptyRun } from './run-model';
@@ -265,6 +266,7 @@ export function onIndex(store: Store, text: string, onStart: (asked: Record<stri
     readOffers(store);
   }
   if (ui.queue !== undefined && openQueue(store) === undefined) delete ui.queue;
+  syncUrl(store, false);
   store.mark('rail', 'attention', 'main', 'status');
   tick(store);
 }

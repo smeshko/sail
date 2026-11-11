@@ -50,8 +50,10 @@ export interface PageHost {
   setInspector(open: boolean): void;
   /** The browser's offset east of UTC, in minutes. */
   offset(): number;
-  /** What the page's URL asks it to open first, from `?repo=…&run=…&key=…&tab=…`: empty when it asks nothing. */
+  /** What the page's URL asks it to open first, from `?repo=…&run=…&key=…&tab=…&timeline=1&file=…` or `?queue=…`: empty when it asks nothing. */
   start(): Record<string, string>;
+  /** Writes the page's URL to `?query` (the path alone for an empty one), as a new history entry when `push`, else in place of the current one. */
+  setUrl(query: string, push: boolean): void;
 }
 
 /** The members of an element the page uses. */
@@ -101,7 +103,11 @@ export interface BrowserWindow {
     documentElement: { dataset: Record<string, string | undefined> };
     activeElement?: ElementLike | null;
   };
-  location: { host: string; search: string };
+  location: { host: string; search: string; pathname: string };
+  history: {
+    pushState(data: unknown, unused: string, url: string): void;
+    replaceState(data: unknown, unused: string, url: string): void;
+  };
   fetch(
     url: string,
     init: { headers: Record<string, string>; method?: string; body?: string },
@@ -390,6 +396,11 @@ export function browserHost(win: BrowserWindow): PageHost {
       doc.documentElement.dataset.theme = theme;
     },
     start: () => Object.fromEntries(new URLSearchParams(win.location.search)),
+    setUrl(query, push) {
+      const url = query === '' ? win.location.pathname : `?${query}`;
+      if (push) win.history.pushState(null, '', url);
+      else win.history.replaceState(null, '', url);
+    },
     setInspector(open) {
       doc.documentElement.dataset.inspector = open ? 'open' : 'closed';
     },

@@ -4,6 +4,7 @@
 // action opens a socket: what needs one goes through `streams.ts`, and what posts goes through the actor.
 
 import { actionOf } from './action-registry';
+import { syncUrl } from './location';
 import { closeFile, openedOutputKeys, openFile, readLog, readOutput, selectCard } from './reads';
 import { FILTER_KEY, RAIL_KEY, THEME_KEY } from './saved';
 import type { Store } from './store';
@@ -212,4 +213,5 @@ export function dispatch(store: Store, action: string, data: Record<string, stri
   if (disarmed || shuts || shutsRun) store.mark('main', 'rail');
   if (acts) store.actor.act(action, data);
   else actions[action]?.(store, data);
+  syncUrl(store, true);
 }
