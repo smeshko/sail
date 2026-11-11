@@ -153,3 +153,42 @@ test('an item keyed __proto__ is read as an own key and pollutes nothing', () =>
   expect(Object.hasOwn(items ?? {}, '__proto__')).toBe(true);
   expect(({} as Record<string, unknown>).drop).toBeUndefined();
 });
+
+/** `.sail/workflows/<name>/workflow.ts` for each name, and a config with `defaultWorkflow`. */
+function workflows(names: string[], defaultWorkflow?: string): void {
+  for (const name of names) {
+    mkdirSync(join(m.beta.sailDir, 'workflows', name), { recursive: true });
+    writeFileSync(join(m.beta.sailDir, 'workflows', name, 'workflow.ts'), '');
+  }
+  mkdirSync(join(m.beta.sailDir, 'workflows', 'no-file'), { recursive: true });
+  const config = readFileSync(join(import.meta.dir, '..', 'fixtures', 'repo', '.sail', 'project.yaml'), 'utf8');
+  writeFileSync(
+    join(m.beta.sailDir, 'project.yaml'),
+    defaultWorkflow === undefined ? config.replace(/^defaultWorkflow:.*\n/m, '') : config,
+  );
+}
+
+test('a repository offers start with the workflows of .sail/workflows/ that hold a workflow.ts, and the config default', () => {
+  workflows(['ticket-to-pr', 'review'], 'ticket-to-pr');
+  expect(beta()?.offers?.start).toEqual({
+    enabled: true,
+    workflows: ['review', 'ticket-to-pr'],
+    defaultWorkflow: 'ticket-to-pr',
+  });
+});
+
+test('start leaves defaultWorkflow out when the config sets none or does not read', () => {
+  workflows(['review']);
+  expect(beta()?.offers?.start).toEqual({ enabled: true, workflows: ['review'] });
+  writeFileSync(join(m.beta.sailDir, 'project.yaml'), 'not: [valid');
+  expect(beta()?.offers?.start).toEqual({ enabled: true, workflows: ['review'] });
+});
+
+test('start is disabled with the path when .sail/ is gone', () => {
+  rmSync(m.beta.sailDir, { recursive: true, force: true });
+  expect(beta()?.offers?.start).toEqual({
+    enabled: false,
+    why: `${m.beta.sailDir} no longer exists`,
+    workflows: [],
+  });
+});

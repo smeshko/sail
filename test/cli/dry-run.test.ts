@@ -5,7 +5,9 @@
 import { expect, test } from 'bun:test';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { rosterSource, rosterText } from '../../src/cli/commands/dry-run';
 import { EXIT_OK, EXIT_REFUSED, EXIT_WAITING } from '../../src/cli/exit-codes';
+import type { RunHeader } from '../../src/engine/run-header';
 import { fakeAdapters } from '../helpers/adapters';
 import { copyFixture, edit, patchTicket } from '../helpers/fixture';
 import { type Captured, runCaptured } from '../helpers/run-captured';
@@ -306,3 +308,30 @@ test('--dry-run on a ticket whose prerequisite is Canceled exits 0', async () =>
   );
   expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
 }, 60_000);
+
+test("rosterSource reads the ticket key or the pull request's number from the first line rosterText prints", async () => {
+  const header = (source: object) =>
+    ({
+      workflow: { name: 'review', version: '1' },
+      source,
+      adapters: {},
+      intake: { name: 'pr', origin: 'builtin' },
+      stages: {},
+    }) as unknown as RunHeader;
+  const ticket = rosterText(
+    header({ kind: 'ticket', ticketKey: 'ADW-7', via: 'cli', forced: [] }),
+    { title: 'Fix it', state: { name: 'Todo' } },
+    'sail/ADW-7-fix-it',
+  );
+  const pr = rosterText(
+    header({ kind: 'pr', number: 12, headSha: 'a'.repeat(40), via: 'cli', forced: [] }),
+    { title: 'Fix it', state: 'open' },
+    'fix-it',
+  );
+  expect([rosterSource(ticket), rosterSource(pr), rosterSource(ROSTER), rosterSource('nothing here\n')]).toEqual([
+    'ADW-7',
+    '#12',
+    'FAKE-1',
+    undefined,
+  ]);
+});

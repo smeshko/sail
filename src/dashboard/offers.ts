@@ -4,10 +4,12 @@
 // one check behind both these offers and the POSTs that change a queue, and a `.sail/` that still exists for the watch
 // set. Read-only.
 import { existsSync } from 'node:fs';
+import { readConfig } from '../engine/config';
 import type { RegistryEntry } from '../watch/registry';
 import type { Offer } from './actions';
 import { type RunItem, runItems } from './files';
 import { type QueueView, queueViews } from './queues';
+import { startableWorkflows } from './start';
 import { type RepoWatcher, repoWatcher, workflowWatch } from './watch-state';
 
 /** What one queue item offers: only the actions that apply to its state. */
@@ -24,8 +26,10 @@ export interface QueueOffers {
   items: Record<string, ItemOffers>;
 }
 
-/** What a repository offers: its watch set, and each workflow's watch or unwatch. */
+/** What a repository offers: its watch set, each workflow's watch or unwatch, and a start from a ticket or a pull request. */
 export interface RepoOffers {
+  /** Start a run: the workflows `.sail/workflows/` holds, and the config's `defaultWorkflow` when it reads. */
+  start?: Offer & { workflows: string[]; defaultWorkflow?: string };
   watch: Offer;
   unwatch?: Offer;
   workflows: Record<string, { watch?: Offer; unwatch?: Offer }>;
@@ -83,6 +87,23 @@ export function offeredQueues(entry: RegistryEntry, runs?: readonly RunItem[], r
   return views.map((view) => ({ ...view, offers: queueOffers(entry, view, live, watcher) }));
 }
 
+/** The start a repository offers: `offer` for the `.sail/` it needs, with the workflows it can start. */
+function startOffer(entry: RegistryEntry, offer: Offer): NonNullable<RepoOffers['start']> {
+  if (!existsSync(entry.sailDir)) return { ...offer, workflows: [] };
+  let defaultWorkflow: string | undefined;
+  try {
+    const config = readConfig(entry.sailDir);
+    if (!('issues' in config)) defaultWorkflow = config.defaultWorkflow;
+  } catch {
+    // A config that doesn't read gives no default: the person names the workflow.
+  }
+  return {
+    ...offer,
+    workflows: startableWorkflows(entry.sailDir),
+    ...(defaultWorkflow === undefined ? {} : { defaultWorkflow }),
+  };
+}
+
 /** The repository's offers: `watchingWorkflows` is the live watcher's watch set in this clone, empty when none. */
 export function repoOffers(
   entry: RegistryEntry,
@@ -94,7 +115,7 @@ export function repoOffers(
   const workflows: RepoOffers['workflows'] = Object.create(null) as RepoOffers['workflows'];
   for (const name of watchingWorkflows) workflows[name] = { unwatch: offer() };
   for (const view of queues) if (!(view.workflow in workflows)) workflows[view.workflow] = { watch: offer() };
-  const offers: RepoOffers = { watch: offer(), workflows };
+  const offers: RepoOffers = { watch: offer(), start: startOffer(entry, offer()), workflows };
   if (watchingWorkflows.length > 0) offers.unwatch = offer();
   return offers;
 }

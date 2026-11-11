@@ -169,7 +169,7 @@ export function index(registryDir: string): IndexRepo[] {
         ...repo,
         runs: [],
         queues: [],
-        offers: { watch: repoOffers(repo, [], []).watch, workflows: {} },
+        offers: { ...repoOffers(repo, [], []), workflows: {} },
         problem: `its runs can't be listed: ${messageOf(error)}`,
       };
     }

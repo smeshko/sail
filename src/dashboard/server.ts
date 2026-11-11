@@ -27,6 +27,10 @@
 //    is not taken yet, or 409 with the CLI's refusal. A release of a usage-limit hold, POST to
 //    `/api/repos/<repo>/queues/<workflow>/release` (body `{ harnessKey }`), needs no watcher: it writes only `holds/` in
 //    the machine directory, as `sail watch --release-hold` does, and answers 200 `{ message }` with the line that prints.
+//    A start is checked at `/api/repos/<repo>/starts/check` (body `{ source, workflow?, until?, force?,
+//    ignorePrerequisites? }`): the route runs `sail <source> --workflow <name> --dry-run …` in the clone, its output in
+//    `.sail-runs/dashboard/start-check.log`, and answers 200 `{ roster, key, forced, start }` with what it printed, or
+//    409 `{ error, override?, start }` with what the CLI refused with and the flag that would override it.
 // 3. A WebSocket upgrade needs a same-origin `Origin`, or no `Origin` and the client header: browsers can't set headers
 //    on an upgrade, but always send `Origin`.
 // 4. A GET of exactly `/` is the page, which a navigation fetches with no header of its own. It holds no data: all it
@@ -40,6 +44,7 @@ import { dirname, join, relative } from 'node:path';
 import type { Server, ServerWebSocket } from 'bun';
 import { z } from 'zod';
 import { BUILTINS } from '../adapters/index';
+import { rosterSource } from '../cli/commands/dry-run';
 import { resolveAdapters } from '../engine/adapters';
 import { isPlainName } from '../engine/call-dir';
 import { cleanedMessage, cleanRun } from '../engine/clean';
@@ -56,7 +61,7 @@ import { commandTaken, dropCommand, NOT_TAKEN } from '../watch/inbox';
 import { commandFor, itemLine, outcomeOf, streamMark } from '../watch/queue-commands';
 import { queueItemsNaming, startingRun } from '../watch/queue-store';
 import { liveSet, liveWatcher } from '../watch/registry';
-import { lastLine, type SpawnedRun, spawnDetached } from '../watch/spawn';
+import { lastLine, logText, type SpawnedRun, spawnDetached } from '../watch/spawn';
 import { runActions } from './actions';
 import { clonePorts, type ResolveClonePorts } from './clone-ports';
 import { callFile, containedFile, findRepo, findRunDir, repos, runItems } from './files';
@@ -64,6 +69,7 @@ import { renderMarkdown } from './markdown';
 import { offeredQueues, watching } from './offers';
 import { createPage } from './page';
 import { findQueueDir, readQueue } from './queues';
+import { forcedOf, overrideOf, runKeyOf, StartBody, startArgs } from './start';
 import { createIndexFeed, openQueueFollow, openRunStream, resolveTarget } from './streams';
 
 export interface DashboardOptions {
@@ -130,6 +136,9 @@ const RESTART_PATH = /^\/api\/repos\/[^/]+\/runs\/[^/]+\/restart$/;
 /** The paths a run is stopped and cleaned at: `/api/repos/<repo>/runs/<run>/stop` and `…/clean`. */
 const STOP_PATH = /^\/api\/repos\/[^/]+\/runs\/[^/]+\/stop$/;
 const CLEAN_PATH = /^\/api\/repos\/[^/]+\/runs\/[^/]+\/clean$/;
+
+/** The path a start is checked at: `/api/repos/<repo>/starts/check`. */
+const START_CHECK_PATH = /^\/api\/repos\/[^/]+\/starts\/check$/;
 
 /** The paths the watch set is changed at: `/api/repos/<repo>/watch` and `…/unwatch`. */
 const WATCH_PATH = /^\/api\/repos\/[^/]+\/(watch|unwatch)$/;
@@ -475,6 +484,62 @@ async function restartRoute(starts: Starts, segments: string[], request: Request
 }
 
 /**
+ * Checks a start by running `sail <source> --workflow <name> … --dry-run` in the clone, its output in
+ * `.sail-runs/dashboard/start-check.log`: 200 `{ roster, key, forced, start }` when it exits 0, 409 `{ error, override?,
+ * start }` with what it printed otherwise, 202 `{ waiting }` when it outlasts `startWaitMs`. The CLI makes every check.
+ */
+async function startCheckRoute(starts: Starts, segments: string[], request: Request): Promise<Response> {
+  const { options, underway } = starts;
+  const [, , name = ''] = segments;
+  const entry = findRepo(options.registryDir, name);
+  if (entry === undefined) return error(404, `no repository '${name}'`);
+  const parsed = await bodyOf(request, StartBody, 'a check of a start');
+  if (parsed instanceof Response) return parsed;
+  const args = startArgs(parsed.body);
+  if ('invalid' in args) return error(400, args.invalid);
+  if (!existsSync(entry.sailDir)) return error(409, `${entry.sailDir} no longer exists`);
+  const key = `start-check ${name}`;
+  if (underway.has(key)) return error(409, `a check of a start in '${name}' is already under way`);
+  underway.add(key);
+  try {
+    const log = join(runsDir(entry.sailDir), 'dashboard', 'start-check.log');
+    const spawned = spawnDetached(
+      dirname(entry.sailDir),
+      log,
+      [parsed.body.source, ...args, '--dry-run'],
+      environmentOf(options),
+      options.cli,
+    );
+    const exit = await Promise.race([
+      spawned.exited,
+      sleep(options.startWaitMs ?? 120_000).then(() => 'late' as const),
+    ]);
+    if (exit === 'late') {
+      return Response.json(
+        {
+          waiting: `the check of the start in '${name}' is still under way: its output is in .sail-runs/dashboard/start-check.log`,
+        },
+        { status: 202 },
+      );
+    }
+    const text = logText(log, spawned.logFrom) ?? '';
+    const source = exit === 0 ? rosterSource(text) : undefined;
+    if (exit === 0 && source !== undefined) {
+      return Response.json({ roster: text, key: runKeyOf(source), forced: forcedOf(text), start: parsed.body });
+    }
+    const failure =
+      exit === 0 ? `the dry run's output names no source: ${text}` : text || `sail exited ${exit ?? 'on a signal'}`;
+    const override = exit === 0 ? undefined : overrideOf(exit, text);
+    return Response.json(
+      { error: failure, ...(override === undefined ? {} : { override }), start: parsed.body },
+      { status: 409 },
+    );
+  } finally {
+    underway.delete(key);
+  }
+}
+
+/**
  * Changes a repository's watch set by running `sail watch <names>` or `sail unwatch <names>` in its clone, and passes
  * the CLI's own line and refusals through. With no live watcher a watch starts one, detached, its output in
  * `.sail-runs/dashboard/watcher.log`: 202 `{ message, pid }` once the registry records it live in this clone. Any other
@@ -641,13 +706,21 @@ export function guard(request: Request, port: number): Response | undefined {
     const path = new URL(request.url).pathname;
     if (
       request.method !== 'POST' ||
-      ![MOVE_PATH, QUEUE_OP_PATH, RELEASE_PATH, RESUME_PATH, RESTART_PATH, STOP_PATH, CLEAN_PATH, WATCH_PATH].some(
-        (each) => each.test(path),
-      )
+      ![
+        MOVE_PATH,
+        QUEUE_OP_PATH,
+        RELEASE_PATH,
+        RESUME_PATH,
+        RESTART_PATH,
+        STOP_PATH,
+        CLEAN_PATH,
+        WATCH_PATH,
+        START_CHECK_PATH,
+      ].some((each) => each.test(path))
     ) {
       return error(
         405,
-        'the dashboard answers only GET, and POST to a queue change, a resume, a restart, a stop, a clean, a watch or an unwatch',
+        'the dashboard answers only GET, and POST to a queue change, a resume, a restart, a stop, a clean, a watch, an unwatch or a check of a start',
         {
           Allow: 'GET',
         },
@@ -806,6 +879,10 @@ export function startDashboard(options: DashboardOptions): Dashboard | { refused
           if (start !== undefined) {
             self.timeout(request, 0);
             return start(starts, segments, request);
+          }
+          if (START_CHECK_PATH.test(path)) {
+            self.timeout(request, 0);
+            return startCheckRoute(starts, segments, request);
           }
           if (WATCH_PATH.test(path)) {
             self.timeout(request, 0);
