@@ -4,6 +4,7 @@
 // queue, under its repository) and History (finished runs, failed then done).
 
 import type { QueueOffers } from '../offers';
+import type { Subject } from './action-registry';
 import { type AttentionItem, identity } from './attention';
 import { type ListRepo, type ListRun, type ListWorkflow, newestFirst, workflowOf } from './index-model';
 
@@ -50,6 +51,14 @@ export interface AttentionRow {
 }
 
 export type ListRow = RunRow | QueueRow | AttentionRow;
+
+/** An Inbox row's subject: the run it opens, else its queue's workflow, else its repository. */
+export function attentionSubject(row: AttentionRow): Subject {
+  const { opens, workflow } = row.item;
+  if (opens !== undefined) return { kind: 'run', repo: opens.repo, runId: opens.runId };
+  if (workflow !== undefined) return { kind: 'workflow', repo: row.repo, workflow };
+  return { kind: 'repo', repo: row.repo };
+}
 
 export interface ListGroup {
   /** `<view>:<name>` */

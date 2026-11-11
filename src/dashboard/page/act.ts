@@ -53,7 +53,8 @@ export interface ActorEffects {
 export interface ActorDeps {
   host: Pick<PageHost, 'post' | 'value' | 'openDialog' | 'closeDialog' | 'dialogValue' | 'redrawDialog'>;
   ui: UiState;
-  source(): OfferSource;
+  /** What the offers say for `subject`: a run that is not open has its own. */
+  source(subject?: Subject): OfferSource;
   openRun(): { repo: string; runId: string } | undefined;
   effects: ActorEffects;
   mark(...regions: Region[]): void;
@@ -64,7 +65,7 @@ export interface ActorDeps {
 
 export interface Actor {
   /** Carries out action `id` for the subject `data` names. */
-  act(id: string, data: Readonly<Record<string, string>>): void;
+  act(id: string, data: Readonly<Record<string, string>>, values?: Values): void;
   /** Reads the drawn parameters of the actions shown in `place` into the drafts, before a draw. */
   keep(place: 'run' | 'queue', subject?: Subject): void;
   /** Forgets what a run's actions hold: an open dialog for it and the drafts. */
@@ -112,8 +113,16 @@ export function createActor(deps: ActorDeps): Actor {
   };
 
   /** What the page holds for `param`: its field, else its draft, else the choice it starts at. */
-  function typed(def: ActionDef, param: Param, data: Readonly<Record<string, string>>): string | undefined {
+  function typed(
+    def: ActionDef,
+    param: Param,
+    data: Readonly<Record<string, string>>,
+    asked: Values | undefined,
+  ): string | undefined {
     if (param.given !== undefined) return data[param.name];
+    // A value the caller has already asked is the one given: no field the page draws takes its place.
+    const given = asked?.[param.name];
+    if (given !== undefined) return given;
     const drafts = draftsOf(def.drafts ?? def.id);
     let value = host.value(param.dom) ?? drafts[param.name];
     if (value === undefined && param.type === 'choice') value = param.initial;
@@ -121,10 +130,15 @@ export function createActor(deps: ActorDeps): Actor {
     return value;
   }
 
-  function read(def: ActionDef, subject: Subject, data: Readonly<Record<string, string>>): Values {
+  function read(
+    def: ActionDef,
+    subject: Subject,
+    data: Readonly<Record<string, string>>,
+    asked: Values | undefined,
+  ): Values {
     const values: Record<string, string> = {};
-    for (const param of def.params(subject, deps.source())) {
-      const value = typed(def, param, data);
+    for (const param of def.params(subject, deps.source(subject))) {
+      const value = typed(def, param, data, asked);
       if (value !== undefined) values[param.name] = value;
     }
     return values;
@@ -162,7 +176,13 @@ export function createActor(deps: ActorDeps): Actor {
     const open = deps.openRun();
     const runEffect = effect !== undefined && effect !== 'took';
     const stillOpen = subject.kind === 'run' && open?.repo === subject.repo && open.runId === subject.runId;
-    if (!(runEffect && !stillOpen)) {
+    if (runEffect && !stillOpen) {
+      // A run acted on that is not open: a Restart opens the run it started and a Resume (a reopen that keeps no menu)
+      // opens the run; a stop's reopen and a clean's leave are the open run's alone.
+      if (typeof effect === 'object' && subject.kind === 'run') effects.open(subject.repo, effect.open);
+      else if (effect === 'reopen' && answer.keepMenu !== true && subject.kind === 'run')
+        effects.open(subject.repo, subject.runId);
+    } else {
       if (effect === 'reopen' && subject.kind === 'run')
         effects.reopen(subject.repo, subject.runId, answer.keepMenu === true);
       else if (effect === 'leave') effects.leave();
@@ -171,7 +191,7 @@ export function createActor(deps: ActorDeps): Actor {
         // A change that took empties the text typed for it. One with no text of its own, such as a poll or a drop,
         // leaves every field as it is typed.
         const texts = def
-          .params(subject, deps.source())
+          .params(subject, deps.source(subject))
           .filter((param) => param.type === 'text' && param.given === undefined);
         if (texts.length > 0) {
           const drafts = draftsOf(def.drafts ?? def.id);
@@ -193,7 +213,7 @@ export function createActor(deps: ActorDeps): Actor {
     void host.post(request.path, request.body).then(({ status, body }) => finish(def, subject, status, body, undo));
   }
 
-  function act(id: string, data: Readonly<Record<string, string>>) {
+  function act(id: string, data: Readonly<Record<string, string>>, asked?: Values) {
     const def = actionOf(id, registry);
     if (def === undefined) return;
     const subject = subjectOf(def.appliesTo, data, deps.openRun());
@@ -204,18 +224,21 @@ export function createActor(deps: ActorDeps): Actor {
       if (done !== undefined) effects.toast('ok', headOf(def, subject), done.text, done.undo);
       return;
     }
-    const source = deps.source();
+    const source = deps.source(subject);
     const available = def.available(subject, source);
     if (!available.offered) return;
     if (!available.enabled && def.holdsDisabled === true) return;
+    // A parameter the dialog asks is asked there, unless the caller (the command menu) has asked it already.
     const asking = def.tier === 'confirmed' && def.dialog !== undefined;
     const params = def.params(subject, source);
-    const asked = asking ? params.filter((param) => param.ask === 'dialog') : [];
-    if (asked.length > 0 && def.dialog !== undefined) {
-      askInDialog(def, def.dialog.bind(def), subject, source, asked, data);
+    const inDialog = asking
+      ? params.filter((param) => param.ask === 'dialog' && asked?.[param.name] === undefined)
+      : [];
+    if (inDialog.length > 0 && def.dialog !== undefined) {
+      askInDialog(def, def.dialog.bind(def), subject, source, inDialog, data, asked);
       return;
     }
-    const values = read(def, subject, data);
+    const values = read(def, subject, data, asked);
     const request = def.request?.(subject, values, source);
     if (request === undefined) return;
     if ('invalid' in request) {
@@ -244,11 +267,12 @@ export function createActor(deps: ActorDeps): Actor {
     source: OfferSource,
     asked: Param[],
     data: Readonly<Record<string, string>>,
+    given: Values | undefined,
   ) {
     const placed: Record<string, string> = {};
     for (const param of def.params(subject, source)) {
-      if (param.ask === 'dialog') continue;
-      const value = typed(def, param, data);
+      if (asked.some((one) => one.name === param.name)) continue;
+      const value = typed(def, param, data, given);
       if (value !== undefined) placed[param.name] = value;
     }
     const undo = def.undo?.(subject, source);

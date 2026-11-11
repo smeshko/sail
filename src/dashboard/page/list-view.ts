@@ -16,13 +16,14 @@
 import type { RunActions } from '../actions';
 import type { RepoOffers } from '../offers';
 import { ACTIONS, actionOf, type OfferSource, type Subject } from './action-registry';
-import { actionControl } from './action-view';
+import { actionControl, subjectAttrs } from './action-view';
 import { type AttentionItem, identity } from './attention';
 import { ago, clock, cost, duration } from './format';
 import { html, type SafeHtml } from './html';
 import { type ListRepo, type ListRun, workflowOf } from './index-model';
 import {
   type AttentionRow,
+  attentionSubject,
   filterRows,
   groupsOf,
   type ListGroup,
@@ -111,7 +112,7 @@ const cur = (id: string, ui: UiState) => (ui.listCursor === id ? ' cur' : '');
 function runRow(row: RunRow, ui: UiState, offers: RunActions | undefined): SafeHtml {
   const { repo, run } = row;
   const tip = tooltipOf(run);
-  return html`<div class="run lrow${isOpen(repo, run, ui) ? ' sel' : ''}${cur(row.id, ui)}" data-row="${row.id}"><button class="r-open"${
+  return html`<div class="run lrow${isOpen(repo, run, ui) ? ' sel' : ''}${cur(row.id, ui)}" data-row="${row.id}"${subjectAttrs({ kind: 'run', repo, runId: run.runId })}><button class="r-open"${
     tip === undefined ? '' : html` title="${tip}"`
   } data-action="select-run" data-repo="${repo}" data-run="${run.runId}"><span class="r-line">${statusMark(repo, run, ui)}<span class="r-id">${runLabel(run)}</span><span class="r-title">${run.title}</span><span class="r-wf">${repo} › ${workflowOf(run)}</span>${
     run.status === 'running' && run.stalled !== undefined
@@ -161,7 +162,7 @@ function queueRow(row: QueueRow, ui: UiState, now: number, repoOffers: RepoOffer
       : html`${name}<span class="n">${row.waiting} waiting</span>${(['running', 'failed', 'parked'] as const).map(
           (state) => (row[state] === undefined ? '' : html`<span class="q-c ${state}">${row[state]} ${state}</span>`),
         )}<span class="q-polled">${row.lastPolledAt === undefined ? 'never polled' : `polled ${ago(row.lastPolledAt, now)}`}</span>${queueChips(row, ui)}`;
-  return html`<div class="q-row${row.problem === undefined ? '' : ' bad'}${sel}" data-row="${row.id}"><button class="q-open" data-action="select-queue" data-queue="${id}">${body}</button>${queueActions(row, ui, repoOffers)}</div>`;
+  return html`<div class="q-row${row.problem === undefined ? '' : ' bad'}${sel}" data-row="${row.id}"${subjectAttrs({ kind: 'workflow', repo: row.repo, workflow: row.workflow })}><button class="q-open" data-action="select-queue" data-queue="${id}">${body}</button>${queueActions(row, ui, repoOffers)}</div>`;
 }
 
 /** Where an Inbox item is: its repository, workflow, run and call. */
@@ -187,7 +188,7 @@ function attentionRow(row: AttentionRow, ui: UiState): SafeHtml {
       : queue !== undefined
         ? html`<button class="r-open" data-action="select-queue" data-queue="${queue}">${body}</button>`
         : html`<div class="r-open">${body}</div>`;
-  return html`<div class="lrow in-row in-${item.kind}${sel ? ' sel' : ''}${cur(row.id, ui)}" data-row="${row.id}">${open}<button class="r-dismiss" type="button" data-action="dismiss-attention" data-item="${identity(item)}" aria-label="dismiss" title="dismiss (e)">✕</button></div>`;
+  return html`<div class="lrow in-row in-${item.kind}${sel ? ' sel' : ''}${cur(row.id, ui)}" data-row="${row.id}"${subjectAttrs(attentionSubject(row))}>${open}<button class="r-dismiss" type="button" data-action="dismiss-attention" data-item="${identity(item)}" aria-label="dismiss" title="dismiss (e)">✕</button></div>`;
 }
 
 const rowOf = (
@@ -205,7 +206,7 @@ const rowOf = (
 
 /** A Queues group's header row: the repository, its watch buttons and its problem. */
 function repoHeader(group: ListGroup, repo: ListRepo, open: boolean, ui: UiState): SafeHtml {
-  return html`<div class="lgrp-row${cur(group.id, ui)}"><button class="lgh${open ? ' open' : ''}"${
+  return html`<div class="lgrp-row${cur(group.id, ui)}"${subjectAttrs({ kind: 'repo', repo: repo.name })}><button class="lgh${open ? ' open' : ''}"${
     repo.remote === null ? '' : html` title="${repo.remote}"`
   } data-action="toggle-list-group" data-group="${group.id}" aria-expanded="${open ? 'true' : 'false'}"><span class="lcaret">›</span><span class="nm">${group.label}</span><span class="c">${group.rows.length}</span></button>${watchButtons(repo.name, repo.offers, ui)}</div>${
     repo.problem === undefined ? '' : html`<div class="lgrp-p">${repo.problem}</div>`

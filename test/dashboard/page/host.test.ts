@@ -458,8 +458,10 @@ test("render writes a region by id, keys say whether they were typed in an input
   host.render('status', 'nowhere');
   expect(fake.elements.list?.innerHTML).toBe('<b>alpha</b>');
   const keys: [string, boolean][] = [];
-  host.onKey((key, inInput) => {
-    keys.push([key, inInput]);
+  const chords: string[] = [];
+  host.onKey((key, inInput, _on, mod) => {
+    if (mod === true) chords.push(key);
+    else keys.push([key, inInput]);
     return false;
   });
   fake.fire('keydown', { key: 'j', target: element({ tagName: 'DIV' }) });
@@ -468,7 +470,8 @@ test("render writes a region by id, keys say whether they were typed in an input
     ['j', false],
     ['j', true],
   ]);
-  // A key held with Cmd, Ctrl or Alt is the browser's; a letter's case is Shift's, never Caps Lock's (review R5).
+  // A key held with Alt is the browser's, one held with Cmd or Ctrl reaches the handler as a chord, for Cmd+K alone; a
+  // letter's case is Shift's, never Caps Lock's (review R5).
   keys.length = 0;
   const div = element({ tagName: 'DIV' });
   fake.fire('keydown', { key: 'e', metaKey: true, target: div });
@@ -484,6 +487,7 @@ test("render writes a region by id, keys say whether they were typed in an input
     ['E', false],
     ['ArrowDown', false],
   ]);
+  expect(chords).toEqual(['e', 'e']);
   host.setTheme('light');
   host.setInspector(false);
   expect(fake.root.dataset).toEqual({ theme: 'light', inspector: 'closed' });
@@ -1171,4 +1175,87 @@ test('onNavigate calls the handler with the query of a popstate, parsed as start
   fake.location.search = '?repo=alpha&run=r';
   for (const listener of fake.windowListeners.popstate ?? []) listener();
   expect(asked).toEqual([{ repo: 'alpha', run: 'r' }]);
+});
+
+test('a mouseover is delegated to the nearest data-subject, and one outside any gives none', () => {
+  const fake = fakeWindow();
+  const host = browserHost(fake.win);
+  const seen: [string, Record<string, string> | undefined, { x: number; y: number }][] = [];
+  host.onPoint((kind, data, point) => {
+    seen.push([kind, data, point]);
+  });
+  const row = element({ dataset: { subject: 'item', repo: 'beta', item: 'ticket:FAKE-5' } });
+  const child = element({ dataset: { action: 'x' }, parentElement: row });
+  fake.fire('mouseover', { target: child, clientX: 12, clientY: 34 });
+  fake.fire('mouseover', { target: element() });
+  expect(seen).toEqual([
+    ['hover', { subject: 'item', repo: 'beta', item: 'ticket:FAKE-5' }, { x: 12, y: 34 }],
+    ['hover', undefined, { x: 0, y: 0 }],
+  ]);
+});
+
+test('a key reaches the handler with whether Cmd or Ctrl is held, and a handled key default is prevented', () => {
+  const fake = fakeWindow();
+  const host = browserHost(fake.win);
+  const seen: [string, boolean | undefined][] = [];
+  host.onKey((key, _inInput, _on, mod) => {
+    seen.push([key, mod]);
+    return key === 'k' && mod === true;
+  });
+  let prevented = 0;
+  const target = element({ tagName: 'DIV' });
+  fake.fire('keydown', { key: 'k', metaKey: true, target, preventDefault: () => prevented++ });
+  fake.fire('keydown', { key: 'k', ctrlKey: true, target, preventDefault: () => prevented++ });
+  fake.fire('keydown', { key: 'k', target, preventDefault: () => prevented++ });
+  expect(seen).toEqual([
+    ['k', true],
+    ['k', true],
+    ['k', false],
+  ]);
+  expect(prevented).toBe(2);
+});
+
+test('an input event reaches the handler with the field name and value, and focusMenu focuses the menu field, else the menu', () => {
+  const fake = fakeWindow();
+  const host = browserHost(fake.win);
+  const typed: [string, string][] = [];
+  host.onInput((name, value) => typed.push([name, value]));
+  fake.fire('input', { target: element({ name: 'menu-query', value: 'res' }) });
+  fake.fire('input', { target: element({ value: 'unnamed' }) });
+  expect(typed).toEqual([['menu-query', 'res']]);
+  const menu = element();
+  const field = element({ focus: () => void focused.push('field') });
+  const box = element({ focus: () => void focused.push('box') });
+  const focused: string[] = [];
+  let withField = true;
+  menu.querySelector = (selector) => (selector.includes('menu-query') ? (withField ? field : null) : box);
+  fake.elements.menu = menu;
+  host.focusMenu();
+  withField = false;
+  host.focusMenu();
+  expect(focused).toEqual(['field', 'box']);
+});
+
+test('a contextmenu on a row reaches the handler with its data and point, and is prevented only when handled', () => {
+  const fake = fakeWindow();
+  const host = browserHost(fake.win);
+  const seen: [string, Record<string, string> | undefined, { x: number; y: number }][] = [];
+  let take = true;
+  host.onPoint((kind, data, point) => {
+    seen.push([kind, data, point]);
+    return kind === 'context' && take;
+  });
+  let prevented = 0;
+  const row = element({ dataset: { subject: 'item', repo: 'beta', item: 'ticket:FAKE-5' } });
+  const child = element({ parentElement: row });
+  fake.fire('contextmenu', { target: child, clientX: 40, clientY: 50, preventDefault: () => prevented++ });
+  take = false;
+  fake.fire('contextmenu', { target: child, clientX: 1, clientY: 2, preventDefault: () => prevented++ });
+  fake.fire('contextmenu', { target: element(), preventDefault: () => prevented++ });
+  expect(seen).toEqual([
+    ['context', { subject: 'item', repo: 'beta', item: 'ticket:FAKE-5' }, { x: 40, y: 50 }],
+    ['context', { subject: 'item', repo: 'beta', item: 'ticket:FAKE-5' }, { x: 1, y: 2 }],
+    ['context', undefined, { x: 0, y: 0 }],
+  ]);
+  expect(prevented).toBe(1);
 });

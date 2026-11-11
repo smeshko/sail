@@ -6,6 +6,7 @@
 import { actionOf } from './action-registry';
 import { VIEWS, type ViewName } from './list-model';
 import { syncUrl } from './location';
+import { closeMenu, runRow } from './menu';
 import { closeFile, openedOutputKeys, openFile, readLog, readOutput, selectCard } from './reads';
 import { FILTER_KEY, LIST_KEY, THEME_KEY } from './saved';
 import type { Store } from './store';
@@ -204,6 +205,8 @@ export const actions: Record<string, Action> = {
       else toast(store, 'bad', 'copy', 'the clipboard refused it');
     });
   },
+  'menu-run': (store, data) => runRow(store, Number(data.row)),
+  'menu-close': (store) => closeMenu(store),
   'dialog-confirm': (store) => store.actor.confirm(),
   'dialog-cancel': (store) => store.actor.cancel(),
   // A field of the dialog changed: its lines follow it.
