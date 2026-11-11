@@ -79,8 +79,6 @@ export interface Actor {
   changed(): void;
 }
 
-const tickOf = (value: string) => (value === '' ? '' : 'on');
-
 /** An actor that does nothing, until the shell wires the real one. */
 export function inertActor(): Actor {
   return {
@@ -116,10 +114,9 @@ export function createActor(deps: ActorDeps): Actor {
   /** What the page holds for `param`: its field, else its draft, else the choice it starts at. */
   function typed(def: ActionDef, param: Param, data: Readonly<Record<string, string>>): string | undefined {
     if (param.given !== undefined) return data[param.name];
-    const drafts = draftsOf(def.id);
+    const drafts = draftsOf(def.drafts ?? def.id);
     let value = host.value(param.dom) ?? drafts[param.name];
-    if (value === undefined && param.type === 'choice' && param.tick !== true) value = param.initial;
-    if (value !== undefined && param.type === 'choice' && param.tick === true) value = tickOf(value);
+    if (value === undefined && param.type === 'choice') value = param.initial;
     if (value !== undefined) drafts[param.name] = value;
     return value;
   }
@@ -171,13 +168,13 @@ export function createActor(deps: ActorDeps): Actor {
       else if (effect === 'leave') effects.leave();
       else if (typeof effect === 'object' && subject.kind === 'run') effects.open(subject.repo, effect.open);
       else if (effect === 'took') {
-        // A change that took empties the text typed for it, and keeps what was ticked. One with no text of its own,
-        // such as a poll or a drop, leaves every field as it is typed.
+        // A change that took empties the text typed for it. One with no text of its own, such as a poll or a drop,
+        // leaves every field as it is typed.
         const texts = def
           .params(subject, deps.source())
           .filter((param) => param.type === 'text' && param.given === undefined);
         if (texts.length > 0) {
-          const drafts = draftsOf(def.id);
+          const drafts = draftsOf(def.drafts ?? def.id);
           for (const param of texts) delete drafts[param.name];
           stale.add(def.place === 'run' ? 'run' : 'queue');
           effects.took();
@@ -331,7 +328,7 @@ export function createActor(deps: ActorDeps): Actor {
           if (param.given !== undefined || param.ask === 'dialog') continue;
           const value = host.value(param.dom);
           if (value === undefined) continue;
-          draftsOf(def.id)[param.name] = param.type === 'choice' && param.tick === true ? tickOf(value) : value;
+          draftsOf(def.drafts ?? def.id)[param.name] = value;
         }
       }
     },

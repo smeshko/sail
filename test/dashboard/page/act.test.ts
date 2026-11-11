@@ -499,25 +499,78 @@ test('a move posts before for up and after for down, a requeue posts at once, an
   expect(r.ui.underway).toEqual({ 'item:beta/wf/ticket:FAKE-6': 'requeuing…' });
 });
 
-test('an add posts the ticket key, with force when ticked, and one that took empties the ticket field and keeps force ticked', async () => {
+const ADD = '/api/repos/beta/queues/wf/add';
+
+test('Add ticket posts { ticketKey } at once, whatever a field named force holds, and an empty key posts nothing and opens no dialog', () => {
   const r = rig(undefined, queueIndex);
   r.actor.act('add-ticket', BETA);
-  expect(r.posts).toEqual([]);
+  r.fields['add-ticket'] = '   ';
+  r.actor.act('add-ticket', BETA);
+  expect([r.posts, r.dialogs]).toEqual([[], []]);
   r.fields['add-ticket'] = ' FAKE-9 ';
   r.fields['add-force'] = 'on';
   r.actor.act('add-ticket', BETA);
-  expect(r.posts).toEqual([{ path: '/api/repos/beta/queues/wf/add', body: { ticketKey: 'FAKE-9', force: true } }]);
+  expect(r.posts).toEqual([{ path: ADD, body: { ticketKey: 'FAKE-9' } }]);
+  expect([r.dialogs, r.ui.dialog]).toEqual([[], undefined]);
+});
+
+test('Add ticket, skipping its checks posts { ticketKey, force: true } after its dialog names the checks it skips', async () => {
+  const r = rig(undefined, queueIndex);
+  r.actor.act('add-ticket-force', BETA);
+  r.fields['add-ticket'] = '  ';
+  r.actor.act('add-ticket-force', BETA);
+  expect([r.posts, r.dialogs, r.ui.dialog]).toEqual([[], [], undefined]);
+  r.fields['add-ticket'] = ' FAKE-9 ';
+  r.actor.act('add-ticket-force', BETA);
+  expect(r.posts).toEqual([]);
+  expect(r.ui.dialog).toEqual({
+    title: 'add FAKE-9, skipping its checks',
+    lines: [
+      "adds FAKE-9 to beta / wf's queue",
+      'skips its checks: the ticket need not be designated or in a pick-up state',
+    ],
+    verb: 'add',
+  });
+  expect(r.actor.dialogFor()).toEqual({ kind: 'workflow', ...BETA });
+  r.actor.confirm();
+  r.actor.confirm();
+  expect(r.posts).toEqual([{ path: ADD, body: { ticketKey: 'FAKE-9', force: true } }]);
   await r.answer(200, { message: 'queued' });
-  expect([r.ui.act.drafts['add-ticket'], r.effects]).toEqual([{ force: 'on' }, ['took']]);
+  expect(r.toasts).toEqual(['ok add, skipping its checks beta / wf: queued']);
+});
+
+test('a cancelled skipping add sends nothing and keeps the typed key', () => {
+  const r = rig(undefined, queueIndex);
+  r.fields['add-ticket'] = 'FAKE-9';
+  r.actor.act('add-ticket-force', BETA);
+  r.actor.cancel();
+  expect([r.posts, r.actor.dialogFor(), r.ui.act.drafts]).toEqual([
+    [],
+    undefined,
+    { 'add-ticket': { ticket: 'FAKE-9' } },
+  ]);
+});
+
+test('a forced add that took empties the ticket field', async () => {
+  const r = rig(undefined, queueIndex);
+  r.fields['add-ticket'] = 'FAKE-9';
+  r.actor.act('add-ticket-force', BETA);
+  r.actor.confirm();
+  expect(r.ui.act.drafts).toEqual({ 'add-ticket': { ticket: 'FAKE-9' } });
+  await r.answer(200, { message: 'queued' });
+  expect([r.ui.act.drafts['add-ticket'], r.effects]).toEqual([{}, ['took']]);
   // The page still holds what was typed: the next keep leaves it alone, the one after reads it.
   r.actor.keep('queue', { kind: 'workflow', ...BETA });
-  expect(r.ui.act.drafts['add-ticket']).toEqual({ force: 'on' });
+  expect(r.ui.act.drafts['add-ticket']).toEqual({});
   r.fields['add-ticket'] = 'FAKE-10';
   r.actor.keep('queue', { kind: 'workflow', ...BETA });
-  expect(r.ui.act.drafts['add-ticket']).toEqual({ ticket: 'FAKE-10', force: 'on' });
-  r.fields['add-force'] = '';
-  r.actor.act('add-ticket', BETA);
-  expect(r.posts[1]).toEqual({ path: '/api/repos/beta/queues/wf/add', body: { ticketKey: 'FAKE-10' } });
+  expect(r.ui.act.drafts['add-ticket']).toEqual({ ticket: 'FAKE-10' });
+  expect(JSON.stringify(r.ui.act.drafts)).not.toContain('force');
+});
+
+test("the page's state holds no stopNow, addForce, raise or restartStage", () => {
+  const keys = Object.keys(initialUi(0));
+  for (const gone of ['stopNow', 'addForce', 'raise', 'restartStage']) expect(keys).not.toContain(gone);
 });
 
 test('an add that was only waiting keeps what was typed, since the watcher has not taken it', async () => {

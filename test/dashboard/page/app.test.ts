@@ -2183,7 +2183,7 @@ test('a poll click posts an empty body to the queue poll route; a 200 toasts its
   expect(host.regions.toasts).toContain('role="alert"');
 });
 
-test('the add form shows once the queue stream has polled tickets; add posts the typed key and force, an empty key posts nothing, and the key is kept across a draw (ADW-460)', async () => {
+test('the add form shows once the queue stream has polled tickets, with add and add, skipping its checks and no box; add posts the typed key, an empty key posts nothing, and the key is kept across a draw (ADW-460)', async () => {
   page = boot(host);
   firstIndex();
   const [socket] = host.open('queue=');
@@ -2193,22 +2193,45 @@ test('the add form shows once the queue stream has polled tickets; add posts the
   for (const event of readEvents(queueDirOf(m))) host.push(socket, { kind: 'queue-event', event });
   host.advance(100);
   expect(host.regions.main).toContain('name="add-ticket"');
+  expect(host.regions.main).toContain('data-action="add-ticket-force"');
+  expect(host.regions.main).not.toContain('type="checkbox"');
   host.click({ action: 'add-ticket', ...BETA });
+  host.click({ action: 'add-ticket-force', ...BETA });
   await settle();
-  expect(host.posts).toEqual([]);
+  expect([host.posts, host.dialog]).toEqual([[], undefined]);
   host.fields['add-ticket'] = '  FAKE-9 ';
-  host.fields['add-force'] = 'on';
   host.postAnswer = { status: 200, body: JSON.stringify({ message: 'sail queue: queued ticket:FAKE-9 Nine' }) };
   host.click({ action: 'add-ticket', ...BETA });
   await settle();
   host.advance(100);
-  expect(host.posts).toEqual([{ path: `${QUEUE_PATH}/add`, body: { ticketKey: 'FAKE-9', force: true } }]);
+  expect(host.posts).toEqual([{ path: `${QUEUE_PATH}/add`, body: { ticketKey: 'FAKE-9' } }]);
   expect(toasts()).toEqual([`ok add beta / ${QUEUE_WORKFLOW}: sail queue: queued ticket:FAKE-9 Nine`]);
   expect(host.regions.main).toContain('value=""');
-  host.fields['add-force'] = '';
-  host.click({ action: 'add-ticket', ...BETA });
+  host.fields['add-ticket'] = 'FAKE-10';
+  host.click({ action: 'add-ticket-force', ...BETA });
+  expect([host.posts.length, dialogTitle()]).toEqual([1, 'add FAKE-10, skipping its checks']);
+  host.click({ action: 'dialog-confirm' });
   await settle();
-  expect(host.posts[1]).toEqual({ path: `${QUEUE_PATH}/add`, body: { ticketKey: 'FAKE-9' } });
+  expect(host.posts[1]).toEqual({ path: `${QUEUE_PATH}/add`, body: { ticketKey: 'FAKE-10', force: true } });
+});
+
+test("a skipping add's dialog closes with nothing sent when its workflow stops being watched", () => {
+  page = boot(host);
+  host.push(host.open('index')[0], indexMessage());
+  host.click({ action: 'select-queue', queue: `beta/${QUEUE_WORKFLOW}` });
+  host.advance(100);
+  host.fields['add-ticket'] = 'FAKE-10';
+  host.click({ action: 'add-ticket-force', ...BETA });
+  expect(dialogTitle()).toBe('add FAKE-10, skipping its checks');
+  host.push(
+    host.open('index')[0],
+    indexMessage({
+      state: 'watcher not running',
+      why: "no watcher is running for 'beta': sail watch ticket-to-pr first",
+    }),
+  );
+  host.advance(100);
+  expect([host.dialog, host.posts]).toEqual([undefined, []]);
 });
 
 test('the first click on drop opens the dialog and posts nothing; its title names the item, its lines what goes, its button the verb (ADW-514)', () => {

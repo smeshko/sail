@@ -75,3 +75,9 @@ test('a view changed by one byte is named as stale, and so is one missing', asyn
     `sidebar.html is stale: ${REGENERATE}`,
   ]);
 });
+
+test('no golden view holds a checkbox', () => {
+  const files = filesIn(COMMITTED);
+  expect(files.length).toBeGreaterThan(20);
+  expect(files.filter((file) => readFileSync(join(COMMITTED, file), 'utf8').includes('type="checkbox"'))).toEqual([]);
+});

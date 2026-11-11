@@ -52,11 +52,6 @@ export function field(param: Param, values: Values, focus = false): SafeHtml | '
         param.placeholder === undefined ? '' : html` placeholder="${param.placeholder}"`
       } value="${typed ?? ''}"${focus ? ' autofocus' : ''}></label>`;
     case 'choice': {
-      if (param.tick === true) {
-        return html`<label class="lbl"><input type="checkbox" name="${param.dom}"${
-          param.change === undefined ? '' : html` data-action="${param.change}"`
-        }${typed === 'on' ? ' checked' : ''}> ${param.label}</label>`;
-      }
       const chosen = param.options.some((each) => each.value === typed) ? typed : param.initial;
       return html`<label class="lbl">${param.label} <select name="${param.dom}"${focus ? ' autofocus' : ''}>${param.options.map(
         (each) =>

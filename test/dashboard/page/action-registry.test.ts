@@ -50,7 +50,7 @@ const def = (id: string) => {
 const request = (id: string, subject: Subject, values: Record<string, string> = {}, from = source()) =>
   def(id).request?.(subject, values, from);
 
-test('ACTIONS has exactly the thirteen ids, each with a label, appliesTo, a tier and a request and answer or a local run', () => {
+test('ACTIONS has exactly the fourteen ids, each with a label, appliesTo, a tier and a request and answer or a local run', () => {
   expect(ACTIONS.map((each) => each.id).sort()).toEqual(
     [
       'resume-run',
@@ -63,6 +63,7 @@ test('ACTIONS has exactly the thirteen ids, each with a label, appliesTo, a tier
       'move-item',
       'poll-queue',
       'add-ticket',
+      'add-ticket-force',
       'watch',
       'unwatch',
       'clear-attention',
@@ -83,6 +84,7 @@ test('ACTIONS has exactly the thirteen ids, each with a label, appliesTo, a tier
     'stop-run-now',
     'clean-run',
     'drop-item',
+    'add-ticket-force',
   ]);
   expect(ACTIONS.filter((each) => each.tier === 'undoable').map((each) => each.id)).toEqual([
     'unwatch',
@@ -142,8 +144,13 @@ test('every entry posts what its handler posted', () => {
   });
   expect(request('add-ticket', WORKFLOW, { ticket: 'FAKE-9', force: 'on' })).toEqual({
     path: '/api/repos/alpha/queues/wf/add',
+    body: { ticketKey: 'FAKE-9' },
+  });
+  expect(request('add-ticket-force', WORKFLOW, { ticket: ' FAKE-9 ' })).toEqual({
+    path: '/api/repos/alpha/queues/wf/add',
     body: { ticketKey: 'FAKE-9', force: true },
   });
+  expect(request('add-ticket-force', WORKFLOW, { ticket: ' ' })).toBeUndefined();
   expect(request('watch', REPO)).toEqual({ path: '/api/repos/alpha/watch', body: { workflows: [] } });
   expect(request('watch', WORKFLOW)).toEqual({ path: '/api/repos/alpha/watch', body: { workflows: ['wf'] } });
   expect(request('unwatch', WORKFLOW)).toEqual({ path: '/api/repos/alpha/unwatch', body: { workflows: ['wf'] } });
@@ -307,6 +314,7 @@ test('every confirmed action has a dialog, and unwatch and all clear are the und
     'stop-run-now',
     'clean-run',
     'drop-item',
+    'add-ticket-force',
   ]);
 });
 

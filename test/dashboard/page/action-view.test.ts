@@ -155,3 +155,46 @@ test('a parameter asked in the dialog is not drawn beside its button', () => {
     '<button class="btn" data-action="resume-run">resume</button>',
   );
 });
+
+test('no action draws a checkbox', () => {
+  const on = { enabled: true };
+  const source = {
+    run: {
+      resume: { ...on, spentUsd: 1, budget: {}, raise: 'usd' },
+      restart: { ...on, stage: 'b', stages: [{ stage: 'b', runsAgain: 'b once' }], budget: {} },
+      stop: on,
+      clean: { ...on, removes: [] },
+    },
+    index: [
+      {
+        name: 'alpha',
+        runs: [],
+        watching: { workflows: ['wf'] },
+        offers: { watch: on, unwatch: on, workflows: { wf: { watch: on, unwatch: on } } },
+        queues: [
+          {
+            workflow: 'wf',
+            offers: { poll: on, add: on, items: { k: { requeue: on, drop: on, move: on } } },
+          },
+        ],
+      },
+    ],
+  } as unknown as OfferSource;
+  const subjects: Subject[] = [
+    RUN,
+    { kind: 'item', repo: 'alpha', workflow: 'wf', item: 'k' },
+    { kind: 'workflow', repo: 'alpha', workflow: 'wf' },
+    { kind: 'repo', repo: 'alpha' },
+    { kind: 'none' },
+  ];
+  let drawn = 0;
+  for (const def of ACTIONS)
+    for (const subject of subjects) {
+      if (!def.appliesTo.includes(subject.kind)) continue;
+      const out = actionControl(def, subject, idle, source).toString();
+      if (out !== '') drawn++;
+      expect([def.id, out.includes('type="checkbox"')]).toEqual([def.id, false]);
+      for (const param of def.params(subject, source)) expect(['number', 'text', 'choice']).toContain(param.type);
+    }
+  expect(drawn).toBeGreaterThanOrEqual(12);
+});

@@ -1,5 +1,5 @@
 // The page's actions, defined once: each thing a person can have done from the page (stop, stop now, resume, restart,
-// clean, drop, requeue, move, poll, add, watch, unwatch, all clear) with its id and label, the subject it applies to, its
+// clean, drop, requeue, move, poll, add, add skipping its checks, watch, unwatch, all clear) with its id and label, the subject it applies to, its
 // availability from the server's offers, its parameters, its tier, its request and what its answer means. Pure: it
 // holds no host, no state and no storage, so `act.ts` carries any entry out and `action-view.ts` draws any entry, and an
 // entry added here needs nothing else. This is the only page module that names a POST endpoint.
@@ -75,7 +75,7 @@ interface ParamBase {
   ask?: 'dialog';
 }
 
-/** A number, a choice or a text. A tick is a choice whose value is `on` while ticked and `''` while not. */
+/** A number, a choice or a text. */
 export type Param = ParamBase &
   (
     | { type: 'number'; min?: number; required?: boolean }
@@ -84,9 +84,6 @@ export type Param = ParamBase &
         options: readonly { value: string; title?: string }[];
         /** The option chosen before one is. */
         initial?: string | undefined;
-        tick?: boolean;
-        /** The `data-action` its field carries, to redraw what depends on it. */
-        change?: string;
       }
     | { type: 'text'; placeholder?: string }
   );
@@ -138,6 +135,8 @@ export interface ActionDef {
   key?: string;
   /** A disabled offer stops the click before its request: otherwise the server's refusal comes with the POST. */
   holdsDisabled?: boolean;
+  /** The id of the action whose drafts it reads and empties, when it shares its parameters with another's. */
+  drafts?: string;
   /** Where its parameters are drawn: the run menu, the queue's header, on the repository's row, or the list's head. */
   place: 'run' | 'queue' | 'repo' | 'list';
   params(subject: Subject, source: OfferSource): Param[];
@@ -400,6 +399,11 @@ function stopAction(id: string, now: boolean): ActionDef {
   };
 }
 
+/** The ticket key field the two adds share. */
+const addParams = (): Param[] => [
+  { name: 'ticket', dom: 'add-ticket', label: 'ticket key', type: 'text', placeholder: 'ticket key' },
+];
+
 export const ACTIONS: readonly ActionDef[] = [
   {
     id: 'resume-run',
@@ -585,18 +589,41 @@ export const ACTIONS: readonly ActionDef[] = [
     tier: 'instant',
     holdsDisabled: true,
     place: 'queue',
-    params: () => [
-      { name: 'ticket', dom: 'add-ticket', label: 'ticket key', type: 'text', placeholder: 'ticket key' },
-      { name: 'force', dom: 'add-force', label: 'force', type: 'choice', options: [], tick: true },
-    ],
+    params: addParams,
     available: queueOffer('add'),
     request: (subject, values) => {
       const ticketKey = (values.ticket ?? '').trim();
       if (ticketKey === '') return undefined;
+      return { path: queuePath(subject, '/add'), body: { ticketKey } };
+    },
+    underway: 'adding…',
+    answer: queueAnswer('add'),
+  },
+  {
+    id: 'add-ticket-force',
+    label: () => 'add, skipping its checks',
+    appliesTo: ['workflow'],
+    tier: 'confirmed',
+    holdsDisabled: true,
+    place: 'queue',
+    drafts: 'add-ticket',
+    params: addParams,
+    available: queueOffer('add'),
+    dialog: (subject, values) => {
+      const ticketKey = (values.ticket ?? '').trim();
       return {
-        path: queuePath(subject, '/add'),
-        body: values.force === 'on' ? { ticketKey, force: true } : { ticketKey },
+        title: `add ${ticketKey}, skipping its checks`,
+        lines: [
+          `adds ${ticketKey} to ${subjectName(subject)}'s queue`,
+          'skips its checks: the ticket need not be designated or in a pick-up state',
+        ],
+        verb: 'add',
       };
+    },
+    request: (subject, values) => {
+      const ticketKey = (values.ticket ?? '').trim();
+      if (ticketKey === '') return undefined;
+      return { path: queuePath(subject, '/add'), body: { ticketKey, force: true } };
     },
     underway: 'adding…',
     answer: queueAnswer('add'),
