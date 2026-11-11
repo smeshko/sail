@@ -3,7 +3,8 @@
 // dismiss) with its id and label, the subject it applies to, its
 // availability from the server's offers, its parameters, its tier, its request and what its answer means. Pure: it
 // holds no host, no state and no storage, so `act.ts` carries any entry out and `action-view.ts` draws any entry, and an
-// entry added here needs nothing else. This is the only page module that names a POST endpoint.
+// entry added here needs nothing else. An entry may also give the `several` form of its dialog, for the one action that
+// takes several runs at once (Clean over the History selection): the actor sends the entry's own request run by run. This is the only page module that names a POST endpoint.
 //
 // A subject is what an action is done to: a run, a queue item, a workflow, a repository, or nothing. The ids are the
 // `data-action` names the markup already carries, `watch-set` split into `watch` and `unwatch`. A local action has
@@ -102,8 +103,13 @@ export interface OfferedRepo {
   queues: readonly {
     workflow: string;
     offers?: OfferedQueue['offers'] | undefined;
-    /** The queue's items, for what a dialog says of one. */
-    queue?: { items?: readonly { dedupKey: string; state: string; attempts: number }[] } | undefined;
+    /** The queue's items, for what a dialog says of one, and its hold, for the harness key a release names. */
+    queue?:
+      | {
+          items?: readonly { dedupKey: string; state: string; attempts: number }[];
+          held?: { harnessKey?: string | undefined } | undefined;
+        }
+      | undefined;
   }[];
   offers?: RepoOffers | undefined;
 }
@@ -126,6 +132,38 @@ export type ActResult = {
   refused?: true;
 };
 export type Effect = 'reopen' | 'leave' | 'took' | { open: string };
+
+/** A run of a selection with what the server says it offers, undefined when that could not be read. */
+export interface SeveralRun {
+  subject: Subject;
+  offers: RunActions | undefined;
+}
+
+/** The toast head of an action done to several runs: `clean 3 runs`. */
+export function severalHead(def: ActionDef, count: number): string {
+  return `${def.label({ kind: 'none' })} ${count} ${count === 1 ? 'run' : 'runs'}`;
+}
+
+/**
+ * What `def`, which has a several form, does over `runs`: its one dialog, how many runs its offers let it act on, and
+ * the request of each of those that has one, in order.
+ */
+export function severalPlan(
+  def: ActionDef,
+  several: NonNullable<ActionDef['several']>,
+  runs: readonly SeveralRun[],
+  index: OfferSource['index'],
+) {
+  const goes = runs.filter(({ subject, offers }) => {
+    const available = def.available(subject, { run: offers, index });
+    return available.offered && available.enabled;
+  });
+  const requests = goes.flatMap(({ subject, offers }) => {
+    const request = def.request?.(subject, {}, { run: offers, index });
+    return request === undefined || 'invalid' in request ? [] : [{ subject, request }];
+  });
+  return { view: several.dialog(runs, { index }), goes: goes.length, requests };
+}
 
 export interface ActionDef {
   id: string;
@@ -155,8 +193,12 @@ export interface ActionDef {
     source: OfferSource,
   ): { path: string; body: unknown } | { invalid: string } | undefined;
   answer?(status: number, body: string, subject: Subject): ActResult;
+  /** The form of the action over several runs: the one dialog that lists what each does. */
+  several?: { dialog(runs: readonly SeveralRun[], source: OfferSource): DialogView };
   /** The name of the effect a local action has the shell perform. */
   run?: string;
+  /** The rows the action is more than one: each its own label, with the `data-*` a click on it gives. */
+  variants?(subject: Subject, source: OfferSource): { label: string; data: Record<string, string> }[];
 }
 
 /** Why a request of kind `what` (a move, a resume, a restart) was refused: the `error` its answer carries, else its status. */
@@ -568,6 +610,21 @@ export const ACTIONS: readonly ActionDef[] = [
         verb: 'clean',
       };
     },
+    several: {
+      dialog: (runs) => ({
+        title: `clean ${runs.length} ${runs.length === 1 ? 'run' : 'runs'}`,
+        lines: runs.map(({ subject, offers }) => {
+          const offer = offers?.clean;
+          if (offer?.enabled === true) {
+            const removes = offer.removes.length === 0 ? 'removes nothing' : `removes ${offer.removes.join(', ')}`;
+            return `${runName(subject)}: ${removes}${offer.archive === undefined ? '' : `; run directory → ${offer.archive}`}`;
+          }
+          const why = offers === undefined ? 'what it offers could not be read' : (offer?.why ?? offers.why);
+          return `skips ${runName(subject)}: ${why ?? 'it cannot be cleaned'}`;
+        }),
+        verb: 'clean',
+      }),
+    },
     request: (subject) => ({ path: runPath(subject, '/clean'), body: {} }),
     answer: (status, body) => {
       if (!ok(status)) return { text: refusal(status, body, 'clean'), refused: true };
@@ -589,6 +646,18 @@ export const ACTIONS: readonly ActionDef[] = [
       { name: 'target', dom: 'target', type: 'text', given: 'data' },
     ],
     available: itemOffer('move'),
+    variants: (subject, source) => {
+      if (subject.kind !== 'item') return [];
+      const waiting = (queueOf(subject, source)?.queue?.items ?? []).filter((each) => each.state === 'queued');
+      const at = waiting.findIndex((each) => each.dedupKey === subject.item);
+      if (at < 0) return [];
+      const above = waiting[at - 1];
+      const below = waiting[at + 1];
+      return [
+        ...(above === undefined ? [] : [{ label: 'move up', data: { dir: 'up', target: above.dedupKey } }]),
+        ...(below === undefined ? [] : [{ label: 'move down', data: { dir: 'down', target: below.dedupKey } }]),
+      ];
+    },
     request: (subject, values) => ({
       path: queuePath(subject, '/move'),
       body:
@@ -621,6 +690,11 @@ export const ACTIONS: readonly ActionDef[] = [
     // The hold is the machine's, not the watcher's: a release needs no watcher, so no offer gates it.
     params: () => [{ name: 'harness', dom: 'harness', type: 'text', given: 'data' }],
     available: () => ({ offered: true, enabled: true }),
+    // A row only for a queue held on a usage limit, carrying the hold's harness key.
+    variants: (subject, source) => {
+      const harness = queueOf(subject, source)?.queue?.held?.harnessKey;
+      return harness === undefined ? [] : [{ label: 'release', data: { harness } }];
+    },
     underway: 'releasing…',
     dialog: (_subject, values) => ({
       title: `release the usage-limit hold on ${values.harness ?? ''}`,

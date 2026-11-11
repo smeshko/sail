@@ -58,13 +58,14 @@ test('dense-sidebar.html holds 4 entries and 5 repositories, and adds up to no m
   expect(entries * ROW + header + repos * ROW).toBeLessThanOrEqual(SPACE);
 });
 
-test('dense-history.html holds 36 run rows, 9 failed and 27 done, and dense-queues.html a group for each of 5 repositories and a row for each of 2 queues', () => {
+test('dense-history.html holds 36 run rows, 9 failed and 27 done, grouped by day, and dense-queues.html a group for each of 5 repositories and a row for each of 2 queues', () => {
   const history = view('dense-history.html');
   expect(count(history, /data-row="run:/g)).toBe(36);
-  expect(history).toContain(
-    'data-group="history:failed" aria-expanded="true"><span class="lcaret">›</span><span class="nm">failed</span><span class="c">9</span>',
-  );
-  expect(history).toContain('<span class="nm">done</span><span class="c">27</span>');
+  expect(count(history, /class="st p-fail"/g)).toBe(9);
+  expect(count(history, /class="st p-pass"/g)).toBe(27);
+  expect(history).not.toContain('data-group="history:failed"');
+  expect(history).not.toContain('data-group="history:done"');
+  expect(count(history, /data-group="history:\d{4}-\d{2}-\d{2}"/g)).toBeGreaterThan(1);
   const queues = view('dense-queues.html');
   expect([count(queues, /data-action="toggle-list-group"/g), count(queues, /data-action="select-queue"/g)]).toEqual([
     5, 2,

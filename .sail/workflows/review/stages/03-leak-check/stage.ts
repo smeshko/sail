@@ -1,6 +1,7 @@
 // leak-check: exact matches and Jev judgments about the public repository's naming rule. It scans added lines for
 // tracker keys other than sail's own and terms of a private denylist kept outside git, and reports every exact hit.
-// Jev also checks added comment, doc and commit-message lines; each hit reaches the judge as a finding.
+// Jev also checks added comment, doc and commit-message lines; the judge gets one finding per group of hits (a tracker-key prefix,
+// a denylist term, a Jev line), and every hit stays in the output and in `leak-locations.txt`.
 import { file, script, value, z } from 'sail';
 
 export const Leaks = z.object({
@@ -10,6 +11,17 @@ export const Leaks = z.object({
       line: z.number().int(),
       match: z.string(),
       kind: z.enum(['key', 'denylist', 'jev']),
+      yes: z.number().optional(),
+    }),
+  ),
+  /** One group per tracker-key prefix, per denylist term and per Jev hit, in order of its first hit. A denylist group names no term. */
+  groups: z.array(
+    z.object({
+      kind: z.enum(['key', 'denylist', 'jev']),
+      prefix: z.string().optional(),
+      count: z.number().int(),
+      files: z.number().int(),
+      examples: z.array(z.object({ file: z.string(), line: z.number().int(), match: z.string().optional() })).max(5),
       yes: z.number().optional(),
     }),
   ),

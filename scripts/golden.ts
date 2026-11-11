@@ -33,15 +33,17 @@ import { renderDialog } from '../src/dashboard/page/dialog-view';
 import type { SafeHtml } from '../src/dashboard/page/html';
 import { listRepos, pollKind, queuePanels } from '../src/dashboard/page/index-model';
 import { renderInspector } from '../src/dashboard/page/inspector-view';
-import { viewCounts } from '../src/dashboard/page/list-model';
+import { shownGroups, viewCounts } from '../src/dashboard/page/list-model';
 import { renderList } from '../src/dashboard/page/list-view';
+import { menuRows } from '../src/dashboard/page/menu-model';
+import { renderMenu } from '../src/dashboard/page/menu-view';
 import { queueId, renderQueue } from '../src/dashboard/page/queue-view';
 import { foldRun } from '../src/dashboard/page/run-model';
 import { renderRun, runControls } from '../src/dashboard/page/run-view';
 import { renderSidebar } from '../src/dashboard/page/sidebar-view';
 import { renderTimeline } from '../src/dashboard/page/timeline-view';
 import { renderToasts } from '../src/dashboard/page/toast-view';
-import { type InspectorTab, initialUi, type UiState } from '../src/dashboard/page/ui-state';
+import { type InspectorTab, initialUi, type MenuState, type UiState } from '../src/dashboard/page/ui-state';
 import { resolveAdapters } from '../src/engine/adapters';
 import { type AdapterConfig, readConfig } from '../src/engine/config';
 import { recordingKeepAwake } from '../src/engine/keep-awake';
@@ -295,6 +297,13 @@ export async function renderDashboardViews(outDir: string): Promise<string[]> {
     views['list-inbox.html'] = renderList('inbox', listed, selected, VIEWS_NOW, undefined, attention(repos));
     views['list-active.html'] = renderList('active', listed, selected, VIEWS_NOW);
     views['list-history.html'] = renderList('history', listed, selected, VIEWS_NOW);
+    const firstRun = shownGroups('history', listed, { listFilter: '', tz: VIEWS_TZ }, VIEWS_NOW)[0]?.rows[0];
+    views['list-history-selected.html'] = renderList(
+      'history',
+      listed,
+      { ...selected, listSelected: firstRun === undefined ? [] : [firstRun.id] },
+      VIEWS_NOW,
+    );
     views['list-queues.html'] = renderList('queues', listed, selected, VIEWS_NOW);
     const unreadable = repos.map((repo) =>
       repo.name === 'beta'
@@ -389,6 +398,16 @@ export async function renderDashboardViews(outDir: string): Promise<string[]> {
       { ...selected, queue },
       VIEWS_NOW,
     );
+    // A right-click on a waiting queue item: its offered actions alone, at the pointer.
+    const itemMenu: MenuState = {
+      mode: 'context',
+      subject: { kind: 'item', repo: 'beta', workflow: QUEUE_WORKFLOW, item: 'ticket:FAKE-5' },
+      query: '',
+      at: 0,
+      steps: [],
+      point: { x: 240, y: 120 },
+    };
+    views['menu-item.html'] = renderMenu(itemMenu, menuRows(itemMenu, { index: repos }, repos, VIEWS_NOW));
     for (const [name, [repo, dir]] of Object.entries(runDirs)) {
       const runId = runIdOf[name as keyof typeof runIdOf];
       const model = foldRun(readEvents(dir));
@@ -417,6 +436,34 @@ export async function renderDashboardViews(outDir: string): Promise<string[]> {
         const view = actionOf('clean-run')?.dialog?.(subject, {}, { run, index: [] });
         if (view === undefined) throw new Error('clean-run has no dialog');
         views['dialog-clean.html'] = renderDialog(view);
+        // The dialog of a clean over a selection: the failed run goes, one a queue item names and a completed one skip.
+        const several = actionOf('clean-run')?.several?.dialog(
+          [
+            { subject, offers: { clean: { ...offers.clean, archive } } },
+            {
+              subject: { kind: 'run', repo: 'beta', runId: FAKE_3_ID },
+              offers: {
+                clean: {
+                  enabled: false,
+                  removes: [],
+                  why: `queue item ticket:FAKE-3 names run ${FAKE_3_ID}: requeue or drop it first`,
+                },
+              },
+            },
+            {
+              subject: { kind: 'run', repo: 'alpha', runId: GOLDEN_RUN_ID },
+              offers: { why: `run ${GOLDEN_RUN_ID} completed: there is nothing to start again` },
+            },
+          ],
+          { index: [] },
+        );
+        if (several === undefined) throw new Error('clean-run has no several form');
+        views['dialog-clean-several.html'] = renderDialog(several);
+      }
+      // The command menu of the failed run: its subject line and its offered actions, then the general ones.
+      if (name === 'fake-2' && offers !== undefined) {
+        const state: MenuState = { mode: 'full', subject: { kind: 'run', repo, runId }, query: '', at: 0, steps: [] };
+        views['menu-fake-2.html'] = renderMenu(state, menuRows(state, { run: offers, index: repos }, repos, VIEWS_NOW));
       }
       // The dialog a restart of the failed run opens: the stage is asked in it, at the offer's choice.
       if (name === 'fake-2' && offers?.restart !== undefined) {

@@ -4,14 +4,22 @@
 // action opens a socket: what needs one goes through `streams.ts`, and what posts goes through the actor.
 
 import { actionOf } from './action-registry';
-import { VIEWS, type ViewName } from './list-model';
+import { listRepos } from './index-model';
+import { historyWorkflows, VIEWS, type ViewName } from './list-model';
 import { syncUrl } from './location';
-import { closeFile, openedOutputKeys, openFile, readLog, readOutput, selectCard } from './reads';
+import { closeMenu, runRow } from './menu';
+import { cleanSelected, closeFile, openedOutputKeys, openFile, readLog, readOutput, selectCard } from './reads';
 import { FILTER_KEY, LIST_KEY, THEME_KEY } from './saved';
 import type { Store } from './store';
 import { closeDetail, reopenQueue, selectRun } from './streams';
 import { dismissToast, toast, undoToast } from './toast';
 import { FILTERS, type InspectorTab, TABS, THEMES, type TimelineFilter } from './ui-state';
+
+/** A read of the offers of an older selection is dropped when it answers, and its `checking…` goes. */
+function dropSelectionRead(store: Store) {
+  store.selectionRead++;
+  delete store.ui.underway.selection;
+}
 
 export type Action = (store: Store, data: Record<string, string>) => void;
 
@@ -109,6 +117,10 @@ export const actions: Record<string, Action> = {
     if (!(VIEWS as readonly string[]).includes(data.view ?? '')) return;
     store.ui.view = data.view as ViewName;
     store.ui.listFilter = '';
+    delete store.ui.historyStatus;
+    delete store.ui.historyWorkflow;
+    store.ui.listSelected = [];
+    dropSelectionRead(store);
     delete store.ui.listCursor;
     // The filter field gives up what was typed in it, so it reads as empty as the filter now is.
     store.fresh.add('list');
@@ -118,6 +130,15 @@ export const actions: Record<string, Action> = {
     if (data.repo === undefined) return;
     if (store.ui.repoFilter === data.repo) delete store.ui.repoFilter;
     else store.ui.repoFilter = data.repo;
+    // A workflow the narrowed repository has no finished run of is dropped, and the controls take the markup's values.
+    const { historyWorkflow } = store.ui;
+    if (
+      historyWorkflow !== undefined &&
+      !historyWorkflows(listRepos(store.index ?? [], store.host.now()), store.ui.repoFilter).includes(historyWorkflow)
+    ) {
+      delete store.ui.historyWorkflow;
+    }
+    store.fresh.add('list');
     store.mark('sidebar', 'list');
   },
   'toggle-list-group': (store, data) => {
@@ -134,6 +155,35 @@ export const actions: Record<string, Action> = {
     store.ui.listFilter = data.value ?? '';
     store.mark('list');
   },
+  // What was chosen in History's status and workflow controls; a value that is no status is ignored.
+  'filter-status': (store, data) => {
+    if (data.value === 'failed' || data.value === 'completed') store.ui.historyStatus = data.value;
+    else if (data.value === '') delete store.ui.historyStatus;
+    else return;
+    store.mark('list');
+  },
+  'filter-workflow': (store, data) => {
+    if (data.value === undefined || data.value === '') delete store.ui.historyWorkflow;
+    else store.ui.historyWorkflow = data.value;
+    store.mark('list');
+  },
+  // `x` marks or unmarks a History run row, by its row id.
+  'toggle-select': (store, data) => {
+    const row = data.row;
+    if (row === undefined || store.ui.view !== 'history') return;
+    const { listSelected } = store.ui;
+    store.ui.listSelected = listSelected.includes(row)
+      ? listSelected.filter((each) => each !== row)
+      : [...listSelected, row];
+    store.mark('list');
+  },
+  'clear-selection': (store) => {
+    dropSelectionRead(store);
+    if (store.ui.listSelected.length === 0) return store.mark('list');
+    store.ui.listSelected = [];
+    store.mark('list');
+  },
+  'clean-selected': (store) => cleanSelected(store),
   'item-menu': (store, data) => {
     if (store.ui.itemMenu === data.item || data.item === undefined) delete store.ui.itemMenu;
     else store.ui.itemMenu = data.item;
@@ -204,6 +254,8 @@ export const actions: Record<string, Action> = {
       else toast(store, 'bad', 'copy', 'the clipboard refused it');
     });
   },
+  'menu-run': (store, data) => runRow(store, Number(data.row)),
+  'menu-close': (store) => closeMenu(store),
   'dialog-confirm': (store) => store.actor.confirm(),
   'dialog-cancel': (store) => store.actor.cancel(),
   // A field of the dialog changed: its lines follow it.
