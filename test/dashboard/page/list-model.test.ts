@@ -1,6 +1,6 @@
 // The list's model: the Active, History and Queues views as grouped rows, the sidebar's counts and the cursor's entries.
 import { expect, test } from 'bun:test';
-import type { RailRepo, RailRun } from '../../../src/dashboard/page/index-model';
+import type { ListRepo, ListRun } from '../../../src/dashboard/page/index-model';
 import {
   activeGroups,
   entries,
@@ -14,7 +14,7 @@ import {
   waitsOnPerson,
 } from '../../../src/dashboard/page/list-model';
 
-const run = (runId: string, status: string, startedAt: string, extra: Partial<RailRun> = {}): RailRun => ({
+const run = (runId: string, status: string, startedAt: string, extra: Partial<ListRun> = {}): ListRun => ({
   runId,
   status,
   startedAt,
@@ -22,7 +22,7 @@ const run = (runId: string, status: string, startedAt: string, extra: Partial<Ra
   ...extra,
 });
 
-const repo = (name: string, runs: RailRun[], extra: Partial<RailRepo> = {}): RailRepo => ({
+const repo = (name: string, runs: ListRun[], extra: Partial<ListRepo> = {}): ListRepo => ({
   name,
   remote: null,
   live: false,

@@ -1,19 +1,19 @@
 // The list, drawn from hand-made repositories: its head and counts, its groups and rows, the run menu under a row, the
 // folded group, and the Queues view's watch buttons.
 import { expect, test } from 'bun:test';
-import type { RailRepo, RailRun } from '../../../src/dashboard/page/index-model';
+import type { ListRepo, ListRun } from '../../../src/dashboard/page/index-model';
 import { renderList } from '../../../src/dashboard/page/list-view';
 import { initialUi, pillOf } from '../../../src/dashboard/page/ui-state';
 
 const NOW = Date.parse('2026-10-01T12:00:00.000Z');
-const run = (runId: string, status: string, startedAt: string, extra: Partial<RailRun> = {}): RailRun => ({
+const run = (runId: string, status: string, startedAt: string, extra: Partial<ListRun> = {}): ListRun => ({
   runId,
   status,
   startedAt,
   workflow: 'flow@1',
   ...extra,
 });
-const repo = (name: string, runs: RailRun[], extra: Partial<RailRepo> = {}): RailRepo => ({
+const repo = (name: string, runs: ListRun[], extra: Partial<ListRepo> = {}): ListRepo => ({
   name,
   remote: null,
   live: false,
@@ -22,7 +22,7 @@ const repo = (name: string, runs: RailRun[], extra: Partial<RailRepo> = {}): Rai
   ...extra,
 });
 
-const repos: RailRepo[] = [
+const repos: ListRepo[] = [
   repo(
     'alpha',
     [
@@ -133,7 +133,7 @@ test('History lists failed then done and Queues one row per queue under its repo
 test('an armed unwatch reads click again, and the watch notice and a problem show on the repository row', () => {
   const markup = renderList(
     'queues',
-    [{ ...repos[0], problem: 'cannot read' } as RailRepo, repos[1] as RailRepo],
+    [{ ...repos[0], problem: 'cannot read' } as ListRepo, repos[1] as ListRepo],
     ui({ armedWatch: 'alpha', watchNotice: { repo: 'alpha', text: 'watching flow' } }),
     NOW,
   ).value;

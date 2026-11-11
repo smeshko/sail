@@ -10,7 +10,7 @@
 import type { RunActions } from '../actions';
 import { ago, cost, duration } from './format';
 import { html, type SafeHtml } from './html';
-import { type RailRepo, type RailRun, workflowOf } from './index-model';
+import { type ListRepo, type ListRun, workflowOf } from './index-model';
 import {
   filterRows,
   groupsOf,
@@ -28,27 +28,27 @@ import { pillOf, type UiState } from './ui-state';
 export const VIEW_LABELS: Record<ViewName, string> = { active: 'Active', queues: 'Queues', history: 'History' };
 
 /** Whether `run` of `repo` is the open run: not while a queue holds the centre. */
-export const isOpen = (repo: string, run: RailRun, ui: UiState) =>
+export const isOpen = (repo: string, run: ListRun, ui: UiState) =>
   ui.queue === undefined && ui.repo === repo && ui.runId === run.runId;
 
 /** The ID a run is listed by: its pull request, else its ticket key, else its run id. */
-export const runLabel = (run: RailRun) => (run.pr === undefined ? (run.ticketKey ?? run.runId) : `PR #${run.pr}`);
+export const runLabel = (run: ListRun) => (run.pr === undefined ? (run.ticketKey ?? run.runId) : `PR #${run.pr}`);
 
 /** The full title, led by the run id for a pull-request run. */
-export const tooltipOf = (run: RailRun): string | undefined =>
+export const tooltipOf = (run: ListRun): string | undefined =>
   run.pr === undefined ? run.title : run.title === undefined ? run.runId : `${run.runId} · ${run.title}`;
 
 /** Whether `run`'s menu is open: only the open run's can be. */
-const isMenuOpen = (repo: string, run: RailRun, ui: UiState) => isOpen(repo, run, ui) && ui.runMenu === run.runId;
+const isMenuOpen = (repo: string, run: ListRun, ui: UiState) => isOpen(repo, run, ui) && ui.runMenu === run.runId;
 
 /** A row's ⋯: on any run but a completed one, which offers nothing. */
-export function more(repo: string, run: RailRun, ui: UiState): SafeHtml | '' {
+export function more(repo: string, run: ListRun, ui: UiState): SafeHtml | '' {
   if (run.status === 'completed') return '';
   return html`<button class="r-more${isMenuOpen(repo, run, ui) ? ' open' : ''}" type="button" data-action="run-menu" data-repo="${repo}" data-run="${run.runId}" aria-label="actions for ${run.runId}" aria-expanded="${isMenuOpen(repo, run, ui) ? 'true' : 'false'}" title="actions for ${run.runId}">⋯</button>`;
 }
 
 /** The open menu under `run`'s row: what the run offers, once its actions are read. */
-export function runMenu(repo: string, run: RailRun, ui: UiState, offers: RunActions | undefined): SafeHtml | '' {
+export function runMenu(repo: string, run: ListRun, ui: UiState, offers: RunActions | undefined): SafeHtml | '' {
   if (!isMenuOpen(repo, run, ui)) return '';
   const controls = runControls(offers, ui);
   if (controls !== undefined) return html`<div class="r-menu">${controls}</div>`;
@@ -93,7 +93,7 @@ const rowOf = (row: ListRow, ui: UiState, now: number, offers: RunActions | unde
   row.kind === 'run' ? runRow(row, ui, offers) : queueRow(row, ui, now);
 
 /** A Queues group's header row: the repository, its watch buttons, its problem and the answer to the last watch change. */
-function repoHeader(group: ListGroup, repo: RailRepo, open: boolean, ui: UiState): SafeHtml {
+function repoHeader(group: ListGroup, repo: ListRepo, open: boolean, ui: UiState): SafeHtml {
   return html`<div class="lgrp-row${cur(group.id, ui)}"><button class="lgh${open ? ' open' : ''}"${
     repo.remote === null ? '' : html` title="${repo.remote}"`
   } data-action="toggle-list-group" data-group="${group.id}" aria-expanded="${open ? 'true' : 'false'}"><span class="lcaret">›</span><span class="nm">${group.label}</span><span class="c">${group.rows.length}</span></button>${watchButton(repo.name, 'watch', ui)}${
@@ -126,7 +126,7 @@ const total = (groups: readonly ListGroup[]) => groups.reduce((sum, group) => su
  */
 export function renderList(
   view: ViewName,
-  repos: readonly RailRepo[],
+  repos: readonly ListRepo[],
   ui: UiState,
   now: number,
   offers?: RunActions | undefined,

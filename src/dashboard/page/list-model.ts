@@ -1,7 +1,7 @@
-// The list's model: the index's repositories (from `railRepos`) turned into the grouped rows each view draws, and the
+// The list's model: the index's repositories (from `listRepos`) turned into the grouped rows each view draws, and the
 // counts the sidebar shows. Pure, with no markup. The views are Active (live runs, those that wait on a person first),
 // Queues (one row per queue, under its repository) and History (finished runs, failed then done).
-import { newestFirst, type RailRepo, type RailRun, workflowOf } from './index-model';
+import { type ListRepo, type ListRun, newestFirst, workflowOf } from './index-model';
 
 export const VIEWS = ['active', 'queues', 'history'] as const;
 export type ViewName = (typeof VIEWS)[number];
@@ -11,7 +11,7 @@ export interface RunRow {
   /** `run:<repo>/<runId>` */
   id: string;
   repo: string;
-  run: RailRun;
+  run: ListRun;
 }
 
 export interface QueueRow {
@@ -32,19 +32,19 @@ export interface ListGroup {
   label: string;
   rows: ListRow[];
   /** The repository a Queues group heads. */
-  repo?: RailRepo;
+  repo?: ListRepo;
 }
 
 /** Live means neither failed nor completed: running, suspended, blocked or unknown. */
-export const isLive = (run: RailRun): boolean => run.status !== 'failed' && run.status !== 'completed';
-export const isFinished = (run: RailRun): boolean => !isLive(run);
+export const isLive = (run: ListRun): boolean => run.status !== 'failed' && run.status !== 'completed';
+export const isFinished = (run: ListRun): boolean => !isLive(run);
 /** A live run that is not running: it waits on a person. */
-export const waitsOnPerson = (run: RailRun): boolean => isLive(run) && run.status !== 'running';
+export const waitsOnPerson = (run: ListRun): boolean => isLive(run) && run.status !== 'running';
 
-const runRow = (repo: string, run: RailRun): RunRow => ({ kind: 'run', id: `run:${repo}/${run.runId}`, repo, run });
+const runRow = (repo: string, run: ListRun): RunRow => ({ kind: 'run', id: `run:${repo}/${run.runId}`, repo, run });
 
 /** The runs of every repository that `keep` holds, newest first, as rows. */
-function runRows(repos: readonly RailRepo[], keep: (run: RailRun) => boolean): RunRow[] {
+function runRows(repos: readonly ListRepo[], keep: (run: ListRun) => boolean): RunRow[] {
   const all = repos.flatMap((repo) => repo.runs.filter(keep).map((run) => ({ ...run, repo: repo.name })));
   return newestFirst(all).map(({ repo, ...run }) => runRow(repo, run));
 }
@@ -54,7 +54,7 @@ function groupOf(view: ViewName, name: string, label: string, rows: ListRow[]): 
 }
 
 /** The live runs: those that wait on a person first, then the running ones. An empty group is left out. */
-export function activeGroups(repos: readonly RailRepo[]): ListGroup[] {
+export function activeGroups(repos: readonly ListRepo[]): ListGroup[] {
   return [
     ...groupOf('active', 'waiting', 'waiting on you', runRows(repos, waitsOnPerson)),
     ...groupOf(
@@ -67,7 +67,7 @@ export function activeGroups(repos: readonly RailRepo[]): ListGroup[] {
 }
 
 /** The finished runs, failed then done, newest first. */
-export function historyGroups(repos: readonly RailRepo[]): ListGroup[] {
+export function historyGroups(repos: readonly ListRepo[]): ListGroup[] {
   return [
     ...groupOf(
       'history',
@@ -85,7 +85,7 @@ export function historyGroups(repos: readonly RailRepo[]): ListGroup[] {
 }
 
 /** One group per repository, with or without a queue, holding a row per workflow that has one. */
-export function queueGroups(repos: readonly RailRepo[]): ListGroup[] {
+export function queueGroups(repos: readonly ListRepo[]): ListGroup[] {
   return repos.map((repo) => ({
     id: `queues:${repo.name}`,
     label: repo.name,
@@ -106,7 +106,7 @@ export function queueGroups(repos: readonly RailRepo[]): ListGroup[] {
 }
 
 /** The view's groups, over `repoFilter`'s repository alone when one is given. */
-export function groupsOf(view: ViewName, repos: readonly RailRepo[], repoFilter?: string): ListGroup[] {
+export function groupsOf(view: ViewName, repos: readonly ListRepo[], repoFilter?: string): ListGroup[] {
   const kept = repoFilter === undefined ? repos : repos.filter((repo) => repo.name === repoFilter);
   if (view === 'active') return activeGroups(kept);
   if (view === 'history') return historyGroups(kept);
@@ -140,14 +140,14 @@ export function filterRows(groups: readonly ListGroup[], text: string): ListGrou
 }
 
 /** What each view lists under the repository filter: the sidebar's counts. */
-export function navCounts(repos: readonly RailRepo[], repoFilter?: string): Record<ViewName, number> {
+export function navCounts(repos: readonly ListRepo[], repoFilter?: string): Record<ViewName, number> {
   const count = (view: ViewName) =>
     groupsOf(view, repos, repoFilter).reduce((sum, group) => sum + group.rows.length, 0);
   return { active: count('active'), queues: count('queues'), history: count('history') };
 }
 
 /** A repository's dot: broken with a problem, watching while its watcher watches a workflow, else idle. */
-export function repoDot(repo: RailRepo): 'broken' | 'watching' | 'idle' {
+export function repoDot(repo: ListRepo): 'broken' | 'watching' | 'idle' {
   if (repo.problem !== undefined) return 'broken';
   return (repo.watching ?? []).length > 0 ? 'watching' : 'idle';
 }

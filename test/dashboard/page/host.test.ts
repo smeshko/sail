@@ -652,7 +652,7 @@ const row = (run: string) => `<button data-action="select-run" data-repo="alpha"
 
 test('render puts the focus back on the element with the same data-action and data, a new element, so Tab goes on from it', () => {
   const fake = fakeWindow();
-  const rail = fake.live('list');
+  const listed = fake.live('list');
   const host = browserHost(fake.win);
   host.render('list', `${row('r1')}${row('r2')}${row('r3')}`);
   fake.tab();
@@ -660,27 +660,27 @@ test('render puts the focus back on the element with the same data-action and da
   const before = fake.focus.active;
   host.render('list', `${row('r1')}${row('r2')}${row('r3')}<span>more</span>`);
   expect(fake.focus.active).not.toBe(before);
-  expect(fake.focus.active).toBe(rail.els[1] as ElementLike);
+  expect(fake.focus.active).toBe(listed.els[1] as ElementLike);
   expect(fake.focus.active?.dataset).toEqual({ action: 'select-run', repo: 'alpha', run: 'r2' });
   expect(fake.focus.calls).toEqual([{ preventScroll: true }]);
   fake.tab();
-  expect(fake.focus.active).toBe(rail.els[2] as ElementLike);
+  expect(fake.focus.active).toBe(listed.els[2] as ElementLike);
 });
 
 test("of two elements with one key, the one at the focused one's place is focused, and the last when one is gone", () => {
   const fake = fakeWindow();
-  const rail = fake.live('list');
+  const listed = fake.live('list');
   const host = browserHost(fake.win);
   const twin = (label: string) => `<button data-action="select-queue" data-queue="b/w">${label}</button>`;
   host.render('list', `${row('r1')}${twin('row')}${twin('badge')}`);
   fake.tab();
   fake.tab();
   fake.tab();
-  expect(fake.focus.active).toBe(rail.els[2] as ElementLike);
+  expect(fake.focus.active).toBe(listed.els[2] as ElementLike);
   host.render('list', `${row('r1')}${twin('row')}${twin('badge')}<i>x</i>`);
-  expect(fake.focus.active).toBe(rail.els[2] as ElementLike);
+  expect(fake.focus.active).toBe(listed.els[2] as ElementLike);
   host.render('list', `${row('r1')}${twin('row')}`);
-  expect(fake.focus.active).toBe(rail.els[1] as ElementLike);
+  expect(fake.focus.active).toBe(listed.els[1] as ElementLike);
 });
 
 test('a focused link is found again by its href', () => {
@@ -754,8 +754,8 @@ test('across a tick the list is rewritten, the focused row stays focused and Tab
   })();
   try {
     fake.advance(100);
-    const rail = fake.elements.list as ReturnType<typeof liveRegion>;
-    const rows = rail.els.filter((el) => el.focusable);
+    const listed = fake.elements.list as ReturnType<typeof liveRegion>;
+    const rows = listed.els.filter((el) => el.focusable);
     const at = Math.min(5, rows.length - 2);
     expect(at).toBeGreaterThan(0);
     // The sidebar comes first in the page, so its focusable elements are tabbed past.
@@ -764,7 +764,7 @@ test('across a tick the list is rewritten, the focused row stays focused and Tab
     const focused = fake.focus.active as ElementLike;
     expect(focused).toBe(rows[at] as ElementLike);
     fake.advance(1000);
-    const after = rail.els.filter((el) => el.focusable);
+    const after = listed.els.filter((el) => el.focusable);
     expect(after[at]).not.toBe(focused);
     expect(fake.focus.active).toBe(after[at] as ElementLike);
     expect(fake.focus.active?.dataset).toEqual(focused.dataset);
@@ -816,31 +816,31 @@ test("a fresh render gives the fields the markup's values and still keeps the fo
 
 test("a select whose option is gone keeps the markup's choice, and one whose option is still there keeps the person's", () => {
   const fake = fakeWindow();
-  const rail = fake.live('list');
+  const listed = fake.live('list');
   const host = browserHost(fake.win);
   const select = (options: string) => `<select name="stage">${options}</select>`;
   host.render('list', select('<option value="a">a</option><option value="b" selected>b</option>'));
-  field(rail, 'stage').value = 'a';
+  field(listed, 'stage').value = 'a';
   host.render(
     'list',
     select('<option value="a">a</option><option value="b" selected>b</option><option value="c">c</option>'),
   );
-  expect(field(rail, 'stage').value).toBe('a');
+  expect(field(listed, 'stage').value).toBe('a');
   host.render('list', select('<option value="b">b</option><option value="c" selected>c</option>'));
-  expect(field(rail, 'stage').value).toBe('c');
+  expect(field(listed, 'stage').value).toBe('c');
 });
 
 test('a focused number field keeps its value and takes no selection call that throws', () => {
   const fake = fakeWindow();
-  const rail = fake.live('list');
+  const listed = fake.live('list');
   const host = browserHost(fake.win);
   const form = '<input name="raise" type="number" value="">';
   host.render('list', form);
   fake.tab();
-  field(rail, 'raise').value = '2.5';
-  expect(field(rail, 'raise').selectionStart).toBeNull();
+  field(listed, 'raise').value = '2.5';
+  expect(field(listed, 'raise').selectionStart).toBeNull();
   expect(() => host.render('list', `${form}<i>x</i>`)).not.toThrow();
-  const after = field(rail, 'raise');
+  const after = field(listed, 'raise');
   expect([after.value, after.selectionCalls]).toEqual(['2.5', 0]);
   expect(fake.focus.active).toBe(after as ElementLike);
 });

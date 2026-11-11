@@ -18,7 +18,7 @@ test("FAKE-2's failure and the two errors are buttons in one list whose data ope
     '<button class="btn att-btn on" type="button" data-action="toggle-attention" aria-expanded="true" title="needs attention (a)">⚑ needs attention<span class="badge">4</span></button>';
   const markup = renderAttention(items, true).value;
   expect(markup).toStartWith(
-    `${button}<div class="att-scrim" data-action="toggle-attention"></div><div class="att-pane"><div class="rail-h"><span>needs attention</span><span class="c">4</span><button class="btn att-clear" type="button" data-action="clear-attention">all clear</button></div><div class="att-list">`,
+    `${button}<div class="att-scrim" data-action="toggle-attention"></div><div class="att-pane"><div class="pane-h"><span>needs attention</span><span class="c">4</span><button class="btn att-clear" type="button" data-action="clear-attention">all clear</button></div><div class="att-list">`,
   );
   expect(renderAttention(items, false).value).toBe(
     button.replace(' on"', '"').replace('aria-expanded="true"', 'aria-expanded="false"'),

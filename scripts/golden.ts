@@ -30,7 +30,7 @@ import { findRepo, index } from '../src/dashboard/files';
 import { attention } from '../src/dashboard/page/attention';
 import { renderAttention } from '../src/dashboard/page/attention-view';
 import type { SafeHtml } from '../src/dashboard/page/html';
-import { pollKind, queuePanels, railRepos, watchState } from '../src/dashboard/page/index-model';
+import { listRepos, pollKind, queuePanels, watchState } from '../src/dashboard/page/index-model';
 import { renderInspector } from '../src/dashboard/page/inspector-view';
 import { navCounts } from '../src/dashboard/page/list-model';
 import { renderList } from '../src/dashboard/page/list-view';
@@ -253,7 +253,7 @@ const VIEWS_TZ = 0;
 function renderDenseViews(): Record<string, SafeHtml> {
   const machine = seedDense();
   try {
-    const repos = railRepos(index(machine.registryDir), VIEWS_NOW).map((repo) => ({
+    const repos = listRepos(index(machine.registryDir), VIEWS_NOW).map((repo) => ({
       ...repo,
       runs: repo.runs.map((run) =>
         run.problem === undefined ? run : { ...run, problem: run.problem.replaceAll(machine.root, '<machine>') },
@@ -287,11 +287,11 @@ export async function renderDashboardViews(outDir: string): Promise<string[]> {
       repos.find((entry) => entry.name === repo)?.runs.find((run) => run.runId === runId)?.summary;
     const views: Record<string, SafeHtml> = {};
     const selected = ui({ repo: 'alpha', runId: GOLDEN_RUN_ID });
-    const rail = railRepos(repos, VIEWS_NOW);
-    views['sidebar.html'] = renderSidebar(rail, navCounts(rail), attention(repos).length, selected);
-    views['list-active.html'] = renderList('active', rail, selected, VIEWS_NOW);
-    views['list-history.html'] = renderList('history', rail, selected, VIEWS_NOW);
-    views['list-queues.html'] = renderList('queues', rail, selected, VIEWS_NOW);
+    const listed = listRepos(repos, VIEWS_NOW);
+    views['sidebar.html'] = renderSidebar(listed, navCounts(listed), attention(repos).length, selected);
+    views['list-active.html'] = renderList('active', listed, selected, VIEWS_NOW);
+    views['list-history.html'] = renderList('history', listed, selected, VIEWS_NOW);
+    views['list-queues.html'] = renderList('queues', listed, selected, VIEWS_NOW);
     views['attention.html'] = renderAttention(attention(repos), true);
     const queueEvents = readEvents(queueDirOf(machine)) as unknown as QueueEvent[];
     const stream = { recent: queueEvents.slice(-20), watch: watchState(queueEvents), polls: pollKind(queueEvents) };
@@ -314,9 +314,9 @@ export async function renderDashboardViews(outDir: string): Promise<string[]> {
       // What a run offers shows in the list, under its row, once its ⋯ is opened.
       if (offers !== undefined && runControls(offers, ui()) !== undefined) {
         const open = ui({ repo, runId, runMenu: runId });
-        const status = rail.find((each) => each.name === repo)?.runs.find((each) => each.runId === runId)?.status;
+        const status = listed.find((each) => each.name === repo)?.runs.find((each) => each.runId === runId)?.status;
         const view = status === 'failed' || status === 'completed' ? 'history' : 'active';
-        views[`list-menu-${name}.html`] = renderList(view, rail, open, VIEWS_NOW, offers);
+        views[`list-menu-${name}.html`] = renderList(view, listed, open, VIEWS_NOW, offers);
       }
     }
     const inspectors: [name: string, run: keyof typeof runDirs, key: string, tab: InspectorTab][] = [

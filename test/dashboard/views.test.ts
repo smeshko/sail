@@ -62,8 +62,8 @@ test('a view changed by one byte is named as stale, and so is one missing', asyn
   await renderDashboardViews(fresh);
   const changed = join(temp, 'changed');
   cpSync(COMMITTED, changed, { recursive: true });
-  const rail = readFileSync(join(changed, 'sidebar.html'), 'utf8');
-  writeFileSync(join(changed, 'sidebar.html'), rail.replace('alpha', 'alphA'));
+  const sidebar = readFileSync(join(changed, 'sidebar.html'), 'utf8');
+  writeFileSync(join(changed, 'sidebar.html'), sidebar.replace('alpha', 'alphA'));
   rmSync(join(changed, 'queue.html'));
   expect(stale(fresh, changed)).toEqual([
     `queue.html is missing: ${REGENERATE}`,

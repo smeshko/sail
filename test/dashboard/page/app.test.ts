@@ -9,7 +9,7 @@ import { callFile, findRepo, findRunDir, index } from '../../../src/dashboard/fi
 import { boot, CLEARED_KEY, FILTER_KEY, LIST_KEY, type Page, THEME_KEY } from '../../../src/dashboard/page/app';
 import { attention, identity } from '../../../src/dashboard/page/attention';
 import { browserHost, type ConnectHandlers, type PageHost, type Region } from '../../../src/dashboard/page/host';
-import { newestFirst, railRepos } from '../../../src/dashboard/page/index-model';
+import { listRepos, newestFirst } from '../../../src/dashboard/page/index-model';
 import { readEvents } from '../../../src/events/consumers/ndjson';
 import {
   FAKE_2_ID,
@@ -282,7 +282,7 @@ const GOLDEN = () => m.alpha.runDir;
 const firstIndex = (runId?: string) => {
   host.push(host.open('index')[0], indexMessage());
   const all = newestFirst(
-    railRepos(index(m.registryDir), host.clock).flatMap((repo) =>
+    listRepos(index(m.registryDir), host.clock).flatMap((repo) =>
       repo.runs.map((run) => ({ ...run, repo: repo.name })),
     ),
   );
@@ -647,7 +647,7 @@ test('a result that arrives after the selection changed is not rendered', async 
   expect(host.regions.inspector).toContain('b4efb0c5de84d87c1455d4504b8b75b095a8e10b');
 });
 
-test("with no queue the rail has no queue row and no queue socket opens; with beta's, its row opens queue=beta/ticket-to-pr in the centre with its recent events, until the queue leaves the index", () => {
+test("with no queue the list has no queue row and no queue socket opens; with beta's, its row opens queue=beta/ticket-to-pr in the centre with its recent events, until the queue leaves the index", () => {
   rmSync(join(m.beta.clone, '.sail-runs', 'queue'), { recursive: true });
   page = boot(host);
   firstIndex();
@@ -1141,7 +1141,7 @@ test('an add that took writes main though its markup is what was last drawn (ADW
   expect(host.regions.main).toContain('name="add-ticket" placeholder="ticket key" value=""');
 });
 
-test('a switch of run draws the rail fresh, and a tick does not (ADW-504)', () => {
+test('a switch of run draws the list fresh, and a tick does not (ADW-504)', () => {
   const { dir, rest } = runningCopy(m, 1);
   const start = rest.map((line) => JSON.parse(line)).find((event) => event.type === 'stage:start');
   host.clock = Date.parse(start.ts) + 1000;
@@ -1235,7 +1235,7 @@ test("a region whose draw throws shows that it couldn't be drawn, and every othe
   firstIndex();
   replay(host.open('run=')[0], GOLDEN());
   host.advance(100);
-  // A summary of no shape, as the server never sends one: the rail and needs attention read it, the open run doesn't.
+  // A summary of no shape, as the server never sends one: the list and needs attention read it, the open run doesn't.
   const broken = indexMessage();
   for (const repo of broken.repos)
     for (const run of repo.runs) if (run.runId === FAKE_3_ID) run.summary = {} as typeof run.summary;
@@ -1806,7 +1806,7 @@ async function openOffering(repo: string, runId: string, dir: string) {
   page = boot(host);
   firstIndex();
   // The row is in the list of the view its status belongs to.
-  const status = railRepos(index(m.registryDir), host.clock)
+  const status = listRepos(index(m.registryDir), host.clock)
     .find((each) => each.name === repo)
     ?.runs.find((run) => run.runId === runId)?.status;
   host.click({ action: 'select-view', view: status === 'failed' || status === 'completed' ? 'history' : 'active' });
@@ -2290,7 +2290,7 @@ const domHost = () => {
   return dom;
 };
 
-test("a raise typed in the rail's run menu is read from the rail and posted with the resume", async () => {
+test("a raise typed in the list's run menu is read from the list and posted with the resume", async () => {
   settleQueue();
   const dom = domHost();
   await openOffering('beta', FAKE_3_ID, m.beta.runDir);
@@ -2307,7 +2307,7 @@ test("a raise typed in the rail's run menu is read from the rail and posted with
   expect(host.posts).toEqual([{ path: `${FAKE_3_PATH}/resume`, body: { raise: { usd: 5 } } }]);
 });
 
-test("a stage chosen in the rail's run menu is read from the rail, armed and posted with the restart", async () => {
+test("a stage chosen in the list's run menu is read from the list, armed and posted with the restart", async () => {
   const dom = domHost();
   await openOffering('alpha', FAKE_2_ID, fake2Dir(m));
   dom.field('list', 'stage').value = 'spec';
@@ -2321,7 +2321,7 @@ test("a stage chosen in the rail's run menu is read from the rail, armed and pos
   expect(host.posts).toEqual([{ path: `${FAKE_2_PATH}/restart`, body: { stage: 'spec' } }]);
 });
 
-test("stop now ticked in the rail's run menu is read from the rail, stays ticked across the draw, and posts { now: true }", async () => {
+test("stop now ticked in the list's run menu is read from the list, stays ticked across the draw, and posts { now: true }", async () => {
   settleQueue();
   const dom = domHost();
   await openOffering('beta', FAKE_3_ID, m.beta.runDir);
@@ -2477,7 +2477,7 @@ describe('all clear', () => {
     host.advance(100);
   };
 
-  test('one click empties the list and the count, shows nothing needs attention, posts nothing and leaves the failed run in the rail', () => {
+  test('one click empties the list and the count, shows nothing needs attention, posts nothing and leaves the failed run in the list', () => {
     bootOpen();
     host.click({ action: 'select-view', view: 'history' });
     host.advance(100);

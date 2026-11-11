@@ -1,10 +1,10 @@
-// The rail's repositories and runs and the queue panel's model, from the index alone (D8, D9). The input is `index()`
+// The list's repositories and runs and the queue panel's model, from the index alone (D8, D9). The input is `index()`
 // of the seeded fixtures: the very object the index stream sends, built server-side in the test.
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { index } from '../../../src/dashboard/files';
-import { pollKind, queuePanels, railRepos, watchState, workflowOf } from '../../../src/dashboard/page/index-model';
+import { listRepos, pollKind, queuePanels, watchState, workflowOf } from '../../../src/dashboard/page/index-model';
 import {
   FAKE_2_ID,
   FAKE_3_ID,
@@ -44,8 +44,8 @@ const named = (file: string) => {
   return NAMES.filter((name) => new RegExp(`['"\`]${name}(['"\`#/:])`).test(source));
 };
 
-test('railRepos lists alpha then beta, each run newest first with its status, stop reason, duration and cost, and neither model names a fixture', () => {
-  const repos = railRepos(index(m.registryDir), NOW);
+test('listRepos lists alpha then beta, each run newest first with its status, stop reason, duration and cost, and neither model names a fixture', () => {
+  const repos = listRepos(index(m.registryDir), NOW);
   expect(repos.map((repo) => [repo.name, repo.remote, repo.live, repo.problem])).toEqual([
     ['alpha', 'https://example.com/alpha.git', false, undefined],
     ['beta', 'https://example.com/beta.git', false, undefined],
@@ -75,20 +75,20 @@ test('railRepos lists alpha then beta, each run newest first with its status, st
   expect([...named('index-model.ts'), ...named('attention.ts')]).toEqual([]);
 });
 
-test('only running runs carry the first stalled key in the rail', () => {
+test('only running runs carry the first stalled key in the list', () => {
   const repos = index(m.registryDir);
   const run = repos[0]?.runs.find((run) => run.runId === GOLDEN_RUN_ID);
   if (!run?.summary) throw new Error('missing fixture summary');
   run.summary.stalled = [{ key: 'spec#1', since: '2026-10-01T12:00:00.000Z' }];
-  expect(railRepos(repos, NOW)[0]?.runs[0]?.stalled).toBeUndefined();
+  expect(listRepos(repos, NOW)[0]?.runs[0]?.stalled).toBeUndefined();
   run.status = { status: 'running' };
-  expect(railRepos(repos, NOW)[0]?.runs[0]?.stalled).toBe('spec#1');
+  expect(listRepos(repos, NOW)[0]?.runs[0]?.stalled).toBe('spec#1');
 });
 
 test('a running copy is live, listed first, and its duration is the time since it started', () => {
   runningCopy(m, 20);
   const started = Date.parse('2026-09-25T09:00:00.000Z');
-  const [alpha] = railRepos(index(m.registryDir), started + 5000);
+  const [alpha] = listRepos(index(m.registryDir), started + 5000);
   expect([alpha?.live, alpha?.runs.map((run) => [run.runId, run.status, run.durationMs])]).toEqual([
     true,
     [
@@ -167,9 +167,9 @@ test('watchState is watched after watch:added, not watched after a later watch:r
   ]).toEqual(['watched', 'not watched', 'watched', 'unknown']);
 });
 
-test('a repository whose .sail/ is gone shows in the rail with its problem and no runs', () => {
+test('a repository whose .sail/ is gone shows in the list with its problem and no runs', () => {
   rmSync(m.alpha.sailDir, { recursive: true });
-  const repos = railRepos(index(m.registryDir), NOW);
+  const repos = listRepos(index(m.registryDir), NOW);
   expect(repos.map((repo) => [repo.name, repo.runs.length, typeof repo.problem])).toEqual([
     ['alpha', 0, 'string'],
     ['beta', 2, 'undefined'],
@@ -177,8 +177,8 @@ test('a repository whose .sail/ is gone shows in the rail with its problem and n
   expect(repos[0]?.problem).toContain('no longer exists');
 });
 
-test("railRepos groups each repository's runs by workflow without its version, beside the queues it has, by name", () => {
-  const repos = railRepos(index(m.registryDir), NOW);
+test("listRepos groups each repository's runs by workflow without its version, beside the queues it has, by name", () => {
+  const repos = listRepos(index(m.registryDir), NOW);
   const groups = repos.flatMap((repo) =>
     repo.workflows.map((workflow) => [repo.name, workflow.name, workflow.runs.map((run) => run.runId), workflow.queue]),
   );
@@ -211,28 +211,28 @@ test('a run whose header or summary source is a pull request carries its number,
       run('ticket-1', { source: { kind: 'ticket', ticketKey: 'FAKE-9', via: 'cli', forced: [] } }),
     ],
   };
-  const runs = railRepos([repo], NOW)[0]?.runs ?? [];
+  const runs = listRepos([repo], NOW)[0]?.runs ?? [];
   const byId = (id: string) => runs.find((each) => each.runId === id);
   expect([byId('pr-12')?.pr, byId('pr-12')?.ticketKey]).toEqual([12, undefined]);
   expect([byId('pr-13')?.pr, byId('pr-13')?.ticketKey]).toEqual([13, undefined]);
   expect([byId('ticket-1')?.pr, byId('ticket-1')?.ticketKey]).toEqual([undefined, 'FAKE-9']);
 });
 
-/** The rail's beta when its index entry carries `watching`. */
-function betaRail(watching?: { pid: number; workflows: string[] }) {
+/** The list's beta when its index entry carries `watching`. */
+function betaList(watching?: { pid: number; workflows: string[] }) {
   const repos = index(m.registryDir).map((repo) =>
     repo.name === 'beta' && watching !== undefined ? { ...repo, watching } : repo,
   );
-  const beta = railRepos(repos, NOW).find((repo) => repo.name === 'beta');
+  const beta = listRepos(repos, NOW).find((repo) => repo.name === 'beta');
   if (beta === undefined) throw new Error('no beta');
   return beta;
 }
 
-const togglesOf = (repo: ReturnType<typeof betaRail>) =>
+const togglesOf = (repo: ReturnType<typeof betaList>) =>
   repo.workflows.map((workflow) => [workflow.name, workflow.toggle]);
 
 test('with no live watcher a workflow with a queue offers watch, one with runs alone offers nothing, and the repository has no watch set', () => {
-  const beta = betaRail();
+  const beta = betaList();
   expect(togglesOf(beta)).toEqual([
     ['review', undefined],
     [QUEUE_WORKFLOW, 'watch'],
@@ -241,13 +241,13 @@ test('with no live watcher a workflow with a queue offers watch, one with runs a
 });
 
 test('a workflow in the live watch set offers unwatch, and a queued one outside it offers watch', () => {
-  const watched = betaRail({ pid: 1, workflows: [QUEUE_WORKFLOW] });
+  const watched = betaList({ pid: 1, workflows: [QUEUE_WORKFLOW] });
   expect(togglesOf(watched)).toEqual([
     ['review', undefined],
     [QUEUE_WORKFLOW, 'unwatch'],
   ]);
   expect(watched.watching).toEqual([QUEUE_WORKFLOW]);
-  const empty = betaRail({ pid: 1, workflows: [] });
+  const empty = betaList({ pid: 1, workflows: [] });
   expect(togglesOf(empty)).toEqual([
     ['review', undefined],
     [QUEUE_WORKFLOW, 'watch'],
@@ -256,7 +256,7 @@ test('a workflow in the live watch set offers unwatch, and a queued one outside 
 });
 
 test('a workflow in the watch set with no queue view is listed too, and offers unwatch', () => {
-  const beta = betaRail({ pid: 1, workflows: ['review', 'ghost', QUEUE_WORKFLOW] });
+  const beta = betaList({ pid: 1, workflows: ['review', 'ghost', QUEUE_WORKFLOW] });
   expect(togglesOf(beta)).toEqual([
     ['ghost', 'unwatch'],
     ['review', 'unwatch'],

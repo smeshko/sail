@@ -2,7 +2,7 @@
 // each change the list's view, with the count of the rows they list; then every repository as a filter, with a dot for
 // its watcher: watching, not watching or broken. It holds no run row, no run menu and no watch button.
 import { html, type SafeHtml } from './html';
-import type { RailRepo } from './index-model';
+import type { ListRepo } from './index-model';
 import { repoDot, VIEWS, type ViewName } from './list-model';
 import { VIEW_LABELS } from './list-view';
 import type { UiState } from './ui-state';
@@ -11,7 +11,7 @@ const DOT_TITLES = { watching: 'watching', idle: 'not watching', broken: 'broken
 
 /** The sidebar. `counts` are what each view lists under the repository filter; `inbox` is the needs-attention count. */
 export function renderSidebar(
-  repos: readonly RailRepo[],
+  repos: readonly ListRepo[],
   counts: Record<ViewName, number>,
   inbox: number,
   ui: UiState,

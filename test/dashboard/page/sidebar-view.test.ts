@@ -1,10 +1,10 @@
 // The sidebar: four entries with counts, then a filter button per repository with its dot, and no run row or menu.
 import { expect, test } from 'bun:test';
-import type { RailRepo } from '../../../src/dashboard/page/index-model';
+import type { ListRepo } from '../../../src/dashboard/page/index-model';
 import { renderSidebar } from '../../../src/dashboard/page/sidebar-view';
 import { initialUi } from '../../../src/dashboard/page/ui-state';
 
-const repo = (name: string, extra: Partial<RailRepo> = {}): RailRepo => ({
+const repo = (name: string, extra: Partial<ListRepo> = {}): ListRepo => ({
   name,
   remote: null,
   live: false,

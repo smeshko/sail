@@ -6,7 +6,7 @@ import { renderAttention } from './attention-view';
 import { renderDrawer } from './drawer-view';
 import { REGIONS, type Region } from './host';
 import { html } from './html';
-import { railRepos, statusOf } from './index-model';
+import { listRepos, statusOf } from './index-model';
 import { renderInspector } from './inspector-view';
 import { navCounts } from './list-model';
 import { renderList } from './list-view';
@@ -25,7 +25,7 @@ export function regions(store: Store): Record<Region, () => string> {
   return {
     sidebar: () => {
       if (store.index === undefined) return '';
-      const repos = railRepos(store.index, host.now());
+      const repos = listRepos(store.index, host.now());
       return renderSidebar(repos, navCounts(repos, ui.repoFilter), listed(store).length, ui).value;
     },
     list: () => {
@@ -38,7 +38,7 @@ export function regions(store: Store): Record<Region, () => string> {
         if (now !== undefined) ui.stopNow = now !== '';
       }
       store.fieldsOwn = true;
-      return renderList(ui.view, railRepos(store.index, host.now()), ui, host.now(), store.offers).value;
+      return renderList(ui.view, listRepos(store.index, host.now()), ui, host.now(), store.offers).value;
     },
     attention: () => {
       const items = listed(store);
@@ -60,7 +60,7 @@ export function regions(store: Store): Record<Region, () => string> {
         if (armedItem === undefined || armedItem.state === 'dispatched') delete ui.armedDrop;
         const menuItem = panel.items.find((item) => item.dedupKey === ui.itemMenu);
         if (menuItem === undefined || menuItem.state === 'dispatched') delete ui.itemMenu;
-        const toggle = railRepos(store.index ?? [], host.now())
+        const toggle = listRepos(store.index ?? [], host.now())
           .find((repo) => repo.name === panel.repo)
           ?.workflows.find((workflow) => queueId(panel.repo, workflow.name) === ui.queue)?.toggle;
         return renderQueue(panel, store.queues.get(ui.queue ?? '')?.stream, ui, host.now(), toggle).value;

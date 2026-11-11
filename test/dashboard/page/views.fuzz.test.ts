@@ -8,7 +8,7 @@ import { dirname, join } from 'node:path';
 import { index } from '../../../src/dashboard/files';
 import { attention } from '../../../src/dashboard/page/attention';
 import { renderAttention } from '../../../src/dashboard/page/attention-view';
-import { queuePanels, railRepos, watchState } from '../../../src/dashboard/page/index-model';
+import { listRepos, queuePanels, watchState } from '../../../src/dashboard/page/index-model';
 import { renderInspector } from '../../../src/dashboard/page/inspector-view';
 import { navCounts } from '../../../src/dashboard/page/list-model';
 import { renderList } from '../../../src/dashboard/page/list-view';
@@ -139,15 +139,15 @@ afterAll(() => m.remove());
 const NOW = Date.parse('2026-10-01T12:00:00.000Z');
 const ui = initialUi(0);
 
-test('the rail, needs attention and the queue view keep their structure under a hostile payload in every untrusted field', async () => {
+test('the list, the sidebar, needs attention and the queue view keep their structure under a hostile payload in every untrusted field', async () => {
   const repos = index(m.registryDir).map((repo) => (repo.name === 'beta' ? { ...repo, problem: 'a problem' } : repo));
   const events = readEvents(queueDirOf(m)) as unknown as QueueEvent[];
   const views = (input: typeof repos, queue: QueueEvent[]) => {
     const stream = { recent: queue, watch: watchState(queue) };
     return [
-      renderList('active', railRepos(input, NOW), ui, NOW).value,
-      renderList('queues', railRepos(input, NOW), ui, NOW).value,
-      renderSidebar(railRepos(input, NOW), navCounts(railRepos(input, NOW)), 2, ui).value,
+      renderList('active', listRepos(input, NOW), ui, NOW).value,
+      renderList('queues', listRepos(input, NOW), ui, NOW).value,
+      renderSidebar(listRepos(input, NOW), navCounts(listRepos(input, NOW)), 2, ui).value,
       renderAttention(attention(input), true).value,
       ...queuePanels(input).map((panel) => renderQueue(panel, stream, ui, NOW).value),
     ];
@@ -162,7 +162,7 @@ test('the rail, needs attention and the queue view keep their structure under a 
       await same(
         view,
         hostile[i] ?? '',
-        `${['rail', 'active', 'queues-list', 'sidebar', 'attention'][i] ?? 'queues'}: ${payload}`,
+        `${['active', 'queues-list', 'sidebar', 'attention'][i] ?? 'queues'}: ${payload}`,
       );
   }
 });
