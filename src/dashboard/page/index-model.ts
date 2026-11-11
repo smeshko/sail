@@ -2,9 +2,9 @@
 // runs newest first and its queue's waiting count, and every watched workflow's queue. It reads only the index the server streams, which already carries each run's
 // summary and each repository's queues, so nothing here opens a run. Nothing here names a stage, a workflow or a
 // repository: they all come from the index.
-import type { QueueEvent } from '../../events/types';
 import type { QueueItem, QueueItemState } from '../../watch/queue-store';
 import type { IndexRepo, RunItem } from '../files';
+import type { QueueWatch, WatchState } from '../watch-state';
 
 /** One run as the rail lists it. */
 export interface RailRun {
@@ -28,7 +28,12 @@ export interface RailWorkflow {
   name: string;
   runs: RailRun[];
   queue?: { waiting: number; lastPolledAt?: string };
-  /** `unwatch` while the live watcher watches it, `watch` when it has a queue and is not watched, else none. */
+  /**
+   * Its watch state from the live watcher, with why it isn't watched: its queue view's, else `watched` while it is in the
+   * watch set, else none for a workflow with runs alone.
+   */
+  watch?: { state: WatchState; why?: string };
+  /** `unwatch` while its state is `watched`, `watch` for the other two states, none without a state. */
   toggle?: 'watch' | 'unwatch';
 }
 
@@ -120,8 +125,9 @@ function workflows(repo: IndexRepo, runs: readonly RailRun[]): RailWorkflow[] {
       const polled = view.queue?.polling.lastPolledAt;
       workflow.queue = polled === undefined ? { waiting } : { waiting, lastPolledAt: polled };
     }
-    if (watched.includes(name)) workflow.toggle = 'unwatch';
-    else if (view !== undefined) workflow.toggle = 'watch';
+    if (view !== undefined) workflow.watch = view.watch.state === 'watched' ? { state: 'watched' } : view.watch;
+    else if (watched.includes(name)) workflow.watch = { state: 'watched' };
+    if (workflow.watch !== undefined) workflow.toggle = workflow.watch.state === 'watched' ? 'unwatch' : 'watch';
     return workflow;
   });
 }
@@ -157,6 +163,8 @@ export interface QueuePanel {
   problem?: string;
   counts: Record<QueueItemState, number>;
   items: PanelItem[];
+  /** The workflow's watch state from the live watcher, and why it isn't watched. */
+  watch: QueueWatch;
 }
 
 export type QueuePanelFile = Omit<NonNullable<IndexRepo['queues'][number]['queue']>, 'items'>;
@@ -181,7 +189,7 @@ export function queuePanels(index: readonly IndexRepo[]): QueuePanel[] {
       const counts = Object.fromEntries(
         QUEUE_STATES.map((state) => [state, items.filter((item) => item.state === state).length]),
       ) as Record<QueueItemState, number>;
-      const panel: QueuePanel = { repo: repo.name, workflow: view.workflow, counts, items };
+      const panel: QueuePanel = { repo: repo.name, workflow: view.workflow, counts, items, watch: view.watch };
       if (view.queue !== undefined) {
         const { items: _, ...file } = view.queue;
         panel.queue = file;
@@ -190,15 +198,6 @@ export function queuePanels(index: readonly IndexRepo[]): QueuePanel[] {
       return panel;
     }),
   );
-}
-
-export type WatchState = 'watched' | 'not watched' | 'unknown';
-
-/** Whether the workflow is in the watch set, from the last `watch:added` or `watch:removed` of its queue's events. */
-export function watchState(events: readonly Pick<QueueEvent, 'type'>[]): WatchState {
-  const last = events.findLast((event) => event.type === 'watch:added' || event.type === 'watch:removed');
-  if (last === undefined) return 'unknown';
-  return last.type === 'watch:added' ? 'watched' : 'not watched';
 }
 
 /** What the workflow polls, from the last `queue:polled` event of its queue's events. */

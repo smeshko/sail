@@ -2,7 +2,7 @@
 // and a change of a repository's watch set each ask the dashboard's server, and the answer, in `sail`'s own words, is
 // shown beside what was clicked: a refusal as the server's message, else "the <what> was refused (<status>)", or "could
 // not be sent" when nothing answered. A started resume or restart opens its run, and a clean leaves the run it removed.
-import type { Store } from './store';
+import { openQueue, type Store } from './store';
 import { closeRun, selectRun } from './streams';
 
 const enc = encodeURIComponent;
@@ -35,6 +35,9 @@ export function answerField(body: string, field: string): string | undefined {
  */
 export function queueOp(store: Store, repo: string, workflow: string, what: string, body: unknown, took?: () => void) {
   const { ui, host } = store;
+  // A workflow that isn't watched is refused, so nothing is sent: a key in the add field, or a click that raced an index.
+  const panel = openQueue(store);
+  if (panel !== undefined && panel.watch.state !== 'watched') return;
   const path = `/api/repos/${enc(repo)}/queues/${enc(workflow)}/${what}`;
   void host.post(path, body).then(({ status, body: answer }) => {
     if (store.stopped) return;

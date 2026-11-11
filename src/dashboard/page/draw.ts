@@ -48,7 +48,12 @@ export function regions(store: Store): Record<Region, () => string> {
           if (forced !== undefined) ui.addForce = forced !== '';
         }
         store.addFieldsOwn = true;
-        // An armed drop whose item is running or gone asks again once the item can be dropped, and its menu shuts.
+        // An armed drop whose item is running or gone asks again once the item can be dropped, and its menu shuts. So do
+        // both while the workflow isn't watched: the controls are disabled then.
+        if (panel.watch.state !== 'watched') {
+          delete ui.armedDrop;
+          delete ui.itemMenu;
+        }
         const armedItem = panel.items.find((item) => item.dedupKey === ui.armedDrop);
         if (armedItem === undefined || armedItem.state === 'dispatched') delete ui.armedDrop;
         const menuItem = panel.items.find((item) => item.dedupKey === ui.itemMenu);

@@ -8,7 +8,7 @@ import { dirname, join } from 'node:path';
 import { index } from '../../../src/dashboard/files';
 import { attention } from '../../../src/dashboard/page/attention';
 import { renderAttention } from '../../../src/dashboard/page/attention-view';
-import { queuePanels, railRepos, watchState } from '../../../src/dashboard/page/index-model';
+import { queuePanels, railRepos } from '../../../src/dashboard/page/index-model';
 import { renderInspector } from '../../../src/dashboard/page/inspector-view';
 import { renderQueue } from '../../../src/dashboard/page/queue-view';
 import { renderRail } from '../../../src/dashboard/page/rail-view';
@@ -138,10 +138,19 @@ const NOW = Date.parse('2026-10-01T12:00:00.000Z');
 const ui = initialUi(0);
 
 test('the rail, needs attention and the queue view keep their structure under a hostile payload in every untrusted field', async () => {
-  const repos = index(m.registryDir).map((repo) => (repo.name === 'beta' ? { ...repo, problem: 'a problem' } : repo));
+  const states = [
+    { state: 'watched' },
+    { state: 'not watched', why: 'it is not in the set' },
+    { state: 'watcher not running', why: 'no watcher' },
+  ] as const;
+  const repos = index(m.registryDir).map((repo, at) => ({
+    ...repo,
+    ...(repo.name === 'beta' ? { problem: 'a problem' } : {}),
+    queues: repo.queues.map((queue) => ({ ...queue, watch: states[at % states.length] ?? states[0] })),
+  }));
   const events = readEvents(queueDirOf(m)) as unknown as QueueEvent[];
   const views = (input: typeof repos, queue: QueueEvent[]) => {
-    const stream = { recent: queue, watch: watchState(queue) };
+    const stream = { recent: queue };
     const rail = {
       ...ui,
       repo: 'alpha',

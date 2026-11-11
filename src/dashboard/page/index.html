@@ -580,6 +580,22 @@
         border-color: var(--warn);
         color: var(--fg);
       }
+      .wf-watch {
+        flex: 0 0 auto;
+        font-family: var(--mono);
+        font-size: 10px;
+        color: var(--fg-4);
+        white-space: nowrap;
+      }
+      .wf-watch.on {
+        color: var(--ok);
+      }
+      .wf-watch.down {
+        color: var(--warn);
+      }
+      .qadd .txt[disabled] {
+        opacity: 0.5;
+      }
       .qbadge {
         flex: 0 0 auto;
         padding: 0 5px;

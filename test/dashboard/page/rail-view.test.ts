@@ -68,7 +68,7 @@ test('each repository lists its workflows by name, the watched one with a warn q
   const groups = [...markup.matchAll(/data-action="toggle-group" data-group="([^"]+)"/g)].map(([, group]) => group);
   expect(groups).toEqual(['alpha', 'alpha/ticket-to-pr', 'beta', 'beta/review', 'beta/ticket-to-pr']);
   expect(markup).toContain(
-    '<div class="wf-h"><button class="wf-t open" data-action="toggle-group" data-group="beta/ticket-to-pr" aria-expanded="true"><span class="caret">›</span><span class="nm">ticket-to-pr</span></button><button class="qbadge warn" title="polled 7d ago" data-action="select-queue" data-queue="beta/ticket-to-pr">1 queued</button><button class="wf-act" data-action="watch-set" data-repo="beta" data-op="watch" data-workflow="ticket-to-pr">watch</button><span class="counts"><span class="r">▶ 1</span><span>1</span></span></div>',
+    '<div class="wf-h"><button class="wf-t open" data-action="toggle-group" data-group="beta/ticket-to-pr" aria-expanded="true"><span class="caret">›</span><span class="nm">ticket-to-pr</span></button><button class="qbadge warn" title="polled 7d ago" data-action="select-queue" data-queue="beta/ticket-to-pr">1 queued</button><span class="wf-watch down" title="no watcher is running for &#39;beta&#39;: sail watch ticket-to-pr first">watcher not running</span><button class="wf-act" data-action="watch-set" data-repo="beta" data-op="watch" data-workflow="ticket-to-pr">watch</button><span class="counts"><span class="r">▶ 1</span><span>1</span></span></div>',
   );
   expect(markup).toContain(
     '<div class="wf-h"><button class="wf-t open" data-action="toggle-group" data-group="alpha/ticket-to-pr" aria-expanded="true"><span class="caret">›</span><span class="nm">ticket-to-pr</span></button><span class="counts"><span class="f">✗ 1</span><span>2</span></span></div>',
@@ -248,6 +248,9 @@ test('a run selected from the running block is marked sel', () => {
   expect(liveRows(markup)).toEqual([`alpha ${RUNNING_ID} *`, `beta ${FAKE_3_ID}`]);
 });
 
+const DOWN =
+  '<span class="wf-watch down" title="no watcher is running for &#39;beta&#39;: sail watch ticket-to-pr first">watcher not running</span>';
+
 const button = (repo: string, op: string, text: string, workflow?: string, armed = false) =>
   `<button class="wf-act${armed ? ' armed' : ''}" data-action="watch-set" data-repo="${repo}" data-op="${op}"${
     workflow === undefined ? '' : ` data-workflow="${workflow}"`
@@ -261,8 +264,14 @@ const watchedRepo = (watching: string[] | undefined): RailRepo[] => [
     live: false,
     runs: [],
     workflows: [
-      { name: 'flow', runs: [], queue: { waiting: 0 }, toggle: 'unwatch' },
-      { name: 'side', runs: [], queue: { waiting: 0 }, toggle: 'watch' },
+      { name: 'flow', runs: [], queue: { waiting: 0 }, watch: { state: 'watched' }, toggle: 'unwatch' },
+      {
+        name: 'side',
+        runs: [],
+        queue: { waiting: 0 },
+        watch: { state: 'not watched', why: 'the watcher of <g> does not watch side' },
+        toggle: 'watch',
+      },
       { name: 'plain', runs: [] },
     ],
     ...(watching === undefined ? {} : { watching }),
@@ -278,7 +287,7 @@ const gamma = (watching: string[] | undefined, fields = {}) =>
 test('a workflow with a queue that is not watched draws watch, one with runs alone none, and an opened repository draws watch all and no unwatch all with nothing watched', () => {
   const markup = rail();
   expect(markup).toContain(
-    `<span class="nm">ticket-to-pr</span></button><button class="qbadge warn" title="polled 7d ago" data-action="select-queue" data-queue="beta/ticket-to-pr">1 queued</button>${button('beta', 'watch', 'watch', 'ticket-to-pr')}<span class="counts">`,
+    `<span class="nm">ticket-to-pr</span></button><button class="qbadge warn" title="polled 7d ago" data-action="select-queue" data-queue="beta/ticket-to-pr">1 queued</button>${DOWN}${button('beta', 'watch', 'watch', 'ticket-to-pr')}<span class="counts">`,
   );
   expect(markup.match(/data-op="watch" data-workflow=/g)).toHaveLength(1);
   expect(markup).toContain(`<div class="lgrp-acts">${button('alpha', 'watch', 'watch all')}</div>`);
@@ -289,8 +298,12 @@ test('a workflow with a queue that is not watched draws watch, one with runs alo
 
 test('a watched workflow draws unwatch, an unwatched one with a queue draws watch, and unwatch all appears while the set is not empty', () => {
   const markup = gamma(['flow']);
-  expect(markup).toContain(button('gamma', 'unwatch', 'unwatch', 'flow'));
-  expect(markup).toContain(button('gamma', 'watch', 'watch', 'side'));
+  expect(markup).toContain(`<span class="wf-watch on">watched</span>${button('gamma', 'unwatch', 'unwatch', 'flow')}`);
+  expect(markup).toContain(
+    `<span class="wf-watch off" title="the watcher of &lt;g&gt; does not watch side">not watched</span>${button('gamma', 'watch', 'watch', 'side')}`,
+  );
+  expect(markup).not.toContain('class="wf-act" data-action="watch-set" data-repo="gamma" data-op="watch" disabled');
+  expect(markup).not.toContain('disabled');
   expect(markup.match(/data-workflow="plain"/g)).toBeNull();
   expect(markup).toContain(
     `<div class="lgrp-acts">${button('gamma', 'watch', 'watch all')}${button('gamma', 'unwatch', 'unwatch all')}</div>`,

@@ -103,7 +103,11 @@ test("the real bundle boots headless: both repositories, the golden run's eight 
   expect(page.text('main')).toContain('<div class="stat"><b>$1.35</b><span>of $25.00 (5.4%)</span></div>');
   expect(page.text('attention')).toContain('<span class="badge">4</span>');
   page.click({ action: 'select-queue', queue: 'beta/ticket-to-pr' });
-  expect(await until(() => page.text('main').includes('<span class="pill p-pass">watched</span>'))).toBe(true);
+  expect(await until(() => page.text('main').includes('<span class="pill p-skip">watcher not running</span>'))).toBe(
+    true,
+  );
+  expect(page.text('main')).toContain('<button class="btn" disabled');
+  expect(page.text('rail')).toContain('watcher not running');
   page.click({ action: 'open', repo: 'alpha', run: FAKE_2_ID, key: 'implement#1', tab: 'permissions' });
   expect(await until(() => page.text('inspector').includes('<code>git push --force origin HEAD</code>'))).toBe(true);
   expect(page.text('inspector')).toContain('<dt>rule</dt><dd>commands</dd>');

@@ -30,7 +30,7 @@ import { findRepo, index } from '../src/dashboard/files';
 import { attention } from '../src/dashboard/page/attention';
 import { renderAttention } from '../src/dashboard/page/attention-view';
 import type { SafeHtml } from '../src/dashboard/page/html';
-import { pollKind, queuePanels, railRepos, watchState } from '../src/dashboard/page/index-model';
+import { pollKind, queuePanels, railRepos } from '../src/dashboard/page/index-model';
 import { renderInspector } from '../src/dashboard/page/inspector-view';
 import { queueId, renderQueue } from '../src/dashboard/page/queue-view';
 import { renderRail } from '../src/dashboard/page/rail-view';
@@ -265,11 +265,17 @@ export async function renderDashboardViews(outDir: string): Promise<string[]> {
     );
     views['attention.html'] = renderAttention(attention(repos), true);
     const queueEvents = readEvents(queueDirOf(machine)) as unknown as QueueEvent[];
-    const stream = { recent: queueEvents.slice(-20), watch: watchState(queueEvents), polls: pollKind(queueEvents) };
+    const stream = { recent: queueEvents.slice(-20), polls: pollKind(queueEvents) };
     const queue = queueId('beta', QUEUE_WORKFLOW);
     const panel = queuePanels(repos).find((each) => queueId(each.repo, each.workflow) === queue);
     if (panel === undefined) throw new Error(`beta has no ${QUEUE_WORKFLOW} queue`);
     views['queue.html'] = renderQueue(panel, stream, { ...selected, queue }, VIEWS_NOW);
+    views['queue-watched.html'] = renderQueue(
+      { ...panel, watch: { state: 'watched' } },
+      stream,
+      { ...selected, queue },
+      VIEWS_NOW,
+    );
     for (const [name, [repo, dir]] of Object.entries(runDirs)) {
       const runId = runIdOf[name as keyof typeof runIdOf];
       const model = foldRun(readEvents(dir));

@@ -4,7 +4,7 @@
 // queue badge that opens its queue. An open workflow shows a history line, whose `failed` and `done` parts each open
 // that status's finished runs, so a long tail of them never buries live work. Whatever is folded, the open run's row
 // and the open queue's workflow stay in sight under it, so the selection is never hidden. A workflow's header also
-// carries its Watch or Unwatch, and an opened repository a row with Watch all and, while its watch set isn't empty,
+// carries its watch state as a word, the live watcher's, which its queue view's pill reads too, and its Watch or Unwatch, which is never disabled, since a watch with no live watcher starts one; and an opened repository a row with Watch all and, while its watch set isn't empty,
 // Unwatch all; an Unwatch armed by a first click reads `click again`. The answer to the last change shows under the
 // repository's header. A run's row is a `div` holding two sibling buttons: its own, which opens the run, and, but on
 // a completed run, a ⋯ of its own that opens the run and, under the row, a menu of what it offers: Resume, Restart,
@@ -165,6 +165,14 @@ function watchButton(repo: string, op: 'watch' | 'unwatch', ui: UiState, workflo
   }>${armed ? `${word}? click again` : word}</button>`;
 }
 
+/** The workflow's watch state as a word: the live watcher's, the same one its queue view's pill reads. */
+function watchWord(watch: RailWorkflow['watch']): SafeHtml | '' {
+  if (watch === undefined) return '';
+  if (watch.state === 'watched') return html`<span class="wf-watch on">watched</span>`;
+  const kind = watch.state === 'not watched' ? 'off' : 'down';
+  return html`<span class="wf-watch ${kind}" title="${watch.why ?? ''}">${watch.state}</span>`;
+}
+
 function workflowHeader(
   repo: string,
   workflow: RailWorkflow,
@@ -175,7 +183,7 @@ function workflowHeader(
 ): SafeHtml {
   return html`<div class="wf-h"><button class="wf-t${open ? ' open' : ''}" data-action="toggle-group" data-group="${group}" aria-expanded="${open ? 'true' : 'false'}"><span class="caret">›</span><span class="nm">${workflow.name}</span></button>${
     workflow.queue === undefined ? '' : badge(group, workflow.queue, ui, now)
-  }${workflow.toggle === undefined ? '' : watchButton(repo, workflow.toggle, ui, workflow.name)}${counts(workflow.runs)}</div>`;
+  }${watchWord(workflow.watch)}${workflow.toggle === undefined ? '' : watchButton(repo, workflow.toggle, ui, workflow.name)}${counts(workflow.runs)}</div>`;
 }
 
 function workflowGroup(
