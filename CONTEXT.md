@@ -690,7 +690,7 @@ What the dashboard's server says a subject (a run, a queue item, a workflow, a r
 _Avoid_: permission (a step's word), capability (an adapter's word)
 
 **Dashboard action**:
-One thing the dashboard's page can have done: stop, resume, restart, clean, drop, requeue, move, poll, add, watch, unwatch or all clear. Each is defined once in the page's registry: its id and label, the subject it applies to, its availability from the offers, its parameters, its tier (`instant`, `undoable` or `confirmed`), its key, its request and what its answer means. The page's view actions, which change what is shown and ask the server nothing, are not Dashboard actions.
+One thing the dashboard's page can have done: stop, resume, restart, clean, drop, requeue, move, poll, release a usage-limit hold, add, watch, unwatch or all clear. Each is defined once in the page's registry: its id and label, the subject it applies to, its availability from the offers, its parameters, its tier (`instant`, `undoable` or `confirmed`), its key, its request and what its answer means. The page's view actions, which change what is shown and ask the server nothing, are not Dashboard actions.
 _Avoid_: command (the CLI's and the watcher's word), control, operation
 
 **Stage card**:
