@@ -601,6 +601,10 @@ _Avoid_: daemon, monitor, poller, scheduler
 The watched workflows a watcher is watching now: exactly those named with `sail watch` (every workflow that declares a watch, when it names none), minus those removed with `sail unwatch` (the whole set, when it names none). It is never remembered across restarts, and the watcher exits when it becomes empty. Each change is a `watch:added` or `watch:removed` event in that workflow's queue event stream, naming the watcher's pid. Neither unwatching a workflow nor stopping the watcher touches its runs, which go on running; `sail stop` stops one (ADR-0019).
 _Avoid_: enabled workflows, active loops, subscriptions
 
+**Watch state**:
+Whether a watched workflow is being watched now, said from the repository's live watcher alone, never from its queue's `watch:added` and `watch:removed` events: `watched` while the live watcher in this clone has it in its watch set, `not watched` while that watcher runs without it, and `watcher not running` while no watcher runs, or one runs in another clone. Each state but `watched` carries the reason the dashboard's server refuses a queue change with, and the dashboard shows that one state, in the same words, in the rail and in the queue view.
+_Avoid_: watch status, watch mode
+
 **Watcher registry**:
 The machine-level record of repositories in `~/.sail/watchers/` (`$SAIL_HOME/watchers/` when set), one `<name>.json` per repository: its `name`, remote, clone path and `.sail/` path, and later the watcher's pid and the labels it polls. Every `sail <ticket>` and `sail resume` writes its repository's entry before the run opens, so an entry exists before any watcher does. A watcher refuses to start if a live one has the same `name` or holds one of its labels on the same TicketSource and scope, such as the same Linear team. The dashboard reads it to find every repository, including those whose watcher has stopped.
 _Avoid_: registry (alone; the config also has an adapter registry), roster, manifest
