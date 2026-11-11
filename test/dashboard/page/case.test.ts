@@ -58,8 +58,8 @@ describe('the case rule (ADW-548)', () => {
       ],
     };
     const menu = renderMenu(state, model).value;
-    expect(menu).toContain('<div class="cmdk-grp">Go to</div>');
-    expect(menu).toContain('<div class="cmdk-grp">General</div>');
+    expect(menu).toContain('<div class="cmdk-grp" id="cmdk-grp-goto" role="presentation">Go to</div>');
+    expect(menu).toContain('<div class="cmdk-grp" id="cmdk-grp-general" role="presentation">General</div>');
     expect(renderSheet().value).toContain('<div class="keys-h">Keyboard shortcuts<');
   });
 
