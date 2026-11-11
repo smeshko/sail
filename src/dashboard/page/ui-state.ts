@@ -71,6 +71,8 @@ export interface UiState {
   dialog?: DialogView;
   /** The toasts on the stack, oldest first. */
   toasts: Toast[];
+  /** The command last copied and whether the clipboard took it, shown on its copy button until it times out. */
+  copied?: { text: string; ok: boolean };
   /** What a subject reads while a request for it is out, by the id `underwayId()` gives: `stopping…`. */
   underway: Record<string, string>;
 }
