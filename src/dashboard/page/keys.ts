@@ -1,18 +1,19 @@
 // What a key does on the page. With a run or queue open, `j`, `k` and the arrows move the card cursor within the cards,
 // `Enter` opens the card under it and `]` and `[` step to the next and previous card; with none open, they move the
 // list's cursor over its entries (group headers and the rows of the groups not folded), `Enter` opens the row under it
-// or folds the group, and `.` opens the menu of the run under it. Cmd+K or Ctrl+K opens the command menu, or closes it,
-// and any other Cmd or Ctrl chord does nothing. While the command menu is open its keys alone are handled (`menu.ts`):
-// the arrows move its highlight, `Enter` runs its row, and `Escape` goes back one step, then closes it. Otherwise
-// `Escape` shuts, in order, the folded sidebar, the run menu, the item menu, the drawer and the timeline, then the
-// selection and, last, the open run or queue, which gives the list the centre. `/` focuses the list's filter field,
-// `1` to `4` open Inbox, Active, Queues and History, `a` opens the Inbox and `i` pins the inspector open or unpins it.
-// In the Inbox `e` dismisses the row under the cursor, else the open run's row, and Shift+E all clear. A key typed in
-// an input does nothing but, for Escape, take the focus off.
+// or folds the group, `.` opens the menu of the run under it, and `x`, in History, marks or unmarks the run under it.
+// Cmd+K or Ctrl+K opens the command menu, or closes it, and any other Cmd or Ctrl chord does nothing. While the command
+// menu is open its keys alone are handled (`menu.ts`): the arrows move its highlight, `Enter` runs its row, and
+// `Escape` goes back one step, then closes it. Otherwise `Escape` shuts, in order, the folded sidebar, the run menu, the
+// item menu, the drawer and the timeline, then the card selection, then, with no run or queue open, the History
+// selection and, last, the open run or queue, which gives the list the centre. `/` focuses the list's filter field, `1`
+// to `4` open Inbox, Active, Queues and History, `a` opens the Inbox and `i` pins the inspector open or unpins it. In
+// the Inbox `e` dismisses the row under the cursor, else the open run's row, and Shift+E all clear. A key typed in an
+// input does nothing but, for Escape, take the focus off.
 import { actions, dispatch, shutSidebar, step } from './actions';
 import { setFocus } from './focus';
 import { listRepos } from './index-model';
-import { type AttentionRow, attentionSubject, entries, filterRows, groupsOf, type ListRow, VIEWS } from './list-model';
+import { type AttentionRow, attentionSubject, entries, type ListRow, shownGroups, VIEWS } from './list-model';
 import { syncUrl } from './location';
 import { menuKey, toggleMenu } from './menu';
 import { closeFile, selectCard } from './reads';
@@ -24,10 +25,7 @@ export const MOVES: Record<string, number> = { j: 1, ArrowDown: 1, ArrowRight: 1
 /** What the list shows now: its groups under the repository filter and the filter field. */
 function shown(store: Store) {
   const { ui, host } = store;
-  return filterRows(
-    groupsOf(ui.view, listRepos(store.index ?? [], host.now()), ui.repoFilter, listed(store)),
-    ui.listFilter,
-  );
+  return shownGroups(ui.view, listRepos(store.index ?? [], host.now()), ui, host.now(), listed(store));
 }
 
 /** The row with `id` in what the list shows. */
@@ -119,6 +117,7 @@ export const keys: Record<string, (store: Store) => void> = {
     } else if (ui.file !== undefined) closeFile(store);
     else if (ui.timeline) actions['close-timeline']?.(store, {});
     else if (ui.key !== undefined) selectCard(store, undefined);
+    else if (!detailOpen(store) && ui.listSelected.length > 0) actions['clear-selection']?.(store, {});
     else actions['close-detail']?.(store, {});
   },
   ']': (store) => step(store, 1),
@@ -136,6 +135,12 @@ export const keys: Record<string, (store: Store) => void> = {
   '.': (store) => {
     const row = rowOf(store, store.ui.listCursor);
     if (row?.kind === 'run') actions['run-menu']?.(store, { repo: row.repo, run: row.run.runId });
+  },
+  // Marks the History run row under the list's cursor, with no run or queue open.
+  x: (store) => {
+    const { ui } = store;
+    const row = detailOpen(store) || ui.view !== 'history' ? undefined : rowOf(store, ui.listCursor);
+    if (row?.kind === 'run') actions['toggle-select']?.(store, { row: row.id });
   },
   '/': (store) => store.host.focus('list-filter'),
   1: (store) => actions['select-view']?.(store, { view: VIEWS[0] }),

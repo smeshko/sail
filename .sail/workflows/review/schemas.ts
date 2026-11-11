@@ -34,7 +34,7 @@ export const Source = z.enum([
 ]);
 
 /**
- * A finding the workflow numbered: `V1` from validation, `L<n>` from the leak check, `B<n>` from the banned-words check,
+ * A finding the workflow numbered: `V1` from validation, `L<n>` from the leak check (one per tracker-key prefix, denylist term or Jev line it found), `B<n>` from the banned-words check,
  * `D<n>` from the demonstration,
  * `R<n>` from a reviewer, `F<round>-<n>` from check-fix, and `C<pass>-<n>` from a check that failed at merge.
  */

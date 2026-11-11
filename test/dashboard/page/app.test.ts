@@ -125,6 +125,8 @@ class FakeHost implements PageHost {
   }
   /** The reads of a run's actions: answered at once, and kept apart from the reads of its calls. */
   actionReads: string[] = [];
+  /** While set, the reads of a run's actions wait for it. */
+  actionsHold: Promise<void> | undefined;
   /** When set, a run's actions wait for `releaseActions()`, as a slow answer lands after the page's flush. */
   holdActions = false;
   private heldActions: (() => void)[] = [];
@@ -134,6 +136,7 @@ class FakeHost implements PageHost {
   get(path: string) {
     if (path.endsWith('/actions')) {
       this.actionReads.push(path);
+      if (this.actionsHold !== undefined) return this.actionsHold.then(() => this.actionsAnswer(path));
       if (!this.holdActions) return this.actionsAnswer(path);
       return new Promise<{ status: number; body: string }>((done) => {
         this.heldActions.push(() => done(this.actionsAnswer(path)));
@@ -153,8 +156,11 @@ class FakeHost implements PageHost {
   /** The POSTs made, and what the dashboard answers them. */
   posts: { path: string; body: unknown }[] = [];
   postAnswer: { status: number; body: string } = { status: 202, body: '{"file":"x"}' };
+  /** While set, the POSTs wait for it. */
+  postHold: Promise<void> | undefined;
   async post(path: string, body: unknown) {
     this.posts.push({ path, body });
+    if (this.postHold !== undefined) await this.postHold;
     return this.postAnswer;
   }
   /** What the dashboard would answer for a run's actions. */
@@ -1803,7 +1809,7 @@ test('booted with ?repo=&run=&view=history the run opens beside the History list
 });
 
 describe('the list by keyboard (ADW-522)', () => {
-  /** Boots on the first index in History: failed FAKE-2, then done runs. */
+  /** Boots on the first index in History: one group per start day, FAKE-1 (09-25), FAKE-2 (09-23), FAKE-4 (09-22). */
   const bootHistory = () => {
     page = boot(host);
     plainIndex();
@@ -1812,16 +1818,21 @@ describe('the list by keyboard (ADW-522)', () => {
     return page;
   };
 
+  /** Moves the cursor onto FAKE-2's row: its group header is the third entry, the row the fourth. */
+  const toFake2 = () => {
+    for (let i = 0; i < 4; i++) host.press('j');
+  };
+
   test('j and k move the cursor one entry and stop at both ends', () => {
     const p = bootHistory();
     expect(p.ui.view).toBe('history');
     host.press('j');
-    expect(p.ui.listCursor).toBe('history:failed');
+    expect(p.ui.listCursor).toBe('history:2026-09-25');
     host.press('j');
-    expect(p.ui.listCursor).toBe(`run:alpha/${FAKE_2_ID}`);
+    expect(p.ui.listCursor?.startsWith('run:alpha/FAKE-1-')).toBe(true);
     host.press('k');
     host.press('k');
-    expect(p.ui.listCursor).toBe('history:failed');
+    expect(p.ui.listCursor).toBe('history:2026-09-25');
     for (let i = 0; i < 9; i++) host.press('ArrowDown');
     const last = p.ui.listCursor;
     expect(last?.startsWith('run:')).toBe(true);
@@ -1833,8 +1844,7 @@ describe('the list by keyboard (ADW-522)', () => {
 
   test('an index that drops the cursor run leaves the cursor alone until the next move, which lands on the first entry', () => {
     const p = bootHistory();
-    host.press('j');
-    host.press('j');
+    toFake2();
     expect(p.ui.listCursor).toBe(`run:alpha/${FAKE_2_ID}`);
     const repos = index(m.registryDir).map((repo) => ({
       ...repo,
@@ -1845,22 +1855,22 @@ describe('the list by keyboard (ADW-522)', () => {
     expect(p.ui.listCursor).toBe(`run:alpha/${FAKE_2_ID}`);
     expect(host.regions.list).not.toContain(' cur"');
     host.press('j');
-    expect(p.ui.listCursor).toBe(`history:done`);
+    expect(p.ui.listCursor).toBe('history:2026-09-25');
     host.press('k');
     host.press('k');
-    expect(p.ui.listCursor).toBe(`history:done`);
+    expect(p.ui.listCursor).toBe('history:2026-09-25');
   });
 
   test('Enter opens the row under the cursor, and folds the group under it', () => {
     const p = bootHistory();
     host.press('j');
     host.press('Enter');
-    expect(p.ui.listFolded).toEqual(['history:failed']);
+    expect(p.ui.listFolded).toEqual(['history:2026-09-25']);
     host.advance(100);
-    expect(host.regions.list).not.toContain(`data-run="${FAKE_2_ID}"`);
+    expect(host.regions.list).not.toContain('data-run="FAKE-1-');
     host.press('Enter');
     expect(p.ui.listFolded).toEqual([]);
-    host.press('j');
+    for (let i = 0; i < 3; i++) host.press('j');
     host.press('Enter');
     expect(host.open('run=').map((socket) => socket.query)).toEqual([runQuery('alpha', FAKE_2_ID)]);
     expect([p.ui.repo, p.ui.runId]).toEqual(['alpha', FAKE_2_ID]);
@@ -1877,8 +1887,7 @@ describe('the list by keyboard (ADW-522)', () => {
 
   test('. opens the menu of the run under the cursor', () => {
     const p = bootHistory();
-    host.press('j');
-    host.press('j');
+    toFake2();
     host.press('.');
     expect([p.ui.runId, p.ui.runMenu]).toEqual([FAKE_2_ID, { runId: FAKE_2_ID, at: 'row' }]);
     host.advance(100);
@@ -1909,6 +1918,274 @@ describe('the list by keyboard (ADW-522)', () => {
     expect(host.regions.list).toContain('<span class="c">3</span>');
   });
 
+  test("choosing a status narrows the list and the cursor, leaves the sidebar's count, and a change of view empties it", () => {
+    const p = bootHistory();
+    const sidebar = host.regions.sidebar;
+    host.type('list-status', 'failed');
+    host.advance(100);
+    expect(p.ui.historyStatus).toBe('failed');
+    expect(host.regions.list).toContain('<span class="c">1 of 3</span>');
+    expect(host.regions.list).toContain(`data-run="${FAKE_2_ID}"`);
+    expect(host.regions.list).not.toContain(`data-run="${GOLDEN_RUN_ID}"`);
+    expect(host.regions.sidebar).toBe(sidebar);
+    for (let i = 0; i < 9; i++) host.press('j');
+    expect(p.ui.listCursor).toBe(`run:alpha/${FAKE_2_ID}`);
+    host.type('list-filter', 'zzz');
+    host.advance(100);
+    expect(host.regions.list).toContain('nothing matches');
+    host.type('list-filter', '');
+    host.type('list-workflow', 'no-such-workflow');
+    host.advance(100);
+    expect(host.regions.list).toContain('nothing matches');
+    host.type('list-workflow', '');
+    host.type('list-status', 'bogus');
+    host.advance(100);
+    expect(p.ui.historyStatus).toBe('failed');
+    host.press('2');
+    host.press('4');
+    host.advance(100);
+    expect([p.ui.historyStatus, p.ui.historyWorkflow]).toEqual([undefined, undefined]);
+    expect(host.regions.list).toContain('<span class="c">3</span>');
+  });
+
+  test('x marks and unmarks the History run under the cursor and the head counts the marks', () => {
+    const p = bootHistory();
+    toFake2();
+    host.press('x');
+    host.advance(100);
+    expect(p.ui.listSelected).toEqual([`run:alpha/${FAKE_2_ID}`]);
+    expect(host.regions.list).toContain(`class="run lrow picked cur" data-row="run:alpha/${FAKE_2_ID}"`);
+    expect(host.regions.list).toContain('<span class="lh-sel">1 selected</span>');
+    host.press('x');
+    host.advance(100);
+    expect(p.ui.listSelected).toEqual([]);
+    expect(host.regions.list).not.toContain('lh-sel');
+    expect(host.regions.list).not.toContain('picked');
+  });
+
+  test('x selects nothing on a group, in Active or Queues, with a run open, or typed in the filter field', () => {
+    const p = bootHistory();
+    host.press('j');
+    host.press('x');
+    expect(p.ui.listSelected).toEqual([]);
+    host.press('x', true);
+    expect(p.ui.listSelected).toEqual([]);
+    host.press('j');
+    host.press('Enter');
+    replay(host.open('run=')[0], fake2Dir(m));
+    host.advance(100);
+    host.press('x');
+    expect(p.ui.listSelected).toEqual([]);
+    host.press('Escape');
+    host.press('2');
+    host.press('j');
+    host.press('j');
+    host.press('x');
+    expect(p.ui.listSelected).toEqual([]);
+    host.press('3');
+    host.press('j');
+    host.press('x');
+    expect(p.ui.listSelected).toEqual([]);
+    host.press('4');
+    host.type('list-filter', 'x');
+    host.advance(100);
+    expect(p.ui.listFilter).toBe('x');
+    expect(p.ui.listSelected).toEqual([]);
+  });
+
+  test('a selected row a filter hides is not counted', () => {
+    const p = bootHistory();
+    toFake2();
+    host.press('x');
+    host.press('j');
+    host.press('j');
+    host.press('x');
+    host.advance(100);
+    expect(p.ui.listSelected).toHaveLength(2);
+    expect(host.regions.list).toContain('2 selected');
+    host.type('list-status', 'failed');
+    host.advance(100);
+    expect(host.regions.list).toContain('<span class="lh-sel">1 selected</span>');
+  });
+
+  test('Escape clears the selection only with no run open, and clear and a change of view empty it', () => {
+    const p = bootHistory();
+    toFake2();
+    host.press('x');
+    host.press('Enter');
+    replay(host.open('run=')[0], fake2Dir(m));
+    host.advance(100);
+    host.press('Escape');
+    host.advance(100);
+    expect([p.ui.runId, p.ui.listSelected]).toEqual([undefined, [`run:alpha/${FAKE_2_ID}`]]);
+    host.press('Escape');
+    host.advance(100);
+    expect(p.ui.listSelected).toEqual([]);
+    host.press('x');
+    host.click({ action: 'clear-selection' });
+    expect(p.ui.listSelected).toEqual([]);
+    host.press('x');
+    host.press('1');
+    expect(p.ui.listSelected).toEqual([]);
+  });
+
+  /** Marks FAKE-1 (the first run row) and FAKE-2 (the second) in History. */
+  const markFirstTwo = () => {
+    host.press('j');
+    host.press('j');
+    host.press('x');
+    host.press('j');
+    host.press('j');
+    host.press('x');
+  };
+
+  test("clean on a selection reads each run's offers, reads checking… meanwhile, and drops a read of an older selection", async () => {
+    const p = bootHistory();
+    markFirstTwo();
+    host.advance(100);
+    expect(p.ui.listSelected).toHaveLength(2);
+    expect(host.regions.list).toContain('data-action="clean-selected">clean</button>');
+    let release = () => {};
+    host.actionsHold = new Promise<void>((done) => {
+      release = done;
+    });
+    host.actionReads = [];
+    host.click({ action: 'clean-selected' });
+    host.advance(100);
+    expect(host.actionReads.map((path) => path.replace(/-01M\w+/, '')).sort()).toEqual([
+      '/api/repos/alpha/runs/FAKE-1/actions',
+      '/api/repos/alpha/runs/FAKE-2/actions',
+    ]);
+    expect(host.regions.list).toContain('<span class="busy">checking 2 runs…</span>');
+    expect(host.regions.list).not.toContain('data-action="clean-selected"');
+    expect(host.dialog).toBeUndefined();
+    release();
+    host.actionsHold = undefined;
+    await Bun.sleep(50);
+    host.advance(100);
+    expect(dialogTitle()).toBe('clean 2 runs');
+    expect(dialogVerb()).toBe('clean');
+    const lines = dialogLines();
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toStartWith('skips FAKE-1-');
+    expect(lines[1]).toStartWith(`${FAKE_2_ID}: removes `);
+    expect(p.ui.listSelected).toEqual([]);
+    expect(host.regions.list).not.toContain('checking');
+    host.postAnswer = { status: 200, body: '{"message":"cleaned it"}' };
+    host.click({ action: 'dialog-confirm' });
+    await Bun.sleep(10);
+    host.advance(100);
+    expect(host.posts).toEqual([{ path: `${FAKE_2_PATH}/clean`, body: {} }]);
+    expect(toasts()).toEqual([`ok clean ${FAKE_2_ID}: cleaned it`]);
+
+    // A selection changed before the answers come opens no dialog.
+    host.posts = [];
+    markFirstTwo();
+    host.advance(100);
+    host.actionsHold = new Promise<void>((done) => {
+      release = done;
+    });
+    host.click({ action: 'clean-selected' });
+    host.press('Escape');
+    host.advance(100);
+    release();
+    host.actionsHold = undefined;
+    await Bun.sleep(50);
+    host.advance(100);
+    expect([host.dialog, p.ui.underway.selection, p.ui.listSelected]).toEqual([undefined, undefined, []]);
+    expect(host.regions.list).not.toContain('checking');
+  });
+
+  test('narrowing to a repository drops a workflow filter it has no finished run of, and keeps one it has (review R6)', () => {
+    const p = bootHistory();
+    host.type('list-workflow', 'review');
+    host.advance(100);
+    expect(p.ui.historyWorkflow).toBe('review');
+    expect(host.regions.list).toContain('<span class="c">1 of 3</span>');
+    host.click({ action: 'filter-repo', repo: 'alpha' });
+    host.advance(100);
+    expect(p.ui.historyWorkflow).toBeUndefined();
+    expect(host.regions.list).not.toContain('nothing matches');
+    expect(host.regions.list).toContain('<span class="lh-t">History</span><span class="c">2</span>');
+    expect(host.regions.list).toContain('<option value="" selected>any workflow</option>');
+    host.type('list-workflow', 'ticket-to-pr');
+    host.click({ action: 'filter-repo', repo: 'alpha' });
+    host.click({ action: 'filter-repo', repo: 'alpha' });
+    host.advance(100);
+    expect(p.ui.historyWorkflow).toBe('ticket-to-pr');
+    expect(host.regions.list).toContain('<option value="ticket-to-pr" selected>ticket-to-pr</option>');
+  });
+
+  test('a read of the offers is dropped when x or a filter changes the shown selection meanwhile, and the marks stay (review R4)', async () => {
+    const p = bootHistory();
+    const cleanWhile = async (change: () => void) => {
+      let release = () => {};
+      host.actionsHold = new Promise<void>((done) => {
+        release = done;
+      });
+      host.click({ action: 'clean-selected' });
+      host.advance(100);
+      change();
+      host.advance(100);
+      release();
+      host.actionsHold = undefined;
+      await Bun.sleep(50);
+      host.advance(100);
+    };
+    markFirstTwo();
+    await cleanWhile(() => host.press('x'));
+    expect([host.dialog, p.ui.underway.selection, p.ui.listSelected.length]).toEqual([undefined, undefined, 1]);
+    expect(host.regions.list).not.toContain('checking');
+    expect(host.regions.list).toContain('<span class="lh-sel">1 selected</span>');
+    host.press('x');
+    await cleanWhile(() => host.type('list-status', 'failed'));
+    expect([host.dialog, p.ui.underway.selection, p.ui.listSelected.length]).toEqual([undefined, undefined, 2]);
+    expect(host.regions.list).toContain('<span class="lh-sel">1 selected</span>');
+    await cleanWhile(() => host.type('list-filter', 'fake-2'));
+    expect(dialogTitle()).toBe('clean 1 run');
+  });
+
+  test('clean on a selection while a run request is out keeps the marks and toasts why (review R3)', async () => {
+    const p = bootHistory();
+    markFirstTwo();
+    host.click({ action: 'clean-selected' });
+    await Bun.sleep(50);
+    host.advance(100);
+    let release = () => {};
+    host.postHold = new Promise<void>((done) => {
+      release = done;
+    });
+    host.click({ action: 'dialog-confirm' });
+    host.advance(100);
+    expect(host.posts).toEqual([{ path: `${FAKE_2_PATH}/clean`, body: {} }]);
+    host.press('x');
+    host.advance(100);
+    const marked = [...p.ui.listSelected];
+    expect(marked).toHaveLength(1);
+    host.click({ action: 'clean-selected' });
+    await Bun.sleep(50);
+    host.advance(100);
+    expect([host.dialog, p.ui.listSelected, p.ui.underway.selection]).toEqual([undefined, marked, undefined]);
+    expect(toasts()).toEqual(['bad clean 1 run: another run action is under way: try again once it is answered']);
+    expect(host.regions.list).toContain('<span class="lh-sel">1 selected</span>');
+    host.postHold = undefined;
+    release();
+  });
+
+  test('clean on a selection none of whose runs can be cleaned opens no dialog and toasts the reasons', async () => {
+    const p = bootHistory();
+    host.press('j');
+    host.press('j');
+    host.press('x');
+    host.click({ action: 'clean-selected' });
+    await Bun.sleep(50);
+    host.advance(100);
+    expect([host.dialog, host.posts]).toEqual([undefined, []]);
+    expect(toasts()).toHaveLength(1);
+    expect(toasts()[0]).toStartWith('bad clean 1 run: FAKE-1-');
+    expect(p.ui.listSelected).toEqual([]);
+  });
+
   test('Escape in the filter field blurs it and changes nothing else; any other key typed there changes only the filter', () => {
     const p = bootHistory();
     host.press('j');
@@ -1920,7 +2197,7 @@ describe('the list by keyboard (ADW-522)', () => {
     host.press('/', true);
     expect([p.ui.view, p.ui.listCursor, p.ui.runId, host.focused]).toEqual([
       'history',
-      'history:failed',
+      'history:2026-09-25',
       undefined,
       [],
     ]);
@@ -1933,7 +2210,7 @@ describe('the list by keyboard (ADW-522)', () => {
     dom.field('list', 'list-filter').value = 'fake';
     host.type('list-filter', 'fake');
     host.advance(100);
-    host.click({ action: 'toggle-list-group', group: 'history:done' });
+    host.click({ action: 'toggle-list-group', group: 'history:2026-09-22' });
     host.advance(100);
     expect(dom.field('list', 'list-filter').value).toBe('fake');
     expect(p.ui.listFilter).toBe('fake');
@@ -1968,8 +2245,7 @@ describe('the list by keyboard (ADW-522)', () => {
 
   test('with a run open, j and k move the card cursor as before and leave the list cursor alone, and Escape steps back to the list', () => {
     const p = bootHistory();
-    host.press('j');
-    host.press('j');
+    toFake2();
     host.press('Enter');
     replay(host.open('run=')[0], fake2Dir(m));
     host.advance(100);
@@ -1981,7 +2257,7 @@ describe('the list by keyboard (ADW-522)', () => {
     host.advance(100);
     expect([p.ui.runId, host.details.at(-1)]).toEqual([undefined, false]);
     host.press('j');
-    expect(p.ui.listCursor).toBe('history:done');
+    expect(p.ui.listCursor).toBe('history:2026-09-22');
   });
 
   test('a redraw of the list that moves no cursor, such as the tick, leaves its scroll alone (review R8)', () => {
@@ -1989,7 +2265,7 @@ describe('the list by keyboard (ADW-522)', () => {
     host.press('j');
     host.advance(100);
     host.revealed = [];
-    host.click({ action: 'toggle-list-group', group: 'history:done' });
+    host.click({ action: 'toggle-list-group', group: 'history:2026-09-22' });
     host.advance(100);
     expect(host.regions.list).toBeDefined();
     expect(host.revealed).toEqual([]);
@@ -2002,7 +2278,7 @@ describe('the list by keyboard (ADW-522)', () => {
     host.press('k');
     host.advance(100);
     host.revealed = [];
-    host.click({ action: 'toggle-list-group', group: 'history:done' });
+    host.click({ action: 'toggle-list-group', group: 'history:2026-09-22' });
     host.advance(100);
     expect(host.regions.list).toBeDefined();
     expect(host.revealed).toEqual([]);

@@ -88,8 +88,13 @@ export interface UiState {
   view: ViewName;
   repoFilter?: string;
   listFilter: string;
+  /** History's status and workflow filters, from the list head's two controls; `completed` is `done`. */
+  historyStatus?: 'failed' | 'completed';
+  historyWorkflow?: string;
   listCursor?: string;
   listFolded: string[];
+  /** The History rows marked with `x`, by row id: the selection. */
+  listSelected: string[];
   /** The queue view's folded sections, as `<repo>/<workflow>:<state>`. */
   folded: string[];
   /** Whether the queue view shows its recent events. */
@@ -132,6 +137,7 @@ export function initialUi(tz: number): UiState {
     view: 'active',
     listFilter: '',
     listFolded: [],
+    listSelected: [],
     folded: [],
     queueEvents: false,
     theme: 'dark',

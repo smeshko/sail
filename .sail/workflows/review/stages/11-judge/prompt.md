@@ -6,7 +6,7 @@ pull request merges into `staging` on its own. A finding you `drop` ships as it 
 look that part of the change gets.
 
 `$STAGE_IN/findings.json` holds every finding, numbered: `V1` when validation (`bun run gate`) failed, `L<n>` for each
-line the leak check flagged, `B<n>` for each avoided word the banned-words check flagged, `D<n>` for each acceptance criterion the demonstration couldn't show, and `R<n>` from the
+tracker-key prefix or denylist term the leak check found, with its count and example locations, and for each line its Jev pass flagged, `B<n>` for each avoided word the banned-words check flagged, `D<n>` for each acceptance criterion the demonstration couldn't show, and `R<n>` from the
 six reviewers, each with the reviewer it came from. `$STAGE_IN/evidence.json` holds how each check went as a whole:
 validation's output, the demonstration's criteria and transcript, and each reviewer's summary and coverage: what it
 checked, how, and with what result.
@@ -24,7 +24,8 @@ wrong does. You need not inspect the code for Jev decisions you keep. Merge dupl
 others as duplicates of it. A failed validation or an unshown criterion is real unless its evidence shows the check
 itself went wrong.
 
-A leak-check hit is a tracker key other than `ADW-<n>`, or a term from a private denylist, on a line the change adds.
+A leak-check finding that gives a count covers every occurrence: decide it once, for all of them. Read its examples; it is
+real unless they show every occurrence is something else. A leak-check hit is a tracker key other than `ADW-<n>`, or a term from a private denylist, on a line the change adds.
 It is real unless the line shows it is something else: a test's placeholder key such as `ZZZ-1`, a version, a
 standard's name. A Jev-pass hit is a comment, doc or commit-message line Jev reads as naming a project, company,
 product or tracker other than sail. It is real unless the name is sail's own, a provider or tool sail integrates with,
