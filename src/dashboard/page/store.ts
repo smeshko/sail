@@ -84,6 +84,8 @@ export interface Store {
   outputRead: number;
   docRead: number;
   offersRead: number;
+  /** The latest read of the offers of a selection's runs: a read that is not the latest, or that a change of the selection outran, is dropped. */
+  selectionRead: number;
   lastLogRead: number;
   lastOutputRead: number;
   flushTimer: number | undefined;
@@ -150,6 +152,7 @@ export function createStore(host: PageHost): Store {
     outputRead: 0,
     docRead: 0,
     offersRead: 0,
+    selectionRead: 0,
     lastLogRead: Number.NEGATIVE_INFINITY,
     lastOutputRead: Number.NEGATIVE_INFINITY,
     flushTimer: undefined,

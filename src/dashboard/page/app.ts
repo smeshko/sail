@@ -79,7 +79,13 @@ export function boot(host: PageHost): Page {
           const { ui } = store;
           // The cursor leaves the row for the next entry of the Inbox, else the previous row, else it is deleted.
           const groups = filterRows(
-            groupsOf('inbox', listRepos(store.index ?? [], host.now()), ui.repoFilter, listed(store)),
+            groupsOf(
+              'inbox',
+              listRepos(store.index ?? [], host.now()),
+              ui.repoFilter,
+              { now: host.now(), tz: ui.tz },
+              listed(store),
+            ),
             ui.listFilter,
           );
           if (ui.listCursor === `inbox:${id}`) {
@@ -147,6 +153,8 @@ export function boot(host: PageHost): Page {
   });
   host.onInput((name, value) => {
     if (name === 'list-filter') dispatch(store, 'list-filter', { value });
+    if (name === 'list-status') dispatch(store, 'filter-status', { value });
+    if (name === 'list-workflow') dispatch(store, 'filter-workflow', { value });
     if (name === 'menu-query') menuInput(store, value);
   });
   host.onNavigate((asked) => {

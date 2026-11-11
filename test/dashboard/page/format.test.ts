@@ -1,7 +1,7 @@
 // The formats every view shares, at each tier's edges. They are built by hand, so every Bun gives the same strings,
 // and a time of day is shown at the offset the shell passes, so a snapshot renders the same on every machine.
 import { expect, test } from 'bun:test';
-import { ago, clock, cost, duration, percent, tokens } from '../../../src/dashboard/page/format';
+import { ago, clock, cost, dayOf, dayOfMs, duration, percent, tokens } from '../../../src/dashboard/page/format';
 
 test('duration gives ms, tenths of a second, minutes and seconds, then hours and minutes, at each edge', () => {
   const at = [0, 999, 1000, 1250, 59_999, 60_000, 184_000, 3_599_999, 3_600_000, 7_500_000];
@@ -82,4 +82,13 @@ test('cost, clock, ago and percent', () => {
     '—',
     '—',
   ]);
+});
+
+test('dayOf gives the date at the offset across midnight, and undefined for a missing or invalid time', () => {
+  const at = '2026-10-01T23:30:00Z';
+  expect([0, 120, -480].map((offset) => dayOf(at, offset))).toEqual(['2026-10-01', '2026-10-02', '2026-10-01']);
+  expect(dayOf('2026-10-01T05:00:00Z', -480)).toBe('2026-09-30');
+  expect([undefined, 'nope', ''].map((t) => dayOf(t, 0))).toEqual([undefined, undefined, undefined]);
+  expect(dayOfMs(Date.parse('2026-01-05T00:00:00Z'), 0)).toBe('2026-01-05');
+  expect(dayOfMs(Date.parse('2026-01-05T00:00:00Z'), -1)).toBe('2026-01-04');
 });

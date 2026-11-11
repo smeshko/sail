@@ -803,6 +803,97 @@ test('the inert actor, the store holds until the shell wires the real one, does 
   expect([actor.dialogFor(), actor.confirm(), actor.cancel()]).toEqual([undefined, undefined, undefined]);
 });
 
+const runOf = (runId: string, repo = 'alpha') => ({ kind: 'run', repo, runId }) as const;
+const cleanable = (...removes: string[]) =>
+  ({ clean: { ...on, removes, archive: `/m/${removes[0] ?? 'x'}` } }) as unknown as RunActions;
+const refused = { clean: { enabled: false, why: 'ticket:FAKE-9 names the run' } } as unknown as RunActions;
+
+test("confirming a clean of several posts each run's clean in order, one toast per answer, and a refusal stops no other run", async () => {
+  const r = rig(undefined);
+  r.open = { repo: 'alpha', runId: 'R2' };
+  r.actor.actSeveral('clean-run', [
+    { subject: runOf('R1'), offers: cleanable('a') },
+    { subject: runOf('R3'), offers: refused },
+    { subject: runOf('R2'), offers: cleanable('b') },
+    { subject: runOf('R4'), offers: cleanable('c') },
+  ]);
+  expect(r.posts).toEqual([]);
+  expect(r.ui.dialog?.title).toBe('clean 4 runs');
+  expect(r.ui.dialog?.lines).toEqual([
+    'R1: removes a; run directory → /m/a',
+    'skips R3: ticket:FAKE-9 names the run',
+    'R2: removes b; run directory → /m/b',
+    'R4: removes c; run directory → /m/c',
+  ]);
+  expect(r.actor.dialogFor()).toEqual({ kind: 'none' });
+  r.actor.confirm();
+  r.actor.confirm();
+  expect(r.posts).toEqual([{ path: '/api/repos/alpha/runs/R1/clean', body: {} }]);
+  expect(r.ui.underway['run:alpha/R1']).toBe('cleaning…');
+  await r.answer(409, { error: 'ticket:FAKE-1 names it' });
+  expect(r.posts.map((p) => p.path)).toEqual(['/api/repos/alpha/runs/R1/clean', '/api/repos/alpha/runs/R2/clean']);
+  expect(r.ui.underway).toEqual({ 'run:alpha/R2': 'cleaning…' });
+  await r.answer(200, { message: 'cleaned R2' });
+  expect(r.effects).toEqual(['leave']);
+  await r.answer(200, { message: 'cleaned R4' });
+  expect(r.posts.map((p) => p.path)).toEqual([
+    '/api/repos/alpha/runs/R1/clean',
+    '/api/repos/alpha/runs/R2/clean',
+    '/api/repos/alpha/runs/R4/clean',
+  ]);
+  expect(r.toasts).toEqual([
+    'bad clean R1: ticket:FAKE-1 names it',
+    'ok clean R2: cleaned R2',
+    'ok clean R4: cleaned R4',
+  ]);
+  expect(r.ui.underway).toEqual({});
+});
+
+test('a run cleaned from a selection that is not the open one only toasts', async () => {
+  const r = rig(undefined);
+  r.actor.actSeveral('clean-run', [{ subject: runOf('R9'), offers: cleanable('a') }]);
+  r.actor.confirm();
+  await r.answer(200, { message: 'cleaned R9' });
+  expect([r.effects, r.toasts]).toEqual([[], ['ok clean R9: cleaned R9']]);
+});
+
+test('a selection with no run to clean opens no dialog and toasts the reasons', () => {
+  const r = rig(undefined);
+  r.actor.actSeveral('clean-run', [
+    { subject: runOf('R1'), offers: refused },
+    { subject: runOf('R2'), offers: { why: 'run R2 completed' } },
+    { subject: runOf('R3'), offers: undefined },
+  ]);
+  expect([r.posts, r.dialogs, r.actor.dialogFor()]).toEqual([[], [], undefined]);
+  expect(r.toasts).toEqual([
+    'bad clean 3 runs: R1: ticket:FAKE-9 names the run; R2: run R2 completed; R3: what it offers could not be read',
+  ]);
+});
+
+test('cancelling the dialog of a clean of several posts nothing, and an unknown action or one with no several form is ignored', () => {
+  const r = rig(undefined);
+  r.actor.actSeveral('clean-run', [{ subject: runOf('R1'), offers: cleanable('a') }]);
+  r.actor.cancel();
+  r.actor.confirm();
+  expect([r.posts, r.actor.dialogFor()]).toEqual([[], undefined]);
+  r.actor.actSeveral('no-such-action', [{ subject: runOf('R1'), offers: cleanable('a') }]);
+  r.actor.actSeveral('stop-run', [{ subject: runOf('R1'), offers: cleanable('a') }]);
+  expect([r.dialogs.filter((d) => d !== 'closed').length, r.toasts]).toEqual([1, []]);
+});
+
+test('a clean of several while a run request is out opens no dialog, toasts why and says it took nothing (review R3)', async () => {
+  const r = rig(undefined);
+  expect(r.actor.actSeveral('clean-run', [{ subject: runOf('R1'), offers: cleanable('a') }])).toBe(true);
+  r.actor.confirm();
+  expect(r.posts).toHaveLength(1);
+  expect(r.actor.actSeveral('clean-run', [{ subject: runOf('R2'), offers: cleanable('b') }])).toBe(false);
+  expect([r.actor.dialogFor(), r.posts.length]).toEqual([undefined, 1]);
+  expect(r.toasts).toEqual(['bad clean 1 run: another run action is under way: try again once it is answered']);
+  await r.answer(200, { message: 'cleaned R1' });
+  expect(r.actor.actSeveral('clean-run', [{ subject: runOf('R2'), offers: cleanable('b') }])).toBe(true);
+  expect(r.actor.dialogFor()).toEqual({ kind: 'none' });
+});
+
 test('values given with the act are read before the page fields', async () => {
   const r = rig(RESTART);
   r.fields.raise = '9';

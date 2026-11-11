@@ -37,7 +37,10 @@ export function regions(store: Store): Record<Region, () => string> {
       // All clear hides the Inbox's rows as they are drawn: its shown rows, under the repository filter and the filter field.
       store.drawn =
         ui.view === 'inbox'
-          ? filterRows(groupsOf('inbox', repos, ui.repoFilter, items), ui.listFilter).flatMap((group) =>
+          ? filterRows(
+              groupsOf('inbox', repos, ui.repoFilter, { now: host.now(), tz: ui.tz }, items),
+              ui.listFilter,
+            ).flatMap((group) =>
               group.rows.flatMap((row) => (row.kind === 'attention' ? [row.id.slice('inbox:'.length)] : [])),
             )
           : [];
