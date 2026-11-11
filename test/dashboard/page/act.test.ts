@@ -268,24 +268,44 @@ test('a refused resume is a red toast quoting the refusal and performs no effect
   expect([r.effects, r.toasts, r.ui.underway]).toEqual([[], ['bad resume R1: run is running'], {}]);
 });
 
-test('Stop now ticked is what the dialog reads and its confirm sends, and the answer reopens the run keeping its menu, with its message', async () => {
+test('Stop posts { now: false } after a dialog that reads stops at its next call boundary', async () => {
   const r = rig(RESTART);
+  // A field named now, as an older page drew, changes nothing.
+  r.fields.now = 'on';
   r.actor.act('stop-run', {});
   expect(r.ui.dialog).toEqual({
     title: 'stop R1',
     lines: ['stops at its next call boundary', 'the run fails as stopped'],
     verb: 'stop',
   });
-  r.actor.cancel();
-  r.fields.now = 'on';
-  r.actor.act('stop-run', {});
-  expect(r.ui.dialog?.lines).toEqual(['ends its running call now', 'the run fails as stopped']);
+  expect(r.posts).toEqual([]);
+  r.actor.confirm();
+  expect(r.posts).toEqual([{ path: '/api/repos/alpha/runs/R1/stop', body: { now: false } }]);
+  expect(r.ui.underway).toEqual({ 'run:alpha/R1': 'stopping…' });
+  await r.answer(200, { message: 'stopping R1' });
+  expect([r.effects, r.toasts, r.ui.act.drafts]).toEqual([['reopen alpha/R1 keep'], ['ok stop R1: stopping R1'], {}]);
+});
+
+test('Stop now posts { now: true } after a dialog that reads ends its running call now', async () => {
+  const r = rig(RESTART);
+  r.actor.act('stop-run-now', {});
+  expect(r.ui.dialog).toEqual({
+    title: 'stop R1 now',
+    lines: ['ends its running call now', 'the run fails as stopped'],
+    verb: 'stop now',
+  });
   expect(r.posts).toEqual([]);
   r.actor.confirm();
   expect(r.posts).toEqual([{ path: '/api/repos/alpha/runs/R1/stop', body: { now: true } }]);
-  expect(r.ui.underway).toEqual({ 'run:alpha/R1': 'stopping…' });
-  await r.answer(200, { message: 'stopping R1' });
-  expect([r.effects, r.toasts]).toEqual([['reopen alpha/R1 keep'], ['ok stop R1: stopping R1']]);
+  await r.answer(200, { message: 'ending R1' });
+  expect([r.effects, r.toasts, r.ui.act.drafts]).toEqual([['reopen alpha/R1 keep'], ['ok stop now R1: ending R1'], {}]);
+});
+
+test('the stop actions read the stop offer: neither is carried out for a run that offers none', () => {
+  const r = rig({ stop: { enabled: false, why: 'no' } } as unknown as RunActions);
+  r.actor.act('stop-run-now', {});
+  r.actor.act('stop-run', {});
+  expect([r.posts, r.ui.dialog]).toEqual([[], undefined]);
 });
 
 test('a first click on Clean opens a dialog with a removes line per thing and the archive, and its confirm posts once, leaves the run and toasts the message', async () => {
@@ -361,15 +381,25 @@ test('no open run and no data means a run action does nothing, and an unknown ac
 
 test('forget drops what a run left: its drafts, and the next keep leaves the page fields alone', () => {
   const r = rig(RESTART);
-  r.fields = { raise: '3', stage: 'spec', now: 'on' };
+  r.registry.push({
+    id: 'poke-run',
+    label: () => 'poke',
+    appliesTo: ['run'],
+    tier: 'instant',
+    place: 'run',
+    params: () => [{ name: 'note', dom: 'note', label: 'note', type: 'text' }],
+    available: () => ({ offered: true, enabled: true }),
+    request: () => undefined,
+  });
+  r.fields = { note: 'hello' };
   r.actor.keep('run');
-  expect(r.ui.act.drafts).toEqual({ 'stop-run': { now: 'on' } });
+  expect(r.ui.act.drafts).toEqual({ 'poke-run': { note: 'hello' } });
   r.actor.forget('run');
   expect(r.ui.act.drafts).toEqual({});
   r.actor.keep('run');
   expect(r.ui.act.drafts).toEqual({});
   r.actor.keep('run');
-  expect(r.ui.act.drafts).toEqual({ 'stop-run': { now: 'on' } });
+  expect(r.ui.act.drafts).toEqual({ 'poke-run': { note: 'hello' } });
 });
 
 test('an action added as one entry is drawn, sent and answered in a toast', async () => {

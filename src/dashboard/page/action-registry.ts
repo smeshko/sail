@@ -1,5 +1,5 @@
-// The page's actions, defined once: each thing a person can have done from the page (stop, resume, restart, clean, drop,
-// requeue, move, poll, add, watch, unwatch, all clear) with its id and label, the subject it applies to, its
+// The page's actions, defined once: each thing a person can have done from the page (stop, stop now, resume, restart,
+// clean, drop, requeue, move, poll, add, watch, unwatch, all clear) with its id and label, the subject it applies to, its
 // availability from the server's offers, its parameters, its tier, its request and what its answer means. Pure: it
 // holds no host, no state and no storage, so `act.ts` carries any entry out and `action-view.ts` draws any entry, and an
 // entry added here needs nothing else. This is the only page module that names a POST endpoint.
@@ -374,15 +374,31 @@ function watchAction(op: 'watch' | 'unwatch', path: string): ActionDef {
   };
 }
 
-const STOP_NOW = (): Param => ({
-  name: 'now',
-  dom: 'now',
-  label: 'stop now',
-  type: 'choice',
-  options: [],
-  tick: true,
-  change: 'stop-now',
-});
+/** Stop, or Stop now: two actions that differ in what they post and in what their dialog says, and read one offer. */
+function stopAction(id: string, now: boolean): ActionDef {
+  return {
+    id,
+    label: () => (now ? 'stop now' : 'stop'),
+    appliesTo: ['run'],
+    tier: 'confirmed',
+    place: 'run',
+    holdsDisabled: true,
+    params: () => [],
+    available: runOffer('stop'),
+    underway: 'stopping…',
+    dialog: (subject) => ({
+      title: now ? `stop ${runName(subject)} now` : `stop ${runName(subject)}`,
+      lines: [now ? 'ends its running call now' : 'stops at its next call boundary', 'the run fails as stopped'],
+      verb: now ? 'stop now' : 'stop',
+    }),
+    request: (subject) => ({ path: runPath(subject, '/stop'), body: { now } }),
+    answer: (status, body) => {
+      if (!ok(status)) return { text: refusal(status, body, 'stop'), refused: true };
+      const text = answerField(body, 'message');
+      return { effect: 'reopen', keepMenu: true, ...(text === undefined ? {} : { text }) };
+    },
+  };
+}
 
 export const ACTIONS: readonly ActionDef[] = [
   {
@@ -492,31 +508,8 @@ export const ACTIONS: readonly ActionDef[] = [
       return runId === undefined ? {} : { effect: { open: runId }, text: `started ${runId}` };
     },
   },
-  {
-    id: 'stop-run',
-    label: () => 'stop',
-    appliesTo: ['run'],
-    tier: 'confirmed',
-    place: 'run',
-    holdsDisabled: true,
-    params: () => [STOP_NOW()],
-    available: runOffer('stop'),
-    underway: 'stopping…',
-    dialog: (subject, values) => ({
-      title: `stop ${runName(subject)}`,
-      lines: [
-        values.now === 'on' ? 'ends its running call now' : 'stops at its next call boundary',
-        'the run fails as stopped',
-      ],
-      verb: 'stop',
-    }),
-    request: (subject, values) => ({ path: runPath(subject, '/stop'), body: { now: values.now === 'on' } }),
-    answer: (status, body) => {
-      if (!ok(status)) return { text: refusal(status, body, 'stop'), refused: true };
-      const text = answerField(body, 'message');
-      return { effect: 'reopen', keepMenu: true, ...(text === undefined ? {} : { text }) };
-    },
-  },
+  stopAction('stop-run', false),
+  stopAction('stop-run-now', true),
   {
     id: 'clean-run',
     label: () => 'clean',

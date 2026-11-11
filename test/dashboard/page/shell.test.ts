@@ -154,7 +154,6 @@ test("the shell's actions are exactly the page's view actions: every action of t
       'close-detail',
       'list-filter',
       'item-menu',
-      'stop-now',
       'run-menu',
       'toggle-queue-events',
       'toggle-queue-section',

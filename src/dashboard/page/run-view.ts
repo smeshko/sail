@@ -122,7 +122,7 @@ function totals(model: RunModel, summary: Summary | null | undefined, now: numbe
 const RUN_ACTIONS = ACTIONS.filter((def) => def.appliesTo.includes('run'));
 
 /**
- * What the run offers (Resume, Restart, Stop, Clean), whichever it does: the body of the ⋯ menu under the open run's
+ * What the run offers (Resume, Restart, Stop, Stop now, Clean), whichever it does: the body of the ⋯ menu under the open run's
  * list row, drawn from the registry. Undefined when it offers none of them.
  */
 export function runControls(actions: RunActions | undefined, ui: UiState): SafeHtml | undefined {

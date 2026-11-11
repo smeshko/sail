@@ -261,15 +261,13 @@ test('Restart is one button and no stage choice, since the dialog asks the stage
   );
 });
 
-test('Stop shows a Stop now box that is ticked as chosen, and a disabled one gives its reason', () => {
+test('Stop shows two buttons, stop and stop now, and no box, and a disabled one gives its reason', () => {
   const view = (ui: Partial<ReturnType<typeof initialUi>>, stop: StopOffer = { enabled: true }) =>
     runControls({ stop }, { ...initialUi(0), ...ui })?.value;
   expect(view({})).toContain(
-    '<span class="act"><label class="lbl"><input type="checkbox" name="now" data-action="stop-now"> stop now</label><button class="btn" data-action="stop-run">stop</button></span>',
+    '<span class="act"><button class="btn" data-action="stop-run">stop</button></span><span class="act"><button class="btn" data-action="stop-run-now">stop now</button></span>',
   );
-  expect(view(act({ 'stop-run': { now: 'on' } }))).toContain(
-    '<input type="checkbox" name="now" data-action="stop-now" checked> stop now',
-  );
+  expect(view({})).not.toContain('type="checkbox"');
   expect(view({}, { enabled: false, why: 'run is not running' })).toContain(
     '<button class="btn" disabled>stop</button><span class="act-why">run is not running</span>',
   );

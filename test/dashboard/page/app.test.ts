@@ -1201,10 +1201,8 @@ test('a tick that changes no markup writes no region and scrolls nothing, and on
   expect(host.scrolls).toEqual(['main']);
   host.renders = [];
   host.scrolls = [];
-  // A value typed between two unchanged ticks is still read by the draw whose write is skipped.
-  host.fields.now = 'on';
   host.advance(2500);
-  expect([host.renders, host.scrolls, page.ui.act.drafts['stop-run']?.now]).toEqual([[], [], 'on']);
+  expect([host.renders, host.scrolls]).toEqual([[], []]);
   host.advance(60_000);
   expect(host.renders).toContain('main');
   expect(host.renders).toContain('list');
@@ -1893,9 +1891,11 @@ const GOLDEN_PATH = `/api/repos/alpha/runs/${GOLDEN_RUN_ID}`;
 const FAKE_2_PATH = `/api/repos/alpha/runs/${FAKE_2_ID}`;
 const FAKE_3_PATH = `/api/repos/beta/runs/${FAKE_3_ID}`;
 const buttons = (region: string | undefined) =>
-  [...(region ?? '').matchAll(/<button class="btn"( disabled)? ?(?:data-action="(\w+-run)")?>([^<]*)<\/button>/g)].map(
-    ([, disabled, action, label]) => [label, action, disabled === undefined ? '' : 'disabled'],
-  );
+  [
+    ...(region ?? '').matchAll(
+      /<button class="btn"( disabled)? ?(?:data-action="(\w+-run(?:-now)?)")?>([^<]*)<\/button>/g,
+    ),
+  ].map(([, disabled, action, label]) => [label, action, disabled === undefined ? '' : 'disabled']);
 
 /** The lines of the dialog open now, and its primary button's verb. */
 const dialogLines = () => [...(host.dialog ?? '').matchAll(/<li>([^<]*)<\/li>/g)].map(([, line]) => line);
@@ -2405,24 +2405,33 @@ test('Stop opens the dialog on a first click and posts nothing; its confirm post
   expect(host.regions.list).not.toContain('stopping…');
   expect(host.actionReads.filter((path) => path === `${FAKE_3_PATH}/actions`).length).toBeGreaterThan(1);
 });
-test('with Stop now ticked, the dialog says so and the post is { now: true }', async () => {
+test('the run menu offers stop and stop now as two buttons; Stop now opens its own dialog and the post is { now: true }', async () => {
   settleQueue();
   await openOffering('beta', FAKE_3_ID, m.beta.runDir);
-  host.fields.now = 'on';
-  host.click({ action: 'stop-run' });
-  expect(dialogLines()[0]).toBe('ends its running call now');
+  expect(buttons(host.regions.list).filter(([, action]) => action?.startsWith('stop-run'))).toEqual([
+    ['stop', 'stop-run', ''],
+    ['stop now', 'stop-run-now', ''],
+  ]);
+  expect(host.regions.list).not.toContain('type="checkbox"');
+  host.click({ action: 'stop-run-now' });
+  expect([dialogTitle(), dialogLines()[0], dialogVerb(), host.posts]).toEqual([
+    `stop ${FAKE_3_ID} now`,
+    'ends its running call now',
+    'stop now',
+    [],
+  ]);
   host.postAnswer = { status: 202, body: JSON.stringify({ message: 'run X ends its running call now (pid 7)' }) };
   host.click({ action: 'dialog-confirm' });
   await settle();
   expect(host.posts).toEqual([{ path: `${FAKE_3_PATH}/stop`, body: { now: true } }]);
 });
-test('ticking Stop now only records the tick: no dialog opens and nothing is posted', async () => {
+test('the dispatch of the removed stop-now action does nothing', async () => {
   settleQueue();
   await openOffering('beta', FAKE_3_ID, m.beta.runDir);
   host.fields.now = 'on';
   host.click({ action: 'stop-now' });
   host.advance(100);
-  expect([page?.ui.act.drafts['stop-run'], host.dialog, host.posts]).toEqual([{ now: 'on' }, undefined, []]);
+  expect([page?.ui.act.drafts, host.dialog, host.posts]).toEqual([{}, undefined, []]);
 });
 const domHost = () => {
   const dom = new DomHost(m);
@@ -2452,20 +2461,6 @@ test("the list's run menu holds no stage choice, and the stage is asked in the d
   expect(host.dialog).toContain('<select name="stage" autofocus>');
 });
 
-test("stop now ticked in the list's run menu is read from the list, stays ticked across the draw, and posts { now: true }", async () => {
-  settleQueue();
-  const dom = domHost();
-  await openOffering('beta', FAKE_3_ID, m.beta.runDir);
-  dom.field('list', 'now').checked = true;
-  host.click({ action: 'stop-now' });
-  host.click({ action: 'stop-run' });
-  host.advance(100);
-  expect(dialogLines()[0]).toBe('ends its running call now');
-  expect(dom.field('list', 'now').checked).toBe(true);
-  host.click({ action: 'dialog-confirm' });
-  await settle();
-  expect(host.posts).toEqual([{ path: `${FAKE_3_PATH}/stop`, body: { now: true } }]);
-});
 test('Clean opens the dialog with what it removes and where the run directory goes, posts {} on confirm, and leaves the run for the index with the cleaned line as a toast', async () => {
   await openOffering('alpha', FAKE_2_ID, fake2Dir(m));
   host.click({ action: 'clean-run' });

@@ -1,4 +1,4 @@
-// The registry of the page's actions: its twelve entries, what each posts, what each answer means and where each reads
+// The registry of the page's actions: its entries, what each posts, what each answer means and where each reads
 // its availability from the server's offers.
 import { expect, test } from 'bun:test';
 import type { RunActions } from '../../../src/dashboard/actions';
@@ -50,12 +50,13 @@ const def = (id: string) => {
 const request = (id: string, subject: Subject, values: Record<string, string> = {}, from = source()) =>
   def(id).request?.(subject, values, from);
 
-test('ACTIONS has exactly the twelve ids, each with a label, appliesTo, a tier and a request and answer or a local run', () => {
+test('ACTIONS has exactly the thirteen ids, each with a label, appliesTo, a tier and a request and answer or a local run', () => {
   expect(ACTIONS.map((each) => each.id).sort()).toEqual(
     [
       'resume-run',
       'restart-run',
       'stop-run',
+      'stop-run-now',
       'clean-run',
       'drop-item',
       'requeue-item',
@@ -79,6 +80,7 @@ test('ACTIONS has exactly the twelve ids, each with a label, appliesTo, a tier a
     'resume-run',
     'restart-run',
     'stop-run',
+    'stop-run-now',
     'clean-run',
     'drop-item',
   ]);
@@ -89,13 +91,18 @@ test('ACTIONS has exactly the twelve ids, each with a label, appliesTo, a tier a
 });
 
 test('every entry posts what its handler posted', () => {
+  // Stop never reads a field: whatever a value named `now` holds, Stop posts false and Stop now true.
   expect(request('stop-run', RUN, { now: 'on' })).toEqual({
     path: '/api/repos/alpha/runs/FAKE-1-RUN/stop',
-    body: { now: true },
+    body: { now: false },
   });
-  expect(request('stop-run', RUN, { now: '' })).toEqual({
+  expect(request('stop-run', RUN)).toEqual({
     path: '/api/repos/alpha/runs/FAKE-1-RUN/stop',
     body: { now: false },
+  });
+  expect(request('stop-run-now', RUN)).toEqual({
+    path: '/api/repos/alpha/runs/FAKE-1-RUN/stop',
+    body: { now: true },
   });
   expect(request('clean-run', RUN)).toEqual({ path: '/api/repos/alpha/runs/FAKE-1-RUN/clean', body: {} });
   expect(request('restart-run', RUN, { stage: 'spec' })).toEqual({
@@ -262,7 +269,14 @@ test('a confirmed run action opens a dialog naming the run and each consequence,
     lines: ['stops at its next call boundary', 'the run fails as stopped'],
     verb: 'stop',
   });
-  expect(dialog('stop-run', { now: 'on' })?.lines[0]).toBe('ends its running call now');
+  expect(dialog('stop-run', { now: 'on' })?.lines[0]).toBe('stops at its next call boundary');
+  expect(dialog('stop-run-now')).toEqual({
+    title: 'stop FAKE-1-RUN now',
+    lines: ['ends its running call now', 'the run fails as stopped'],
+    verb: 'stop now',
+  });
+  expect([def('stop-run').label(RUN), def('stop-run-now').label(RUN)]).toEqual(['stop', 'stop now']);
+  expect([def('stop-run').params(RUN, source()), def('stop-run-now').params(RUN, source())]).toEqual([[], []]);
   expect(dialog('clean-run')).toEqual({
     title: 'clean FAKE-1-RUN',
     lines: ['removes its worktree', 'removes its branch', 'run directory → /m/failed-runs/x'],
@@ -290,6 +304,7 @@ test('every confirmed action has a dialog, and unwatch and all clear are the und
     'resume-run',
     'restart-run',
     'stop-run',
+    'stop-run-now',
     'clean-run',
     'drop-item',
   ]);

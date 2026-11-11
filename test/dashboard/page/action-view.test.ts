@@ -78,7 +78,7 @@ test("a button carries its subject's data, its class and its title when asked", 
   );
 });
 
-test('a choice is drawn as a select with the draft chosen, else the initial one, and a tick as a checkbox', () => {
+test('a choice is drawn as a select with the draft chosen, else the initial one, and Stop draws no box', () => {
   const stop = ACTIONS.find((each) => each.id === 'stop-run');
   const restart = ACTIONS.find((each) => each.id === 'restart-run');
   if (stop === undefined || restart === undefined) throw new Error('missing');
@@ -97,11 +97,8 @@ test('a choice is drawn as a select with the draft chosen, else the initial one,
       },
     },
   } as unknown as OfferSource;
-  expect(actionControl(stop, RUN, idle, source).toString()).toContain(
-    '<input type="checkbox" name="now" data-action="stop-now"> stop now</label>',
-  );
-  expect(actionControl(stop, RUN, { drafts: { 'stop-run': { now: 'on' } } }, source).toString()).toContain(
-    'name="now" data-action="stop-now" checked>',
+  expect(actionControl(stop, RUN, idle, source).toString()).toBe(
+    '<button class="btn" data-action="stop-run">stop</button>',
   );
   const stage = restart.params(RUN, source)[0];
   if (stage === undefined) throw new Error('no stage');
