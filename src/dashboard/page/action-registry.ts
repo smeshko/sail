@@ -678,6 +678,20 @@ const suspendAction: ActionDef = {
   },
 };
 
+/** What a clean removes, in a sentence: `removes its worktree, its branch b and the run ref that keeps its commits`. */
+function removesLine(removes: readonly string[]): string {
+  if (removes.length === 0) return 'removes nothing';
+  const words = removes.map((each) =>
+    each === 'run ref'
+      ? 'the run ref that keeps its commits'
+      : /^(worktree|branch |remote branch)/.test(each)
+        ? `its ${each}`
+        : each,
+  );
+  const last = words.pop();
+  return `removes ${words.length === 0 ? last : `${words.join(', ')} and ${last}`}`;
+}
+
 /** Why a clean of several leaves a run out although its Clean is enabled: a queue item names it. */
 function cleanSkips(offers: RunActions | undefined): string | undefined {
   const item = offers?.clean?.item;
@@ -916,11 +930,11 @@ export const ACTIONS: readonly ActionDef[] = [
           offer === undefined
             ? []
             : [
-                ...(offer.removes.length === 0 ? ['removes nothing'] : offer.removes.map((each) => `removes ${each}`)),
-                ...(offer.archive === undefined ? [] : [`run directory → ${offer.archive}`]),
+                removesLine(offer.removes),
+                ...(offer.archive === undefined ? [] : [`moves its run directory to ${offer.archive}`]),
                 ...(offer.ticketKey === undefined
                   ? []
-                  : [`moves ${offer.ticketKey} back to unstarted when it is started`]),
+                  : [`moves ${offer.ticketKey} back to unstarted, if it is still started`]),
                 ...settles,
               ],
         verb: 'clean',

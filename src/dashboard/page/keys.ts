@@ -15,26 +15,26 @@
 // chord does nothing. While the command menu is open its keys alone are handled (`menu.ts`): the arrows move its
 // highlight, `Enter` runs its row, and `Escape` goes back one step, then lets go of its subject, then closes it; a key
 // that changes what is shown writes the URL, as a click does. While the shortcut sheet is open, `Escape` and `?` close
-// it and no other key does anything. Otherwise `Escape` shuts, in order, the folded sidebar, the run menu, the item
-// menu, the drawer and the timeline, then the card selection, then, with no run or queue open, the History selection
-// and, last, the open run or queue, which leaves the centre's empty state and no row selected. `/` focuses the list's
-// filter field, `1` to `4` and `g` then `i`, `a`, `q` or `h` open Inbox, Active, Queues and History, `a` opens the Inbox
-// too and `i` pins the inspector open or unpins it. `o` opens the open run's pull request, else its ticket, `l` and
-// `f` its call's log and files, and `z` undoes what the newest toast with an Undo did. A key typed in an input does
-// nothing but, for Escape, take the focus off.
+// it, Tab stays in it, and no other key does anything. Otherwise `Escape` shuts, in order, the folded sidebar, the run
+// menu, the item menu, the drawer and the timeline, then the card selection, then, with no run or queue open, the
+// History selection, then the newest toast and, last, the open run or queue, which leaves the centre's empty state and
+// no row selected. `/` focuses the list's filter field, `1` to `4` and `g` then `i`, `a`, `q` or `h` open Inbox, Active,
+// Queues and History, and `i` pins the inspector open or unpins it. `o` opens the open run's pull request, else its
+// ticket, `l` and `f` its call's log and files, and `z` undoes what the newest toast with an Undo did. A key that can't
+// be done here says what it needs in a hint. A key typed in an input does nothing but, for Escape, take the focus off.
 
 import { subjectName } from './action-registry';
 import { actions, shutSidebar, step } from './actions';
 import { moveList, openCursor, rowOf, switchPane } from './cursor';
 import { safeHref } from './html';
 import { actOnKey, keySubject } from './key-act';
-import { LEADS, type NavId, navOf } from './keymap';
+import { LEADS, NAV, type NavId, navOf, withKey } from './keymap';
 import { VIEWS } from './list-model';
 import { syncUrl } from './location';
 import { menuKey, toggleMenu } from './menu';
 import { closeFile, selectCard } from './reads';
 import { centreRun, detailOpen, drivenPane, type Store, summaryOf } from './store';
-import { toast, undoToast } from './toast';
+import { dismissNewest, toast, undoToast } from './toast';
 
 export { inboxRow } from './cursor';
 
@@ -45,6 +45,9 @@ function move(store: Store, by: number) {
   store.ui.cursor = Math.max(0, Math.min(last, store.ui.cursor + by));
   store.mark('main');
 }
+
+/** A navigation key's word with its key, as a hint names it: `files (F)`. */
+const keyed = (id: NavId, word: string) => withKey(word, NAV.find((entry) => entry.id === id)?.keys[0]);
 
 /** Opens or closes the shortcut sheet, in the menu's place. */
 function toggleSheet(store: Store) {
@@ -58,20 +61,20 @@ function toggleSheet(store: Store) {
 function callTab(store: Store, tab: 'log' | 'files') {
   const run = centreRun(store);
   const card = run?.model.cards.find((each) => each.key === store.ui.key) ?? run?.model.cards[store.ui.cursor];
-  if (card === undefined) return toast(store, 'bad', tab, `${tab} needs an open run with a call`);
+  if (card === undefined) return toast(store, 'hint', keyed(tab, tab), 'needs an open run with a call');
   selectCard(store, card.key, tab);
 }
 
 /** The open run's pull request, else its ticket, in a new tab. */
 function openLink(store: Store) {
   const run = centreRun(store);
-  if (run === undefined) return toast(store, 'bad', 'open', 'open needs an open run');
+  if (run === undefined) return toast(store, 'hint', keyed('link', 'open'), 'needs an open run');
   const summary = summaryOf(store, run);
   const result = summary?.result as { pr?: { url?: unknown } } | undefined;
   const url = [run.model.pr?.url, result?.pr?.url, run.model.ticket?.url, summary?.ticket?.url]
     .map((each) => (typeof each === 'string' ? safeHref(each) : undefined))
     .find((each) => each !== undefined);
-  if (url === undefined) toast(store, 'bad', `open ${run.runId}`, 'it has no pull request or ticket link');
+  if (url === undefined) toast(store, 'hint', keyed('link', 'open'), `${run.runId} has no pull request or ticket link`);
   else store.host.openLink(url);
 }
 
@@ -79,7 +82,7 @@ function openLink(store: Store) {
 function copyId(store: Store) {
   const subject = keySubject(store);
   if (subject === undefined || subject.kind === 'none')
-    return toast(store, 'bad', 'copy', 'nothing is focused to copy');
+    return toast(store, 'hint', keyed('copy', 'copy'), 'needs a focused run, queue or queue item');
   actions.copy?.(store, { text: subjectName(subject) });
 }
 
@@ -95,8 +98,8 @@ export const does: Record<NavId, (store: Store) => void> = {
   pane: switchPane,
   inspector: (store) => actions['toggle-inspector']?.(store, {}),
   // The folded sidebar, the run menu, the item menu and the drawer shut first, in that order; then back to the cards
-  // from a timeline, keeping the selection; from the cards, no selection; last, the run or queue itself, which leaves
-  // the empty state in the centre.
+  // from a timeline, keeping the selection; from the cards, no selection; then the newest toast; last, the run or queue
+  // itself, which leaves the empty state in the centre.
   back: (store) => {
     const { ui } = store;
     if (ui.sidebar) shutSidebar(store);
@@ -110,7 +113,7 @@ export const does: Record<NavId, (store: Store) => void> = {
     else if (ui.timeline) actions['close-timeline']?.(store, {});
     else if (ui.key !== undefined) selectCard(store, undefined);
     else if (!detailOpen(store) && ui.listSelected.length > 0) actions['clear-selection']?.(store, {});
-    else actions['close-detail']?.(store, {});
+    else if (!dismissNewest(store)) actions['close-detail']?.(store, {});
   },
   down: (store) => move(store, 1),
   up: (store) => move(store, -1),
@@ -137,7 +140,7 @@ export const does: Record<NavId, (store: Store) => void> = {
   next: (store) => step(store, 1),
   undo: (store) => {
     const newest = [...store.ui.toasts].reverse().find((each) => each.undo === true && each.undoLabel === undefined);
-    if (newest === undefined) toast(store, 'bad', 'undo', 'no toast has an undo');
+    if (newest === undefined) toast(store, 'hint', keyed('undo', 'undo'), 'finds no toast with an undo');
     else undoToast(store, newest.id);
   },
 };
@@ -187,9 +190,10 @@ export function onKey(store: Store, key: string, inInput: boolean, on?: string, 
     syncUrl(store, true);
     return handled;
   }
+  // Tab stays in the sheet: its default, which would walk to the page behind it, is suppressed.
   if (ui.sheet) {
     if (key === 'Escape' || key === '?') toggleSheet(store);
-    return false;
+    return key === 'Tab';
   }
   if (inInput) {
     if (key === 'Escape') store.host.blur();

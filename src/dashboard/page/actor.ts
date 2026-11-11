@@ -27,6 +27,8 @@ export interface ActorDeps {
   /** What the offers say for `subject`: a run that is not open has its own. */
   source(subject?: Subject): OfferSource;
   openRun(): { repo: string; runId: string } | undefined;
+  /** A run's short name, its ticket key or pull request, and its title: what a dialog's title calls it in place of its id. */
+  nameOf?(subject: Subject): { key: string; title?: string | undefined } | undefined;
   effects: ActorEffects;
   mark(...regions: Region[]): void;
   stopped(): boolean;
@@ -48,6 +50,8 @@ export interface Actor {
   forget(kind: 'run'): void;
   /** The subject of the confirmation dialog open now, if any. */
   dialogFor(): Subject | undefined;
+  /** The id of the action whose confirmation dialog is open now, if any. */
+  dialogAction(): string | undefined;
   /** Confirms the open dialog: it sends what it asks, once. */
   confirm(): void;
   /** Closes the open dialog and sends nothing. */

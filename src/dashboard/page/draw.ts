@@ -70,23 +70,17 @@ export function regions(store: Store): Record<Region, () => string> {
         store.actor.keep('queue', { kind: 'workflow', repo: panel.repo, workflow: panel.workflow });
         // A drop dialog whose item can't be dropped now (it runs, or is gone) closes with nothing sent, and its menu shuts.
         // So do both while the workflow isn't watched, and so does a dialog of the workflow's own (an add skipping its
-        // checks): the controls are disabled then.
+        // checks): the controls are disabled then. A release dialog, the one a queue's banner opens, needs no watcher: it
+        // closes with nothing sent once its queue is held on a key no more.
         const unwatched = panel.watch.state !== 'watched';
         const asked = store.actor.dialogFor();
-        if (asked?.kind === 'workflow' && asked.repo === panel.repo && asked.workflow === panel.workflow && unwatched)
-          store.actor.cancel();
+        if (asked?.kind === 'workflow' && asked.repo === panel.repo && asked.workflow === panel.workflow) {
+          const releasing = store.actor.dialogAction() === 'release-hold';
+          if (releasing ? panel.queue?.held?.harnessKey === undefined : unwatched) store.actor.cancel();
+        }
         if (asked?.kind === 'item' && asked.repo === panel.repo && asked.workflow === panel.workflow) {
           const target = panel.items.find((each) => each.dedupKey === asked.item);
           if (unwatched || target === undefined || !offeredDrop(panel, target)) store.actor.cancel();
-        }
-        // A release dialog, the one a queue's banner opens, closes with nothing sent once its queue is held on a key no more.
-        if (
-          asked?.kind === 'workflow' &&
-          asked.repo === panel.repo &&
-          asked.workflow === panel.workflow &&
-          panel.queue?.held?.harnessKey === undefined
-        ) {
-          store.actor.cancel();
         }
         const menuItem = panel.items.find((item) => item.dedupKey === ui.itemMenu);
         if (unwatched || menuItem === undefined || !hasItemActions(panel, menuItem)) delete ui.itemMenu;
@@ -176,6 +170,8 @@ export function flush(store: Store): void {
       store.menuFocus = false;
       host.focusMenu();
     }
+    // The menu's highlighted row stays in sight within its rows' scroller, after a move, a filter or a tick.
+    if (region === 'menu' && ui.menu !== undefined) host.reveal('menu', 'sel');
     // Only a cursor move scrolls the list: a redraw such as the tick leaves where the person scrolled it (review R8).
     if (region === 'list' && store.revealList) {
       store.revealList = false;

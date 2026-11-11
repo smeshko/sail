@@ -14,6 +14,7 @@
 //
 // The rules each module follows are in its own header.
 import { createActor } from './act';
+import type { Subject } from './action-registry';
 import { dispatch } from './actions';
 import { identity } from './attention';
 import { focusRow } from './cursor';
@@ -49,6 +50,14 @@ export interface Page {
   readonly store: Store;
 }
 
+/** The listed run `subject` names, with its ticket key, pull request and title, when the index has it. */
+function runOf(store: Store, subject: Subject) {
+  if (subject.kind !== 'run') return undefined;
+  return listRepos(store.index ?? [], store.host.now())
+    .find((repo) => repo.name === subject.repo)
+    ?.runs.find((each) => each.runId === subject.runId);
+}
+
 export function boot(host: PageHost): Page {
   const store = createStore(host);
   store.actor = createActor({
@@ -56,6 +65,11 @@ export function boot(host: PageHost): Page {
     ui: store.ui,
     source: (subject) => sourceFor(store, subject),
     openRun: () => (store.run === undefined ? undefined : { repo: store.run.repo, runId: store.run.runId }),
+    nameOf: (subject) => {
+      const run = runOf(store, subject);
+      const key = run?.ticketKey ?? (run?.pr === undefined ? undefined : `#${run.pr}`);
+      return key === undefined ? undefined : { key, title: run?.title };
+    },
     effects: {
       reopen(repo, runId, keepMenu) {
         const menu = store.ui.runMenu;
@@ -108,7 +122,7 @@ export function boot(host: PageHost): Page {
           saveCleared(host, store.cleared);
           store.mark('sidebar', 'list');
           return {
-            text: `${item.about} ${item.title} hidden`,
+            text: `${item.about} ${item.title} is hidden from the Inbox`,
             undo: () => {
               store.cleared = new Set([...storedCleared(host), ...store.cleared].filter((each) => each !== id));
               saveCleared(host, store.cleared);
@@ -124,7 +138,7 @@ export function boot(host: PageHost): Page {
           store.mark('sidebar', 'list');
           if (added.size === 0) return undefined;
           return {
-            text: `${added.size} hidden`,
+            text: `${added.size} ${added.size === 1 ? 'row is' : 'rows are'} hidden from the Inbox`,
             // Undo lists the same items again: exactly the identities this click added leave the stored set, and an
             // identity another tab saved since stays.
             undo: () => {

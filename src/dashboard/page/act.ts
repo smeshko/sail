@@ -35,7 +35,7 @@ import {
   type Values,
 } from './action-registry';
 import type { Actor, ActorDeps } from './actor';
-import { type DialogAsk, renderDialog, renderDialogBody } from './dialog-view';
+import { type DialogAsk, type DialogView, namedView, renderDialog, renderDialogBody } from './dialog-view';
 
 type Data = Readonly<Record<string, string>>;
 
@@ -49,6 +49,7 @@ export function inertActor(): Actor {
     keep: () => {},
     forget: () => {},
     dialogFor: () => undefined,
+    dialogAction: () => undefined,
     confirm: () => {},
     cancel: () => {},
     changed: () => {},
@@ -67,7 +68,9 @@ export function createActor(deps: ActorDeps): Actor {
    * The confirmation dialog open: who it is for, and what its confirm does: `submit()` answers what to send once the
    * dialog closes, nothing, or 'keep' when it stays open. `changed()` draws it again, for a dialog that asks fields.
    */
-  let dialog: { subject: Subject; submit(): (() => void) | 'keep' | undefined; changed?: () => void } | undefined;
+  let dialog:
+    | { action: string; subject: Subject; submit(): (() => void) | 'keep' | undefined; changed?: () => void }
+    | undefined;
 
   const draftsOf = (id: string) => {
     state.drafts[id] ??= {};
@@ -95,6 +98,10 @@ export function createActor(deps: ActorDeps): Actor {
     }
     return values;
   }
+
+  /** A dialog's view naming its run by its ticket key or pull request, when the shell knows it, in place of its id. */
+  const named = (view: DialogView, subject: Subject) =>
+    subject.kind === 'run' ? namedView(view, subject.runId, deps.nameOf?.(subject)) : view;
 
   /** The head of `def`'s toast: `<verb> <subject>`. */
   const headOf = (def: ActionDef, subject: Subject) => `${def.label(subject)} ${subjectName(subject)}`.trim();
@@ -214,6 +221,7 @@ export function createActor(deps: ActorDeps): Actor {
       return true;
     }
     dialog = {
+      action: def.id,
       subject: { kind: 'none' },
       submit: () => () => {
         const sendFrom = (at: number) => {
@@ -264,8 +272,8 @@ export function createActor(deps: ActorDeps): Actor {
     }
     const undo = def.undo?.(subject, source);
     if (def.tier === 'confirmed' && def.dialog !== undefined) {
-      const view = def.dialog(subject, values, source);
-      dialog = { subject, submit: () => () => send(def, subject, request, undo, values) };
+      const view = named(def.dialog(subject, values, source), subject);
+      dialog = { action: def.id, subject, submit: () => () => send(def, subject, request, undo, values) };
       ui.dialog = view;
       host.openDialog(renderDialog(view).value);
       // What was typed for its parameters is kept in the drafts, and drawn again.
@@ -303,13 +311,14 @@ export function createActor(deps: ActorDeps): Actor {
       }
     };
     const draw = (fresh: boolean) => {
-      const view = dialogOf(subject, values, source);
+      const view = named(dialogOf(subject, values, source), subject);
       ui.dialog = view;
       const ask = { fields: asked, values, error } satisfies DialogAsk;
       if (fresh) host.openDialog(renderDialog(view, ask).value);
       else host.redrawDialog(renderDialogBody(view, ask).value);
     };
     dialog = {
+      action: def.id,
       subject,
       changed: () => {
         readFields();
@@ -343,6 +352,7 @@ export function createActor(deps: ActorDeps): Actor {
     act,
     actSeveral,
     dialogFor: () => dialog?.subject,
+    dialogAction: () => dialog?.action,
     confirm() {
       // The dialog is cleared first, so the click a browser makes of Enter on its focused button finds nothing to do.
       const submitted = dialog?.submit();

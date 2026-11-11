@@ -714,7 +714,7 @@ The menu Cmd+K or Ctrl+K opens, or a right-click on a row opens at the pointer: 
 _Avoid_: palette, launcher, omnibar
 
 **Shortcut sheet**:
-The overlay `?` opens over the dashboard, in the command menu's place and style: every key the page handles, grouped Global, List, Run, Queue item and Inbox. It is generated from the one table of navigation keys the key handler reads and from the Dashboard actions' keys, so it lists only keys that do something. A Dashboard action's key does it to the focused subject as its button does, opening its confirmation dialog when it has one, and a key whose action can't be done says why in a toast. `Escape`, `?` or a click outside closes it.
+The overlay `?` opens over the dashboard, in the command menu's place and style: every key the page handles, grouped Global, List, Run, Queue item and Inbox. It is generated from the one table of navigation keys the key handler reads and from the Dashboard actions' keys, so it lists only keys that do something. A Dashboard action's key does it to the focused subject as its button does, opening its confirmation dialog when it has one, and a key whose action can't be done says why in a hint. Tab stays in it, and `Escape`, `?` or a click outside closes it, giving the focus back to what had it.
 _Avoid_: cheat sheet, help, keymap (the table's module)
 
 **Stage card**:
@@ -734,9 +734,9 @@ The dashboard's one list, across every repository, of what a person should look 
 _Avoid_: alerts, signals, triage
 
 **Toast**:
-The dashboard's answer to an action, drawn at the bottom right and naming the action and its subject. A success leaves after 4 s; a refusal is red, quotes `sail`'s own words and stays until it is dismissed.
+The dashboard's answer to an action, drawn at the bottom right and naming the action and its subject. A success leaves after 4 s; a refusal is red, quotes `sail`'s own words and stays until it is dismissed. A key that can't be done here answers with a hint instead, a neutral toast that leaves after 3 s and replaces the hint before it. The newest three show, under a line counting the rest; Esc dismisses the newest once nothing else is open for it to close, before it closes the open run.
 _Avoid_: notice, snackbar, chip
 
 **Confirmation dialog**:
-The one dialog a stop, stop now, suspend and hold, resume, restart, drop, clean, release of a usage-limit hold, an add that skips its ticket's checks or a start of a run opens before it is done: a title naming the action and its subject, a field for each parameter the action asks there (Resume's raise, Restart's stage and its two ticks, this stage only and from the base, a Clean's requeue or drop of the queue item that names the run, and skip, requeue or drop for the queue items of a clean of every failed run), one line per consequence (a Clean of the Selection or of every failed run: a line per run that goes and a `skips` line per run that can't), a start's roster as a preformatted text under them, which a change of a field draws again, and one button with the verb. A value it can't send keeps it open with the reason beside the field. Enter confirms and Esc cancels.
+The one dialog a stop, stop now, suspend and hold, resume, restart, drop, clean, release of a usage-limit hold, an add that skips its ticket's checks or a start of a run opens before it is done: a title naming the action and its subject (a run by its ticket key or pull request, with its title and full id on a quiet line under it), a field for each parameter the action asks there (Resume's raise, Restart's stage and its two ticks, this stage only and from the base, a Clean's requeue or drop of the queue item that names the run, and skip, requeue or drop for the queue items of a clean of every failed run), one line per consequence (a Clean of the Selection or of every failed run: a line per run that goes and a `skips` line per run that can't), a start's roster as a preformatted text under them, which a change of a field draws again, and one button with the verb. A value it can't send keeps it open with the reason beside the field. Enter confirms and Esc cancels.
 _Avoid_: modal, popup, prompt, armed button

@@ -25,7 +25,7 @@ export const NAV = [
   { id: 'menu', keys: ['Mod+k'], group: 'Global', text: 'commands' },
   { id: 'filter', keys: ['/'], group: 'Global', text: 'filter the list' },
   { id: 'sheet', keys: ['?'], group: 'Global', text: 'these keys' },
-  { id: 'inbox', keys: ['g i', '1', 'a'], group: 'Global', text: 'go to Inbox' },
+  { id: 'inbox', keys: ['g i', '1'], group: 'Global', text: 'go to Inbox' },
   { id: 'active', keys: ['g a', '2'], group: 'Global', text: 'go to Active' },
   { id: 'queues', keys: ['g q', '3'], group: 'Global', text: 'go to Queues' },
   { id: 'history', keys: ['g h', '4'], group: 'Global', text: 'go to History' },

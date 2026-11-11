@@ -298,7 +298,7 @@ export const actions: Record<string, Action> = {
     const { host } = store;
     void host.copy(host.href()).then((copied) => {
       if (store.stopped) return;
-      if (copied) toast(store, 'ok', 'copy link', 'link copied');
+      if (copied) toast(store, 'ok', 'copy link', "copied this page's link");
       else toast(store, 'bad', 'copy link', 'the link could not be copied');
     });
   },

@@ -1,7 +1,8 @@
 // The command menu's markup, from its state and the model `menu-model.ts` made. Pure. A row is a button whose
 // `data-action` is `menu-run` and whose `data-row` is its place in the rows; a disabled one is `disabled` and says why.
 // A run's go-to row leads with the list's status dot, its ticket key or pull request and, to tell two alike apart, the random part of its run id.
-// The context menu is the subject's rows at the pointer with no field. The back button behind the menu closes it.
+// The context menu is the subject's rows at the pointer with no field. The back button behind the menu closes it. The
+// rows scroll in a box of their own under the chip and the field, which stay.
 import { html, raw, type SafeHtml } from './html';
 import { keyLabel } from './keymap';
 import type { MenuModel, MenuRow } from './menu-model';
@@ -104,9 +105,10 @@ export function renderMenu(state: MenuState, model: MenuModel): SafeHtml {
     last = item.group;
     return html`${heading ? html`<div class="cmdk-grp">${HEADINGS[item.group]}</div>` : ''}${row(item, place, state)}`;
   });
-  return html`<button class="cmdk-back" type="button" data-action="menu-close" aria-label="close the command menu" tabindex="-1"></button><div class="cmdk${state.mode === 'context' ? ' ctx' : ''}" role="dialog" aria-label="command menu" tabindex="-1"${style}>${
+  // The chip, the step and the field stay put: the rows scroll on their own, keeping their place across a redraw.
+  return html`<button class="cmdk-back" type="button" data-action="menu-close" aria-label="close the command menu" tabindex="-1"></button><div class="cmdk${state.mode === 'context' ? ' ctx' : ''}" role="dialog" aria-modal="true" aria-label="command menu" tabindex="-1"${style}>${
     model.head === undefined ? '' : html`<div class="cmdk-subj">${model.head}</div>`
   }${model.why === undefined ? '' : html`<div class="cmdk-note">${model.why}</div>`}${model.step === undefined ? '' : html`<div class="cmdk-step">${model.step.label}</div>${model.step.lines.map((line) => html`<div class="cmdk-line">${line}</div>`)}`}${field(state, model)}${
     state.error === undefined ? '' : html`<div class="cmdk-err">${state.error}</div>`
-  }${rows}</div>`;
+  }<div class="cmdk-rows" data-scroll="menu-rows">${rows}</div></div>`;
 }

@@ -1,5 +1,29 @@
-import { expect, test } from 'bun:test';
-import { renderDialog } from '../../../src/dashboard/page/dialog-view';
+import { describe, expect, test } from 'bun:test';
+import { namedView, renderDialog } from '../../../src/dashboard/page/dialog-view';
+
+describe('audit 2: overlays behave (ADW-542)', () => {
+  const view = {
+    title: 'restart FAKE-1-01ABC',
+    lines: ['moves its run directory to /m/FAKE-1-01ABC'],
+    verb: 'restart',
+  };
+
+  test('a run named by its key keeps its title and full id for a quiet line, and its lines as they were', () => {
+    const named = namedView(view, 'FAKE-1-01ABC', { key: 'FAKE-1', title: 'Fix <it>' });
+    expect(named).toEqual({ ...view, title: 'restart FAKE-1', about: { title: 'Fix <it>', id: 'FAKE-1-01ABC' } });
+    expect(renderDialog(named).value).toStartWith(
+      '<h2 id="dialog-title">restart FAKE-1</h2><p class="dlg-sub"><span class="dlg-about">Fix &lt;it&gt;</span><span class="dlg-id">FAKE-1-01ABC</span></p><ul class="dlg-lines">',
+    );
+  });
+
+  test('a run with no short name is left as it was, and one with no title shows its id alone', () => {
+    expect(namedView(view, 'FAKE-1-01ABC', undefined)).toBe(view);
+    const bare = renderDialog(namedView(view, 'FAKE-1-01ABC', { key: '#12' })).value;
+    expect(bare).toContain(
+      '<h2 id="dialog-title">restart #12</h2><p class="dlg-sub"><span class="dlg-id">FAKE-1-01ABC</span></p>',
+    );
+  });
+});
 
 test('the dialog has the title, one li per line, the verb as the focused primary button, and cancel', () => {
   const out = renderDialog({ title: 'clean R1', lines: ['removes a', 'removes b'], verb: 'clean' }).value;

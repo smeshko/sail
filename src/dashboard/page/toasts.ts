@@ -5,11 +5,16 @@
 export const TOAST_MS = 4000;
 /** A toast carrying Undo leaves after this long. */
 export const UNDO_MS = 8000;
+/** A key's hint leaves after this long. */
+export const HINT_MS = 3000;
+/** How many toasts the stack shows: the newest, under a line counting the rest. */
+export const TOASTS_SHOWN = 3;
 
 export interface Toast {
   id: number;
-  kind: 'ok' | 'bad';
-  /** `<verb> <subject>`, such as `clean ADW-1-…`. */
+  /** A success, a refusal, or a hint: what a key that can't be done here needs, which asked the server nothing. */
+  kind: 'ok' | 'bad' | 'hint';
+  /** `<verb> <subject>`, such as `clean ADW-1-…`, or a key's `<verb> (<key>)`. */
   head: string;
   /** Sail's own words. */
   text: string;
@@ -19,13 +24,16 @@ export interface Toast {
   undoLabel?: string;
 }
 
-/** `list` with `toast` added at its end. A refusal equal in head and text to one still shown replaces it. */
+/**
+ * `list` with `toast` added at its end. A refusal equal in head and text to one still shown replaces it, and a hint
+ * replaces the hint shown, so one is shown at a time.
+ */
 export function addToast(list: readonly Toast[], toast: Toast): Toast[] {
-  const kept =
-    toast.kind === 'bad'
-      ? list.filter((each) => !(each.kind === 'bad' && each.head === toast.head && each.text === toast.text))
-      : list;
-  return [...kept, toast];
+  const replaces = (each: Toast) =>
+    toast.kind === 'hint'
+      ? each.kind === 'hint'
+      : toast.kind === 'bad' && each.kind === 'bad' && each.head === toast.head && each.text === toast.text;
+  return [...list.filter((each) => !replaces(each)), toast];
 }
 
 /** `list` without the toast `id`. */

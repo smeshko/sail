@@ -22,7 +22,9 @@ export interface PageHost {
    * Draws `html` into `region`, keeping the scroll of each `data-scroll` box that is still there, the focus, by the
    * focus key of the focused element (its name, else its `data-action` and data, else its href), the value or tick of
    * each named field and the focused field's caret. `fresh` drops the values and the caret: the fields take the
-   * markup's, and the focus is still kept.
+   * markup's, and the focus is still kept. A focus the write takes away moves on: in a list's row (`data-row`), to the
+   * row that took its place, the next, else the one before; in a toast, to the newest one left; and out of the
+   * command menu or the shortcut sheet when it closes, or of the last toast, back to what had it before.
    */
   render(region: Region, html: string, fresh?: boolean): void;
   /** Scrolls what holds `region` to its end. */
@@ -38,8 +40,8 @@ export interface PageHost {
   onKey(handler: (key: string, inInput: boolean, on?: string, mod?: boolean) => boolean): void;
   /**
    * `handler` is told where the pointer is: `hover` when it moves onto an element, `context` when a right-click lands,
-   * and `focus` when the focus reaches an element, by Tab or a click, though not when a redraw or a closing dialog gives
-   * it back. `data` is the dataset of the nearest ancestor with a `data-subject`, or undefined when the element is on no
+   * and `focus` when the focus reaches an element, by Tab or a click, though not when a redraw, a closing dialog, menu,
+   * sheet or toast, or a row written away gives it back or moves it on. `data` is the dataset of the nearest ancestor with a `data-subject`, or undefined when the element is on no
    * row. A `context` answered true has its default prevented.
    */
   onPoint(
@@ -55,7 +57,7 @@ export interface PageHost {
   onInput(handler: (name: string, value: string) => void): void;
   /** Focuses the field named `name`, in whichever region draws it. */
   focus(name: string): void;
-  /** Focuses the command menu's field, else the menu itself. */
+  /** Focuses the command menu's field, else the menu itself, remembering what had the focus for when it closes. */
   focusMenu(): void;
   /** Takes the focus off the focused element. */
   blur(): void;
@@ -144,6 +146,7 @@ export interface ElementLike {
   blur?(): void;
   scrollIntoView?(options?: { block?: string }): void;
   getAttribute?(name: string): string | null;
+  setAttribute?(name: string, value: string): void;
   querySelectorAll?(selectors: string): ArrayLike<ElementLike>;
   querySelector?(selectors: string): ElementLike | null;
   style?: { setProperty(name: string, value: string): void };
@@ -271,6 +274,29 @@ const keyed = (root: ElementLike, key: string) =>
 
 const INPUTS = new Set(['INPUT', 'TEXTAREA', 'SELECT']);
 
+/** The row (`data-row`) of `element` that holds `active`, with the ids of the element's rows in order. */
+function rowAround(element: ElementLike, active: ElementLike): { id: string; ids: string[] } | undefined {
+  let at: ElementLike | null = active;
+  while (at !== null && at !== element && at.dataset.row === undefined) at = at.parentElement;
+  const id = at?.dataset.row;
+  if (id === undefined) return undefined;
+  const ids = Array.from(element.querySelectorAll?.('[data-row]') ?? []).flatMap((each) =>
+    each.dataset.row === undefined ? [] : [each.dataset.row],
+  );
+  return { id, ids };
+}
+
+/** The first of `ids` that `element` holds a row for, after the write, and what in it takes the focus. */
+function rowTarget(element: ElementLike, ids: readonly string[]): ElementLike | undefined {
+  const rows = new Map(Array.from(element.querySelectorAll?.('[data-row]') ?? []).map((row) => [row.dataset.row, row]));
+  for (const id of ids) {
+    const row = rows.get(id);
+    const target = row?.dataset.action !== undefined ? row : (row?.querySelector?.(FOCUSABLE) ?? undefined);
+    if (target !== undefined) return target;
+  }
+  return undefined;
+}
+
 type Side = 'left' | 'right';
 
 /**
@@ -351,6 +377,57 @@ export function browserHost(win: BrowserWindow): PageHost {
     } finally {
       refocusing = false;
     }
+  };
+  /** The regions drawn over the page, which give the focus back when they close. */
+  const over = (element: ElementLike) =>
+    (['menu', 'toasts', 'dialog'] as const).some((id) => doc.getElementById(id)?.contains?.(element) === true);
+  /** The focus key of what last had the focus outside them: where it goes back to once the one it moved to closes. */
+  let back: string | undefined;
+  doc.addEventListener('focusin', (event) => {
+    if (isElement(event.target) && !over(event.target)) back = focusKey(event.target);
+  });
+  /** Gives the focus back to the element of the regions with `key`, the first, and answers whether there was one. */
+  const refocusKey = (key: string | undefined) => {
+    if (key === undefined) return false;
+    for (const region of REGIONS) {
+      const root = doc.getElementById(region);
+      const target = root === null ? undefined : keyed(root, key)[0];
+      if (target !== undefined) {
+        refocus(target);
+        return true;
+      }
+    }
+    return false;
+  };
+  /** Whether `element` holds the focus. */
+  const holds = (element: ElementLike) => {
+    const active = doc.activeElement;
+    return active !== null && active !== undefined && element.contains?.(active) === true;
+  };
+  const menuTarget = () => {
+    const menu = doc.getElementById('menu');
+    return menu?.querySelector?.('[name="menu-query"]') ?? menu?.querySelector?.('.cmdk');
+  };
+  /** Moves on a focus the write of `region` took away, from the row it was in, if any. */
+  const moveOn = (region: Region, element: ElementLike, markup: string, row: ReturnType<typeof rowAround>) => {
+    if (region === 'menu') {
+      if (markup === '') refocusKey(back);
+      else {
+        const target = menuTarget();
+        if (target !== null && target !== undefined) refocus(target);
+      }
+      return;
+    }
+    if (region === 'toasts') {
+      const left = Array.from(element.querySelectorAll?.('[data-action="dismiss-toast"]') ?? []).at(-1);
+      if (left === undefined) refocusKey(back);
+      else refocus(left);
+      return;
+    }
+    if (row === undefined) return;
+    const at = row.ids.indexOf(row.id);
+    const target = rowTarget(element, [row.id, ...row.ids.slice(at + 1), ...row.ids.slice(0, at).reverse()]);
+    if (target !== undefined) refocus(target);
   };
   let onAction: (action: string, data: Record<string, string>) => void = () => {};
   /** Delivers `element`'s action with its data, as a click on it would. */
@@ -436,13 +513,19 @@ export function browserHost(win: BrowserWindow): PageHost {
   return {
     render(region, markup, fresh = false) {
       const element = doc.getElementById(region);
-      if (element !== null) draw(element, markup, fresh);
+      if (element === null) return;
+      const had = holds(element);
+      const active = doc.activeElement;
+      const row = had && active !== null && active !== undefined ? rowAround(element, active) : undefined;
+      draw(element, markup, fresh);
+      if (had && !holds(element)) moveOn(region, element, markup, row);
     },
     openDialog(markup) {
       const dialog = doc.getElementById('dialog');
       if (dialog === null) return;
+      // Opened from an overlay, the command menu, the focus goes back to what had it before that.
       const active = doc.activeElement;
-      opener = active === null || active === undefined ? undefined : focusKey(active);
+      opener = active === null || active === undefined ? undefined : over(active) ? back : focusKey(active);
       dialog.innerHTML = markup;
       // A close the browser makes itself, with no Escape the page saw, cancels the dialog as its cancel button does.
       // A close event that finds it open again is an earlier close's, made before a reopen.
@@ -457,15 +540,7 @@ export function browserHost(win: BrowserWindow): PageHost {
       dialog?.close?.();
       const key = opener;
       opener = undefined;
-      if (key === undefined) return;
-      for (const region of REGIONS) {
-        const root = doc.getElementById(region);
-        const target = root === null ? undefined : keyed(root, key)[0];
-        if (target !== undefined) {
-          refocus(target);
-          return;
-        }
-      }
+      refocusKey(key);
     },
     redrawDialog(markup) {
       const dialog = doc.getElementById('dialog-body') ?? doc.getElementById('dialog');
@@ -535,9 +610,9 @@ export function browserHost(win: BrowserWindow): PageHost {
       }
     },
     focusMenu() {
-      const menu = doc.getElementById('menu');
-      const target = menu?.querySelector?.('[name="menu-query"]') ?? menu?.querySelector?.('.cmdk');
-      target?.focus?.();
+      const active = doc.activeElement;
+      if (active !== null && active !== undefined && !over(active)) back = focusKey(active);
+      menuTarget()?.focus?.();
     },
     blur() {
       doc.activeElement?.blur?.();
@@ -672,6 +747,7 @@ export function browserHost(win: BrowserWindow): PageHost {
     setInspector(open, pinned) {
       doc.documentElement.dataset.inspector = open ? 'open' : 'closed';
       doc.documentElement.dataset.pinned = pinned ? 'true' : 'false';
+      doc.getElementById('pin-inspector')?.setAttribute?.('aria-pressed', pinned ? 'true' : 'false');
       // An inspector that opens beside a sidebar dragged wide takes its column within what the window leaves.
       fitColumns();
     },
