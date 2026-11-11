@@ -2,7 +2,8 @@
 // centre; a listed run opens with its call, tab, timeline and file, each only when it differs from what is open. A run
 // or queue the index does not list sets `ui.indexNotice` and, as `fallback` says, opens the newest run (`first`, at
 // load) or keeps what is shown (`keep`, on Back and forward). An empty query leaves a queue for the run open, or the
-// newest run when none is, with no notice. It never writes the URL: the caller does, once it has opened what it can.
+// newest run when none is, with no notice. The caller writes the URL once it has opened what it can,
+// but for a file the run turns out not to have: `missing()` replaces the URL itself, when the file's read answers.
 
 import { queuePanels } from './index-model';
 import { fromQuery, syncUrl } from './location';
