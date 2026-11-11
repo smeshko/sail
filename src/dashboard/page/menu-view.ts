@@ -1,9 +1,10 @@
 // The command menu's markup, from its state and the model `menu-model.ts` made. Pure. A row is a button whose
 // `data-action` is `menu-run` and whose `data-row` is its place in the rows; a disabled one is `disabled` and says why.
+// A run's go-to row leads with the list's status dot, its ticket key or pull request and, to tell two alike apart, the random part of its run id.
 // The context menu is the subject's rows at the pointer with no field. The back button behind the menu closes it.
 import { html, raw, type SafeHtml } from './html';
 import type { MenuModel, MenuRow } from './menu-model';
-import type { MenuState } from './ui-state';
+import { type MenuState, pillOf } from './ui-state';
 
 const HEADINGS: Partial<Record<MenuRow['group'], string>> = { goto: 'go to', general: 'general' };
 
@@ -68,7 +69,13 @@ const icon = (run: MenuRow['run']): SafeHtml =>
 function row(item: MenuRow, place: number, state: MenuState): SafeHtml {
   return html`<button class="cmdk-row${place === state.at ? ' sel' : ''}" type="button" data-action="menu-run" data-row="${place}"${
     item.disabled ? ' disabled' : ''
-  }><span class="cmdk-label">${item.label}</span>${item.hint === undefined ? '' : html`<span class="cmdk-hint">${item.hint}</span>`}${
+  }>${
+    item.lead === undefined
+      ? ''
+      : html`<span class="st ${pillOf(item.status)}"></span><span class="cmdk-key">${item.lead}</span>${
+          item.id === undefined ? '' : html`<span class="cmdk-id">${item.id}</span>`
+        }`
+  }<span class="cmdk-label">${item.label}</span>${item.hint === undefined ? '' : html`<span class="cmdk-hint">${item.hint}</span>`}${
     item.disabled && item.why !== undefined ? html`<span class="cmdk-why">${item.why}</span>` : ''
   }${item.key === undefined ? '' : html`<kbd>${item.key}</kbd>`}${icon(item.run)}</button>`;
 }

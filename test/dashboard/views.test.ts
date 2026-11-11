@@ -36,6 +36,11 @@ test('the committed dashboard views are what the fixtures render now', async () 
     'list-history.html',
     'list-history-selected.html',
     'list-queues.html',
+    'empty-inbox.html',
+    'empty-active.html',
+    'empty-queues.html',
+    'empty-history.html',
+    'empty-active-none.html',
     'list-queues-problem.html',
     'list-queues-held.html',
     'queue.html',
@@ -66,8 +71,27 @@ test('the committed dashboard views are what the fixtures render now', async () 
     'dense-active.html',
     'dense-history.html',
     'dense-queues.html',
+    'dense-menu-title.html',
+    'dense-menu-key.html',
   ]);
   expect(stale(fresh, COMMITTED)).toEqual([]);
+});
+
+test("the dense fixture's recorded menu shows a title query's runs by key and title, and a key query's one run", () => {
+  const title = readFileSync(join(COMMITTED, 'dense-menu-title.html'), 'utf8');
+  expect(title).toContain('<span class="cmdk-key">FAKE-1001</span>');
+  expect(title).toContain('<span class="cmdk-label">Retry the fetch helper on a 503</span>');
+  expect(title).not.toContain('01M7D');
+  const runTitles = [...title.matchAll(/<span class="cmdk-key">[^<]*<\/span><span class="cmdk-label">([^<]*)</g)];
+  expect(runTitles.length).toBeGreaterThan(0);
+  for (const [, label] of runTitles) expect(label?.toLowerCase()).toContain('retry');
+  const key = readFileSync(join(COMMITTED, 'dense-menu-key.html'), 'utf8');
+  const goto = key.slice(key.indexOf('<div class="cmdk-grp">go to</div>'));
+  const next = goto.indexOf('<div class="cmdk-grp">', 10);
+  const rows = (next < 0 ? goto : goto.slice(0, next)).match(/class="cmdk-row/g);
+  expect(rows).toHaveLength(1);
+  expect(key).toContain('<span class="st p-fail"></span><span class="cmdk-key">FAKE-2004</span>');
+  expect(key).toContain('<span class="cmdk-hint">borealis › ticket-to-pr</span>');
 });
 
 test("the committed paused, held, watched queue's row holds both chips, an enabled poll and an unwatch", () => {

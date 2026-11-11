@@ -180,12 +180,8 @@
       }
       .body {
         display: grid;
-        grid-template-columns: var(--side-w, 180px) 5px minmax(0, 1fr);
-        overflow: hidden;
-      }
-      /* a run or queue open beside the list: the run view keeps 320px and the list gives way first */
-      :root[data-detail="open"] .body {
         grid-template-columns: var(--side-w, 180px) 5px minmax(0, var(--list-w, 340px)) minmax(320px, 1fr);
+        overflow: hidden;
       }
       .resize-handle {
         cursor: col-resize;
@@ -551,13 +547,11 @@
         background: var(--err);
       }
 
-      /* the list: one row per entry, at fixed heights, in folding groups */
+      /* the list: one row per entry, at fixed heights, in folding groups, always one column wide */
       .list {
         min-width: 0;
         overflow-y: auto;
         overflow-x: hidden;
-      }
-      :root[data-detail="open"] .list {
         border-right: 1px solid var(--line);
       }
       .list-h {
@@ -764,9 +758,7 @@
         font-size: 12px;
         color: var(--fg-2);
       }
-      .r-wf,
       .r-el,
-      .r-cost,
       .run .why,
       .run .stalled {
         flex: 0 4 auto;
@@ -788,11 +780,6 @@
         color: var(--del);
         overflow-wrap: anywhere;
         white-space: normal;
-      }
-      /* beside the run view, the row gives up its workflow and cost */
-      :root[data-detail="open"] .r-wf,
-      :root[data-detail="open"] .r-cost {
-        display: none;
       }
       .r-more {
         flex: 0 0 auto;
@@ -993,15 +980,40 @@
         color: var(--fg-4);
       }
 
+      /* the centre with nothing open: a headline, what the view holds and the keys */
+      .empty {
+        margin: auto;
+        padding: 18px;
+        max-width: 100%;
+        text-align: center;
+        overflow-wrap: anywhere;
+        font-family: var(--mono);
+        color: var(--fg-4);
+      }
+      .empty-t {
+        font-size: 14px;
+        color: var(--fg-3);
+      }
+      .empty-c,
+      .empty-k {
+        margin-top: 8px;
+        font-size: 12px;
+      }
+      .empty kbd {
+        padding: 0 4px;
+        border: 1px solid var(--line);
+        border-radius: 3px;
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--fg-3);
+      }
+
       /* the centre: the run view and the queues */
       .main {
         display: flex;
         flex-direction: column;
         overflow-y: auto;
         min-width: 0;
-      }
-      :root:not([data-detail="open"]) .main {
-        display: none;
       }
       .d-h {
         display: flex;
@@ -1363,6 +1375,21 @@
       }
       .cmdk-row:disabled .cmdk-label {
         flex: 0 1 auto;
+      }
+      .cmdk-row .st {
+        flex: 0 0 auto;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+      }
+      .cmdk-key,
+      .cmdk-id {
+        flex: none;
+        font-family: var(--mono);
+      }
+      .cmdk-id {
+        color: var(--fg-3);
+        font-size: 13px;
       }
       .cmdk-hint,
       .cmdk-why {
@@ -2075,9 +2102,6 @@
       /* from 1100px the open inspector is a column of the grid */
       @media (min-width: 1100px) {
         :root[data-inspector="open"] .body {
-          grid-template-columns: var(--side-w, 180px) 5px minmax(0, 1fr) 5px var(--ins-w, 360px);
-        }
-        :root[data-detail="open"][data-inspector="open"] .body {
           grid-template-columns: var(--side-w, 180px) 5px minmax(0, var(--list-w, 340px)) minmax(320px, 1fr) 5px var(--ins-w, 360px);
         }
       }
@@ -2108,9 +2132,11 @@
       }
       /* under 800px the page is one column: the list, or the open run or queue with a way back */
       @media (max-width: 799px) {
-        .body,
-        :root[data-detail="open"] .body {
+        .body {
           grid-template-columns: minmax(0, 1fr);
+        }
+        :root:not([data-detail="open"]) .main {
+          display: none;
         }
         .resize-handle {
           display: none;

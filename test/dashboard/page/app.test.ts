@@ -247,6 +247,11 @@ class FakeHost implements PageHost {
   setDetail(open: boolean) {
     this.details.push(open);
   }
+  /** Whether the window is under 800px, where no first row is selected: most tests leave it so, and the ones about selecting set it false. */
+  narrowed = true;
+  narrow() {
+    return this.narrowed;
+  }
   /** The filter field's typing handler, the fields focused by name, the blurs, and the regions revealed. */
   private input?: (name: string, value: string) => void;
   focused: string[] = [];
@@ -273,8 +278,10 @@ class FakeHost implements PageHost {
   blur() {
     this.blurs++;
   }
-  reveal(region: Region) {
-    this.revealed.push(region);
+  /** The regions whose selected row was revealed, apart from `revealed`'s cursor ones. */
+  revealedOpen: Region[] = [];
+  reveal(region: Region, what: 'cur' | 'sel' = 'cur') {
+    (what === 'sel' ? this.revealedOpen : this.revealed).push(region);
   }
   /** Types `value` into the field `name`. */
   type(name: string, value: string) {
@@ -436,11 +443,11 @@ test('boot draws the sidebar and the list from the first index and opens no run;
   expect(host.open('run=')).toEqual([]);
   host.renders = [];
   host.advance(100);
-  expect(host.renders.sort()).toEqual(['list', 'sidebar']);
+  expect(host.renders.sort()).toEqual(['list', 'main', 'sidebar']);
   expect(host.regions.sidebar).toContain('<span class="nm">alpha</span>');
   expect(host.regions.sidebar).toContain('<span class="nm">beta</span>');
   expect(host.regions.list).toContain('<span class="lh-t">Active</span><span class="c">1</span>');
-  expect(host.regions.main).toContain('no run selected');
+  expect(host.regions.main).toContain('No run selected');
   expect(host.details).toEqual([false]);
   host.click({ action: 'select-view', view: 'history' });
   host.advance(100);
@@ -1064,10 +1071,10 @@ test('the sidebar button opens the folded sidebar, and choosing a view or pressi
   host.press('Escape');
   expect(host.sidebars.slice(-2)).toEqual([true, false]);
   host.advance(100);
-  expect(host.regions.main).not.toContain('no run selected');
+  expect(host.regions.main).not.toContain('No run selected');
   host.press('Escape');
   host.advance(100);
-  expect(host.regions.main).toContain('no run selected');
+  expect(host.regions.main).toContain('No run selected');
 });
 
 test('a key that changes the list or moves its cursor shuts the open sidebar too (review R1) (ADW-528)', () => {
@@ -1090,11 +1097,11 @@ test('a view or repository chosen in the open sidebar over an open run closes th
   replay(host.open('run=')[0], GOLDEN());
   host.click({ action: 'select-run', repo: 'alpha', run: GOLDEN_RUN_ID });
   host.advance(100);
-  expect(host.regions.main).not.toContain('no run selected');
+  expect(host.regions.main).not.toContain('No run selected');
   host.click({ action: 'toggle-sidebar' });
   host.click({ action: 'select-view', view: 'history' });
   host.advance(100);
-  expect([page.ui.view, host.regions.main]).toEqual(['history', expect.stringContaining('no run selected')]);
+  expect([page.ui.view, host.regions.main]).toEqual(['history', expect.stringContaining('No run selected')]);
   host.click({ action: 'select-queue', queue: `beta/${QUEUE_WORKFLOW}` });
   host.click({ action: 'toggle-sidebar' });
   host.click({ action: 'filter-repo', repo: 'beta' });
@@ -1104,7 +1111,7 @@ test('a view or repository chosen in the open sidebar over an open run closes th
   host.click({ action: 'select-run', repo: 'alpha', run: GOLDEN_RUN_ID });
   host.click({ action: 'select-view', view: 'active' });
   host.advance(100);
-  expect(host.regions.main).not.toContain('no run selected');
+  expect(host.regions.main).not.toContain('No run selected');
 });
 
 test("the inspector's close button unpins it and deselects its card, so a pointer closes it (review R2) (ADW-528)", () => {
@@ -1776,7 +1783,7 @@ test('a click on a list row opens the run beside the list, the host is told, and
   expect(host.details).toEqual([false, true, false]);
   expect([page.ui.runId, page.ui.repo]).toEqual([undefined, undefined]);
   expect(host.open('run=')).toEqual([]);
-  expect(host.regions.main).toContain('no run selected');
+  expect(host.regions.main).toContain('No run selected');
 });
 
 test('Escape steps back through a selected card before it closes the run (ADW-522)', () => {
@@ -3642,6 +3649,7 @@ test('an index that turns the open queue to watcher not running redraws main wit
 // The command menu (ADW-520): opened on Cmd+K over the focused subject, filtered, moved and run by key.
 const cmdk = () => host.regions.menu ?? '';
 const menuLabels = () => [...cmdk().matchAll(/<span class="cmdk-label">([^<]*)<\/span>/g)].map(([, label]) => label);
+const menuLeads = () => [...cmdk().matchAll(/<span class="cmdk-key">([^<]*)<\/span>/g)].map(([, lead]) => lead);
 const menuSel = () => cmdk().match(/class="cmdk-row sel"[^>]*><span class="cmdk-label">([^<]*)</)?.[1];
 const menuHead = () => cmdk().match(/<div class="cmdk-subj">([^<]*)<\/div>/)?.[1];
 const cmdK = () => host.press('k', false, undefined, true);
@@ -3743,7 +3751,8 @@ test('typing filters the rows within one flush and lists go-to rows, and the fie
   host.type('menu-query', FAKE_2_ID.slice(0, 8));
   host.advance(100);
   expect(cmdk()).toContain('<div class="cmdk-grp">go to</div>');
-  expect(menuLabels()).toContain(FAKE_2_ID);
+  expect(menuLeads()).toContain(FAKE_2_ID.replace(/-[^-]*$/, ''));
+  expect(cmdk()).not.toContain('cmdk-id');
 });
 
 test('ArrowDown and ArrowUp move the highlight over enabled rows only, and j typed in the menu moves no card cursor', async () => {
@@ -3772,12 +3781,12 @@ test('Enter on a go-to row opens a run, a queue or an item opens the queue, and 
     cmdK();
     host.type('menu-query', query);
     host.advance(100);
-    expect(menuLabels()[0]).toBe(row);
+    expect(menuLeads()[0] ?? menuLabels()[0]).toBe(row);
     host.press('Enter', true);
     host.advance(100);
     expect(cmdk()).toBe('');
   };
-  goTo(FAKE_3_ID.slice(0, 10), FAKE_3_ID);
+  goTo(FAKE_3_ID.slice(0, 10), FAKE_3_ID.replace(/-[^-]*$/, ''));
   expect(page?.store.run?.runId).toBe(FAKE_3_ID);
   expect(focused((page as Page).ui)).toEqual({ kind: 'run', repo: 'beta', runId: FAKE_3_ID });
   goTo('ticket:FAKE-5', 'ticket:FAKE-5');
@@ -3793,6 +3802,36 @@ test('Enter on a go-to row opens a run, a queue or an item opens the queue, and 
   expect(page?.ui.view).toBe('queues');
   expect(page?.ui.listFolded).not.toContain('queues:alpha');
   expect(page?.ui.focus.cursor?.subject).toEqual({ kind: 'repo', repo: 'alpha' });
+});
+
+test('Enter on a go-to row pushes the URL of what it opened, and a key that changes nothing writes none', async () => {
+  await openRunPage(FAKE_2_ID);
+  const enterOn = (query: string) => {
+    cmdK();
+    host.type('menu-query', query);
+    host.advance(100);
+    host.urls = [];
+    host.press('Enter', true);
+    host.advance(100);
+    return host.urls;
+  };
+  expect(enterOn(FAKE_3_ID.slice(0, 10))).toEqual([{ query: `repo=beta&run=${FAKE_3_ID}`, push: true }]);
+  expect(enterOn('ticket:FAKE-5')).toEqual([{ query: `queue=beta%2F${QUEUE_WORKFLOW}`, push: true }]);
+  const repo = enterOn('alph');
+  expect(repo).toHaveLength(1);
+  expect(repo[0]?.query).toContain('view=queues');
+  expect(repo[0]?.push).toBe(true);
+  // Keys that only move the highlight, close the menu or type write nothing.
+  cmdK();
+  host.type('menu-query', 'a');
+  host.advance(100);
+  host.urls = [];
+  host.press('ArrowDown', true);
+  host.press('ArrowUp', true);
+  host.type('menu-query', 'ab');
+  host.press('Escape', true);
+  host.press('Escape', true);
+  expect(host.urls).toEqual([]);
 });
 
 test('Enter on switch theme changes the theme and on toggle inspector the inspector, and Enter on a disabled row does nothing', async () => {
@@ -4367,7 +4406,7 @@ describe('loading a URL opens what it names (ADW-513)', () => {
     host.advance(100);
     expect(host.regions.toasts).toContain('queue beta/nope is not listed');
     expect(host.open('run=')).toEqual([]);
-    expect(host.regions.main).toContain('no run selected');
+    expect(host.regions.main).toContain('No run selected');
     expect(host.urls).toEqual([{ query: '', push: false }]);
   });
 
@@ -4482,7 +4521,7 @@ describe('Back and forward open what an entry names, and push nothing (ADW-513)'
     host.go('');
     host.advance(100);
     expect([page?.ui.queue, page?.ui.runId]).toEqual([undefined, undefined]);
-    expect(host.regions.main).toContain('no run selected');
+    expect(host.regions.main).toContain('No run selected');
     expect(host.urls).toHaveLength(written);
   });
 
@@ -5037,5 +5076,281 @@ describe('start a run (ADW-524)', () => {
       path: '/api/repos/alpha/starts/check',
       body: { source: 'FAKE-3', workflow: 'ticket-to-pr', force: true },
     });
+  });
+});
+
+describe('a view opens with its first row selected (ADW-537)', () => {
+  beforeEach(() => {
+    host.narrowed = false;
+  });
+  /** The row the list draws selected. */
+  const selectedRow = () => /class="[^"]*\bsel\b[^"]*" data-row="([^"]+)"/.exec(host.regions.list ?? '')?.[1];
+  const pushes = () => host.urls.filter((write) => write.push).length;
+
+  test('a boot with an empty URL opens the first row of Active, draws it selected and writes the URL once, as a replace', () => {
+    page = boot(host);
+    plainIndex();
+    host.advance(100);
+    expect([page.ui.repo, page.ui.runId]).toEqual(['beta', FAKE_3_ID]);
+    expect(selectedRow()).toBe(`run:beta/${FAKE_3_ID}`);
+    expect(host.regions.main).toContain(FAKE_3_ID);
+    expect(host.regions.main).not.toContain('class="empty"');
+    expect(host.urls).toEqual([{ query: `repo=beta&run=${FAKE_3_ID}`, push: false }]);
+  });
+
+  test('each of 1 to 4 and a click on a view open that view first row and push exactly one history entry', () => {
+    page = boot(host);
+    plainIndex();
+    host.advance(100);
+    for (const [key, view] of [
+      ['1', 'inbox'],
+      ['2', 'active'],
+      ['3', 'queues'],
+      ['4', 'history'],
+    ] as const) {
+      const before = pushes();
+      host.press(key);
+      host.advance(100);
+      expect(page.ui.view).toBe(view);
+      expect(pushes()).toBe(before + 1);
+      expect(selectedRow()).toBeDefined();
+      expect(host.regions.main).not.toContain('class="empty"');
+    }
+    expect([page.ui.repo, page.ui.runId]).not.toEqual([undefined, undefined]);
+    host.click({ action: 'select-view', view: 'queues' });
+    host.advance(100);
+    expect(page.ui.queue).toBe('beta/ticket-to-pr');
+    expect(selectedRow()).toBe('queue:beta/ticket-to-pr');
+    host.click({ action: 'select-view', view: 'history' });
+    host.advance(100);
+    expect(page.ui.queue).toBeUndefined();
+    expect(page.ui.runId).toBeDefined();
+  });
+
+  test('a URL that names a listed run opens that run, not the first row', () => {
+    host.startAt = { repo: 'alpha', run: GOLDEN_RUN_ID };
+    page = boot(host);
+    plainIndex();
+    host.advance(100);
+    expect([page.ui.repo, page.ui.runId]).toEqual(['alpha', GOLDEN_RUN_ID]);
+  });
+
+  test('a URL that names a run the index does not list opens none and says so in a toast', () => {
+    host.startAt = { repo: 'alpha', run: 'nope' };
+    page = boot(host);
+    plainIndex();
+    host.advance(100);
+    expect(page.ui.runId).toBeUndefined();
+    expect(toasts().join('\n')).toContain('run nope of alpha is not listed');
+    expect(host.regions.main).toContain('No run selected');
+    expect(selectedRow()).toBeUndefined();
+  });
+
+  test('Escape from the open run shows the empty state with no row selected, and a later index selects nothing', () => {
+    page = boot(host);
+    plainIndex();
+    host.advance(100);
+    expect(page.ui.runId).toBe(FAKE_3_ID);
+    host.press('Escape');
+    host.advance(100);
+    expect(host.regions.main).toContain('class="empty"');
+    expect(host.regions.main).toContain('No run selected');
+    expect(selectedRow()).toBeUndefined();
+    plainIndex();
+    host.advance(100);
+    expect(page.ui.runId).toBeUndefined();
+    expect(selectedRow()).toBeUndefined();
+    expect(host.regions.main).toContain('No run selected');
+  });
+
+  test('Back to an entry that names nothing leaves no row selected, and a later index selects nothing', () => {
+    page = boot(host);
+    plainIndex();
+    host.advance(100);
+    expect(page.ui.runId).toBe(FAKE_3_ID);
+    host.go('');
+    host.advance(100);
+    expect(page.ui.runId).toBeUndefined();
+    expect(selectedRow()).toBeUndefined();
+    plainIndex();
+    host.advance(100);
+    expect(page.ui.runId).toBeUndefined();
+  });
+
+  test('a window under 800px selects no first row, at boot or on a change of view', () => {
+    host.narrowed = true;
+    page = boot(host);
+    plainIndex();
+    host.advance(100);
+    expect(page.ui.runId).toBeUndefined();
+    host.press('4');
+    host.advance(100);
+    expect([page.ui.view, page.ui.runId, page.ui.queue]).toEqual(['history', undefined, undefined]);
+    expect(selectedRow()).toBeUndefined();
+  });
+});
+
+describe('a filter that drops the open row selects the first row left (ADW-537)', () => {
+  const FAKE_1 = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N';
+  const FAKE_4 = 'FAKE-4-01M348XP801GH3GKJT2MNM2NR9';
+  const pushes = () => host.urls.filter((write) => write.push).length;
+  /** History, whose first row FAKE-1 is open, its rows FAKE-1, FAKE-2 (failed) and FAKE-4 (beta). */
+  const onHistory = () => {
+    host.narrowed = false;
+    page = boot(host);
+    plainIndex();
+    host.press('4');
+    host.advance(100);
+    expect(page.ui.runId).toBe(FAKE_1);
+    return page;
+  };
+
+  test('a text filter that hides the open run opens the first row shown and adds no history entry', () => {
+    const open = onHistory();
+    const before = pushes();
+    host.type('list-filter', 'FAKE-4');
+    host.advance(100);
+    expect([open.ui.repo, open.ui.runId]).toEqual(['beta', FAKE_4]);
+    expect(host.regions.list).toContain(`data-row="run:beta/${FAKE_4}"`);
+    expect(pushes()).toBe(before);
+    expect(host.urls.at(-1)).toEqual({ query: `repo=beta&run=${FAKE_4}&view=history`, push: false });
+  });
+
+  test('a text filter that keeps the open run leaves it open and writes nothing', () => {
+    const open = onHistory();
+    const writes = host.urls.length;
+    host.type('list-filter', 'FAKE-1');
+    host.advance(100);
+    expect(open.ui.runId).toBe(FAKE_1);
+    expect(host.urls.length).toBe(writes);
+  });
+
+  test('a filter that hides every row shows the empty state, and widening it opens the first row', () => {
+    const open = onHistory();
+    const before = pushes();
+    host.type('list-filter', 'no such run');
+    host.advance(100);
+    expect(open.ui.runId).toBeUndefined();
+    expect(host.regions.main).toContain('No run selected');
+    host.type('list-filter', '');
+    host.advance(100);
+    expect(open.ui.runId).toBe(FAKE_1);
+    expect(pushes()).toBe(before);
+  });
+
+  test("History's status control and the sidebar's repository filter do the same", () => {
+    const open = onHistory();
+    const before = pushes();
+    host.type('list-status', 'failed');
+    host.advance(100);
+    expect(open.ui.runId).toBe(FAKE_2_ID);
+    host.type('list-status', '');
+    host.click({ action: 'filter-repo', repo: 'beta' });
+    host.advance(100);
+    expect([open.ui.repo, open.ui.runId]).toEqual(['beta', FAKE_4]);
+    expect(pushes()).toBe(before);
+  });
+
+  test("History's workflow control opens the first row of the workflow when the open run is of another", () => {
+    const open = onHistory();
+    const workflows = [...(host.regions.list ?? '').matchAll(/<option value="([^"]+)"/g)].map(([, value]) => value);
+    const repos = listRepos(index(m.registryDir), host.clock);
+    const ofRun = (runId: string) => repos.flatMap((repo) => repo.runs).find((run) => run.runId === runId)?.workflow;
+    const other = [FAKE_2_ID, FAKE_4].find(
+      (id) => ofRun(id)?.replace(/@\d+$/, '') !== ofRun(FAKE_1)?.replace(/@\d+$/, ''),
+    );
+    expect(other).toBeDefined();
+    if (other === undefined) return;
+    const workflow = (ofRun(other) ?? '').replace(/@\d+$/, '');
+    expect(workflows).toContain(workflow);
+    host.type('list-workflow', workflow);
+    host.advance(100);
+    expect(open.ui.runId).toBe(other);
+  });
+
+  test('after Escape no filter change opens a row', () => {
+    const open = onHistory();
+    host.press('Escape');
+    host.advance(100);
+    expect(open.ui.runId).toBeUndefined();
+    host.type('list-filter', 'FAKE-4');
+    host.advance(100);
+    expect(open.ui.runId).toBeUndefined();
+    host.type('list-status', 'failed');
+    host.advance(100);
+    expect(open.ui.runId).toBeUndefined();
+    expect(host.regions.main).toContain('No run selected');
+  });
+
+  test('a run opened from elsewhere that the list never showed stays open when a filter changes', () => {
+    const open = onHistory();
+    host.click({ action: 'select-run', repo: 'beta', run: FAKE_3_ID });
+    host.type('list-filter', 'FAKE-4');
+    host.advance(100);
+    expect(open.ui.runId).toBe(FAKE_3_ID);
+  });
+});
+
+describe('the open row is scrolled into sight when it changes (ADW-537)', () => {
+  beforeEach(() => {
+    host.narrowed = false;
+  });
+
+  test('a run opened from the URL at load is revealed in the list once', () => {
+    host.startAt = { repo: 'alpha', run: GOLDEN_RUN_ID };
+    page = boot(host);
+    plainIndex();
+    host.advance(100);
+    expect(host.revealedOpen).toEqual(['list']);
+  });
+
+  test('a first row the shell selects on boot, and on a change of view, is revealed once each', () => {
+    page = boot(host);
+    plainIndex();
+    host.advance(100);
+    expect(host.revealedOpen).toEqual(['list']);
+    host.press('4');
+    host.advance(100);
+    expect(host.revealedOpen).toEqual(['list', 'list']);
+  });
+
+  test('a filter that opens another row reveals it', () => {
+    page = boot(host);
+    plainIndex();
+    host.press('4');
+    host.advance(100);
+    host.revealedOpen = [];
+    host.type('list-filter', 'FAKE-4');
+    host.advance(100);
+    expect(host.revealedOpen).toEqual(['list']);
+  });
+
+  test('a tick and an index refresh scroll nothing', () => {
+    page = boot(host);
+    plainIndex();
+    host.advance(100);
+    host.revealedOpen = [];
+    host.advance(5000);
+    plainIndex();
+    host.advance(100);
+    host.press('j');
+    expect(host.revealedOpen).toEqual([]);
+  });
+
+  test('a list whose markup did not change keeps the reveal for the next write', () => {
+    host.narrowed = true;
+    page = boot(host);
+    plainIndex();
+    host.advance(100);
+    page.store.revealOpen = true;
+    page.store.mark('list');
+    host.advance(100);
+    expect(host.revealedOpen).toEqual([]);
+    expect(page.store.revealOpen).toBe(true);
+    page.ui.listFilter = 'FAKE';
+    page.store.mark('list');
+    host.advance(100);
+    expect(host.revealedOpen).toEqual(['list']);
+    expect(page.store.revealOpen).toBe(false);
   });
 });
