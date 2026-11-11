@@ -226,6 +226,47 @@ test('a roster entry lists its tools by name, in run.json and in run:start, each
   ]);
 });
 
+test('a roster entry, a step and the intake take their own conventions, in run.json and in run:start; an empty path or a repeated one is refused', () => {
+  const spec = { kind: 'agent', origin: 'repo:.sail/stages/spec' };
+  const stagesOf = (conventions: unknown) => ({ spec: { ...spec, conventions } });
+  const stepsOf = {
+    publish: {
+      origin: 'repo:.sail/stages/publish',
+      steps: [
+        { step: 'describe', kind: 'agent', conventions: ['AGENTS.md'] },
+        { step: 'open', kind: 'script' },
+      ],
+    },
+  };
+  const intake = { name: 'ticket', origin: 'builtin', conventions: ['CONTEXT.md'] };
+  const forms = (stages: unknown, intakeEntry: unknown = run.intake) => [
+    validateDocument('sail.run.v1', { ...run, intake: intakeEntry, stages }),
+    validateDocument('sail.event.v1', {
+      ...event,
+      roster: { ...runStart.roster, intake: intakeEntry, stages },
+    }),
+  ];
+  for (const stages of [stagesOf(['CONTEXT.md']), stagesOf([]), stepsOf]) expect(forms(stages)).toEqual([[], []]);
+  expect(forms(stagesOf([]), intake)).toEqual([[], []]);
+  expect(paths('sail.event.v1', { ...event, roster: { ...runStart.roster, stages: stagesOf(['']) } })).toEqual([
+    '/roster/stages/spec/conventions/0',
+  ]);
+  expect(
+    paths('sail.event.v1', { ...event, roster: { ...runStart.roster, stages: stagesOf(['A.md', 'A.md']) } }),
+  ).toEqual(['/roster/stages/spec/conventions']);
+});
+
+test('the roster entry of sail.event.v1 names every property sail.run.v1 names, for a stage, a step and the intake', () => {
+  const read = (name: string) => JSON.parse(readFileSync(join(root, 'schemas', `${name}.json`), 'utf8'));
+  const runSchema = read('sail.run.v1');
+  const eventSchema = read('sail.event.v1');
+  const names = (definition: { properties: Record<string, unknown> }) => Object.keys(definition.properties).sort();
+  const entry = eventSchema.$defs.rosterEntry;
+  expect(names(entry)).toEqual(names(runSchema.$defs.rosterEntry));
+  expect(names(entry.properties.steps.items)).toEqual(names(runSchema.$defs.stepRosterEntry));
+  expect([...names(entry), 'name'].sort()).toEqual(names(runSchema.$defs.intakeEntry));
+});
+
 test('permission:denied names tools as its rule, with the tools the step lists; mcp is no rule', () => {
   const denied = {
     ...envelope,

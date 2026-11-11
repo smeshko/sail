@@ -204,6 +204,18 @@ test('an agent records the conventions it names, an empty list included, and lea
   const both = stage('both', { output: Out, steps: [first, plain] });
   expect(entryOf(both)?.steps?.[0]).toMatchObject({ step: 'first', conventions: [] });
   for (const entry of [entryOf(narrowed), entryOf(both)]) {
+    const fake = { use: 'fake', origin: 'builtin' };
+    const start = {
+      seq: 1,
+      ts: '2026-09-27T09:00:00.000Z',
+      runId: 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N',
+      type: 'run:start',
+      source: { kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: [] },
+      workflow: { name: 'unit', version: 1 },
+      roster: { intake: { name: 'ticket', origin: 'builtin' }, stages: { describe: entry } },
+      adapters: { ticketSource: fake, codeHost: fake, harness: fake, workspace: fake },
+    };
+    expect(validateDocument('sail.event.v1', start)).toEqual([]);
     const header = {
       schema: 'sail.run.v1',
       runId: 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N',
