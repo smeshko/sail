@@ -190,7 +190,7 @@ test('a query filters the subject and general groups by label and lists go-to ro
 
 test('context mode gives the subject group alone, whatever is typed', () => {
   const model = menuRows(state({ mode: 'context', subject: ITEM, query: 'zzz' }), source(), index, NOW);
-  expect(model.head).toBe('item ticket:FAKE-5');
+  expect(model.head).toBe('FAKE-5 · Add a widget');
   expect(labels(model.rows)).toEqual(['drop', 'move down']);
 });
 

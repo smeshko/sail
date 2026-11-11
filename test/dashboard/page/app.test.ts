@@ -3517,11 +3517,11 @@ test('Cmd+K does nothing while the confirmation dialog is open, and another key 
   expect(page?.ui.view).not.toBe('inbox');
 });
 
-test('with a run open the head reads run <id> and the first group is that run offered actions; with nothing focused there is no head', async () => {
+test('with a run open the head reads its ticket key and title and the first group is that run offered actions; with nothing focused there is no head', async () => {
   await openRunPage(FAKE_2_ID);
   cmdK();
   host.advance(100);
-  expect(menuHead()).toBe(`run ${FAKE_2_ID}`);
+  expect(menuHead()).toBe('FAKE-2 · Print the version with --version');
   expect(menuLabels().slice(0, 2)).toEqual(['restart', 'clean']);
   cmdK();
   page?.stop();
@@ -3538,10 +3538,10 @@ test('the subject follows hover, cursor and open object, the last changed winnin
   host.point('hover', ITEM_ROW);
   cmdK();
   host.advance(100);
-  expect(menuHead()).toBe('item ticket:FAKE-5');
+  expect(menuHead()).toBe('FAKE-5 · Link the changelog from the README');
   host.point('hover', { subject: 'run', repo: 'alpha', run: FAKE_2_ID });
   host.advance(100);
-  expect(menuHead()).toBe('item ticket:FAKE-5');
+  expect(menuHead()).toBe('FAKE-5 · Link the changelog from the README');
   cmdK();
   host.point('hover', undefined);
   expect(focused((page as Page).ui)).toEqual({ kind: 'run', repo: 'alpha', runId: FAKE_2_ID });
@@ -3558,7 +3558,7 @@ test('with the cursor set after a hover the menu opens on the cursor, and with t
   host.point('hover', { subject: 'run', repo: 'beta', run: FAKE_3_ID });
   cmdK();
   host.advance(100);
-  expect(menuHead()).toBe(`run ${FAKE_3_ID}`);
+  expect(menuHead()).toBe('FAKE-3 · Escape &lt;b&gt;this&lt;/b&gt; &amp; &quot;that&quot;');
 });
 
 test('typing filters the rows within one flush and lists go-to rows, and the field holds what was typed', async () => {
@@ -3904,7 +3904,7 @@ test('a cursor on an Inbox row makes its run the subject', async () => {
   host.press('j');
   cmdK();
   host.advance(100);
-  expect(menuHead()).toBe(`run ${FAKE_2_ID}`);
+  expect(menuHead()).toBe('FAKE-2 · Print the version with --version');
 });
 
 test('Esc steps back through add’s steps, then closes', async () => {
@@ -3954,7 +3954,7 @@ test('a right-click on a row opens its subject group in place: its head, its off
   expect(host.point('context', ITEM_6, { x: 300, y: 140 })).toBe(true);
   await settle();
   host.advance(100);
-  expect(menuHead()).toBe('item ticket:FAKE-6');
+  expect(menuHead()).toBe('FAKE-6 · Greet in French with --lang fr');
   expect(menuLabels()).toEqual(['requeue', 'drop']);
   expect(cmdk()).toContain('class="cmdk ctx"');
   expect(cmdk()).toContain('style="left:300px;top:140px"');
@@ -3985,7 +3985,7 @@ test('the menu redraws when its subject’s offers land after it is drawn: a run
   host.point('context', FAKE_2_ROW, { x: 0, y: 0 });
   await settle();
   host.advance(100);
-  expect(menuHead()).toBe(`run ${FAKE_2_ID}`);
+  expect(menuHead()).toBe('FAKE-2 · Print the version with --version');
   expect(menuLabels()).not.toContain('clean');
   host.releaseActions();
   await settle();

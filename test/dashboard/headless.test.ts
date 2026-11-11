@@ -304,7 +304,7 @@ test('on the real bundle, Cmd+K draws the command menu with the open run as its 
   expect(await until(() => page.text('main').includes(`${FAKE_2_ID} · ticket-to-pr@1`))).toBe(true);
   page.press('k', true);
   expect(await until(() => page.text('menu').includes('class="cmdk"'))).toBe(true);
-  expect(page.text('menu')).toContain(`<div class="cmdk-subj">run ${FAKE_2_ID}</div>`);
+  expect(page.text('menu')).toContain('<div class="cmdk-subj">FAKE-2 · Print the version with --version</div>');
   expect(await until(() => page.text('menu').includes('<span class="cmdk-label">clean</span>'))).toBe(true);
   page.press('Escape');
   expect(await until(() => page.text('menu') === '')).toBe(true);

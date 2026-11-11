@@ -114,11 +114,14 @@ test('--focus is at least 3:1 on every surface in each theme block (ADW-508)', (
   expect(low).toEqual([]);
 });
 
-test('one :focus-visible rule draws a 2px --focus outline, and no declaration removes an outline (ADW-508)', () => {
+test('one :focus-visible rule draws a 2px --focus outline, and no declaration removes an outline but the menu field (ADW-508)', () => {
   const ring = rules().filter(([sel]) => sel === ':focus-visible');
   expect(ring).toHaveLength(1);
   expect(ring[0]?.[1]).toContain('outline: 2px solid var(--focus);');
-  expect(style).not.toMatch(/outline(-width)?:\s*(none|0)\b/);
+  // The command menu's field is the one exception: it is the only thing its dialog focuses, and its caret shows it.
+  const field = /\.cmdk-in:focus-visible \{\s*outline: none;\s*\}/;
+  expect(style).toMatch(field);
+  expect(style.replace(field, '')).not.toMatch(/outline(-width)?:\s*(none|0)\b/);
 });
 
 test('buttons, selects, text inputs and role=button have a 24px minimum height in one rule (ADW-508)', () => {
