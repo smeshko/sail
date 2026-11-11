@@ -276,7 +276,18 @@ const commands = new Map<string, CommandSpec>([
       command: port,
     },
   ],
-  ['watch', { options: { 'release-hold': { type: 'string' } }, positionals: Number.POSITIVE_INFINITY, command: watch }],
+  [
+    'watch',
+    {
+      options: {
+        'release-hold': { type: 'string' },
+        // The installed login service's: it also stops itself, exiting 6, once sail's code changes. Not in USAGE.
+        service: { type: 'boolean' },
+      },
+      positionals: Number.POSITIVE_INFINITY,
+      command: watch,
+    },
+  ],
   ['unwatch', { options: {}, positionals: Number.POSITIVE_INFINITY, command: unwatch }],
   [
     'queue',

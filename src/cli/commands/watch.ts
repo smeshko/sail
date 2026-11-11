@@ -20,6 +20,11 @@
 // Before each poll of a workflow it re-reads that workflow's `watch` and `maxConcurrentRuns` from the `.sail/` committed
 // at the default branch's tip (`committedWatches()`), and applies a change with no restart.
 //
+// `sail watch --service` is the watcher an installed login service runs (hidden, like `--dispatch`): the same
+// watcher, which also reads sail's code version at start and every minute, and once it changes stops as on SIGTERM,
+// prints a line starting `sail watch: sail changed (`, and exits 6, so launchd starts the new code. Its runs carry on,
+// and the next watcher adopts them. Without `--service` a watcher keeps running through a change.
+//
 // A second command waits up to 15 s for the watcher to take its command. One it hasn't taken by then stays in the
 // inbox, which a watcher stopped meanwhile empties at its next start, and the command exits 0 saying so. The set it
 // prints is read back from the queue event streams: each workflow whose last `watch:*` event of the live watcher's pid
@@ -58,9 +63,10 @@ import {
 } from '../../watch/registry';
 import type { SpawnedRun, SpawnResumeOptions, SpawnRunOptions } from '../../watch/spawn';
 import { holderRefusal, startWatcher } from '../../watch/watcher';
-import { EXIT_OK, type ExitCode } from '../exit-codes';
+import { EXIT_OK, EXIT_RESTART, type ExitCode } from '../exit-codes';
 import type { Command, Io, Parsed } from '../index';
 import { repositoryEntry } from '../registration';
+import { type ReadVersion, sailVersion, watchSailChange } from '../sail-change';
 import { at, findProject, refuseAs } from './run-workflow';
 
 /** What the commands run on: the system's unless a test hands its own. */
@@ -79,6 +85,10 @@ export interface WatchDeps {
   pid?: number;
   /** Where the re-read of the committed `.sail/` makes its scratch directory: the system's temp directory by default. */
   tmp?: string;
+  /** Reads sail's code version, for a watcher started with `--service`: its checkout's `HEAD` by default. */
+  sailVersion?: ReadVersion;
+  /** How often a `--service` watcher reads it: 60 000 ms by default. */
+  sailVersionEveryMs?: number;
 }
 
 /** The environment without its unset variables, for the runs the watcher spawns. */
@@ -259,6 +269,8 @@ export function watchCommand(deps: WatchDeps = {}): Command {
       workspace: project.adapters.ports.workspace,
       ...(deps.tmp === undefined ? {} : { tmp: deps.tmp }),
     });
+    let stopChange: (() => void) | undefined;
+    let changed = false;
     try {
       const started = await startWatcher({
         sailDir,
@@ -284,12 +296,27 @@ export function watchCommand(deps: WatchDeps = {}): Command {
       const unregister = onInterrupt(() => {
         void started.stop();
       });
+      if (args.values.service === true) {
+        stopChange = watchSailChange({
+          read: deps.sailVersion ?? (() => sailVersion()),
+          everyMs: deps.sailVersionEveryMs ?? 60_000,
+          timers: deps.timers ?? systemTimers,
+          onChange(before, after) {
+            changed = true;
+            io.stdout(
+              `${command}: sail changed (${before.slice(0, 7)} → ${after.slice(0, 7)}): stopping, so the login service starts the new code\n`,
+            );
+            void started.stop();
+          },
+        });
+      }
       await started.done;
       unregister();
     } finally {
+      stopChange?.();
       committed.dispose();
     }
-    return EXIT_OK;
+    return changed ? EXIT_RESTART : EXIT_OK;
   };
 }
 
