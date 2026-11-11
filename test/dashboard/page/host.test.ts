@@ -1473,3 +1473,13 @@ test('narrow() asks the window whether it is under 800px, and a window without m
   expect(asked).toEqual(['(max-width: 799px)', '(max-width: 799px)']);
   expect(browserHost(fakeWindow().win).narrow()).toBe(false);
 });
+
+test('setUrl answers false, and throws nothing, when the browser refuses the write (review R3)', () => {
+  const fake = fakeWindow();
+  fake.win.history.replaceState = () => {
+    throw new Error('SecurityError: too many calls to the History API');
+  };
+  const host = browserHost(fake.win);
+  expect(host.setUrl('q=a', false)).toBe(false);
+  expect(host.setUrl('q=a', true)).toBe(true);
+});

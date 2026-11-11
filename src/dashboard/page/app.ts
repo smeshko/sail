@@ -9,7 +9,7 @@
 //   a focused stage card arrive as its action, and on a focused button or link not at all; Enter in the queue
 //   view's add field arrives as `add-ticket`.
 //
-// The page's URL names the view and the selection (`location.ts`, opened by `navigate.ts`, also on Back and forward),
+// The page's URL names the view, the list's filters and the selection (`location.ts`, opened by `navigate.ts`, also on Back and forward),
 // and the top bar's Copy link copies it (`actions.ts`). A copy button says for a moment whether its copy took.
 //
 // The rules each module follows are in its own header.
@@ -60,6 +60,8 @@ function runOf(store: Store, subject: Subject) {
 
 export function boot(host: PageHost): Page {
   const store = createStore(host);
+  // The first draw is narrowed by the list's filters the URL names.
+  showView(store, host.start());
   store.actor = createActor({
     host,
     ui: store.ui,
