@@ -321,19 +321,13 @@ test('an armed unwatch reads unwatch? click again, and an armed unwatch all unwa
   expect(all.match(/armed/g)).toHaveLength(1);
 });
 
-test("the watch notice shows under its own repository's header, open or folded, and under no other", () => {
-  const text = 'sail watch: no workflow declares a watch';
-  const said = {
-    act: {
-      drafts: {},
-      results: { repo: { id: 'watch', subject: { kind: 'repo', repo: 'gamma' }, text, place: 'repo' } },
-    },
-  } as const;
-  expect(gamma(['flow'], said)).toContain(`</button>\n<div class="lgrp-p">${text}</div>`);
-  const folded = renderRail(watchedRepo(['flow']), { ...initialUi(0), ...said }, NOW).value;
-  expect(folded).toContain(`<div class="lgrp-p">${text}</div>`);
-  expect(folded).not.toContain('lgrp-acts');
-  expect(rail(said)).not.toContain(text);
+test("while a watch request is out a workflow's or repository's watch buttons read the word under way, and a repository's header shows no answer", () => {
+  const underway = { underway: { 'watch:gamma': 'watching…', 'watch:gamma/flow': 'unwatching…' } };
+  const markup = gamma(['flow'], underway);
+  expect(markup).toContain('<span class="busy">unwatching…</span>');
+  expect(markup).toContain('<div class="lgrp-acts"><span class="busy">watching…</span></div>');
+  expect(gamma(['flow'])).not.toContain('busy');
+  expect(markup).not.toContain('lgrp-p');
 });
 
 test("every run but a completed one has a ⋯ in its row, and only the open run's menu opens under its row, with what it offers (ADW-466)", () => {

@@ -85,6 +85,8 @@ export interface UiState {
   act: ActState;
   /** The toasts on the stack, oldest first. */
   toasts: Toast[];
+  /** What a subject reads while a request for it is out, by the id `underwayId()` gives: `stopping…`. */
+  underway: Record<string, string>;
 }
 
 export function initialUi(tz: number): UiState {
@@ -105,6 +107,7 @@ export function initialUi(tz: number): UiState {
     tz,
     act: { results: {}, drafts: {} },
     toasts: [],
+    underway: {},
   };
 }
 

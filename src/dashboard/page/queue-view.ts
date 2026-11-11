@@ -10,7 +10,7 @@
 import type { QueueEvent } from '../../events/types';
 import type { QueueItemState } from '../../watch/queue-store';
 import { ACTIONS, actionOf, type OfferSource, type Subject } from './action-registry';
-import { actionControl, resultOf } from './action-view';
+import { actionControl } from './action-view';
 import { ago, clock } from './format';
 import { html, type SafeHtml, safeHref } from './html';
 import { type PanelItem, panelSource, QUEUE_STATES, type QueuePanel, type WatchState } from './index-model';
@@ -151,7 +151,8 @@ function itemRow(panel: QueuePanel, item: PanelItem, ui: UiState): SafeHtml {
       : item.runListed
         ? html`<button class="run-link" data-action="select-run" data-repo="${panel.repo}" data-run="${item.runId}" title="open ${item.runId}">${item.runId} ›</button>`
         : html`<span class="c-run">${item.runId}</span>`;
-  return html`<div class="qrow2${item.state === 'done' ? ' done' : ''}"><span class="c-dot"><i class="${item.state}"></i></span><span class="c-ref">${item.dedupKey}</span><span class="c-main">${title}<span class="c-sub">${item.state} · ${plural(item.attempts, 'attempt')}${
+  const underway = ui.underway[`item:${panel.repo}/${panel.workflow}/${item.dedupKey}`];
+  return html`<div class="qrow2${item.state === 'done' ? ' done' : ''}"><span class="c-dot"><i class="${item.state}"></i></span><span class="c-ref">${item.dedupKey}</span><span class="c-main">${title}<span class="c-sub">${underway === undefined ? item.state : html`<span class="busy">${underway}</span>`} · ${plural(item.attempts, 'attempt')}${
     item.priority === undefined || item.priority === 'none' ? '' : ` · priority ${item.priority}`
   }${item.moved === true ? ' · moved' : ''}${
     item.retryAt === undefined ? '' : html` · retry at ${clock(item.retryAt, ui.tz)}`
@@ -187,9 +188,13 @@ function panelView(panel: QueuePanel, stream: QueueStream | undefined, ui: UiSta
   const polling = panel.queue?.polling;
   const paused = polling?.paused;
   const held = panel.queue?.held;
-  const notice = resultOf(ui.act, 'queue', { repo: panel.repo, workflow: panel.workflow });
+  const underway = ui.underway[`queue:${panel.repo}/${panel.workflow}`];
   return html`<section class="qpanel">
-<div class="srcbar"><span class="h${watch === 'watched' ? '' : ' held'}"></span><span class="nm">${panel.repo} / ${panel.workflow}</span><span class="pill ${watch === 'watched' ? 'p-pass' : 'p-skip'}">${watch}</span>${
+<div class="srcbar"><span class="h${watch === 'watched' ? '' : ' held'}"></span><span class="nm">${panel.repo} / ${panel.workflow}</span>${
+    underway === undefined
+      ? html`<span class="pill ${watch === 'watched' ? 'p-pass' : 'p-skip'}">${watch}</span>`
+      : html`<span class="busy">${underway}</span>`
+  }${
     polling === undefined
       ? ''
       : html`<span class="dt">label ${polling.label} · polled ${ago(polling.lastPolledAt, now)} · ${polling.failures} failed polls</span>`
@@ -197,7 +202,7 @@ function panelView(panel: QueuePanel, stream: QueueStream | undefined, ui: UiSta
     held === undefined
       ? ''
       : html`<span class="warnchip">held${held.until === undefined ? '' : html` until ${clock(held.until, ui.tz)}`}: ${held.reason}</span>`
-  }${notice === undefined ? '' : html`<span class="warnchip">${notice}</span>`}${
+  }${
     queueOffered(panel, 'poll-queue')
       ? html`<button class="btn" data-action="poll-queue" data-repo="${panel.repo}" data-workflow="${panel.workflow}" title="poll now">poll</button>`
       : ''

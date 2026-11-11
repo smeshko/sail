@@ -117,7 +117,14 @@ type Offered = { enabled: boolean; why?: string };
 
 export type Availability = { offered: false; why?: string } | { offered: true; enabled: boolean; why?: string };
 
-export type ActResult = { text?: string; place: 'run' | 'queue' | 'repo' | 'rail'; effect?: Effect; keepMenu?: true };
+export type ActResult = {
+  text?: string;
+  place: 'run' | 'queue' | 'repo' | 'rail';
+  effect?: Effect;
+  keepMenu?: true;
+  /** The request was refused: its text is sail's refusal. */
+  refused?: true;
+};
 export type Effect = 'reopen' | 'leave' | 'took' | { open: string };
 
 export interface ActionDef {
@@ -137,6 +144,8 @@ export interface ActionDef {
   confirm?(subject: Subject, values: Values, source: OfferSource): string;
   /** What shows while its request is out. */
   sending?(subject: Subject): string;
+  /** What its subject's row reads, in place of its status, while its request is out. */
+  underway?: string;
   /** What to post, `{ invalid }` for a value it can't send, or nothing when there is nothing to send. */
   request?(
     subject: Subject,
@@ -167,6 +176,39 @@ export function answerField(body: string, field: string): string | undefined {
     return typeof value === 'string' && value !== '' ? value : undefined;
   } catch {
     return undefined;
+  }
+}
+
+/** What a toast names an action's subject as: the run, the item's key, `<repo> / <workflow>`, the repository. */
+export function subjectName(subject: Subject): string {
+  switch (subject.kind) {
+    case 'run':
+      return subject.runId;
+    case 'item':
+      return subject.item;
+    case 'workflow':
+      return `${subject.repo} / ${subject.workflow}`;
+    case 'repo':
+      return subject.repo;
+    case 'none':
+      return '';
+  }
+}
+
+/** The key of `ui.underway` that `def` done to `subject` sets while its request is out. */
+export function underwayId(def: ActionDef, subject: Subject): string {
+  const watching = def.id === 'watch' || def.id === 'unwatch';
+  switch (subject.kind) {
+    case 'run':
+      return `run:${subject.repo}/${subject.runId}`;
+    case 'item':
+      return `item:${subject.repo}/${subject.workflow}/${subject.item}`;
+    case 'workflow':
+      return `${watching ? 'watch' : 'queue'}:${subject.repo}/${subject.workflow}`;
+    case 'repo':
+      return `watch:${subject.repo}`;
+    case 'none':
+      return '';
   }
 }
 
@@ -257,7 +299,7 @@ function budgetOf(offer: NonNullable<RunActions['restart']>): string {
 /** An answer a queue change got: a 200's message (the change was taken) or a 202's waiting, else the refusal. */
 function queueAnswer(word: string) {
   return (status: number, body: string): ActResult => {
-    if (status !== 200 && status !== 202) return { place: 'queue', text: refusal(status, body, word) };
+    if (status !== 200 && status !== 202) return { place: 'queue', text: refusal(status, body, word), refused: true };
     const text = answerField(body, status === 200 ? 'message' : 'waiting');
     return {
       place: 'queue',
@@ -278,6 +320,7 @@ function queueItemAction(id: string, op: 'requeue' | 'drop', tier: Tier, path: s
     available: itemOffer(op),
     ...(tier === 'confirmed' ? { confirm: () => 'confirm drop' } : {}),
     request: (subject) => ({ path: queuePath(subject, path), body: { dedupKey: itemKey(subject) } }),
+    underway: op === 'drop' ? 'dropping…' : 'requeuing…',
     answer: queueAnswer(op),
   };
 }
@@ -294,13 +337,13 @@ function watchAction(op: 'watch' | 'unwatch', path: string): ActionDef {
     ...(op === 'unwatch'
       ? { confirm: (subject: Subject) => `${subject.kind === 'repo' ? 'unwatch all' : 'unwatch'}? click again` }
       : {}),
-    sending: () => (op === 'watch' ? 'watching…' : 'unwatching…'),
+    underway: op === 'watch' ? 'watching…' : 'unwatching…',
     request: (subject) => ({
       path: `/api/repos/${enc(REPO(subject))}${path}`,
       body: { workflows: subject.kind === 'workflow' ? [subject.workflow] : [] },
     }),
     answer: (status, body) => {
-      if (status !== 200 && status !== 202) return { place: 'repo', text: refusal(status, body, op) };
+      if (status !== 200 && status !== 202) return { place: 'repo', text: refusal(status, body, op), refused: true };
       const text = answerField(body, 'message') ?? answerField(body, 'waiting');
       return { place: 'repo', ...(text === undefined ? {} : { text }) };
     },
@@ -463,6 +506,7 @@ export const ACTIONS: readonly ActionDef[] = [
           ? { dedupKey: itemKey(subject), before: values.target }
           : { dedupKey: itemKey(subject), after: values.target },
     }),
+    underway: 'moving…',
     answer: queueAnswer('move'),
   },
   {
@@ -474,6 +518,7 @@ export const ACTIONS: readonly ActionDef[] = [
     params: () => [],
     available: queueOffer('poll'),
     request: (subject) => ({ path: queuePath(subject, '/poll'), body: {} }),
+    underway: 'polling…',
     answer: queueAnswer('poll'),
   },
   {
@@ -495,6 +540,7 @@ export const ACTIONS: readonly ActionDef[] = [
         body: values.force === 'on' ? { ticketKey, force: true } : { ticketKey },
       };
     },
+    underway: 'adding…',
     answer: queueAnswer('add'),
   },
   watchAction('watch', '/watch'),

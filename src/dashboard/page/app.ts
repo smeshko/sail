@@ -19,6 +19,7 @@ import { stopReads } from './reads';
 import { saveCleared, storedCleared } from './saved';
 import { createStore } from './store';
 import { closeRun, openIndex, selectRun, stopStreams } from './streams';
+import { toast } from './toast';
 import type { UiState } from './ui-state';
 
 export { TICK_MS } from './draw';
@@ -51,6 +52,7 @@ export function boot(host: PageHost): Page {
       open: (repo, runId) => selectRun(store, repo, runId),
       leave: () => closeRun(store),
       took: () => store.fresh.add('main'),
+      toast: (kind, head, text, undo) => toast(store, kind, head, text, undo),
       local: {
         'clear-attention': () => {
           store.cleared = new Set([...storedCleared(host), ...store.cleared, ...store.drawn]);

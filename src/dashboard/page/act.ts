@@ -14,12 +14,15 @@
 import {
   ACTIONS,
   type ActionDef,
+  type ActResult,
   actionOf,
   type OfferSource,
   type Param,
   type Subject,
   sameSubject,
+  subjectName,
   subjectOf,
+  underwayId,
   type Values,
 } from './action-registry';
 import type { PageHost, Region } from './host';
@@ -34,6 +37,8 @@ export interface ActorEffects {
   leave(): void;
   /** Draws the field a change that took emptied as it is, not as it was typed. */
   took(): void;
+  /** Puts a toast on the stack. */
+  toast(kind: 'ok' | 'bad', head: string, text: string, undo?: () => void): void;
   /** The local actions' effects, by the name their entry's `run` gives. */
   local: Record<string, () => void>;
 }
@@ -133,6 +138,16 @@ export function createActor(deps: ActorDeps): Actor {
     return values;
   }
 
+  /** Whether `def`'s answer is a toast: the queue's and the watch set's are. */
+  const toasts = (def: ActionDef) => def.place === 'queue' || def.place === 'repo';
+
+  /** The toast an answer is: `<verb> <subject>`, then sail's own words. */
+  function say(def: ActionDef, subject: Subject, status: number, answer: ActResult) {
+    const head = `${def.label(subject)} ${subjectName(subject)}`.trim();
+    if (answer.refused === true) effects.toast('bad', head, answer.text ?? `the ${def.label(subject)} was refused`);
+    else effects.toast('ok', head, answer.text ?? (status === 200 ? 'done' : 'asked'));
+  }
+
   function finish(def: ActionDef, subject: Subject, status: number, body: string) {
     if (subject.kind === 'run') runsOut--;
     if (deps.stopped()) return;
@@ -140,11 +155,13 @@ export function createActor(deps: ActorDeps): Actor {
     if (pending?.sent === true && pending.id === def.id && sameSubject(pending.subject, subject)) delete state.pending;
     const answer = def.answer?.(status, body, subject) ?? { place: def.place };
     const { effect } = answer;
+    delete ui.underway[underwayId(def, subject)];
     const open = deps.openRun();
     const runEffect = effect !== undefined && effect !== 'took';
     const stillOpen = subject.kind === 'run' && open?.repo === subject.repo && open.runId === subject.runId;
     if (runEffect && !stillOpen) {
       clearOwn(def, subject);
+      if (toasts(def)) say(def, subject, status, answer);
     } else {
       if (effect === 'reopen' && subject.kind === 'run')
         effects.reopen(subject.repo, subject.runId, answer.keepMenu === true);
@@ -164,7 +181,8 @@ export function createActor(deps: ActorDeps): Actor {
         }
       }
       clearOwn(def, subject);
-      setResult(def.id, subject, answer.place, answer.text);
+      if (toasts(def)) say(def, subject, status, answer);
+      else setResult(def.id, subject, answer.place, answer.text);
     }
     mark('rail', 'main');
     if (answer.place === 'rail' || effect === 'leave') mark('inspector', 'status');
@@ -173,6 +191,7 @@ export function createActor(deps: ActorDeps): Actor {
   function send(def: ActionDef, subject: Subject, values: Values, request: { path: string; body: unknown }) {
     if (def.tier === 'confirmed') state.pending = { id: def.id, subject, values: { ...values }, sent: true };
     if (subject.kind === 'run') runsOut++;
+    if (def.underway !== undefined) ui.underway[underwayId(def, subject)] = def.underway;
     if (def.sending !== undefined) setResult(def.id, subject, def.place, def.sending(subject));
     else if (subject.kind === 'run') delete state.results.run;
     mark('rail', 'main');

@@ -238,6 +238,9 @@ afterEach(() => {
   m.remove();
 });
 
+/** The toasts on the stack, as `<kind> <head>: <text>`. */
+const toasts = () => (page?.ui.toasts ?? []).map((each) => `${each.kind} ${each.head}: ${each.text}`);
+
 /** Lets the reads' promises settle. */
 const settle = () => Bun.sleep(0);
 const indexMessage = () => ({ kind: 'index', repos: index(m.registryDir) });
@@ -1387,7 +1390,7 @@ test('the rail restores the opens it saved and ignores a stored value that is no
   again.stop();
 });
 
-test("a click on a waiting row's down button posts the move to the queue's move route, a 409 shows its error as the notice, and a 202 clears it", async () => {
+test("a click on a waiting row's down button posts the move to the queue's move route, a 409 is a red toast quoting its error, and a 202 an ok one", async () => {
   const file = join(queueDirOf(m), 'queue.json');
   const queue = JSON.parse(readFileSync(file, 'utf8'));
   const waiting = queue.items.find((item: { state: string }) => item.state === 'queued');
@@ -1402,15 +1405,15 @@ test("a click on a waiting row's down button posts the move to the queue's move 
   host.click({ action: 'move-item', dir: 'down', ...row, key: 'ticket:FAKE-5', target: 'ticket:FAKE-7' });
   await settle();
   host.advance(100);
-  const refused = host.regions.main;
+  const refused = toasts();
   host.postAnswer = { status: 202, body: '{"file":"x"}' };
   host.click({ action: 'move-item', dir: 'up', ...row, key: 'ticket:FAKE-7', target: 'ticket:FAKE-5' });
   await settle();
   host.advance(100);
   expect({
     posts: host.posts,
-    refused: refused?.includes('<span class="warnchip">no watcher is running for &#39;beta&#39;</span>'),
-    cleared: [page.ui.act.results.queue?.text, host.regions.main?.includes('no watcher is running')],
+    refused,
+    after: toasts(),
   }).toEqual({
     posts: [
       {
@@ -1422,8 +1425,8 @@ test("a click on a waiting row's down button posts the move to the queue's move 
         body: { dedupKey: 'ticket:FAKE-7', before: 'ticket:FAKE-5' },
       },
     ],
-    refused: true,
-    cleared: [undefined, false],
+    refused: ["bad move ticket:FAKE-5: no watcher is running for 'beta'"],
+    after: ["bad move ticket:FAKE-5: no watcher is running for 'beta'", `ok move ticket:FAKE-7: asked`],
   });
 });
 
@@ -1692,7 +1695,7 @@ function openBetaQueue() {
 const BETA = { repo: 'beta', workflow: QUEUE_WORKFLOW };
 const QUEUE_PATH = `/api/repos/beta/queues/${QUEUE_WORKFLOW}`;
 
-test('a poll click posts an empty body to the queue poll route; a 200 shows its message beside the header, a 202 says waiting, a 409 its error, and no answer says so (ADW-460)', async () => {
+test('a poll click posts an empty body to the queue poll route; a 200 toasts its message, a 202 its waiting line, a 409 its error, and no answer says so (ADW-460)', async () => {
   openBetaQueue();
   const notices: (string | undefined)[] = [];
   for (const answer of [
@@ -1705,16 +1708,17 @@ test('a poll click posts an empty body to the queue poll route; a 200 shows its 
     host.click({ action: 'poll-queue', ...BETA });
     await settle();
     host.advance(100);
-    notices.push(page?.ui.act.results.queue?.text);
+    notices.push(toasts().at(-1));
   }
   expect(host.posts).toEqual(Array(4).fill({ path: `${QUEUE_PATH}/poll`, body: {} }));
+  const head = `poll beta / ${QUEUE_WORKFLOW}`;
   expect(notices).toEqual([
-    'sail queue: polled ticket-to-pr',
-    'the watcher has not taken the command yet',
-    "no watcher is running for 'beta'",
-    'the poll could not be sent: the dashboard did not answer',
+    `ok ${head}: sail queue: polled ticket-to-pr`,
+    `ok ${head}: the watcher has not taken the command yet`,
+    `bad ${head}: no watcher is running for 'beta'`,
+    `bad ${head}: the poll could not be sent: the dashboard did not answer`,
   ]);
-  expect(host.regions.main).toContain('<span class="warnchip">the poll could not be sent');
+  expect(host.regions.toasts).toContain('role="alert"');
 });
 
 test('the add form shows once the queue stream has polled tickets; add posts the typed key and force, an empty key posts nothing, and the key is kept across a draw (ADW-460)', async () => {
@@ -1737,7 +1741,7 @@ test('the add form shows once the queue stream has polled tickets; add posts the
   await settle();
   host.advance(100);
   expect(host.posts).toEqual([{ path: `${QUEUE_PATH}/add`, body: { ticketKey: 'FAKE-9', force: true } }]);
-  expect(page?.ui.act.results.queue?.text).toBe('sail queue: queued ticket:FAKE-9 Nine');
+  expect(toasts()).toEqual([`ok add beta / ${QUEUE_WORKFLOW}: sail queue: queued ticket:FAKE-9 Nine`]);
   expect(host.regions.main).toContain('value=""');
   host.fields['add-force'] = '';
   host.click({ action: 'add-ticket', ...BETA });
@@ -1764,11 +1768,11 @@ test('the first click on drop arms it and posts nothing, the second posts the de
   host.click({ action: 'drop-item', ...BETA, item: 'ticket:FAKE-5' });
   await settle();
   host.advance(100);
-  expect([host.posts, armedDrop(), page?.ui.itemMenu, page?.ui.act.results.queue?.text]).toEqual([
+  expect([host.posts, armedDrop(), page?.ui.itemMenu, toasts()]).toEqual([
     [{ path: `${QUEUE_PATH}/drop`, body: { dedupKey: 'ticket:FAKE-5' } }],
     undefined,
     undefined,
-    'sail queue: ticket:FAKE-5 dropped',
+    ['ok drop ticket:FAKE-5: sail queue: ticket:FAKE-5 dropped'],
   ]);
 });
 
@@ -1857,7 +1861,17 @@ test('an armed drop is disarmed when its item is drawn dispatched, so it asks ag
   expect(host.posts).toEqual([]);
 });
 
-test('a requeue click posts at once with the dedup key, and a 409 shows the CLI line as the notice (ADW-460)', async () => {
+test("between a requeue's click and its answer the item's row reads requeuing… in place of its state, and the answer takes it away", async () => {
+  openBetaQueue();
+  host.click({ action: 'requeue-item', ...BETA, item: 'ticket:FAKE-6' });
+  host.advance(100);
+  expect(host.regions.main).toContain('<span class="c-sub"><span class="busy">requeuing…</span> · ');
+  await settle();
+  host.advance(100);
+  expect(host.regions.main).not.toContain('requeuing…');
+});
+
+test('a requeue click posts at once with the dedup key, and a 409 is a red toast quoting the CLI line (ADW-460)', async () => {
   openBetaQueue();
   host.postAnswer = {
     status: 409,
@@ -1866,9 +1880,9 @@ test('a requeue click posts at once with the dedup key, and a 409 shows the CLI 
   host.click({ action: 'requeue-item', ...BETA, item: 'ticket:FAKE-6' });
   await settle();
   host.advance(100);
-  expect([host.posts, page?.ui.act.results.queue?.text]).toEqual([
+  expect([host.posts, toasts()]).toEqual([
     [{ path: `${QUEUE_PATH}/requeue`, body: { dedupKey: 'ticket:FAKE-6' } }],
-    'ticket:FAKE-6 is queued: only a parked or failed item is requeued',
+    ['bad requeue ticket:FAKE-6: ticket:FAKE-6 is queued: only a parked or failed item is requeued'],
   ]);
 });
 
@@ -2052,13 +2066,8 @@ function bootWatching(workflows?: string[]) {
 }
 const watchClick = (op: string, workflow?: string) =>
   host.click({ action: op, repo: 'beta', ...(workflow === undefined ? {} : { workflow }) });
-/** What the last watch or unwatch answered, shown under the repository: its text, with the repository it names. */
-const watchNotice = () => {
-  const result = page?.ui.act.results.repo;
-  return result !== undefined && 'repo' in result.subject
-    ? { repo: result.subject.repo, text: result.text }
-    : undefined;
-};
+/** What watch and unwatch answered, as toasts. */
+const watchToasts = () => toasts();
 /** The unwatch a first click has armed: the repository, or `<repository>/<workflow>`. */
 const armedWatch = () => {
   const pending = page?.ui.act.pending;
@@ -2076,11 +2085,14 @@ test('a Watch click posts the workflow to the repository watch route at once, an
   host.postAnswer = { status: 200, body: JSON.stringify({ message: 'sail watch: it watches ticket-to-pr' }) };
   watchClick('watch', QUEUE_WORKFLOW);
   expect(host.posts).toEqual([{ path: '/api/repos/beta/watch', body: { workflows: [QUEUE_WORKFLOW] } }]);
-  expect(watchNotice()).toEqual({ repo: 'beta', text: 'watching…' });
+  expect(page?.ui.underway).toEqual({ [`watch:beta/${QUEUE_WORKFLOW}`]: 'watching…' });
   await settle();
-  expect(watchNotice()).toEqual({ repo: 'beta', text: 'sail watch: it watches ticket-to-pr' });
+  expect([page?.ui.underway, watchToasts()]).toEqual([
+    {},
+    [`ok watch beta / ${QUEUE_WORKFLOW}: sail watch: it watches ticket-to-pr`],
+  ]);
   host.advance(100);
-  expect(host.regions.rail).toContain('<div class="lgrp-p">sail watch: it watches ticket-to-pr</div>');
+  expect(host.regions.rail).not.toContain('<div class="lgrp-p">sail watch: it watches ticket-to-pr</div>');
 });
 
 test('an Unwatch click arms and posts nothing, another action disarms it, and the second click posts the workflow to the unwatch route', async () => {
@@ -2100,7 +2112,7 @@ test('an Unwatch click arms and posts nothing, another action disarms it, and th
   host.postAnswer = { status: 200, body: JSON.stringify({ message: 'sail unwatch: done' }) };
   watchClick('unwatch', QUEUE_WORKFLOW);
   expect(host.posts).toEqual([{ path: '/api/repos/beta/unwatch', body: { workflows: [QUEUE_WORKFLOW] } }]);
-  expect([armedWatch(), watchNotice()]).toEqual([undefined, { repo: 'beta', text: 'unwatching…' }]);
+  expect([armedWatch(), page?.ui.underway]).toEqual([undefined, { [`watch:beta/${QUEUE_WORKFLOW}`]: 'unwatching…' }]);
 });
 
 test('Watch all posts an empty list at once, and Unwatch all posts one on its second click', async () => {
@@ -2115,7 +2127,7 @@ test('Watch all posts an empty list at once, and Unwatch all posts one on its se
   await settle();
 });
 
-test('a 202 shows its waiting line, a 409 the CLI refusal, and no answer says so, each under the repository', async () => {
+test('a 202 toasts its waiting line, a 409 the CLI refusal, and no answer says so', async () => {
   bootWatching();
   const notices: (string | undefined)[] = [];
   for (const answer of [
@@ -2127,13 +2139,13 @@ test('a 202 shows its waiting line, a 409 the CLI refusal, and no answer says so
     host.postAnswer = answer;
     watchClick('watch');
     await settle();
-    notices.push(watchNotice()?.text);
+    notices.push(watchToasts().at(-1));
   }
   expect(notices).toEqual([
-    'the watcher of beta (pid 7) starts',
-    'the watcher has not taken the command yet',
-    'sail watch: no workflow declares a watch',
-    'the watch could not be sent: the dashboard did not answer',
+    'ok watch all beta: the watcher of beta (pid 7) starts',
+    'ok watch all beta: the watcher has not taken the command yet',
+    'bad watch all beta: sail watch: no workflow declares a watch',
+    'bad watch all beta: the watch could not be sent: the dashboard did not answer',
   ]);
 });
 

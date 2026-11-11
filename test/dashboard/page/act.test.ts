@@ -18,6 +18,7 @@ interface Rig {
   posts: { path: string; body: unknown }[];
   fields: Record<string, string>;
   effects: string[];
+  toasts: string[];
   marks: string[][];
   answer(status: number, body: unknown): Promise<void>;
   open: { repo: string; runId: string } | undefined;
@@ -34,6 +35,7 @@ function rig(run?: RunActions, index: IndexRepo[] = []): Rig {
     posts: [] as Rig['posts'],
     fields: {} as Record<string, string>,
     effects: [] as string[],
+    toasts: [] as string[],
     marks: [] as string[][],
     open: { repo: 'alpha', runId: 'R1' } as Rig['open'],
     stopped: false,
@@ -56,6 +58,7 @@ function rig(run?: RunActions, index: IndexRepo[] = []): Rig {
       open: (repo, runId) => state.effects.push(`open ${repo}/${runId}`),
       leave: () => state.effects.push('leave'),
       took: () => state.effects.push('took'),
+      toast: (kind, head, text) => state.toasts.push(`${kind} ${head}: ${text}`),
       local: { 'clear-attention': () => state.effects.push('cleared') },
     },
     mark: (...regions) => state.marks.push(regions),
@@ -319,10 +322,11 @@ test('a first click on drop arms it, a click elsewhere disarms it, and a second 
   r.actor.act('drop-item', { ...BETA, item: 'ticket:FAKE-5' });
   r.actor.act('drop-item', { ...BETA, item: 'ticket:FAKE-5' });
   expect(r.posts[1]).toEqual({ path: '/api/repos/beta/queues/wf/drop', body: { dedupKey: 'ticket:FAKE-5' } });
+  expect(r.ui.underway).toEqual({ 'item:beta/wf/ticket:FAKE-5': 'dropping…' });
   await r.answer(200, { message: 'ticket:FAKE-5 dropped' });
-  expect([r.ui.act.results.queue?.text, r.ui.act.results.queue?.place, r.effects, r.ui.act.pending]).toEqual([
-    'ticket:FAKE-5 dropped',
-    'queue',
+  expect([r.toasts, r.ui.underway, r.effects, r.ui.act.pending]).toEqual([
+    ['ok poll beta / wf: the watcher has not taken it', 'ok drop ticket:FAKE-5: ticket:FAKE-5 dropped'],
+    {},
     [],
     undefined,
   ]);
@@ -338,13 +342,13 @@ test('a move posts before for up and after for down, a requeue posts at once, an
     { path: '/api/repos/beta/queues/wf/move', body: { dedupKey: 'ticket:FAKE-5', after: 'ticket:FAKE-7' } },
     { path: '/api/repos/beta/queues/wf/requeue', body: { dedupKey: 'ticket:FAKE-6' } },
   ]);
-  await r.answer(409, { error: 'no watcher is running' });
-  expect(r.ui.act.results.queue).toEqual({
-    id: 'move-item',
-    subject: { kind: 'item', repo: 'beta', workflow: 'wf', item: 'ticket:FAKE-5' },
-    text: 'no watcher is running',
-    place: 'queue',
+  expect(r.ui.underway).toEqual({
+    'item:beta/wf/ticket:FAKE-5': 'moving…',
+    'item:beta/wf/ticket:FAKE-6': 'requeuing…',
   });
+  await r.answer(409, { error: 'no watcher is running' });
+  expect(r.toasts).toEqual(['bad move ticket:FAKE-5: no watcher is running']);
+  expect(r.ui.underway).toEqual({ 'item:beta/wf/ticket:FAKE-6': 'requeuing…' });
 });
 
 test('an add posts the ticket key, with force when ticked, and one that took empties the ticket field and keeps force ticked', async () => {
@@ -373,10 +377,10 @@ test('an add that was only waiting keeps what was typed, since the watcher has n
   r.fields['add-ticket'] = 'FAKE-9';
   r.actor.act('add-ticket', BETA);
   await r.answer(202, { waiting: 'not yet' });
-  expect([r.ui.act.drafts['add-ticket'], r.effects, r.ui.act.results.queue?.text]).toEqual([
+  expect([r.ui.act.drafts['add-ticket'], r.effects, r.toasts]).toEqual([
     { ticket: 'FAKE-9' },
     [],
-    'not yet',
+    ['ok add beta / wf: not yet'],
   ]);
 });
 
@@ -401,26 +405,18 @@ const watchIndex = [
   },
 ] as unknown as IndexRepo[];
 
-test('a watch posts the workflow at once and says it is watching until the answer, which replaces it under the repository', async () => {
+test('a watch posts the workflow at once and reads watching… until the answer, which is a toast', async () => {
   const r = rig(undefined, watchIndex);
   r.actor.act('watch', { repo: 'beta', workflow: 'side' });
   expect(r.posts).toEqual([{ path: '/api/repos/beta/watch', body: { workflows: ['side'] } }]);
-  expect([r.ui.act.results.repo?.text, r.ui.act.results.repo?.place, r.ui.act.pending]).toEqual([
-    'watching…',
-    'repo',
-    undefined,
-  ]);
+  expect([r.ui.underway, r.ui.act.pending]).toEqual([{ 'watch:beta/side': 'watching…' }, undefined]);
   await r.answer(200, { message: 'sail watch: it watches side' });
-  expect(r.ui.act.results.repo).toEqual({
-    id: 'watch',
-    subject: { kind: 'workflow', repo: 'beta', workflow: 'side' },
-    text: 'sail watch: it watches side',
-    place: 'repo',
-  });
+  expect([r.toasts, r.ui.underway]).toEqual([['ok watch beta / side: sail watch: it watches side'], {}]);
   r.actor.act('watch', { repo: 'beta' });
   expect(r.posts[1]).toEqual({ path: '/api/repos/beta/watch', body: { workflows: [] } });
+  expect(r.ui.underway).toEqual({ 'watch:beta': 'watching…' });
   await r.answer(202, {});
-  expect(r.ui.act.results.repo).toBeUndefined();
+  expect(r.toasts.at(-1)).toBe('ok watch all beta: asked');
 });
 
 test('an unwatch arms on a first click, any other action disarms it, and a second click posts it', async () => {
@@ -436,8 +432,12 @@ test('an unwatch arms on a first click, any other action disarms it, and a secon
   r.actor.act('unwatch', { repo: 'beta' });
   r.actor.act('unwatch', { repo: 'beta' });
   expect(r.posts.at(-1)).toEqual({ path: '/api/repos/beta/unwatch', body: { workflows: [] } });
+  await r.answer(200, { message: 'watching side' });
   await r.answer(409, { error: 'sail unwatch: nothing to do' });
-  expect(r.ui.act.results.repo?.text).toBe('sail unwatch: nothing to do');
+  expect(r.toasts).toEqual([
+    'ok watch beta / side: watching side',
+    'bad unwatch all beta: sail unwatch: nothing to do',
+  ]);
 });
 
 test('a watch of a workflow the repository does not offer it for is not sent', () => {
@@ -447,27 +447,24 @@ test('a watch of a workflow the repository does not offer it for is not sent', (
   expect(r.posts).toEqual([]);
 });
 
-test('each place keeps its own answer: a poll answered while a watch is out leaves the watch line, and a run answer for a run no longer open clears neither', async () => {
+test('each subject keeps its own word under way: a poll answered while a watch is out leaves the watch reading watching…, and a run answer for a run no longer open touches neither', async () => {
   const both = [{ ...queueIndex[0], offers: watchIndex[0]?.offers }] as unknown as IndexRepo[];
   const r = rig(RESTART, both);
   r.actor.act('poll-queue', BETA);
   r.actor.act('watch', { repo: 'beta' });
   await r.answer(200, { message: 'polls wf now' });
-  expect([resultOf(r.ui.act, 'repo', { repo: 'beta' }), resultOf(r.ui.act, 'queue', BETA)]).toEqual([
-    'watching…',
-    'polls wf now',
-  ]);
+  expect([r.ui.underway, r.toasts]).toEqual([{ 'watch:beta': 'watching…' }, ['ok poll beta / wf: polls wf now']]);
   r.actor.act('stop-run', {});
   r.actor.act('stop-run', {});
   await r.answer(200, { message: 'sail watch: it watches all' });
   expect(resultOf(r.ui.act, 'run')).toBe('stopping R1…');
   r.open = { repo: 'alpha', runId: 'OTHER' };
   await r.answer(200, { message: 'stopped' });
-  expect([
-    resultOf(r.ui.act, 'run'),
-    resultOf(r.ui.act, 'repo', { repo: 'beta' }),
-    resultOf(r.ui.act, 'queue', BETA),
-  ]).toEqual([undefined, 'sail watch: it watches all', 'polls wf now']);
+  expect([resultOf(r.ui.act, 'run'), r.ui.underway, r.toasts]).toEqual([
+    undefined,
+    {},
+    ['ok poll beta / wf: polls wf now', 'ok watch all beta: sail watch: it watches all'],
+  ]);
 });
 
 test('a poll, drop, requeue or move that took leaves the add field as typed: only an add that took empties it', async () => {

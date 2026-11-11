@@ -11,7 +11,9 @@ import {
   refusal,
   type Subject,
   sameSubject,
+  subjectName,
   subjectOf,
+  underwayId,
 } from '../../../src/dashboard/page/action-registry';
 
 const RUN: Subject = { kind: 'run', repo: 'alpha', runId: 'FAKE-1-RUN' };
@@ -180,19 +182,59 @@ test('a queue change shows a 200 message and took, a 202 waiting, and any other 
   expect(answer('drop-item', 200, '{"message":"gone"}')).toEqual({ place: 'queue', text: 'gone', effect: 'took' });
   expect(answer('poll-queue', 202, '{"waiting":"not yet"}')).toEqual({ place: 'queue', text: 'not yet' });
   expect(answer('poll-queue', 202, '{"message":"x"}')).toEqual({ place: 'queue' });
-  expect(answer('move-item', 409, '{"error":"no watcher"}')).toEqual({ place: 'queue', text: 'no watcher' });
-  expect(answer('add-ticket', 500, 'oops')).toEqual({ place: 'queue', text: 'the add was refused (500)' });
+  expect(answer('move-item', 409, '{"error":"no watcher"}')).toEqual({
+    place: 'queue',
+    text: 'no watcher',
+    refused: true,
+  });
+  expect(answer('add-ticket', 500, 'oops')).toEqual({
+    place: 'queue',
+    text: 'the add was refused (500)',
+    refused: true,
+  });
 });
 
 test('watch shows its message or waiting under the repository, and any other status its refusal', () => {
   expect(def('watch').answer?.(200, '{"message":"m","waiting":"w"}', REPO)).toEqual({ place: 'repo', text: 'm' });
   expect(def('watch').answer?.(202, '{"waiting":"w"}', REPO)).toEqual({ place: 'repo', text: 'w' });
   expect(def('watch').answer?.(202, '{}', REPO)).toEqual({ place: 'repo' });
-  expect(def('unwatch').answer?.(409, '{"error":"nope"}', REPO)).toEqual({ place: 'repo', text: 'nope' });
+  expect(def('unwatch').answer?.(409, '{"error":"nope"}', REPO)).toEqual({
+    place: 'repo',
+    text: 'nope',
+    refused: true,
+  });
   expect(def('unwatch').answer?.(0, '', REPO)).toEqual({
     place: 'repo',
     text: 'the unwatch could not be sent: the dashboard did not answer',
+    refused: true,
   });
+});
+
+test('a toast names its subject: a run by its id, an item by its key, a workflow with its repository, a repository', () => {
+  expect([
+    subjectName({ kind: 'run', repo: 'a', runId: 'R1' }),
+    subjectName({ kind: 'item', repo: 'a', workflow: 'w', item: 'ticket:X-1' }),
+    subjectName({ kind: 'workflow', repo: 'a', workflow: 'w' }),
+    subjectName({ kind: 'repo', repo: 'a' }),
+    subjectName({ kind: 'none' }),
+  ]).toEqual(['R1', 'ticket:X-1', 'a / w', 'a', '']);
+});
+
+test('the word under way is kept by subject, a workflow of a watch apart from the workflow of a poll', () => {
+  const workflow: Subject = { kind: 'workflow', repo: 'a', workflow: 'w' };
+  expect([
+    underwayId(def('poll-queue'), workflow),
+    underwayId(def('watch'), workflow),
+    underwayId(def('unwatch'), { kind: 'repo', repo: 'a' }),
+    underwayId(def('requeue-item'), { kind: 'item', repo: 'a', workflow: 'w', item: 'k' }),
+    underwayId(def('stop-run'), { kind: 'run', repo: 'a', runId: 'R1' }),
+    underwayId(def('clear-attention'), { kind: 'none' }),
+  ]).toEqual(['queue:a/w', 'watch:a/w', 'watch:a', 'item:a/w/k', 'run:a/R1', '']);
+  expect(
+    ['poll-queue', 'add-ticket', 'move-item', 'requeue-item', 'drop-item', 'watch', 'unwatch'].map(
+      (id) => def(id).underway,
+    ),
+  ).toEqual(['polling…', 'adding…', 'moving…', 'requeuing…', 'dropping…', 'watching…', 'unwatching…']);
 });
 
 test('a run action that is refused says why, by its own noun', () => {

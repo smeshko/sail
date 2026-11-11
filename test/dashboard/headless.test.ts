@@ -124,3 +124,20 @@ test("once beta's queue/ is gone, the next index drops its queue row and gives t
   expect(await until(() => (page.text('main').match(/data-action="select-card"/g) ?? []).length === 8)).toBe(true);
   expect(page.text('rail')).toContain('<span class="nm">beta</span>');
 }, 30_000);
+
+test('instant tier: on the real bundle and server, a poll with no watcher draws a red toast quoting the refusal, with no dialog', async () => {
+  m = seedFixtures();
+  const started = startDashboard({ registryDir: m.registryDir, port: 0, followPollMs: 20, indexPollMs: 50 });
+  if ('refused' in started) throw new Error(started.refused);
+  server = started;
+  const page = await bootHeadless(server);
+  expect(page.ids).toEqual(expect.arrayContaining(['toasts']));
+  expect(await until(() => page.text('rail').includes('data-action="select-queue"'))).toBe(true);
+  page.click({ action: 'select-queue', queue: 'beta/ticket-to-pr' });
+  expect(await until(() => page.text('main').includes('data-action="poll-queue"'))).toBe(true);
+  page.click({ action: 'poll-queue', repo: 'beta', workflow: 'ticket-to-pr' });
+  expect(await until(() => page.text('toasts').includes('toast bad'))).toBe(true);
+  expect(page.text('toasts')).toContain('role="alert"');
+  expect(page.text('toasts')).toContain('poll beta / ticket-to-pr');
+  expect(page.text('toasts')).toContain('no watcher is running');
+}, 30_000);

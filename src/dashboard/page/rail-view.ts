@@ -170,6 +170,8 @@ const watchSource = (repo: string, offers: RepoOffers | undefined): OfferSource 
 function watchButtons(repo: string, offers: RepoOffers | undefined, ui: UiState, workflow?: string): SafeHtml {
   const subject: Subject = workflow === undefined ? { kind: 'repo', repo } : { kind: 'workflow', repo, workflow };
   const source = watchSource(repo, offers);
+  const underway = ui.underway[workflow === undefined ? `watch:${repo}` : `watch:${repo}/${workflow}`];
+  if (underway !== undefined) return html`<span class="busy">${underway}</span>`;
   return html`${ACTIONS.filter((def) => def.place === 'repo' && def.appliesTo.includes(subject.kind)).map((def) =>
     actionControl(def, subject, ui.act, source, { class: 'wf-act', data: true }),
   )}`;
@@ -212,14 +214,11 @@ function repoSelection(repo: RailRepo, ui: UiState, now: number, offers: RunActi
 
 function repoGroup(repo: RailRepo, ui: UiState, now: number, offers: RunActions | undefined): SafeHtml {
   const open = ui.expanded.includes(repo.name);
-  const said = resultOf(ui.act, 'repo', { repo: repo.name });
   return html`<div class="lgrp">
 <button class="lgrp-h${open ? ' open' : ''}"${
     repo.remote === null ? '' : html` title="${repo.remote}"`
   } data-action="toggle-group" data-group="${repo.name}" aria-expanded="${open ? 'true' : 'false'}"><span class="caret">›</span><span class="nm">${repo.name}</span>${counts(repo.runs)}</button>
-${repo.problem === undefined ? '' : html`<div class="lgrp-p">${repo.problem}</div>`}${
-  said === undefined ? '' : html`<div class="lgrp-p">${said}</div>`
-}${open ? html`<div class="lgrp-acts">${watchButtons(repo.name, repo.offers, ui)}</div>` : ''}
+${repo.problem === undefined ? '' : html`<div class="lgrp-p">${repo.problem}</div>`}${open ? html`<div class="lgrp-acts">${watchButtons(repo.name, repo.offers, ui)}</div>` : ''}
 ${open ? repo.workflows.map((workflow) => workflowGroup(repo, workflow, ui, now, offers)) : repoSelection(repo, ui, now, offers)}</div>`;
 }
 
