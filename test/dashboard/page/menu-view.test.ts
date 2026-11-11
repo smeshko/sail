@@ -144,6 +144,7 @@ test('a row leads with the icon of what it runs, and an arrow when it has none o
     'arrow',
   ]);
   expect(['restart-run', 'start-run-go'].map(act)).toEqual(['restart', 'run']);
+  expect(['stop-run', 'stop-run-now', 'suspend-run'].map(act)).toEqual(['stop', 'stopNow', 'pause']);
   expect(iconOf({ goto: { kind: 'run', repo: 'a', runId: 'r' } })).toBe('run');
   expect(iconOf({ goto: none })).toBe('arrow');
   expect(['toggle-theme', 'toggle-inspector', 'x'].map((view) => iconOf({ view }))).toEqual(['sun', 'panel', 'arrow']);
