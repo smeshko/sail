@@ -653,6 +653,7 @@
         opacity: 0.5;
       }
       .run {
+        position: relative;
         display: flex;
         align-items: flex-start;
         gap: 6px;
@@ -771,7 +772,11 @@
         color: var(--fg);
       }
       .r-menu {
-        margin: 2px 10px 8px 14px;
+        position: absolute;
+        top: 100%;
+        left: 34px;
+        right: 10px;
+        z-index: 5;
         padding: 8px;
         border: 1px solid var(--line-2);
         border-radius: 8px;

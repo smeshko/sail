@@ -3,8 +3,8 @@
 // folding groups: Active's `waiting on you` and `running`, History's `failed` and `done`, and in Queues one per
 // repository. A run's row is a `div` holding two sibling buttons: its own, which opens the run and shows on one line
 // its status, id, title, repository › workflow, stalled mark, duration, cost and stop reason, with a problem wrapping
-// inside it, and, but on a completed run, a ⋯ of its own that opens the run and, under the row, a menu of what it
-// offers: Resume, Restart, Stop and Clean. A queue's row opens its queue and names its watch state, the live watcher's;
+// inside it, and, but on a completed run, a ⋯ of its own that opens the run and a menu of what it offers: Resume,
+// Restart, Stop and Clean. The menu is drawn inside its row and floats over the rows under it, pushing none down. A queue's row opens its queue and names its watch state, the live watcher's;
 // a queue that can't be read shows its problem in place of its waiting count. A Queues group's header row also carries
 // the Watch all and Unwatch all the repository offers, drawn from the registry, and its problem; each runs at once, its
 // answer is a toast, and while its request is out the buttons read the word under way, as a run's row reads it in place
@@ -53,7 +53,7 @@ export function more(repo: string, run: ListRun, ui: UiState): SafeHtml | '' {
   return html`<button class="r-more${isMenuOpen(repo, run, ui) ? ' open' : ''}" type="button" data-action="run-menu" data-repo="${repo}" data-run="${run.runId}" aria-label="actions for ${run.runId}" aria-expanded="${isMenuOpen(repo, run, ui) ? 'true' : 'false'}" title="actions for ${run.runId}">⋯</button>`;
 }
 
-/** The open menu under `run`'s row: what the run offers, once its actions are read. */
+/** The open menu over the rows under `run`'s row: what the run offers, once its actions are read. */
 export function runMenu(repo: string, run: ListRun, ui: UiState, offers: RunActions | undefined): SafeHtml | '' {
   if (!isMenuOpen(repo, run, ui)) return '';
   const controls = runControls(offers, ui);
@@ -105,7 +105,7 @@ function runRow(row: RunRow, ui: UiState, offers: RunActions | undefined): SafeH
       : ''
   }<span class="r-el">${duration(run.durationMs)}</span><span class="r-cost">${cost(run.costUsd)}</span>${
     run.stopReason === undefined ? '' : html`<span class="why">${run.stopReason}</span>`
-  }</span>${run.problem === undefined ? '' : html`<span class="r-problem">${run.problem}</span>`}</button>${more(repo, run, ui)}</div>${runMenu(repo, run, ui, offers)}`;
+  }</span>${run.problem === undefined ? '' : html`<span class="r-problem">${run.problem}</span>`}</button>${more(repo, run, ui)}${runMenu(repo, run, ui, offers)}</div>`;
 }
 
 function queueRow(row: QueueRow, ui: UiState, now: number): SafeHtml {
