@@ -1,7 +1,8 @@
 // `sail queue ls|add|requeue|drop|poll|move <workflow> [<item>|<ticket>] [--force] [--before|--after <item>]`: a
 // watched workflow's queue from the CLI (DECISIONS D8, D9).
 //
-// - `ls` reads its queue file, with or without a watcher: the workflow's polling, then each item in queue order with its
+// - `ls` reads its queue file, with or without a watcher: the workflow's polling, then the held runs that fill a slot of
+//   the workflow (read from the run directories), then each item in queue order with its
 //   state, its dedup key, its title and what applies of its priority (unless none), run, attempts, retry time,
 //   what it waits on, `forced`, `moved` and reason.
 // - `move` puts a queued item directly before or after another queued one, exactly one of `--before` and `--after`;
@@ -23,6 +24,7 @@
 // refusal is exit code 3.
 import { isAlive as processIsAlive } from '../../adapters/leases';
 import { runsDir as runsDirOf } from '../../engine/run-dir';
+import { heldRuns } from '../../engine/runs';
 import { clean } from '../../events/consumers/screen';
 import { dropCommand, NOT_TAKEN } from '../../watch/inbox';
 import { commandFor, itemLine, outcomeOf, queueOf, streamMark } from '../../watch/queue-commands';
@@ -61,7 +63,12 @@ function list(io: Io, runs: string, workflow: string): ExitCode {
     queue.held === undefined
       ? ''
       : `, dispatch held${queue.held.until === undefined ? `: ${queue.held.reason}` : ` until ${queue.held.until}`}`;
-  io.stdout(`${workflow}: label ${label}, last polled ${lastPolledAt ?? 'never'}${pause}${held}\n`);
+  const heldRunIds = heldRuns(runs, workflow);
+  const slots =
+    heldRunIds.length === 0
+      ? ''
+      : `, ${heldRunIds.length} ${heldRunIds.length === 1 ? 'slot filled by held run' : 'slots filled by held runs'} ${heldRunIds.join(', ')}`;
+  io.stdout(`${workflow}: label ${label}, last polled ${lastPolledAt ?? 'never'}${pause}${held}${slots}\n`);
   for (const item of queue.items) io.stdout(`${itemLine(item)}\n`);
   return EXIT_OK;
 }
