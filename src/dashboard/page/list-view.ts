@@ -6,7 +6,7 @@
 // open their run (at its last call in error) or queue, the view staying Inbox, and carry a ✕ that dismisses them. A
 // run's row is a `div` holding two sibling buttons: its own, which opens the run and shows on one line
 // its status, id, title, stalled mark, duration and stop reason, with a problem wrapping
-// inside it, and, but on a completed run, a ⋯ of its own that opens the run and a menu of what it offers: Resume,
+// inside it, and a ⋯ of its own that opens the run and a menu of what it offers: Resume,
 // Restart, Stop and Clean. The menu is drawn inside its row and floats over the rows under it, pushing none down. A
 // queue's row is a `div` holding its open button and, beside it, poll, watch and unwatch from the registry. The button
 // names the live watcher's watch state, what waits, runs, failed and is parked (a zero count left out), when the queue
@@ -65,9 +65,8 @@ export const tooltipOf = (run: ListRun): string | undefined =>
 const isMenuOpen = (repo: string, run: ListRun, ui: UiState) =>
   isOpen(repo, run, ui) && ui.runMenu?.runId === run.runId && ui.runMenu.at === 'row';
 
-/** A row's ⋯: on any run but a completed one, which offers nothing. */
+/** A row's ⋯: on every run, a completed one included, which offers Restart. */
 export function more(repo: string, run: ListRun, ui: UiState): SafeHtml | '' {
-  if (run.status === 'completed') return '';
   return html`<button class="r-more${isMenuOpen(repo, run, ui) ? ' open' : ''}" type="button" data-action="run-menu" data-repo="${repo}" data-run="${run.runId}" aria-label="actions for ${run.runId}" aria-expanded="${isMenuOpen(repo, run, ui) ? 'true' : 'false'}" title="actions for ${run.runId}">⋯</button>`;
 }
 

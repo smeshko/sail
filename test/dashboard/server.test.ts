@@ -644,6 +644,43 @@ test('a POST to resume a suspended run starts `sail resume` with the raise, answ
   expect(JSON.parse(runs.body).map((run: { runId: string }) => run.runId)).not.toContain(`${FAKE_3_ID}.log`);
 });
 
+test('a POST to resume a running run no live process holds starts sail resume, answers 409 with the CLI line when it is refused and 202 once STATUS changes', async () => {
+  m = seedFixtures();
+  settleQueue();
+  writeFileSync(join(betaRun(), 'STATUS'), 'running\n');
+  const refused = stubSail("echo 'run is held elsewhere' >&2\nexit 3");
+  const first = await post(startWith(refused.cli), RESUME, startedBy('{}'));
+  expect([first.status, await first.json(), refused.argv()]).toEqual([
+    409,
+    { error: 'run is held elsewhere' },
+    [`resume ${FAKE_3_ID}`],
+  ]);
+  const taken = stubSail(`printf 'suspended until\\n' > '${join(betaRun(), 'STATUS')}'\nsleep 1`);
+  const second = await post(startWith(taken.cli), RESUME, startedBy('{}'));
+  // Both stubs record into one file: the second start is its last line.
+  expect([second.status, await second.json(), taken.argv()]).toEqual([
+    202,
+    { runId: FAKE_3_ID },
+    [`resume ${FAKE_3_ID}`, `resume ${FAKE_3_ID}`],
+  ]);
+});
+
+test('a POST to resume a running run a live process holds is 409 is running and starts nothing', async () => {
+  m = seedFixtures();
+  settleQueue();
+  writeFileSync(join(betaRun(), 'STATUS'), 'running\n');
+  const leasesDir = join(m.root, 'leases');
+  mkdirSync(leasesDir, { recursive: true });
+  takeLease(leasesDir, 'fake://origin', FAKE_3_BRANCH, { runId: FAKE_3_ID, runDir: betaRun(), pid: process.pid });
+  const stub = stubSail('exit 0');
+  const response = await post(startWith(stub.cli), RESUME, startedBy('{}'));
+  expect([response.status, await response.json(), stub.argv()]).toEqual([
+    409,
+    { error: `run ${FAKE_3_ID} is running` },
+    [],
+  ]);
+});
+
 test('a POST to restart a failed run starts `sail run --from-run` under a minted id of its ticket and answers 202 with it once its STATUS reads', async () => {
   m = seedFixtures();
   const stub = stubSail(
@@ -657,6 +694,55 @@ test('a POST to restart a failed run starts `sail run --from-run` under a minted
   expect(readFileSync(join(m.alpha.clone, '.sail-runs', runId, 'STATUS'), 'utf8')).toBe('running\n');
   expect(stub.argv()).toEqual([`run --from-run ${FAKE_2_ID} --stage spec --continue --run-id ${runId}`]);
   expect(dashboardLogs(m.alpha)).toEqual([`${runId}.log`]);
+});
+
+test('a POST to restart a completed run starts a seeded run', async () => {
+  m = seedFixtures();
+  const stub = stubSail(
+    `id=$(echo "$*" | sed 's/.*--run-id //')\nmkdir -p ".sail-runs/$id"\necho '{}' > ".sail-runs/$id/run.json"\nprintf 'running\\n' > ".sail-runs/$id/STATUS"\nsleep 1`,
+  );
+  const server = startWith(stub.cli);
+  const response = await post(server, `/api/repos/alpha/runs/${GOLDEN_RUN_ID}/restart`, startedBy('{"stage":"tests"}'));
+  const { runId } = (await response.json()) as { runId: string };
+  expect(response.status).toBe(202);
+  expect(isRunIdOf('FAKE-1', runId)).toBe(true);
+  expect(stub.argv()).toEqual([`run --from-run ${GOLDEN_RUN_ID} --stage tests --continue --run-id ${runId}`]);
+});
+
+const seededStub = () =>
+  stubSail(
+    `id=$(echo "$*" | sed 's/.*--run-id //')\nmkdir -p ".sail-runs/$id"\necho '{}' > ".sail-runs/$id/run.json"\nprintf 'running\\n' > ".sail-runs/$id/STATUS"\nsleep 1`,
+  );
+
+test('a restart passes --continue unless told this stage only, and --from-base when told from the base', async () => {
+  m = seedFixtures();
+  const stub = seededStub();
+  const server = startWith(stub.cli);
+  const ids: string[] = [];
+  for (const body of [
+    '{"stage":"spec"}',
+    '{"stage":"spec","continue":false}',
+    '{"stage":"spec","fromBase":true}',
+    '{"stage":"spec","continue":false,"fromBase":true}',
+  ]) {
+    const response = await post(server, RESTART, startedBy(body));
+    expect(response.status).toBe(202);
+    ids.push(((await response.json()) as { runId: string }).runId);
+  }
+  const head = `run --from-run ${FAKE_2_ID} --stage spec`;
+  expect(stub.argv()).toEqual([
+    `${head} --continue --run-id ${ids[0]}`,
+    `${head} --run-id ${ids[1]}`,
+    `${head} --continue --from-base --run-id ${ids[2]}`,
+    `${head} --from-base --run-id ${ids[3]}`,
+  ]);
+});
+
+test('a restart whose continue is not a boolean is 400 and starts nothing', async () => {
+  m = seedFixtures();
+  const stub = stubSail('exit 0');
+  const response = await post(startWith(stub.cli), RESTART, startedBy('{"stage":"spec","continue":"no"}'));
+  expect([response.status, stub.argv()]).toEqual([400, []]);
 });
 
 test('a restart whose sail exits after run.json and before STATUS is 409 with the last line it printed', async () => {
@@ -1047,4 +1133,49 @@ test.each([
     expect(response.status).toBe(status);
   }
   expect(treeHash(m.root)).toBe(before);
+});
+
+const REBUILD = `/api/repos/alpha/runs/${FAKE_2_ID}/rebuild`;
+const fake2Run = () => join(m.alpha.clone, '.sail-runs', FAKE_2_ID);
+
+test("a POST to rebuild rewrites summary.json and answers sail show --rebuild's line", async () => {
+  m = seedFixtures();
+  writeFileSync(join(fake2Run(), 'summary.json'), '{}');
+  const server = startWith(stubSail('exit 0').cli);
+  const response = await post(server, REBUILD, startedBy('{}'));
+  expect([response.status, await response.json()]).toEqual([
+    200,
+    { message: `rebuilt .sail-runs/${FAKE_2_ID}/summary.json` },
+  ]);
+  expect(JSON.parse(readFileSync(join(fake2Run(), 'summary.json'), 'utf8')).schema).toBe('sail.summary.v1');
+  const again = await post(server, REBUILD, startedBy('{}'));
+  expect([again.status, await again.json()]).toEqual([409, { error: `run ${FAKE_2_ID} offers no rebuild` }]);
+});
+
+test("a rebuild whose events can't be read is refused in rebuildSummary's words", async () => {
+  m = seedFixtures();
+  writeFileSync(join(fake2Run(), 'summary.json'), 'not json');
+  writeFileSync(join(fake2Run(), 'events.ndjson'), '');
+  const response = await post(startWith(stubSail('exit 0').cli), REBUILD, startedBy('{}'));
+  expect([response.status, await response.json()]).toEqual([
+    409,
+    { error: `run ${FAKE_2_ID}'s events hold no run:start, so there is no summary to build` },
+  ]);
+});
+
+test('a rebuild of a run with a readable summary is 409, and a body with a field is 400', async () => {
+  m = seedFixtures();
+  const server = startWith(stubSail('exit 0').cli);
+  const readable = await post(server, REBUILD, startedBy('{}'));
+  expect([readable.status, await readable.json()]).toEqual([409, { error: `run ${FAKE_2_ID} offers no rebuild` }]);
+  const field = await post(server, REBUILD, startedBy('{"force":true}'));
+  expect(field.status).toBe(400);
+});
+
+test('the 405 for another method names a rebuild among what a POST may do', async () => {
+  m = seedFixtures();
+  const server = startWith(stubSail('exit 0').cli);
+  const response = await fetch(`http://127.0.0.1:${server.port}${REBUILD}`, { method: 'PUT', headers: HEADER });
+  expect(response.status).toBe(405);
+  expect(((await response.json()) as { error: string }).error).toContain('a clean, a rebuild, a watch');
 });

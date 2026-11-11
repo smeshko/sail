@@ -22,7 +22,7 @@ import { attention, identity } from '../../../src/dashboard/page/attention';
 import { focused, setFocus } from '../../../src/dashboard/page/focus';
 import { browserHost, type ConnectHandlers, type PageHost, type Region } from '../../../src/dashboard/page/host';
 import { listRepos, newestFirst } from '../../../src/dashboard/page/index-model';
-import { readSubjectOffers } from '../../../src/dashboard/page/reads';
+import { offerSignature, readSubjectOffers } from '../../../src/dashboard/page/reads';
 import { sourceFor } from '../../../src/dashboard/page/store';
 import type { QueueWatch } from '../../../src/dashboard/watch-state';
 import { readEvents } from '../../../src/events/consumers/ndjson';
@@ -2670,7 +2670,9 @@ test("a run's ⋯ opens the run and its menu under its row, reading what it offe
     { runId: GOLDEN_RUN_ID, at: 'row' },
     1,
   ]);
-  expect(host.regions.list).toContain(`<div class="r-menu"><span class="act-why">run ${GOLDEN_RUN_ID} completed`);
+  expect(host.regions.list).toContain(
+    '<div class="r-menu"><div class="acts"><span class="act"><button class="btn" data-action="restart-run">restart</button></span></div></div>',
+  );
 });
 
 test('a suspended run over its dollars offers Resume and no Restart; its dialog asks the raise, keeps open with the refusal while none is typed, and posts the raise it reads and reads the run again', async () => {
@@ -2729,6 +2731,12 @@ test("the open run's actions are read again when the index shows its status chan
   await openOffering('alpha', FAKE_2_ID, fake2Dir(m));
   host.click({ action: 'restart-run' });
   writeFileSync(join(fake2Dir(m), 'STATUS'), 'running\n');
+  // A live process holds the run, so it reads running and offers nothing to resume.
+  takeLease(join(m.root, 'leases'), 'fake://origin', 'sail/FAKE-2-print-the-version-with-version', {
+    runId: FAKE_2_ID,
+    runDir: fake2Dir(m),
+    pid: process.pid,
+  });
   plainIndex();
   await settle();
   host.advance(100);
@@ -3140,6 +3148,35 @@ test("a failed run's header draws restart and clean once the offers answer arriv
   ]);
   expect(host.regions.main).not.toContain('data-at="header"');
   expect(host.regions.list).not.toContain('class="r-menu"');
+});
+
+test("a run whose summary can't be read has Rebuild in its header's ⋯ menu, which posts at once with no dialog and toasts the server's line", async () => {
+  writeFileSync(join(fake2Dir(m), 'summary.json'), '{}');
+  await openRun('alpha', FAKE_2_ID, fake2Dir(m));
+  host.click({ action: 'run-menu', repo: 'alpha', run: FAKE_2_ID, at: 'header' });
+  host.advance(100);
+  expect(host.regions.main).toContain('<button class="btn" data-action="rebuild-run">rebuild</button>');
+  host.postAnswer = { status: 200, body: JSON.stringify({ message: `rebuilt .sail-runs/${FAKE_2_ID}/summary.json` }) };
+  host.click({ action: 'rebuild-run' });
+  await settle();
+  expect(host.dialog).toBeUndefined();
+  expect(host.posts).toEqual([{ path: `/api/repos/alpha/runs/${FAKE_2_ID}/rebuild`, body: {} }]);
+  expect(toasts()).toEqual([`ok rebuild ${FAKE_2_ID}: rebuilt .sail-runs/${FAKE_2_ID}/summary.json`]);
+});
+
+test("the open run's offers are read again when its summary problem goes, with its status unchanged", () => {
+  const open = { repo: 'alpha', runId: 'R' } as never;
+  const store = (problem?: string) =>
+    ({
+      index: [
+        {
+          name: 'alpha',
+          queues: [],
+          runs: [{ runId: 'R', status: { status: 'failed' }, ...(problem ? { problem } : {}) }],
+        },
+      ],
+    }) as never;
+  expect(offerSignature(store('summary.json is not a sail.summary.v1'), open)).not.toBe(offerSignature(store(), open));
 });
 
 test("the header's ⋯ opens a menu of the actions it has no button for; its ⋯ again, Escape or any other click shuts it", async () => {

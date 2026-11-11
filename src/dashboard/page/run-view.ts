@@ -3,7 +3,7 @@
 // and the CLI commands to copy. The cards come from the run model, fed by the run's events. The totals come from the
 // summary in the index when there is one, and from the cards otherwise. The Resume, Restart, Stop or Clean a run offers
 // are drawn in the run view's view header, by `runHeaderActions`: a button for each the run's status has (Stop while it runs,
-// Resume while suspended, Restart and Clean once failed) and the rest behind a ⋯. `runControls` is the one component both
+// Resume while suspended, Restart and Clean once failed) and the rest behind a ⋯, Rebuild among them. `runControls` is the one component both
 // that ⋯ menu and the list row's ⋯ menu are drawn with.
 import type { Summary } from '../../events/summary';
 import type { RunActions } from '../actions';

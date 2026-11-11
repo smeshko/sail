@@ -216,9 +216,9 @@ export function generalRows(source: OfferSource): MenuRow[] {
   ];
 }
 
-/** The parameters an action asks in the menu: those its click doesn't give. */
+/** The parameters an action asks in the menu: those its click doesn't give, and no tick, which only its dialog asks. */
 export function askedParams(def: ActionDef, subject: Subject, source: OfferSource): Param[] {
-  return def.params(subject, source).filter((param) => param.given === undefined);
+  return def.params(subject, source).filter((param) => param.given === undefined && param.type !== 'tick');
 }
 
 const stepRow = (label: string, run: MenuRun, hint?: string): MenuRow => ({
@@ -266,9 +266,11 @@ export function stepOf(step: MenuStep, source: OfferSource, typed = ''): StepMod
     return { label, lines, rows, start: Math.max(0, start) };
   }
   const field =
-    param.type === 'number'
-      ? { type: 'number' as const, ...(param.min === undefined ? {} : { min: param.min }) }
-      : { type: 'text' as const, ...(param.placeholder === undefined ? {} : { placeholder: param.placeholder }) };
+    param.type === 'tick'
+      ? { type: 'text' as const }
+      : param.type === 'number'
+        ? { type: 'number' as const, ...(param.min === undefined ? {} : { min: param.min }) }
+        : { type: 'text' as const, ...(param.placeholder === undefined ? {} : { placeholder: param.placeholder }) };
   return { label, field, lines, rows: [], start: 0 };
 }
 
