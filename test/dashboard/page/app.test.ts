@@ -2648,6 +2648,20 @@ test('an Unwatch click posts the workflow to the unwatch route at once, with no 
   expect(host.regions.list).not.toContain('armed');
 });
 
+test("an unwatched workflow's queue header draws poll disabled with its reason and a watch whose click posts the workflow to the watch route", async () => {
+  bootWatching();
+  host.click({ action: 'select-queue', queue: `beta/${QUEUE_WORKFLOW}` });
+  host.advance(100);
+  const header = host.regions.main?.match(/<div class="srcbar">.*?<\/span><\/span><\/div>/s)?.[0] ?? '';
+  expect(header).toContain('<button class="btn" disabled>poll</button><span class="act-why">');
+  expect(header).toContain(`data-action="watch" data-repo="beta" data-workflow="${QUEUE_WORKFLOW}">watch</button>`);
+  expect(header).not.toContain('data-action="unwatch"');
+  host.postAnswer = { status: 200, body: JSON.stringify({ message: 'sail watch: done' }) };
+  watchClick('watch', QUEUE_WORKFLOW);
+  await settle();
+  expect(host.posts).toEqual([{ path: '/api/repos/beta/watch', body: { workflows: [QUEUE_WORKFLOW] } }]);
+});
+
 test('an Unwatch toast has an undo that posts the watch with the same body and takes the toast away; the undo toast is drawn at 7,999 ms and gone at 8,000 ms', async () => {
   bootWatching([QUEUE_WORKFLOW]);
   host.postAnswer = { status: 200, body: JSON.stringify({ message: 'sail unwatch: done' }) };
@@ -2880,7 +2894,7 @@ test('an index that turns the open queue to watcher not running redraws main wit
   host.advance(100);
   expect(host.renders).toContain('main');
   expect(host.regions.main).toContain(
-    `<button class="btn" disabled title="no watcher is running for &#39;beta&#39;: sail watch ticket-to-pr first">poll</button>`,
+    `<button class="btn" disabled>poll</button><span class="act-why">no watcher is running for &#39;beta&#39;: sail watch ticket-to-pr first</span>`,
   );
   expect(host.regions.main).toContain('<span class="pill p-skip">watcher not running</span>');
   expect([page.ui.itemMenu, dialogTitle(), host.posts]).toEqual([undefined, undefined, []]);

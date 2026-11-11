@@ -62,8 +62,7 @@ export function regions(store: Store): Record<Region, () => string> {
         }
         const menuItem = panel.items.find((item) => item.dedupKey === ui.itemMenu);
         if (unwatched || menuItem === undefined || !hasItemActions(panel, menuItem)) delete ui.itemMenu;
-        const repoOffers = store.index?.find((repo) => repo.name === panel.repo)?.offers;
-        return renderQueue(panel, store.queues.get(ui.queue ?? '')?.stream, ui, host.now(), repoOffers).value;
+        return renderQueue(panel, store.queues.get(ui.queue ?? '')?.stream, ui, host.now()).value;
       }
       if (store.run === undefined) return html`<div class="qempty">no run selected</div>`.value;
       const error = store.run.error === undefined ? '' : html`<div class="code bad">${store.run.error}</div>`;

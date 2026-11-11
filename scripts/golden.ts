@@ -329,15 +329,20 @@ export async function renderDashboardViews(outDir: string): Promise<string[]> {
     const queue = queueId('beta', QUEUE_WORKFLOW);
     const panel = queuePanels(repos).find((each) => queueId(each.repo, each.workflow) === queue);
     if (panel === undefined) throw new Error(`beta has no ${QUEUE_WORKFLOW} queue`);
-    // The queue view's header carries its workflow's Watch or Unwatch, from the repository's offers.
-    const betaOffers = repos.find((each) => each.name === 'beta')?.offers;
-    views['queue.html'] = renderQueue(panel, stream, { ...selected, queue }, VIEWS_NOW, betaOffers);
+    // The queue view's header carries its poll and its workflow's Watch or Unwatch, from the repository's offers: the
+    // watched variant is the one the server gives while the workflow's watcher runs.
+    views['queue.html'] = renderQueue(panel, stream, { ...selected, queue }, VIEWS_NOW);
+    const on = { enabled: true };
     views['queue-watched.html'] = renderQueue(
-      { ...panel, watch: { state: 'watched' } },
+      {
+        ...panel,
+        watch: { state: 'watched' },
+        ...(panel.offers === undefined ? {} : { offers: { ...panel.offers, poll: on } }),
+        repoOffers: { watch: on, unwatch: on, workflows: { [panel.workflow]: { unwatch: on } } },
+      },
       stream,
       { ...selected, queue },
       VIEWS_NOW,
-      betaOffers,
     );
     for (const [name, [repo, dir]] of Object.entries(runDirs)) {
       const runId = runIdOf[name as keyof typeof runIdOf];
