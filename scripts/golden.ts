@@ -435,6 +435,12 @@ export async function renderDashboardViews(outDir: string): Promise<string[]> {
           ),
         });
       }
+      // The dialog a suspend and hold opens. It reads no offer, so the run's own id will do.
+      if (name === 'fake-3') {
+        const view = actionOf('suspend-run')?.dialog?.({ kind: 'run', repo, runId }, {}, { run: {}, index: [] });
+        if (view === undefined) throw new Error('suspend-run has no dialog');
+        views['dialog-suspend.html'] = renderDialog(view);
+      }
     }
     // One toast of each kind: a success, one with an Undo, and a refusal.
     views['toasts.html'] = renderToasts([

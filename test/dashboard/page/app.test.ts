@@ -2460,6 +2460,45 @@ test('the run menu offers stop and stop now as two buttons; Stop now opens its o
   await settle();
   expect(host.posts).toEqual([{ path: `${FAKE_3_PATH}/stop`, body: { now: true } }]);
 });
+test('Suspend and hold opens its dialog and posts nothing; its confirm posts { now: false, suspend: true }, shows suspending… meanwhile, toasts the answer and reads the run again', async () => {
+  writeFileSync(join(m.beta.runDir, 'STATUS'), 'running\n');
+  await openOffering('beta', FAKE_3_ID, m.beta.runDir);
+  expect(buttons(host.regions.list).filter(([, action]) => action === 'suspend-run')).toEqual([
+    ['suspend and hold', 'suspend-run', ''],
+  ]);
+  host.click({ action: 'suspend-run' });
+  host.advance(100);
+  expect([host.posts, dialogTitle(), dialogLines(), dialogVerb()]).toEqual([
+    [],
+    `suspend and hold ${FAKE_3_ID}`,
+    [
+      'ends its running call now',
+      'the run is suspended and held: it keeps its workspace and its branch, and the watcher leaves it until Resume',
+      'unlike stop, the run does not fail',
+    ],
+    'suspend and hold',
+  ]);
+  const message = `run ${FAKE_3_ID} suspends now, held until sail resume ${FAKE_3_ID} (pid 7)`;
+  host.postAnswer = { status: 202, body: JSON.stringify({ message }) };
+  host.click({ action: 'dialog-confirm' });
+  host.advance(100);
+  expect(host.regions.list).toContain('<span class="busy">suspending…</span>');
+  await settle();
+  host.advance(100);
+  expect(host.posts).toEqual([{ path: `${FAKE_3_PATH}/stop`, body: { now: false, suspend: true } }]);
+  expect(toasts()).toEqual([`ok suspend and hold ${FAKE_3_ID}: ${message}`]);
+  expect(host.actionReads.filter((path) => path === `${FAKE_3_PATH}/actions`).length).toBeGreaterThan(1);
+});
+test('a refused suspend and hold toasts the server words', async () => {
+  writeFileSync(join(m.beta.runDir, 'STATUS'), 'running\n');
+  await openOffering('beta', FAKE_3_ID, m.beta.runDir);
+  host.click({ action: 'suspend-run' });
+  host.postAnswer = { status: 409, body: JSON.stringify({ error: 'run X is still starting' }) };
+  host.click({ action: 'dialog-confirm' });
+  await settle();
+  host.advance(100);
+  expect(toasts()).toEqual([`bad suspend and hold ${FAKE_3_ID}: run X is still starting`]);
+});
 test('the dispatch of the removed stop-now action does nothing', async () => {
   settleQueue();
   await openOffering('beta', FAKE_3_ID, m.beta.runDir);
