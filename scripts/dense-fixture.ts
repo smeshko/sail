@@ -15,23 +15,30 @@ const BASE_SPAN_MS = 6200;
 
 export type Ending = 'running' | 'suspended' | 'failed' | 'completed' | 'unreadable';
 
-/** The clones, and the endings of the runs each holds, newest first. */
-export const DENSE: Record<string, { prefix: string; endings: Ending[] }> = {
+/**
+ * The clones, and the endings of the runs each holds, newest first. Every ticket is a `FAKE-<n>`, the key the leak check
+ * lets through, and each clone has its thousand: `FAKE-<base + 1>` on for its runs, `FAKE-<base + 201>` on for its
+ * queued tickets and `FAKE-<base + 901>` for its finished queue item, clear of the other fixtures' `FAKE-<n>` below 1000.
+ */
+export const DENSE: Record<string, { base: number; endings: Ending[] }> = {
   atlas: {
-    prefix: 'ATL',
+    base: 1000,
     endings: ['running', 'suspended', 'failed', 'failed', ...Array<Ending>(6).fill('completed')],
   },
   borealis: {
-    prefix: 'BOR',
+    base: 2000,
     endings: ['running', 'suspended', 'unreadable', 'failed', 'failed', ...Array<Ending>(5).fill('completed')],
   },
-  cirrus: { prefix: 'CIR', endings: ['running', 'failed', 'failed', ...Array<Ending>(6).fill('completed')] },
+  cirrus: { base: 3000, endings: ['running', 'failed', 'failed', ...Array<Ending>(6).fill('completed')] },
   delta: {
-    prefix: 'DEL',
+    base: 4000,
     endings: ['running', 'suspended', 'failed', 'failed', ...Array<Ending>(5).fill('completed')],
   },
-  ember: { prefix: 'EMB', endings: ['failed', ...Array<Ending>(5).fill('completed')] },
+  ember: { base: 5000, endings: ['failed', ...Array<Ending>(5).fill('completed')] },
 };
+
+/** A clone's ticket key: the `n`th of its thousand. */
+const keyOf = (repo: string, n: number) => `FAKE-${(DENSE[repo]?.base ?? 0) + n}`;
 
 const TITLES = [
   'Retry the fetch helper on a 503',
@@ -71,10 +78,10 @@ const iso = (ms: number) => new Date(ms).toISOString();
 export function planRuns(): Plan[] {
   const plans: Plan[] = [];
   let n = 0;
-  for (const [repo, { prefix, endings }] of Object.entries(DENSE)) {
-    for (const ending of endings) {
+  for (const [repo, { endings }] of Object.entries(DENSE)) {
+    for (const [at, ending] of endings.entries()) {
       const i = n++;
-      const key = `${prefix}-${100 + i}`;
+      const key = keyOf(repo, at + 1);
       const startedAt = Date.parse('2026-10-01T11:40:00.000Z') - i * 23 * 60_000;
       plans.push({
         repo,
@@ -101,11 +108,17 @@ export function planRuns(): Plan[] {
 
 const read = (file: string) => readFileSync(join(BASE, file), 'utf8');
 
+const BASE_TITLE_JSON = JSON.stringify(BASE_TITLE).slice(1, -1);
+const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** The base run's id, title and key, matched in one pass, so a new key that starts `FAKE-3` is never renamed again. */
+const BASE_NAMES = new RegExp(`${literal(BASE_ID)}|${literal(BASE_TITLE_JSON)}|FAKE-3(?!\\d)`, 'g');
+
 /** `text` with the base run's id, key, title and workflow changed to the plan's. */
 function rename(text: string, plan: Plan): string {
   const title = JSON.stringify(plan.title).slice(1, -1);
-  const baseTitle = JSON.stringify(BASE_TITLE).slice(1, -1);
-  const renamed = text.replaceAll(BASE_ID, plan.runId).replaceAll(baseTitle, title).replaceAll('FAKE-3', plan.key);
+  const renamed = text.replace(BASE_NAMES, (name) =>
+    name === BASE_ID ? plan.runId : name === BASE_TITLE_JSON ? title : plan.key,
+  );
   return plan.workflow === 'ticket-to-pr' ? renamed : renamed.replaceAll('ticket-to-pr', plan.workflow);
 }
 
@@ -178,7 +191,7 @@ function statusOf(plan: Plan): string {
 }
 
 /** A queue of `workflow` in a clone: its items, polled at the given time. */
-function queueOf(workflow: string, plans: Plan[], waiting: string[], polledAt: string) {
+function queueOf(workflow: string, plans: Plan[], waiting: string[], done: string, polledAt: string) {
   const dispatched = plans.find((plan) => plan.ending === 'running');
   const item = (key: string, title: string, state: string, extra: Record<string, unknown> = {}) => ({
     dedupKey: `ticket:${key}`,
@@ -195,7 +208,7 @@ function queueOf(workflow: string, plans: Plan[], waiting: string[], polledAt: s
     ...(dispatched === undefined
       ? []
       : [item(dispatched.key, dispatched.title, 'dispatched', { runId: dispatched.runId })]),
-    item('OLD-1', 'Keep the changelog in step with the releases', 'done', { finishedAt: '2026-10-01T10:58:00.000Z' }),
+    item(done, 'Keep the changelog in step with the releases', 'done', { finishedAt: '2026-10-01T10:58:00.000Z' }),
   ];
   const queue = {
     version: 1,
@@ -259,15 +272,16 @@ export function writeDenseFixture(outDir: string): string[] {
     put(`${dir}/events.ndjson`, eventsOf(plan));
     put(`${dir}/journal.ndjson`, rename(read('journal.ndjson'), plan));
   }
-  const queues: [repo: string, workflow: string, waiting: string[]][] = [
-    ['atlas', 'ticket-to-pr', ['ATL-201', 'ATL-202']],
-    ['cirrus', 'review', []],
+  const queues: [repo: string, workflow: string, waiting: number][] = [
+    ['atlas', 'ticket-to-pr', 2],
+    ['cirrus', 'review', 0],
   ];
   for (const [repo, workflow, waiting] of queues) {
     const files = queueOf(
       workflow,
       plans.filter((plan) => plan.repo === repo),
-      waiting,
+      Array.from({ length: waiting }, (_, at) => keyOf(repo, 201 + at)),
+      keyOf(repo, 901),
       '2026-10-01T11:55:00.000Z',
     );
     for (const [name, text] of Object.entries(files)) put(`${repo}/queue/${workflow}/${name}`, text);

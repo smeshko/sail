@@ -9,52 +9,52 @@
   },
   "items": [
     {
-      "dedupKey": "ticket:ATL-201",
+      "dedupKey": "ticket:FAKE-1201",
       "source": {
         "kind": "ticket",
-        "ticketKey": "ATL-201"
+        "ticketKey": "FAKE-1201"
       },
       "title": "Add a --json flag to every listing command",
-      "url": "fake://tickets/ATL-201",
+      "url": "fake://tickets/FAKE-1201",
       "state": "queued",
       "attempts": 0,
       "addedAt": "2026-10-01T10:50:00.000Z",
       "priority": "high"
     },
     {
-      "dedupKey": "ticket:ATL-202",
+      "dedupKey": "ticket:FAKE-1202",
       "source": {
         "kind": "ticket",
-        "ticketKey": "ATL-202"
+        "ticketKey": "FAKE-1202"
       },
       "title": "Fix the off-by-one in the pagination of the run list",
-      "url": "fake://tickets/ATL-202",
+      "url": "fake://tickets/FAKE-1202",
       "state": "queued",
       "attempts": 0,
       "addedAt": "2026-10-01T10:50:00.000Z",
       "priority": "high"
     },
     {
-      "dedupKey": "ticket:ATL-100",
+      "dedupKey": "ticket:FAKE-1001",
       "source": {
         "kind": "ticket",
-        "ticketKey": "ATL-100"
+        "ticketKey": "FAKE-1001"
       },
       "title": "Retry the fetch helper on a 503",
-      "url": "fake://tickets/ATL-100",
+      "url": "fake://tickets/FAKE-1001",
       "state": "dispatched",
       "attempts": 1,
       "addedAt": "2026-10-01T10:50:00.000Z",
-      "runId": "ATL-100-01M7D000DENSE0000000000000"
+      "runId": "FAKE-1001-01M7D000DENSE0000000000000"
     },
     {
-      "dedupKey": "ticket:OLD-1",
+      "dedupKey": "ticket:FAKE-1901",
       "source": {
         "kind": "ticket",
-        "ticketKey": "OLD-1"
+        "ticketKey": "FAKE-1901"
       },
       "title": "Keep the changelog in step with the releases",
-      "url": "fake://tickets/OLD-1",
+      "url": "fake://tickets/FAKE-1901",
       "state": "done",
       "attempts": 1,
       "addedAt": "2026-10-01T10:50:00.000Z",

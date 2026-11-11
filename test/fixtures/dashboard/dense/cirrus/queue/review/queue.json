@@ -9,26 +9,26 @@
   },
   "items": [
     {
-      "dedupKey": "ticket:CIR-120",
+      "dedupKey": "ticket:FAKE-3001",
       "source": {
         "kind": "ticket",
-        "ticketKey": "CIR-120"
+        "ticketKey": "FAKE-3001"
       },
       "title": "Show the stop reason beside a failed run",
-      "url": "fake://tickets/CIR-120",
+      "url": "fake://tickets/FAKE-3001",
       "state": "dispatched",
       "attempts": 1,
       "addedAt": "2026-10-01T10:50:00.000Z",
-      "runId": "CIR-120-01M7D020DENSE0000000000000"
+      "runId": "FAKE-3001-01M7D020DENSE0000000000000"
     },
     {
-      "dedupKey": "ticket:OLD-1",
+      "dedupKey": "ticket:FAKE-3901",
       "source": {
         "kind": "ticket",
-        "ticketKey": "OLD-1"
+        "ticketKey": "FAKE-3901"
       },
       "title": "Keep the changelog in step with the releases",
-      "url": "fake://tickets/OLD-1",
+      "url": "fake://tickets/FAKE-3901",
       "state": "done",
       "attempts": 1,
       "addedAt": "2026-10-01T10:50:00.000Z",

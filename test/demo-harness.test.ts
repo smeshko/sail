@@ -432,7 +432,7 @@ test('new --clone registers a clone under the demo, with the folder as its .sail
     expect({
       code,
       printed: stdout.split('\n').filter((line) => line.startsWith('demo: registered')),
-      runs: readdirSync(join(dir, 'clones', 'atlas', '.sail-runs')).filter((name) => name.startsWith('ATL-')).length,
+      runs: readdirSync(join(dir, 'clones', 'atlas', '.sail-runs')).filter((name) => name.startsWith('FAKE-1')).length,
       queue: existsSync(join(dir, 'clones', 'atlas', '.sail-runs', 'queue', 'ticket-to-pr', 'queue.json')),
       entry: { ...entry, updatedAt: typeof entry.updatedAt },
       sailDir: existsSync(entry.sailDir),
