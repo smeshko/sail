@@ -3318,3 +3318,82 @@ test('poll every queue posts one poll for each queue that offers it enabled, and
   host.click({ action: 'menu-run', row: '0' });
   expect(host.posts).toEqual([]);
 });
+
+// A right-click on a row opens its subject group in place (ADW-520).
+test('a right-click on a row opens its subject group in place: its head, its offered actions, no field, no go to, no general group', async () => {
+  bootIndexed();
+  host.point('hover', FAKE_2_ROW);
+  expect(host.point('context', ITEM_6, { x: 300, y: 140 })).toBe(true);
+  await settle();
+  host.advance(100);
+  expect(menuHead()).toBe('item ticket:FAKE-6');
+  expect(menuLabels()).toEqual(['requeue', 'drop']);
+  expect(cmdk()).toContain('class="cmdk ctx"');
+  expect(cmdk()).toContain('style="left:300px;top:140px"');
+  expect(cmdk()).not.toContain('<input');
+  expect(cmdk()).not.toContain('cmdk-grp');
+  expect(host.menuFocuses).toBe(1);
+});
+
+test('the row right-clicked is the subject while another is open, and Enter on drop opens the dialog for the item', async () => {
+  page = boot(host);
+  firstIndex(GOLDEN_RUN_ID);
+  host.advance(100);
+  host.point('context', ITEM_6, { x: 0, y: 0 });
+  host.advance(100);
+  host.press('ArrowDown');
+  host.advance(100);
+  expect(menuSel()).toBe('drop');
+  host.press('Enter');
+  host.advance(100);
+  expect([dialogTitle(), host.posts, cmdk()]).toEqual(['drop ticket:FAKE-6', [], '']);
+  host.press('Enter');
+  expect(host.posts).toEqual([{ path: `${QUEUE_PATH}/drop`, body: { dedupKey: 'ticket:FAKE-6' } }]);
+});
+
+test('a right-click off every row is the browser’s: nothing opens and it is not taken', () => {
+  bootIndexed();
+  expect(host.point('context', undefined)).toBe(false);
+  expect(host.point('context', { repo: 'beta' })).toBe(false);
+  host.advance(100);
+  expect(cmdk()).toBe('');
+});
+
+test('a right-click while the confirmation dialog is open is the browser’s, and a context menu closes on Escape or the backdrop', async () => {
+  bootIndexed();
+  host.point('context', ITEM_6, { x: 0, y: 0 });
+  host.advance(100);
+  host.press('Escape');
+  host.advance(100);
+  expect(cmdk()).toBe('');
+  host.point('context', ITEM_6, { x: 0, y: 0 });
+  host.click({ action: 'menu-close' });
+  host.advance(100);
+  expect(cmdk()).toBe('');
+  settleQueue();
+  await menuOn(FAKE_3_ROW);
+  typeIn('stop');
+  enter();
+  enter();
+  expect(dialogTitle()).toBe(`stop ${FAKE_3_ID}`);
+  expect(host.point('context', ITEM_6)).toBe(false);
+});
+
+test('a context menu asks a typed step in its own field, and Escape steps back to the subject group before it closes', async () => {
+  settleQueue();
+  bootIndexed();
+  host.point('context', FAKE_3_ROW, { x: 10, y: 10 });
+  await settle();
+  host.advance(100);
+  expect(menuSel()).toBe('resume');
+  host.press('Enter');
+  host.advance(100);
+  expect(stepLabel()).toBe('raise $');
+  expect(cmdk()).toContain('<input class="cmdk-in" name="menu-query" type="number"');
+  host.press('Escape', true);
+  host.advance(100);
+  expect([stepLabel(), menuLabels()]).toEqual([undefined, ['resume', 'stop']]);
+  host.press('Escape', true);
+  host.advance(100);
+  expect(cmdk()).toBe('');
+});

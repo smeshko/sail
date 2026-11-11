@@ -407,6 +407,12 @@ export function browserHost(win: BrowserWindow): PageHost {
       doc.addEventListener('mouseover', (event) => {
         handler('hover', subjectData(event.target), { x: event.clientX ?? 0, y: event.clientY ?? 0 });
       });
+      // A right-click on a row is the page's, and its default is prevented only when the handler took it: one on no row
+      // keeps the browser's own menu.
+      doc.addEventListener('contextmenu', (event) => {
+        const point = { x: event.clientX ?? 0, y: event.clientY ?? 0 };
+        if (handler('context', subjectData(event.target), point) === true) event.preventDefault?.();
+      });
     },
     onInput(handler) {
       doc.addEventListener('input', (event) => {

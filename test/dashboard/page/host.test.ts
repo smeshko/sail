@@ -1122,3 +1122,27 @@ test('an input event reaches the handler with the field name and value, and focu
   host.focusMenu();
   expect(focused).toEqual(['field', 'box']);
 });
+
+test('a contextmenu on a row reaches the handler with its data and point, and is prevented only when handled', () => {
+  const fake = fakeWindow();
+  const host = browserHost(fake.win);
+  const seen: [string, Record<string, string> | undefined, { x: number; y: number }][] = [];
+  let take = true;
+  host.onPoint((kind, data, point) => {
+    seen.push([kind, data, point]);
+    return kind === 'context' && take;
+  });
+  let prevented = 0;
+  const row = element({ dataset: { subject: 'item', repo: 'beta', item: 'ticket:FAKE-5' } });
+  const child = element({ parentElement: row });
+  fake.fire('contextmenu', { target: child, clientX: 40, clientY: 50, preventDefault: () => prevented++ });
+  take = false;
+  fake.fire('contextmenu', { target: child, clientX: 1, clientY: 2, preventDefault: () => prevented++ });
+  fake.fire('contextmenu', { target: element(), preventDefault: () => prevented++ });
+  expect(seen).toEqual([
+    ['context', { subject: 'item', repo: 'beta', item: 'ticket:FAKE-5' }, { x: 40, y: 50 }],
+    ['context', { subject: 'item', repo: 'beta', item: 'ticket:FAKE-5' }, { x: 1, y: 2 }],
+    ['context', undefined, { x: 0, y: 0 }],
+  ]);
+  expect(prevented).toBe(1);
+});
