@@ -5,7 +5,7 @@
 // needs attention, the drawer and the timeline, then the selection and, last, the open run or queue, which gives the
 // list the centre. `/` focuses the list's filter field, `1`, `2` and `3` open Active, Queues and History, and `i` pins the
 // inspector open or unpins it, and `a` toggles needs attention. A key typed in an input does nothing but, for Escape, take the focus off.
-import { actions, closeAttention, shutNav, step } from './actions';
+import { actions, closeAttention, shutSidebar, step } from './actions';
 import { listRepos } from './index-model';
 import { entries, filterRows, groupsOf, type ListRow, VIEWS } from './list-model';
 import { syncUrl } from './location';
@@ -64,7 +64,7 @@ export const keys: Record<string, (store: Store) => void> = {
   // from a timeline, keeping the selection; from the cards, no selection; last, the run or queue itself.
   Escape: (store) => {
     const { ui } = store;
-    if (ui.nav) shutNav(store);
+    if (ui.sidebar) shutSidebar(store);
     else if (ui.runMenu !== undefined) {
       delete ui.runMenu;
       store.mark('list', 'main');
@@ -110,7 +110,7 @@ export function onKey(store: Store, key: string, inInput: boolean, on?: string):
   }
   const by = MOVES[key];
   // A key that does something shuts the folded sidebar, as a click does; Escape's own rule shuts it first.
-  if (key !== 'Escape' && (by !== undefined || keys[key] !== undefined)) shutNav(store);
+  if (key !== 'Escape' && (by !== undefined || keys[key] !== undefined)) shutSidebar(store);
   if (by === undefined) {
     keys[key]?.(store);
     syncUrl(store, true);

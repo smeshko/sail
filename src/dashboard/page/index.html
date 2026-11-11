@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-theme="dark" data-inspector="closed" data-pinned="false" data-detail="closed" data-nav="closed">
+<html lang="en" data-theme="dark" data-inspector="closed" data-pinned="false" data-detail="closed" data-sidebar="closed">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -197,7 +197,7 @@
         border-radius: 5px;
         background: linear-gradient(135deg, #4c8dff, #34d399);
       }
-      .nav-btn,
+      .sidebar-btn,
       .back,
       .ins-close {
         display: none;
@@ -1913,7 +1913,7 @@
         .side {
           display: none;
         }
-        :root[data-nav="open"] .side {
+        :root[data-sidebar="open"] .side {
           display: block;
           position: fixed;
           top: 46px;
@@ -1927,7 +1927,7 @@
         :root[data-detail="open"] .list {
           display: none;
         }
-        .nav-btn {
+        .sidebar-btn {
           display: inline-flex;
         }
         :root[data-detail="open"] .back {
@@ -1948,7 +1948,7 @@
   <body>
     <div class="shell">
       <header class="top">
-        <button class="btn nav-btn" type="button" data-action="toggle-nav" aria-label="navigation" title="navigation">☰</button>
+        <button class="btn sidebar-btn" type="button" data-action="toggle-sidebar" aria-label="sidebar" title="sidebar">☰</button>
         <div class="brand"><i></i><span class="brand-t">sail dashboard</span></div>
         <div class="spacer"></div>
         <div id="attention"></div>

@@ -63,7 +63,7 @@ export interface UiState {
   /** Whether the inspector is pinned open: it opens with a selected card without it. */
   pinned: boolean;
   /** Whether the folded sidebar (under 800px) is open over the page. */
-  nav: boolean;
+  sidebar: boolean;
   /** The card under the keyboard's cursor, by its place in the run view. */
   cursor: number;
   /** Whether the log and the timeline follow their tail. */
@@ -94,7 +94,7 @@ export function initialUi(tz: number): UiState {
     queueEvents: false,
     theme: 'dark',
     pinned: false,
-    nav: false,
+    sidebar: false,
     cursor: 0,
     follow: false,
     tz,

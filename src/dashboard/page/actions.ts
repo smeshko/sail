@@ -39,10 +39,10 @@ export function closeAttention(store: Store) {
 }
 
 /** Shuts the folded sidebar, when it is open. */
-export function shutNav(store: Store) {
-  if (!store.ui.nav) return;
-  store.ui.nav = false;
-  store.host.setNav(false);
+export function shutSidebar(store: Store) {
+  if (!store.ui.sidebar) return;
+  store.ui.sidebar = false;
+  store.host.setSidebar(false);
 }
 
 export const actions: Record<string, Action> = {
@@ -203,9 +203,9 @@ export const actions: Record<string, Action> = {
     if (store.ui.key !== undefined) selectCard(store, undefined);
     store.mark('inspector');
   },
-  'toggle-nav': (store) => {
-    store.ui.nav = !store.ui.nav;
-    store.host.setNav(store.ui.nav);
+  'toggle-sidebar': (store) => {
+    store.ui.sidebar = !store.ui.sidebar;
+    store.host.setSidebar(store.ui.sidebar);
   },
   'toggle-theme': (store) => {
     store.ui.theme = THEMES[(THEMES.indexOf(store.ui.theme) + 1) % THEMES.length] ?? 'dark';
@@ -256,8 +256,8 @@ export function dispatch(store: Store, action: string, data: Record<string, stri
   const shutsRun = ui.runMenu !== undefined && !runAction && action !== 'run-menu' && !dialogClick;
   // The folded sidebar shuts on any action but its own button. A view or a repository chosen in it closes the open run
   // or queue, which hides the list under 800px, so the choice shows.
-  if (ui.nav && (action === 'select-view' || action === 'filter-repo')) closeDetail(store);
-  if (action !== 'toggle-nav') shutNav(store);
+  if (ui.sidebar && (action === 'select-view' || action === 'filter-repo')) closeDetail(store);
+  if (action !== 'toggle-sidebar') shutSidebar(store);
   if (shuts) delete ui.itemMenu;
   if (shutsRun) delete ui.runMenu;
   if (shuts || shutsRun) store.mark('main', 'list');

@@ -231,9 +231,9 @@ class FakeHost implements PageHost {
     this.input?.(name, value);
   }
   /** What the host was told about the folded sidebar, in order. */
-  navs: boolean[] = [];
-  setNav(open: boolean) {
-    this.navs.push(open);
+  sidebars: boolean[] = [];
+  setSidebar(open: boolean) {
+    this.sidebars.push(open);
   }
   setInspector(open: boolean, pinned: boolean) {
     this.inspectors.push([open, pinned]);
@@ -948,21 +948,21 @@ test('the status bar is empty while a queue is open and describes the run again 
   expect(host.regions.status).toContain('calls <b>');
 });
 
-test('the navigation button opens the folded sidebar, and choosing a view or pressing Escape shuts it (ADW-528)', () => {
+test('the sidebar button opens the folded sidebar, and choosing a view or pressing Escape shuts it (ADW-528)', () => {
   page = boot(host);
   firstIndex();
-  host.click({ action: 'toggle-nav' });
-  expect(host.navs).toEqual([true]);
-  host.click({ action: 'toggle-nav' });
-  expect(host.navs).toEqual([true, false]);
-  host.click({ action: 'toggle-nav' });
+  host.click({ action: 'toggle-sidebar' });
+  expect(host.sidebars).toEqual([true]);
+  host.click({ action: 'toggle-sidebar' });
+  expect(host.sidebars).toEqual([true, false]);
+  host.click({ action: 'toggle-sidebar' });
   host.click({ action: 'select-view', view: 'history' });
-  expect([host.navs, page.ui.view]).toEqual([[true, false, true, false], 'history']);
+  expect([host.sidebars, page.ui.view]).toEqual([[true, false, true, false], 'history']);
   replay(host.open('run=')[0], GOLDEN());
   host.click({ action: 'select-run', repo: 'alpha', run: GOLDEN_RUN_ID });
-  host.click({ action: 'toggle-nav' });
+  host.click({ action: 'toggle-sidebar' });
   host.press('Escape');
-  expect(host.navs.slice(-2)).toEqual([true, false]);
+  expect(host.sidebars.slice(-2)).toEqual([true, false]);
   host.advance(100);
   expect(host.regions.main).not.toContain('no run selected');
   host.press('Escape');
@@ -973,15 +973,15 @@ test('the navigation button opens the folded sidebar, and choosing a view or pre
 test('a key that changes the list or moves its cursor shuts the open sidebar too (review R1) (ADW-528)', () => {
   page = boot(host);
   firstIndex();
-  host.click({ action: 'toggle-nav' });
+  host.click({ action: 'toggle-sidebar' });
   host.press('3');
-  expect([host.navs, page.ui.view]).toEqual([[true, false], 'history']);
-  host.click({ action: 'toggle-nav' });
+  expect([host.sidebars, page.ui.view]).toEqual([[true, false], 'history']);
+  host.click({ action: 'toggle-sidebar' });
   host.press('j');
-  expect(host.navs).toEqual([true, false, true, false]);
-  host.click({ action: 'toggle-nav' });
+  expect(host.sidebars).toEqual([true, false, true, false]);
+  host.click({ action: 'toggle-sidebar' });
   host.press('Escape');
-  expect(host.navs).toEqual([true, false, true, false, true, false]);
+  expect(host.sidebars).toEqual([true, false, true, false, true, false]);
 });
 
 test('a view or repository chosen in the open sidebar over an open run closes the run, so the list shows (review R3) (ADW-528)', () => {
@@ -991,12 +991,12 @@ test('a view or repository chosen in the open sidebar over an open run closes th
   host.click({ action: 'select-run', repo: 'alpha', run: GOLDEN_RUN_ID });
   host.advance(100);
   expect(host.regions.main).not.toContain('no run selected');
-  host.click({ action: 'toggle-nav' });
+  host.click({ action: 'toggle-sidebar' });
   host.click({ action: 'select-view', view: 'history' });
   host.advance(100);
   expect([page.ui.view, host.regions.main]).toEqual(['history', expect.stringContaining('no run selected')]);
   host.click({ action: 'select-queue', queue: `beta/${QUEUE_WORKFLOW}` });
-  host.click({ action: 'toggle-nav' });
+  host.click({ action: 'toggle-sidebar' });
   host.click({ action: 'filter-repo', repo: 'beta' });
   host.advance(100);
   expect([page.ui.repoFilter, page.ui.queue]).toEqual(['beta', undefined]);
