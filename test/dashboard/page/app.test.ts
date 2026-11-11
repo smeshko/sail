@@ -4,6 +4,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { takeLease } from '../../../src/adapters/leases';
 import { runActions } from '../../../src/dashboard/actions';
 import { callFile, findRepo, findRunDir, index } from '../../../src/dashboard/files';
 import { boot, CLEARED_KEY, FILTER_KEY, LIST_KEY, type Page, THEME_KEY } from '../../../src/dashboard/page/app';
@@ -1931,6 +1932,16 @@ async function openOffering(repo: string, runId: string, dir: string) {
   host.advance(100);
 }
 
+/** FAKE-3 read `running`, its branch leased by this live process, as a run its process still holds is. */
+const holdLive = () => {
+  writeFileSync(join(m.beta.runDir, 'STATUS'), 'running\n');
+  takeLease(join(m.root, 'leases'), 'fake://origin', 'sail/FAKE-3-escape-b-this-b-that', {
+    runId: FAKE_3_ID,
+    runDir: m.beta.runDir,
+    pid: process.pid,
+  });
+};
+
 /** The queue item of FAKE-3 as the watcher leaves it when it has let go: settled, so nothing holds the run. */
 const settleQueue = () => {
   const file = join(queueDirOf(m), 'queue.json');
@@ -2461,7 +2472,7 @@ test('the run menu offers stop and stop now as two buttons; Stop now opens its o
   expect(host.posts).toEqual([{ path: `${FAKE_3_PATH}/stop`, body: { now: true } }]);
 });
 test('Suspend and hold opens its dialog and posts nothing; its confirm posts { now: false, suspend: true }, shows suspending… meanwhile, toasts the answer and reads the run again', async () => {
-  writeFileSync(join(m.beta.runDir, 'STATUS'), 'running\n');
+  holdLive();
   await openOffering('beta', FAKE_3_ID, m.beta.runDir);
   expect(buttons(host.regions.list).filter(([, action]) => action === 'suspend-run')).toEqual([
     ['suspend and hold', 'suspend-run', ''],
@@ -2490,7 +2501,7 @@ test('Suspend and hold opens its dialog and posts nothing; its confirm posts { n
   expect(host.actionReads.filter((path) => path === `${FAKE_3_PATH}/actions`).length).toBeGreaterThan(1);
 });
 test('a refused suspend and hold toasts the server words', async () => {
-  writeFileSync(join(m.beta.runDir, 'STATUS'), 'running\n');
+  holdLive();
   await openOffering('beta', FAKE_3_ID, m.beta.runDir);
   host.click({ action: 'suspend-run' });
   host.postAnswer = { status: 409, body: JSON.stringify({ error: 'run X is still starting' }) };
