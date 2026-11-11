@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-theme="dark" data-inspector="open" data-detail="closed">
+<html lang="en" data-theme="dark" data-inspector="closed" data-pinned="false" data-detail="closed">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -887,6 +887,7 @@
         font-weight: 700;
         text-align: center;
       }
+      :root[data-pinned="true"] [data-action="toggle-inspector"],
       .att-btn.on {
         border-color: var(--err);
         color: var(--fg);
@@ -1877,7 +1878,7 @@
         <div id="attention"></div>
         <div id="link"></div>
         <button class="btn" type="button" data-action="toggle-theme" aria-label="switch theme" title="theme">◐</button>
-        <button class="btn" type="button" data-action="toggle-inspector" aria-label="toggle inspector" title="inspector (i)">⇥</button>
+        <button class="btn" type="button" data-action="toggle-inspector" aria-label="pin inspector" title="pin the inspector (i)">⇥</button>
       </header>
       <div class="body" id="body">
         <nav class="side">

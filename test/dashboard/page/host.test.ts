@@ -469,8 +469,10 @@ test("render writes a region by id, keys say whether they were typed in an input
     ['j', true],
   ]);
   host.setTheme('light');
-  host.setInspector(false);
-  expect(fake.root.dataset).toEqual({ theme: 'light', inspector: 'closed' });
+  host.setInspector(false, false);
+  expect(fake.root.dataset).toEqual({ theme: 'light', inspector: 'closed', pinned: 'false' });
+  host.setInspector(true, true);
+  expect(fake.root.dataset).toEqual({ theme: 'light', inspector: 'open', pinned: 'true' });
   expect([host.later(() => {}, 100), host.later(() => {}, 100), host.offset()]).toEqual([1, 2, 120]);
   host.cancel(2);
   expect(fake.cleared).toEqual([2]);

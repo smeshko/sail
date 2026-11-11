@@ -302,7 +302,7 @@ export function onIndex(store: Store, text: string, onStart: (asked: Record<stri
   }
   if (ui.queue !== undefined && openQueue(store) === undefined) delete ui.queue;
   syncUrl(store, false);
-  store.mark('sidebar', 'list', 'attention', 'main', 'status');
+  store.mark('sidebar', 'list', 'attention', 'main', 'inspector', 'status');
   tick(store);
 }
 

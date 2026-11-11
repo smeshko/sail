@@ -28,7 +28,7 @@ export function leaveQueue(store: Store) {
   const { ui } = store;
   if (ui.queue === undefined) return;
   delete ui.queue;
-  store.mark('list', 'main');
+  store.mark('list', 'main', 'inspector');
 }
 
 export function closeAttention(store: Store) {
@@ -48,7 +48,7 @@ export const actions: Record<string, Action> = {
     if (data.queue === undefined) return;
     reopenQueue(store, data.queue);
     store.ui.queue = data.queue;
-    store.mark('list', 'main');
+    store.mark('list', 'main', 'inspector');
   },
   'select-card': (store, data) => selectCard(store, data.key, undefined, true),
   open: (store, data) => {
@@ -186,8 +186,8 @@ export const actions: Record<string, Action> = {
     store.mark('attention');
   },
   'toggle-inspector': (store) => {
-    store.ui.inspector = !store.ui.inspector;
-    store.host.setInspector(store.ui.inspector);
+    store.ui.pinned = !store.ui.pinned;
+    store.mark('inspector');
   },
   'toggle-theme': (store) => {
     store.ui.theme = THEMES[(THEMES.indexOf(store.ui.theme) + 1) % THEMES.length] ?? 'dark';

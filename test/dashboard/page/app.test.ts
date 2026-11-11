@@ -53,7 +53,11 @@ class FakeHost implements PageHost {
   storage = new Map<string, string>();
   copied: string[] = [];
   theme = '';
-  inspector = true;
+  /** What the host was told about the inspector, in order: whether it is open and whether it is pinned. */
+  inspectors: [boolean, boolean][] = [];
+  get inspector() {
+    return this.inspectors.at(-1);
+  }
   /** The query the page's URL holds, as start() gives it. */
   startAt: Record<string, string> = {};
   clock = Date.parse('2026-10-01T12:00:00.000Z');
@@ -226,8 +230,8 @@ class FakeHost implements PageHost {
   type(name: string, value: string) {
     this.input?.(name, value);
   }
-  setInspector(open: boolean) {
-    this.inspector = open;
+  setInspector(open: boolean, pinned: boolean) {
+    this.inspectors.push([open, pinned]);
   }
   offset() {
     return 0;
@@ -843,7 +847,7 @@ test('a failed queue reopened before its old socket closes keeps one open socket
   expect(host.open('queue=')).toHaveLength(1);
 });
 
-test('keys move the cursor, Enter opens a timeline, ] and [ step it, Escape goes back to the cards then deselects, i toggles the inspector, and a key typed in an input does nothing', () => {
+test('keys move the cursor, Enter opens a timeline, ] and [ step it, Escape goes back to the cards then deselects, and a key typed in an input does nothing', () => {
   page = boot(host);
   firstIndex();
   replay(host.open('run=')[0], GOLDEN());
@@ -872,13 +876,56 @@ test('keys move the cursor, Enter opens a timeline, ] and [ step it, Escape goes
   expect(cursor()).toBe('implement#1');
   host.press('Escape');
   expect(page.ui.key).toBeUndefined();
-  host.press('i');
-  expect(host.inspector).toBe(false);
-  host.press('i');
-  expect(host.inspector).toBe(true);
   for (let i = 0; i < 20; i++) host.press('ArrowRight');
   host.advance(100);
   expect(cursor()).toBe('publish#1');
+});
+
+test('the inspector opens when a card is selected and closes when it is deselected (ADW-528)', () => {
+  page = boot(host);
+  firstIndex();
+  replay(host.open('run=')[0], GOLDEN());
+  host.advance(100);
+  expect(host.inspector).toEqual([false, false]);
+  host.click({ action: 'select-card', key: 'implement#1' });
+  host.advance(100);
+  expect(host.inspector).toEqual([true, false]);
+  host.press('Escape');
+  host.press('Escape');
+  host.advance(100);
+  expect(page.ui.key).toBeUndefined();
+  expect(host.inspector).toEqual([false, false]);
+});
+
+test('i pins the inspector open with no card selected, and i again unpins it (ADW-528)', () => {
+  page = boot(host);
+  firstIndex();
+  replay(host.open('run=')[0], GOLDEN());
+  host.advance(100);
+  host.press('i');
+  host.advance(100);
+  expect(host.inspector).toEqual([true, true]);
+  expect(host.regions.inspector).toContain('select a stage card');
+  host.press('i');
+  host.advance(100);
+  expect(host.inspector).toEqual([false, false]);
+});
+
+test('a queue open over a selected card closes the inspector, and a pinned one shows no card (ADW-528)', () => {
+  page = boot(host);
+  firstIndex();
+  replay(host.open('run=')[0], GOLDEN());
+  host.click({ action: 'select-card', key: 'implement#1' });
+  host.advance(100);
+  expect(host.inspector).toEqual([true, false]);
+  host.click({ action: 'select-queue', queue: `beta/${QUEUE_WORKFLOW}` });
+  host.advance(100);
+  expect(host.inspector).toEqual([false, false]);
+  host.press('i');
+  host.advance(100);
+  expect(host.inspector).toEqual([true, true]);
+  expect(host.regions.inspector).toContain('select a stage card');
+  expect(host.regions.inspector).not.toContain('implement#1');
 });
 
 test('a copy that took draws one ok toast reading what it copied, and 4,000 ms on it is gone', async () => {
@@ -2311,9 +2358,9 @@ test('Escape and the cancel button close the dialog and post nothing, and Enter 
 test('while the dialog is open, j, a and i change nothing', () => {
   openBetaQueue();
   host.click({ action: 'drop-item', ...BETA, item: 'ticket:FAKE-6' });
-  const before = [page?.ui.attention, page?.ui.inspector, page?.ui.cursor];
+  const before = [page?.ui.attention, page?.ui.pinned, page?.ui.cursor];
   for (const key of ['j', 'a', 'i']) host.press(key);
-  expect([page?.ui.attention, page?.ui.inspector, page?.ui.cursor]).toEqual(before);
+  expect([page?.ui.attention, page?.ui.pinned, page?.ui.cursor]).toEqual(before);
   expect(dialogTitle()).toBe('drop ticket:FAKE-6');
 });
 

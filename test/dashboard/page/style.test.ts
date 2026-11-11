@@ -92,9 +92,13 @@ test("a row's menu floats: .r-menu is absolute inside a relative .run (ADW-516)"
   expect(body('.r-menu')).toContain('top: 100%');
 });
 
+test('the page starts with the inspector closed and unpinned (ADW-528)', () => {
+  expect(html).toContain('data-inspector="closed" data-pinned="false"');
+});
+
 test('the theme and inspector buttons carry an aria-label beside their title (ADW-508)', () => {
   expect(html).toContain('data-action="toggle-theme" aria-label="switch theme" title="theme"');
-  expect(html).toContain('data-action="toggle-inspector" aria-label="toggle inspector" title="inspector (i)"');
+  expect(html).toContain('data-action="toggle-inspector" aria-label="pin inspector" title="pin the inspector (i)"');
 });
 
 test('--focus is at least 3:1 on every surface in each theme block (ADW-508)', () => {

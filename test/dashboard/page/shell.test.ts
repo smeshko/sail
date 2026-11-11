@@ -51,7 +51,7 @@ function fakeHost(stored: Record<string, string>) {
     load: (key: string) => stored[key],
     save: () => {},
     setTheme: () => {},
-    setInspector: () => {},
+    setInspector: (_open: boolean, _pinned: boolean) => {},
     setDetail: () => {},
     offset: () => 120,
     start: () => ({ run: 'r-1' }),

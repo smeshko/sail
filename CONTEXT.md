@@ -706,7 +706,7 @@ One call's events in order, drawn where the run view's cards were when a stage c
 _Avoid_: feed, activity, live log, stream (the event stream's word)
 
 **Inspector**:
-The dashboard's panel for one call, with its overview, files, permissions and log tabs. It explains a denial from the run's files alone: the command, the rule, and the step's permissions under it.
+The dashboard's panel for one call, with its overview, files, permissions and log tabs. It explains a denial from the run's files alone: the command, the rule, and the step's permissions under it. It opens when a stage card is selected and closes with it; `i` pins it open.
 _Avoid_: details pane, drawer
 
 **Needs attention**:

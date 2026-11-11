@@ -3,8 +3,8 @@
 // list's cursor over its entries (group headers and the rows of the groups not folded), `Enter` opens the row under it
 // or folds the group, and `.` opens the menu of the run under it. `Escape` shuts, in order, the run menu, the item menu,
 // needs attention, the drawer and the timeline, then the selection and, last, the open run or queue, which gives the
-// list the centre. `/` focuses the list's filter field, `1`, `2` and `3` open Active, Queues and History, and `i` and `a`
-// toggle the inspector and needs attention. A key typed in an input does nothing but, for Escape, take the focus off.
+// list the centre. `/` focuses the list's filter field, `1`, `2` and `3` open Active, Queues and History, and `i` pins the
+// inspector open or unpins it, and `a` toggles needs attention. A key typed in an input does nothing but, for Escape, take the focus off.
 import { actions, closeAttention, step } from './actions';
 import { listRepos } from './index-model';
 import { entries, filterRows, groupsOf, type ListRow, VIEWS } from './list-model';

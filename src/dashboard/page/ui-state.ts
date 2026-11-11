@@ -60,7 +60,8 @@ export interface UiState {
   /** The open run's ⋯ menu that is open, and where: under its list row, or in the run view's view header. One at a time. */
   runMenu?: { runId: string; at: 'row' | 'header' };
   theme: Theme;
-  inspector: boolean;
+  /** Whether the inspector is pinned open: it opens with a selected card without it. */
+  pinned: boolean;
   /** The card under the keyboard's cursor, by its place in the run view. */
   cursor: number;
   /** Whether the log and the timeline follow their tail. */
@@ -90,7 +91,7 @@ export function initialUi(tz: number): UiState {
     folded: [],
     queueEvents: false,
     theme: 'dark',
-    inspector: true,
+    pinned: false,
     cursor: 0,
     follow: false,
     tz,

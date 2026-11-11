@@ -66,6 +66,8 @@ export interface Store {
   revealList: boolean;
   /** Whether the host was last told a run or queue is open beside the list. */
   detail: boolean | undefined;
+  /** What the host was last told about the inspector: whether it is open and whether it is pinned. */
+  inspector: string | undefined;
   /** What the URL asks to open, until the first index: then it is opened, or dropped when its run isn't listed. */
   start: Record<string, string> | undefined;
   /** The query last written to the URL, `undefined` until one is. */
@@ -112,7 +114,6 @@ export function createStore(host: PageHost): Store {
   const asked = host.start().view;
   if ((VIEWS as readonly string[]).includes(asked ?? '')) ui.view = asked as ViewName;
   const cleared = new Set<string>(storedCleared(host));
-  host.setInspector(ui.inspector);
   const store: Store = {
     host,
     ui,
@@ -132,6 +133,7 @@ export function createStore(host: PageHost): Store {
     cursorPending: false,
     revealList: false,
     detail: undefined,
+    inspector: undefined,
     start: host.start(),
     url: undefined,
     stopped: false,
@@ -184,3 +186,12 @@ export const opened = (store: Store) => (store.ui.timeline ? selected(store) : u
 
 export const listed = (store: Store) =>
   store.index === undefined ? [] : attention(store.index).filter((item) => !store.cleared.has(identity(item)));
+
+/** The run the centre shows: the open run, unless a queue is open in its place. */
+export const centreRun = (store: Store) => (openQueue(store) === undefined ? store.run : undefined);
+
+/** The selected card, while the centre shows its run. */
+export const centreCard = (store: Store) => (centreRun(store) === undefined ? undefined : selected(store));
+
+/** Whether the inspector takes its room: it is pinned, or the centre shows a run with a selected card. */
+export const inspectorOpen = (store: Store) => store.ui.pinned || centreCard(store) !== undefined;
