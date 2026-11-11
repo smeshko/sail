@@ -19,11 +19,12 @@ import { stopReads } from './reads';
 import { saveCleared, storedCleared } from './saved';
 import { createStore } from './store';
 import { closeRun, openIndex, selectRun, stopStreams } from './streams';
+import { toast } from './toast';
 import type { UiState } from './ui-state';
 
 export { TICK_MS } from './draw';
 export { LOG_REFRESH_MS } from './reads';
-export { CLEARED_KEY, FILTER_KEY, RAIL_KEY, THEME_KEY } from './saved';
+export { CLEARED_KEY, FILTER_KEY, LIST_KEY, THEME_KEY } from './saved';
 export { FLUSH_MS } from './store';
 export { RECENT_EVENTS, RECONNECT_MS } from './streams';
 
@@ -51,11 +52,25 @@ export function boot(host: PageHost): Page {
       open: (repo, runId) => selectRun(store, repo, runId),
       leave: () => closeRun(store),
       took: () => store.fresh.add('main'),
+      toast: (kind, head, text, undo) => toast(store, kind, head, text, undo),
       local: {
         'clear-attention': () => {
-          store.cleared = new Set([...storedCleared(host), ...store.cleared, ...store.drawn]);
+          const before = new Set([...storedCleared(host), ...store.cleared]);
+          const added = new Set(store.drawn.filter((each) => !before.has(each)));
+          store.cleared = new Set([...before, ...store.drawn]);
           saveCleared(host, store.cleared);
           store.mark('attention');
+          if (added.size === 0) return undefined;
+          return {
+            text: `${added.size} hidden`,
+            // Undo lists the same items again: exactly the identities this click added leave the stored set, and an
+            // identity another tab saved since stays.
+            undo: () => {
+              store.cleared = new Set([...storedCleared(host), ...store.cleared].filter((each) => !added.has(each)));
+              saveCleared(host, store.cleared);
+              store.mark('attention');
+            },
+          };
         },
       },
     },
@@ -64,7 +79,10 @@ export function boot(host: PageHost): Page {
   });
   startDraw(store);
   host.onAction((action, data) => dispatch(store, action, data));
-  host.onKey((key, inInput) => onKey(store, key, inInput));
+  host.onKey((key, inInput, on) => onKey(store, key, inInput, on));
+  host.onInput((name, value) => {
+    if (name === 'list-filter') dispatch(store, 'list-filter', { value });
+  });
   openIndex(store, (asked) => actions.open?.(store, asked));
   store.mark(...REGIONS);
 
@@ -75,6 +93,7 @@ export function boot(host: PageHost): Page {
       stopStreams(store);
       if (store.flushTimer !== undefined) host.cancel(store.flushTimer);
       stopReads(store);
+      for (const timer of store.toastTimers.values()) host.cancel(timer);
       if (store.tickTimer !== undefined) host.cancel(store.tickTimer);
     },
   };

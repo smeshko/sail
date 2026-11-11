@@ -27,16 +27,21 @@ import { BUILTINS } from '../src/adapters/index';
 import { recordingHarness, writeJournalKeys } from '../src/adapters/recording';
 import { runActions } from '../src/dashboard/actions';
 import { findRepo, index } from '../src/dashboard/files';
+import { actionOf } from '../src/dashboard/page/action-registry';
 import { attention } from '../src/dashboard/page/attention';
 import { renderAttention } from '../src/dashboard/page/attention-view';
+import { renderDialog } from '../src/dashboard/page/dialog-view';
 import type { SafeHtml } from '../src/dashboard/page/html';
-import { pollKind, queuePanels, railRepos } from '../src/dashboard/page/index-model';
+import { listRepos, pollKind, queuePanels } from '../src/dashboard/page/index-model';
 import { renderInspector } from '../src/dashboard/page/inspector-view';
+import { viewCounts } from '../src/dashboard/page/list-model';
+import { renderList } from '../src/dashboard/page/list-view';
 import { queueId, renderQueue } from '../src/dashboard/page/queue-view';
-import { renderRail } from '../src/dashboard/page/rail-view';
 import { foldRun } from '../src/dashboard/page/run-model';
 import { renderRun, runControls } from '../src/dashboard/page/run-view';
+import { renderSidebar } from '../src/dashboard/page/sidebar-view';
 import { renderTimeline } from '../src/dashboard/page/timeline-view';
+import { renderToasts } from '../src/dashboard/page/toast-view';
 import { type InspectorTab, initialUi, type UiState } from '../src/dashboard/page/ui-state';
 import { resolveAdapters } from '../src/engine/adapters';
 import { type AdapterConfig, readConfig } from '../src/engine/config';
@@ -53,15 +58,18 @@ import {
   fakeClonePorts,
   QUEUE_WORKFLOW,
   queueDirOf,
+  seedDense,
   seedFixtures,
 } from '../test/helpers/dashboard';
 import { FAKE_4_ID } from '../test/helpers/review-fixture';
+import { writeDenseFixture } from './dense-fixture';
 
 const root = join(import.meta.dir, '..');
 const FIXTURE_SAIL = join(root, 'test', 'fixtures', 'repo', '.sail');
 const RUNS = join(root, 'test', 'fixtures', 'runs');
 const VIEWS = join(root, 'test', 'fixtures', 'terminal');
 const DASHBOARD_VIEWS = join(root, 'test', 'fixtures', 'dashboard', 'views');
+const DENSE_FIXTURE = join(root, 'test', 'fixtures', 'dashboard', 'dense');
 /** Recordings: the scripted run's, and each real set's. A set carries the `.sail/` it was recorded on, when it has one. */
 export const SESSIONS = join(root, 'test', 'fixtures', 'sessions');
 /** The golden run directory a recorded set plays back to, one folder per set. */
@@ -241,6 +249,31 @@ const VIEWS_TZ = 0;
  * Renders every view of the dashboard's recorded fixtures into `outDir`, as fragments, and gives the files written. The
  * machine is seeded afresh, and nothing absolute of it is ever rendered, so the views are the same on every machine.
  */
+/**
+ * The dense fixture's four views: the sidebar and the Active, History and Queues lists of five repositories and 44 runs.
+ * An unreadable run's problem names the machine's temp folder, which is shown as `<machine>`.
+ */
+function renderDenseViews(): Record<string, SafeHtml> {
+  const machine = seedDense();
+  try {
+    const repos = listRepos(index(machine.registryDir), VIEWS_NOW).map((repo) => ({
+      ...repo,
+      runs: repo.runs.map((run) =>
+        run.problem === undefined ? run : { ...run, problem: run.problem.replaceAll(machine.root, '<machine>') },
+      ),
+    }));
+    const ui: UiState = { ...initialUi(VIEWS_TZ) };
+    return {
+      'dense-sidebar.html': renderSidebar(repos, viewCounts(repos), 0, ui),
+      'dense-active.html': renderList('active', repos, ui, VIEWS_NOW),
+      'dense-history.html': renderList('history', repos, ui, VIEWS_NOW),
+      'dense-queues.html': renderList('queues', repos, ui, VIEWS_NOW),
+    };
+  } finally {
+    machine.remove();
+  }
+}
+
 export async function renderDashboardViews(outDir: string): Promise<string[]> {
   const machine = seedFixtures();
   try {
@@ -257,12 +290,11 @@ export async function renderDashboardViews(outDir: string): Promise<string[]> {
       repos.find((entry) => entry.name === repo)?.runs.find((run) => run.runId === runId)?.summary;
     const views: Record<string, SafeHtml> = {};
     const selected = ui({ repo: 'alpha', runId: GOLDEN_RUN_ID });
-    views['rail.html'] = renderRail(railRepos(repos, VIEWS_NOW), selected, VIEWS_NOW);
-    views['rail-repos.html'] = renderRail(
-      railRepos(repos, VIEWS_NOW),
-      { ...selected, expanded: ['alpha', 'beta'] },
-      VIEWS_NOW,
-    );
+    const listed = listRepos(repos, VIEWS_NOW);
+    views['sidebar.html'] = renderSidebar(listed, viewCounts(listed), attention(repos).length, selected);
+    views['list-active.html'] = renderList('active', listed, selected, VIEWS_NOW);
+    views['list-history.html'] = renderList('history', listed, selected, VIEWS_NOW);
+    views['list-queues.html'] = renderList('queues', listed, selected, VIEWS_NOW);
     const unreadable = repos.map((repo) =>
       repo.name === 'beta'
         ? {
@@ -290,23 +322,22 @@ export async function renderDashboardViews(outDir: string): Promise<string[]> {
           }
         : repo,
     );
-    views['rail-queue-problem.html'] = renderRail(
-      railRepos(unreadable, VIEWS_NOW),
-      { ...selected, expanded: ['alpha', 'beta'] },
-      VIEWS_NOW,
-    );
+    views['list-queues-problem.html'] = renderList('queues', listRepos(unreadable, VIEWS_NOW), selected, VIEWS_NOW);
     views['attention.html'] = renderAttention(attention(repos), true);
     const queueEvents = readEvents(queueDirOf(machine)) as unknown as QueueEvent[];
     const stream = { recent: queueEvents.slice(-20), polls: pollKind(queueEvents) };
     const queue = queueId('beta', QUEUE_WORKFLOW);
     const panel = queuePanels(repos).find((each) => queueId(each.repo, each.workflow) === queue);
     if (panel === undefined) throw new Error(`beta has no ${QUEUE_WORKFLOW} queue`);
-    views['queue.html'] = renderQueue(panel, stream, { ...selected, queue }, VIEWS_NOW);
+    // The queue view's header carries its workflow's Watch or Unwatch, from the repository's offers.
+    const betaOffers = repos.find((each) => each.name === 'beta')?.offers;
+    views['queue.html'] = renderQueue(panel, stream, { ...selected, queue }, VIEWS_NOW, betaOffers);
     views['queue-watched.html'] = renderQueue(
       { ...panel, watch: { state: 'watched' } },
       stream,
       { ...selected, queue },
       VIEWS_NOW,
+      betaOffers,
     );
     for (const [name, [repo, dir]] of Object.entries(runDirs)) {
       const runId = runIdOf[name as keyof typeof runIdOf];
@@ -320,12 +351,35 @@ export async function renderDashboardViews(outDir: string): Promise<string[]> {
           ? undefined
           : await runActions(entry, runId, { leasesDir, ports: fakeClonePorts(leasesDir) });
       views[`run-${name}.html`] = renderRun(model, summaryOf(repo, runId), ui({ repo, runId }), VIEWS_NOW);
-      // What a run offers shows in the rail, under its row, once its ⋯ is opened.
+      // What a run offers shows in the list, under its row, once its ⋯ is opened.
       if (offers !== undefined && runControls(offers, ui()) !== undefined) {
         const open = ui({ repo, runId, runMenu: runId });
-        views[`rail-menu-${name}.html`] = renderRail(railRepos(repos, VIEWS_NOW), open, VIEWS_NOW, offers);
+        const status = listed.find((each) => each.name === repo)?.runs.find((each) => each.runId === runId)?.status;
+        const view = status === 'failed' || status === 'completed' ? 'history' : 'active';
+        views[`list-menu-${name}.html`] = renderList(view, listed, open, VIEWS_NOW, offers);
+      }
+      // The dialog a clean of the failed run opens, built from its offers by the registry's own lines.
+      if (name === 'fake-2' && offers?.clean !== undefined) {
+        const subject = { kind: 'run', repo, runId } as const;
+        // The archive is where this machine would put the run directory, on today's date: the golden names a fixed one.
+        const archive = `~/.sail/failed-runs/2026-11-01/${runId}`;
+        const run = { ...offers, clean: { ...offers.clean, archive } };
+        const view = actionOf('clean-run')?.dialog?.(subject, {}, { run, index: [] });
+        if (view === undefined) throw new Error('clean-run has no dialog');
+        views['dialog-clean.html'] = renderDialog(view);
       }
     }
+    // One toast of each kind: a success, one with an Undo, and a refusal.
+    views['toasts.html'] = renderToasts([
+      { id: 1, kind: 'ok', head: `clean ${FAKE_2_ID}`, text: `cleaned ${FAKE_2_ID}` },
+      { id: 2, kind: 'ok', head: 'all clear', text: '4 hidden', undo: true },
+      {
+        id: 3,
+        kind: 'bad',
+        head: `poll beta / ${QUEUE_WORKFLOW}`,
+        text: "no watcher is running for 'beta': sail watch ticket-to-pr first",
+      },
+    ]);
     const inspectors: [name: string, run: keyof typeof runDirs, key: string, tab: InspectorTab][] = [
       ['inspector-fake-2-implement-1-permissions.html', 'fake-2', 'implement#1', 'permissions'],
       ['inspector-golden-implement-2-overview.html', 'golden', 'implement#2', 'overview'],
@@ -367,6 +421,7 @@ export async function renderDashboardViews(outDir: string): Promise<string[]> {
       const opened = card.timeline.flatMap((entry) => (entry.kind === 'tool' ? [entry.callId] : [])).slice(0, 3);
       views[file] = renderTimeline(card, ui({ key, timeline: true, opened }), VIEWS_NOW);
     }
+    Object.assign(views, renderDenseViews());
     mkdirSync(outDir, { recursive: true });
     return Object.entries(views).map(([file, view]) => {
       writeFileSync(join(outDir, file), `${view.value}\n`);
@@ -403,7 +458,9 @@ if (import.meta.main) {
     await playBack(set, played);
     for (const file of filesIn(played)) console.log(relative(root, join(played, file)));
   }
-  // Last, since a timeline is drawn from a played-back run.
+  // The dense fixture first, since its views are drawn from it; then, last, since a timeline is drawn from a played-back run.
+  rmSync(DENSE_FIXTURE, { recursive: true, force: true });
+  for (const file of writeDenseFixture(DENSE_FIXTURE)) console.log(relative(root, join(DENSE_FIXTURE, file)));
   rmSync(DASHBOARD_VIEWS, { recursive: true, force: true });
   for (const file of await renderDashboardViews(DASHBOARD_VIEWS))
     console.log(relative(root, join(DASHBOARD_VIEWS, file)));

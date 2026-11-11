@@ -27,9 +27,22 @@ test('the page builds into one document with exactly one script, inline, holding
   expect(script).toContain('X-Sail-Dashboard');
   expect(script).not.toMatch(/^\s*(import|export)\s/m);
   expect([script.includes('</script'), script.includes('<!--')]).toEqual([false, false]);
-  for (const region of ['rail', 'attention', 'main', 'inspector', 'status']) {
+  for (const region of ['sidebar', 'list', 'attention', 'main', 'inspector', 'status']) {
     expect(html).toContain(`id="${region}"`);
   }
+});
+
+test('the page has a modal dialog labelled by its title', async () => {
+  const html = await (await built).clone().text();
+  expect(html).toContain(
+    '<dialog id="dialog" class="dlg" role="dialog" aria-modal="true" aria-labelledby="dialog-title"></dialog>',
+  );
+  expect(html).not.toContain('.armed');
+});
+
+test('the page has a toasts region announced politely', async () => {
+  const html = await (await built).clone().text();
+  expect(html).toContain('<div id="toasts" class="toasts" aria-live="polite"></div>');
 });
 
 test('nothing in the page points outside it: no src, no href, and no @import or url() in its style', async () => {

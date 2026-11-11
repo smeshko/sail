@@ -1,10 +1,12 @@
 // What a person has chosen on the page, which every view reads: the open run, card and tab, whether the card's timeline
 // is open, which of its tool calls and which kinds of its entries it hides, the queue open in its place with its folded
-// sections, the rail's open sections and opened groups, whether needs attention is open, the theme, the offset their
-// clock is at, and the file open in the drawer. `act` is the one state of carrying an action out: the pending action on
-// its subject, the last result and the parameters typed. It holds nothing about the runs themselves.
+// sections, the list's view, filter, cursor and folded groups, whether needs attention is open, the theme, the offset their
+// clock is at, and the file open in the drawer. `act` is the one state of carrying an action out: the parameters typed. It
+// holds nothing about the runs themselves.
 
-import type { Subject } from './action-registry';
+import type { DialogView } from './dialog-view';
+import type { ViewName } from './list-model';
+import type { Toast } from './toasts';
 
 export const TABS = ['overview', 'files', 'permissions', 'log'] as const;
 export type InspectorTab = (typeof TABS)[number];
@@ -16,25 +18,8 @@ export type TimelineFilter = (typeof FILTERS)[number];
 export const THEMES = ['dark', 'light', 'system'] as const;
 export type Theme = (typeof THEMES)[number];
 
-/** Where an action's answer is shown: the run's menu, the queue's header, under a repository's header, or the rail's top. */
-export type ActPlace = 'run' | 'queue' | 'repo' | 'rail';
-
-/** An action's answer as shown: for what, and where. */
-export interface ShownResult {
-  id: string;
-  subject: Subject;
-  text: string;
-  place: ActPlace;
-}
-
-/**
- * Carrying an action out, for every action alike: the one pending, which a first click of a confirmed action arms
- * (`sent: false`) and a second sends (`sent: true`, until its answer), the last result of each place, for what, so one
- * place's answer leaves another's, and what was typed for each action's parameters, kept across a draw.
- */
+/** Carrying an action out, for every action alike: what was typed for each action's parameters, kept across a draw. */
 export interface ActState {
-  pending?: { id: string; subject: Subject; values: Record<string, string>; sent: boolean };
-  results: Partial<Record<ActPlace, ShownResult>>;
   drafts: Record<string, Record<string, string>>;
 }
 
@@ -58,10 +43,12 @@ export interface UiState {
   stream?: string;
   /** The step the log tab shows for a multi-step call, when one is chosen. */
   step?: string;
-  /** The rail's open sections, as `<repo>/<workflow>:completed`. */
-  open: string[];
-  /** The rail's opened repositories and workflows, as `<repo>` and `<repo>/<workflow>`: every one starts folded. */
-  expanded: string[];
+  /** The view the list shows, the repository it is narrowed to, what the filter field holds, the entry under the cursor (by id) and the folded groups (by id). */
+  view: ViewName;
+  repoFilter?: string;
+  listFilter: string;
+  listCursor?: string;
+  listFolded: string[];
   /** Whether the needs attention pane is open. */
   attention: boolean;
   /** The queue view's folded sections, as `<repo>/<workflow>:<state>`. */
@@ -70,7 +57,7 @@ export interface UiState {
   queueEvents: boolean;
   /** The item whose ⋯ menu is open, by dedup key. */
   itemMenu?: string;
-  /** The open run whose ⋯ menu is open in the rail, by run id. */
+  /** The open run whose ⋯ menu is open in the list, by run id. */
   runMenu?: string;
   theme: Theme;
   inspector: boolean;
@@ -80,8 +67,14 @@ export interface UiState {
   follow: boolean;
   /** The clock's offset east of UTC, in minutes: times are shown at it. */
   tz: number;
-  /** The action being carried out, the last result of each place and the parameters typed. */
+  /** The parameters typed for each action. */
   act: ActState;
+  /** The confirmation dialog open now, if any. */
+  dialog?: DialogView;
+  /** The toasts on the stack, oldest first. */
+  toasts: Toast[];
+  /** What a subject reads while a request for it is out, by the id `underwayId()` gives: `stopping…`. */
+  underway: Record<string, string>;
 }
 
 export function initialUi(tz: number): UiState {
@@ -90,8 +83,9 @@ export function initialUi(tz: number): UiState {
     timeline: false,
     opened: [],
     hidden: [],
-    open: [],
-    expanded: [],
+    view: 'active',
+    listFilter: '',
+    listFolded: [],
     attention: false,
     folded: [],
     queueEvents: false,
@@ -100,7 +94,9 @@ export function initialUi(tz: number): UiState {
     cursor: 0,
     follow: false,
     tz,
-    act: { results: {}, drafts: {} },
+    act: { drafts: {} },
+    toasts: [],
+    underway: {},
   };
 }
 

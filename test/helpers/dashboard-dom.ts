@@ -78,7 +78,8 @@ export function markupWindow() {
       removeEventListener: () => {},
       documentElement: { dataset: {} },
     },
-    location: { host: '127.0.0.1:0', search: '' },
+    location: { host: '127.0.0.1:0', pathname: '/', search: '' },
+    history: { replaceState() {} },
     fetch: async () => ({ status: 200, text: async () => '' }),
     WebSocket: class {
       onmessage = null;

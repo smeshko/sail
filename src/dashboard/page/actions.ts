@@ -1,13 +1,15 @@
 // What each view `data-action` does, as one function of the store apiece, and `dispatch()`, the delegated click's rule.
 // An action of the registry (`action-registry.ts`) is carried out by the actor (`act.ts`), which drops any confirmation
-// but its own; a click on anything else drops an armed one. An item's menu and a run's menu shut by the rules below. No
+// but its own. An item's menu and a run's menu shut by the rules below. No
 // action opens a socket: what needs one goes through `streams.ts`, and what posts goes through the actor.
 
 import { actionOf } from './action-registry';
+import { VIEWS, type ViewName } from './list-model';
 import { closeFile, openedOutputKeys, openFile, readLog, readOutput, selectCard } from './reads';
-import { FILTER_KEY, RAIL_KEY, THEME_KEY } from './saved';
+import { FILTER_KEY, LIST_KEY, THEME_KEY } from './saved';
 import type { Store } from './store';
-import { reopenQueue, selectRun } from './streams';
+import { closeDetail, reopenQueue, selectRun } from './streams';
+import { dismissToast, toast, undoToast } from './toast';
 import { FILTERS, type InspectorTab, TABS, THEMES, type TimelineFilter } from './ui-state';
 
 export type Action = (store: Store, data: Record<string, string>) => void;
@@ -25,7 +27,7 @@ export function leaveQueue(store: Store) {
   const { ui } = store;
   if (ui.queue === undefined) return;
   delete ui.queue;
-  store.mark('rail', 'main');
+  store.mark('list', 'main');
 }
 
 export function closeAttention(store: Store) {
@@ -38,7 +40,6 @@ export function closeAttention(store: Store) {
 export const actions: Record<string, Action> = {
   'select-run': (store, data) => {
     if (data.repo === undefined || data.run === undefined) return;
-    store.actor.clearResult('rail');
     leaveQueue(store);
     selectRun(store, data.repo, data.run);
   },
@@ -46,8 +47,7 @@ export const actions: Record<string, Action> = {
     if (data.queue === undefined) return;
     reopenQueue(store, data.queue);
     store.ui.queue = data.queue;
-    store.actor.clearResult('queue');
-    store.mark('rail', 'main');
+    store.mark('list', 'main');
   },
   'select-card': (store, data) => selectCard(store, data.key, undefined, true),
   open: (store, data) => {
@@ -112,31 +112,54 @@ export const actions: Record<string, Action> = {
     readLog(store);
     store.mark('inspector');
   },
-  'toggle-group': (store, data) => {
+  'select-view': (store, data) => {
+    if (!(VIEWS as readonly string[]).includes(data.view ?? '')) return;
+    store.ui.view = data.view as ViewName;
+    store.host.setParam('view', store.ui.view);
+    store.ui.listFilter = '';
+    delete store.ui.listCursor;
+    // The filter field gives up what was typed in it, so it reads as empty as the filter now is.
+    store.fresh.add('list');
+    store.mark('sidebar', 'list');
+  },
+  'filter-repo': (store, data) => {
+    if (data.repo === undefined) return;
+    if (store.ui.repoFilter === data.repo) delete store.ui.repoFilter;
+    else store.ui.repoFilter = data.repo;
+    store.mark('sidebar', 'list');
+  },
+  'toggle-list-group': (store, data) => {
     const group = data.group ?? '';
-    store.ui.expanded = store.ui.expanded.includes(group)
-      ? store.ui.expanded.filter((each) => each !== group)
-      : [...store.ui.expanded, group];
-    store.host.save(RAIL_KEY, JSON.stringify(store.ui.expanded));
-    store.mark('rail');
+    store.ui.listFolded = store.ui.listFolded.includes(group)
+      ? store.ui.listFolded.filter((each) => each !== group)
+      : [...store.ui.listFolded, group];
+    store.host.save(LIST_KEY, JSON.stringify(store.ui.listFolded));
+    store.mark('list');
+  },
+  'close-detail': (store) => closeDetail(store),
+  // What was typed in the list's filter field, which `onInput` delivers under the field's name.
+  'list-filter': (store, data) => {
+    store.ui.listFilter = data.value ?? '';
+    store.mark('list');
   },
   'item-menu': (store, data) => {
     if (store.ui.itemMenu === data.item || data.item === undefined) delete store.ui.itemMenu;
     else store.ui.itemMenu = data.item;
     store.mark('main');
   },
-  // Ticking Stop now redraws an armed Stop's confirmation, which names what it will do.
+  // Ticking Stop now only records the tick: the dialog reads it at the click.
   'stop-now': (store) => {
     store.ui.act.drafts['stop-run'] = {
       ...store.ui.act.drafts['stop-run'],
       now: store.host.value('now') === 'on' ? 'on' : '',
     };
-    store.mark('rail');
   },
   // A run's ⋯ opens it and its menu under its row; on the open menu's run, it shuts the menu.
   'run-menu': (store, data) => {
     const { repo, run: runId } = data;
     if (repo === undefined || runId === undefined) return;
+    // A dialog open for a run closes with nothing sent when its menu is toggled or another run's opened.
+    if (store.actor.dialogFor()?.kind === 'run') store.actor.cancel();
     if (
       store.ui.runMenu === runId &&
       store.ui.queue === undefined &&
@@ -144,13 +167,12 @@ export const actions: Record<string, Action> = {
       store.run.runId === runId
     ) {
       delete store.ui.runMenu;
-      store.actor.disarm();
-      store.mark('rail');
+      store.mark('list');
       return;
     }
     actions['select-run']?.(store, data);
     store.ui.runMenu = runId;
-    store.mark('rail');
+    store.mark('list');
   },
   'toggle-queue-events': (store) => {
     store.ui.queueEvents = !store.ui.queueEvents;
@@ -168,13 +190,6 @@ export const actions: Record<string, Action> = {
     store.ui.attention = !store.ui.attention;
     store.mark('attention');
   },
-  'toggle-section': (store, data) => {
-    const section = data.section ?? '';
-    store.ui.open = store.ui.open.includes(section)
-      ? store.ui.open.filter((open) => open !== section)
-      : [...store.ui.open, section];
-    store.mark('rail');
-  },
   'toggle-inspector': (store) => {
     store.ui.inspector = !store.ui.inspector;
     store.host.setInspector(store.ui.inspector);
@@ -189,27 +204,35 @@ export const actions: Record<string, Action> = {
     store.mark('main', 'inspector');
   },
   copy: (store, data) => {
-    if (data.text !== undefined) void store.host.copy(data.text);
+    const { text } = data;
+    if (text === undefined) return;
+    void store.host.copy(text).then((copied) => {
+      if (store.stopped) return;
+      if (copied) toast(store, 'ok', 'copy', `copied ${text}`);
+      else toast(store, 'bad', 'copy', 'the clipboard refused it');
+    });
   },
+  'dialog-confirm': (store) => store.actor.confirm(),
+  'dialog-cancel': (store) => store.actor.cancel(),
+  'dismiss-toast': (store, data) => dismissToast(store, Number(data.toast)),
+  'undo-toast': (store, data) => undoToast(store, Number(data.toast)),
 };
 
 export function dispatch(store: Store, action: string, data: Record<string, string>) {
   const { ui } = store;
   const def = actionOf(action);
-  // A registry action is carried out by the actor, which drops any confirmation but its own. A click on anything else
-  // drops it, and `stop-now` keeps it: ticking the box redraws an armed Stop. An item's menu shuts on any click but its
-  // ⋯, which toggles it, and the confirmed action of an item that arms. A run's menu shuts on any click but a run
-  // action and a run's ⋯, which handles its own.
+  // A registry action is carried out by the actor. An item's menu shuts on any click but its ⋯, which toggles it, an
+  // item's confirmed action, whose dialog opens over it, and the dialog's own buttons. A run's menu shuts on any click
+  // but a run action, a run's ⋯, which handles its own, and the dialog's buttons.
   const acts = def !== undefined;
   const runAction = action === 'stop-now' || (def?.appliesTo.includes('run') ?? false);
-  const arming =
-    def?.appliesTo.includes('item') === true && def.tier === 'confirmed' && !store.actor.armed(action, data);
-  const shuts = ui.itemMenu !== undefined && action !== 'item-menu' && !arming;
-  const shutsRun = ui.runMenu !== undefined && !runAction && action !== 'run-menu';
-  const disarmed = !acts && action !== 'stop-now' && store.actor.disarm();
+  const confirming = def?.appliesTo.includes('item') === true && def.tier === 'confirmed';
+  const dialogClick = action === 'dialog-confirm' || action === 'dialog-cancel';
+  const shuts = ui.itemMenu !== undefined && action !== 'item-menu' && !confirming && !dialogClick;
+  const shutsRun = ui.runMenu !== undefined && !runAction && action !== 'run-menu' && !dialogClick;
   if (shuts) delete ui.itemMenu;
   if (shutsRun) delete ui.runMenu;
-  if (disarmed || shuts || shutsRun) store.mark('main', 'rail');
+  if (shuts || shutsRun) store.mark('main', 'list');
   if (acts) store.actor.act(action, data);
   else actions[action]?.(store, data);
 }

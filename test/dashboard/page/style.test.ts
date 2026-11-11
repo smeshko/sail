@@ -134,3 +134,68 @@ test('no control class is given a height under 24px (ADW-508)', () => {
   }
   expect(small).toEqual([]);
 });
+
+/** The top-level rules of the stylesheet as [selector list, declarations]: an at-rule's body is read as one rule too. */
+const rulesOf = (): [string[], string][] =>
+  [...style.matchAll(/(?<=^|\})\s*(?:\/\*[\s\S]*?\*\/\s*)*([^{}@/][^{}]*?)\s*\{([^{}]*)\}/g)].map(
+    ([, selectors, body]) => [(selectors as string).split(',').map((each) => each.trim()), body as string],
+  );
+/** The declarations of every rule that has `selector` among its selectors, joined. */
+const declarationsOf = (selector: string): string =>
+  rulesOf()
+    .filter(([selectors]) => selectors.includes(selector))
+    .map(([, body]) => body)
+    .join('\n');
+
+test('the sidebar is 180px wide by default, and the list beside a run is 340px (ADW-522)', () => {
+  expect(declarationsOf('.body')).toContain('var(--side-w, 180px) 5px 1fr 5px var(--ins-w, 360px)');
+  expect(declarationsOf(':root[data-detail="open"] .body')).toContain(
+    'var(--side-w, 180px) 5px var(--list-w, 340px) 1fr 5px var(--ins-w, 360px)',
+  );
+  expect(declarationsOf(':root[data-detail="open"][data-inspector="closed"] .body')).toContain(
+    'var(--side-w, 180px) 5px var(--list-w, 340px) 1fr;',
+  );
+  expect(declarationsOf(':root:not([data-detail="open"]) .main')).toContain('display: none');
+});
+
+test('no sidebar or problem rule keeps its text on one line, so labels wrap rather than clip (ADW-522)', () => {
+  const wrapping = rulesOf().filter(([selectors]) =>
+    selectors.some((each) => /^\.(side\b|side-|r-problem|lgrp-p|r-menu|lgh \.nm)/.test(each)),
+  );
+  expect(wrapping.length).toBeGreaterThan(8);
+  for (const [selectors, body] of wrapping)
+    expect({ selectors, nowrap: /white-space:\s*nowrap/.test(body) }).toEqual({ selectors, nowrap: false });
+  expect(declarationsOf('.side-ent .nm')).toContain('overflow-wrap: anywhere');
+  expect(declarationsOf('.side-repo .nm')).toContain('overflow-wrap: anywhere');
+  expect(declarationsOf('.r-problem')).toContain('overflow-wrap: anywhere');
+});
+
+test('a counter in the sidebar shrinks before its name does (ADW-522)', () => {
+  expect(declarationsOf('.side-ent .c')).toContain('flex: 0 100 auto');
+  expect(declarationsOf('.side-ent .nm')).toContain('flex: 1 1 auto');
+});
+
+test("the list hides horizontal overflow, and a row's facts shrink before its title (ADW-522)", () => {
+  expect(declarationsOf('.list')).toContain('overflow-x: hidden');
+  expect(declarationsOf('.r-title')).toContain('flex: 1 1 0');
+  expect(declarationsOf('.r-wf')).toContain('flex: 0 4 auto');
+  expect(declarationsOf('.r-line')).toContain('white-space: nowrap');
+  expect(declarationsOf('.r-open')).toContain('min-width: 0');
+});
+
+test("beside the run view a row gives up its workflow and cost, and an armed action's label wraps inside its menu (ADW-522)", () => {
+  expect(declarationsOf(':root[data-detail="open"] .r-wf')).toContain('display: none');
+  expect(declarationsOf(':root[data-detail="open"] .r-cost')).toContain('display: none');
+  expect(declarationsOf('.r-menu .act button')).toContain('white-space: normal');
+  expect(declarationsOf('.r-menu')).toContain('overflow-wrap: anywhere');
+  expect(declarationsOf('.wf-act')).toContain('white-space: normal');
+});
+
+test('row, group and head heights are set once, in custom properties the fit test reads (ADW-522)', () => {
+  expect(declarationsOf(':root')).toMatch(/--row-h:\s*28px/);
+  expect(declarationsOf(':root')).toMatch(/--group-h:\s*28px/);
+  expect(declarationsOf(':root')).toMatch(/--list-head-h:\s*40px/);
+  expect(declarationsOf('.run')).toContain('min-height: var(--row-h)');
+  expect(declarationsOf('.lgh')).toContain('min-height: var(--group-h)');
+  expect(declarationsOf('.list-h')).toContain('min-height: var(--list-head-h)');
+});

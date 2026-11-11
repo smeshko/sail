@@ -7,7 +7,14 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { BrowserWindow, ElementLike, EventLike } from '../../src/dashboard/page/host';
 import { type Dashboard, startDashboard } from '../../src/dashboard/server';
-import { FAKE_2_ID, type Machine, seedFixtures } from '../helpers/dashboard';
+import {
+  betaWatcher,
+  FAKE_2_ID,
+  fakeClonePorts,
+  GOLDEN_RUN_ID,
+  type Machine,
+  seedFixtures,
+} from '../helpers/dashboard';
 
 let m: Machine | undefined;
 let server: Dashboard | undefined;
@@ -30,7 +37,7 @@ async function until(condition: () => boolean, ms = 8000): Promise<boolean> {
 }
 
 /** Boots the bundle `GET /` serves against a fake window on `dashboard`. Its regions, and a click. */
-async function bootHeadless(dashboard: Dashboard) {
+async function bootHeadless(dashboard: Dashboard, search = '') {
   const html = await (await fetch(dashboard.url)).text();
   const script = /<script type="module" id="sail-page">([\s\S]*)<\/script>/.exec(html)?.[1] ?? '';
   const ids = [...html.replace(/<script[\s\S]*<\/script>/, '').matchAll(/\sid="([^"]+)"/g)].map(([, id]) => id ?? '');
@@ -43,7 +50,9 @@ async function bootHeadless(dashboard: Dashboard) {
   const listeners: Record<string, ((event: EventLike) => void)[]> = {};
   const origin = `http://127.0.0.1:${dashboard.port}`;
   const sockets: WebSocket[] = [];
+  const posted: string[] = [];
   const timers = new Set<ReturnType<typeof setTimeout>>();
+  const urls: string[] = [];
   const win: BrowserWindow = {
     document: {
       getElementById: (id) => regions[id] ?? null,
@@ -53,8 +62,12 @@ async function bootHeadless(dashboard: Dashboard) {
       removeEventListener() {},
       documentElement: { dataset: {} },
     },
-    location: { host: `127.0.0.1:${dashboard.port}`, search: '' },
-    fetch: (path, init) => fetch(`${origin}${path}`, init),
+    location: { host: `127.0.0.1:${dashboard.port}`, pathname: '/', search },
+    history: { replaceState: (_state, _title, url) => void urls.push(url) },
+    fetch: (path, init) => {
+      if (init.method === 'POST') posted.push(path);
+      return fetch(`${origin}${path}`, init);
+    },
     // Bun's own WebSocket, with the Origin a browser would send.
     WebSocket: class extends WebSocket {
       constructor(url: string) {
@@ -86,50 +99,68 @@ async function bootHeadless(dashboard: Dashboard) {
       listener({ target: { innerHTML: '', dataset, parentElement: null } satisfies ElementLike });
     }
   };
-  return { ids, text, click };
+  return { ids, text, click, urls, posted };
 }
 
-test("the real bundle boots headless: both repositories, the golden run's eight cards and its $1.35, then FAKE-2's denial on the permissions tab", async () => {
+test("the real bundle boots headless: both repositories, the golden run's eight cards and its $1.35 once its row is clicked, then FAKE-2's denial on the permissions tab", async () => {
   m = seedFixtures();
   const started = startDashboard({ registryDir: m.registryDir, port: 0, followPollMs: 20, indexPollMs: 50 });
   if ('refused' in started) throw new Error(started.refused);
   server = started;
   const page = await bootHeadless(server);
-  expect(page.ids).toEqual(expect.arrayContaining(['rail', 'attention', 'main', 'inspector', 'status']));
+  expect(page.ids).toEqual(expect.arrayContaining(['sidebar', 'list', 'attention', 'main', 'inspector', 'status']));
   expect(page.ids).not.toContain('queues');
-  expect(await until(() => page.text('rail').includes('<span class="nm">beta</span>'))).toBe(true);
-  expect(page.text('rail')).toContain('<span class="nm">alpha</span>');
+  expect(await until(() => page.text('sidebar').includes('<span class="nm">beta</span>'))).toBe(true);
+  expect(page.text('sidebar')).toContain('<span class="nm">alpha</span>');
+  expect(page.text('main')).toContain('no run selected');
+  page.click({ action: 'select-view', view: 'history' });
+  expect(await until(() => page.text('list').includes(`data-run="${GOLDEN_RUN_ID}"`))).toBe(true);
+  page.click({ action: 'select-run', repo: 'alpha', run: GOLDEN_RUN_ID });
   expect(await until(() => (page.text('main').match(/data-action="select-card"/g) ?? []).length === 8)).toBe(true);
   expect(page.text('main')).toContain('<div class="stat"><b>$1.35</b><span>of $25.00 (5.4%)</span></div>');
   expect(page.text('attention')).toContain('<span class="badge">3</span>');
+  page.click({ action: 'select-view', view: 'queues' });
   page.click({ action: 'select-queue', queue: 'beta/ticket-to-pr' });
   expect(await until(() => page.text('main').includes('<span class="pill p-skip">watcher not running</span>'))).toBe(
     true,
   );
   expect(page.text('main')).toContain('<button class="btn" disabled');
-  expect(page.text('rail')).toContain('watcher not running');
+  expect(page.text('list')).toContain('watcher not running');
   page.click({ action: 'open', repo: 'alpha', run: FAKE_2_ID, key: 'implement#1', tab: 'permissions' });
   expect(await until(() => page.text('inspector').includes('<code>git push --force origin HEAD</code>'))).toBe(true);
   expect(page.text('inspector')).toContain('<dt>rule</dt><dd>commands</dd>');
   expect(page.text('main')).toContain(`<span class="d-agent">${FAKE_2_ID} · ticket-to-pr@1</span>`);
 }, 30_000);
 
-test("once beta's queue/ is gone, the next index drops its queue row and gives the centre back to the run", async () => {
+test("once beta's queue/ is gone, the next index drops its queue row and gives the centre back to the list", async () => {
   m = seedFixtures();
   const started = startDashboard({ registryDir: m.registryDir, port: 0, followPollMs: 20, indexPollMs: 50 });
   if ('refused' in started) throw new Error(started.refused);
   server = started;
   const page = await bootHeadless(server);
-  expect(await until(() => page.text('rail').includes('data-action="select-queue"'))).toBe(true);
+  page.click({ action: 'select-view', view: 'queues' });
+  expect(await until(() => page.text('list').includes('data-action="select-queue"'))).toBe(true);
   page.click({ action: 'select-queue', queue: 'beta/ticket-to-pr' });
   expect(await until(() => page.text('main').includes('beta / ticket-to-pr'))).toBe(true);
   rmSync(join(m.beta.clone, '.sail-runs', 'queue'), { recursive: true });
-  expect(await until(() => !page.text('rail').includes('select-queue'))).toBe(true);
-  expect(await until(() => (page.text('main').match(/data-action="select-card"/g) ?? []).length === 8)).toBe(true);
-  expect(page.text('rail')).toContain('<span class="nm">beta</span>');
+  expect(await until(() => !page.text('list').includes('select-queue'))).toBe(true);
+  expect(await until(() => page.text('main').includes('no run selected'))).toBe(true);
+  expect(page.text('sidebar')).toContain('<span class="nm">beta</span>');
 }, 30_000);
 
-test("a beta queue that can't be read is listed in the rail with its problem, and its row opens a queue view that shows it", async () => {
+test('the real bundle opens the view the URL names, and writes the view it is changed to (ADW-522)', async () => {
+  m = seedFixtures();
+  const started = startDashboard({ registryDir: m.registryDir, port: 0, followPollMs: 20, indexPollMs: 50 });
+  if ('refused' in started) throw new Error(started.refused);
+  server = started;
+  const page = await bootHeadless(server, '?view=history');
+  expect(await until(() => page.text('list').includes('<span class="lh-t">History</span>'))).toBe(true);
+  page.click({ action: 'select-view', view: 'queues' });
+  expect(await until(() => page.text('list').includes('<span class="lh-t">Queues</span>'))).toBe(true);
+  expect(page.urls).toEqual(['/?view=queues']);
+}, 30_000);
+
+test("a beta queue that can't be read is listed in the Queues view with its problem, and its row opens a queue view that shows it", async () => {
   m = seedFixtures();
   const broken = join(m.beta.clone, '.sail-runs', 'queue', 'broken');
   mkdirSync(broken, { recursive: true });
@@ -138,9 +169,82 @@ test("a beta queue that can't be read is listed in the rail with its problem, an
   if ('refused' in started) throw new Error(started.refused);
   server = started;
   const page = await bootHeadless(server);
-  expect(await until(() => page.text('rail').includes('beta › broken'))).toBe(true);
-  expect(page.text('rail')).toContain('<span class="n">unreadable</span>');
+  expect(await until(() => page.text('sidebar').includes('<span class="nm">beta</span>'))).toBe(true);
+  page.click({ action: 'select-view', view: 'queues' });
+  expect(await until(() => page.text('list').includes('beta › broken'))).toBe(true);
+  expect(page.text('list')).toContain('<span class="n">unreadable</span>');
   page.click({ action: 'select-queue', queue: 'beta/broken' });
   expect(await until(() => page.text('main').includes('broken queue'))).toBe(true);
   expect(page.text('main')).toContain('queue.json can&#39;t be read');
+}, 30_000);
+
+test('instant tier: on the real bundle and server, a move the watcher refuses draws a red toast quoting the refusal, with no dialog', async () => {
+  m = seedFixtures();
+  betaWatcher(m, { pid: process.pid, sailDir: m.beta.sailDir });
+  const started = startDashboard({ registryDir: m.registryDir, port: 0, followPollMs: 20, indexPollMs: 50 });
+  if ('refused' in started) throw new Error(started.refused);
+  server = started;
+  const page = await bootHeadless(server);
+  expect(page.ids).toEqual(expect.arrayContaining(['toasts']));
+  page.click({ action: 'select-view', view: 'queues' });
+  expect(await until(() => page.text('list').includes('data-action="select-queue"'))).toBe(true);
+  page.click({ action: 'select-queue', queue: 'beta/ticket-to-pr' });
+  expect(await until(() => page.text('main').includes('data-action="poll-queue"'))).toBe(true);
+  page.click({
+    action: 'move-item',
+    dir: 'down',
+    repo: 'beta',
+    workflow: 'ticket-to-pr',
+    key: 'ticket:FAKE-5',
+    target: 'ticket:FAKE-6',
+  });
+  expect(await until(() => page.text('toasts').includes('toast bad'))).toBe(true);
+  expect(page.text('toasts')).toContain('role="alert"');
+  expect(page.text('toasts')).toContain('ticket:FAKE-6 is parked: only a queued item is moved');
+  expect(page.text('dialog')).not.toContain('data-action="dialog-confirm"');
+}, 30_000);
+
+test('confirmed tier: on the real bundle and server, a click on FAKE-2 clean-run fills the dialog with a clean button, and no POST was made', async () => {
+  m = seedFixtures();
+  const leasesDir = join(m.root, 'leases');
+  const started = startDashboard({
+    registryDir: m.registryDir,
+    port: 0,
+    followPollMs: 20,
+    indexPollMs: 50,
+    leasesDir,
+    ports: fakeClonePorts(leasesDir),
+  });
+  if ('refused' in started) throw new Error(started.refused);
+  server = started;
+  const page = await bootHeadless(server);
+  expect(await until(() => page.text('sidebar').includes('<span class="nm">alpha</span>'))).toBe(true);
+  page.click({ action: 'select-view', view: 'history' });
+  expect(await until(() => page.text('list').includes(`data-run="${FAKE_2_ID}"`))).toBe(true);
+  page.click({ action: 'run-menu', repo: 'alpha', run: FAKE_2_ID });
+  expect(await until(() => page.text('list').includes('data-action="clean-run"'))).toBe(true);
+  page.click({ action: 'clean-run', repo: 'alpha', run: FAKE_2_ID });
+  expect(await until(() => page.text('dialog').includes('data-action="dialog-confirm"'))).toBe(true);
+  expect(page.text('dialog')).toContain(`<h2 id="dialog-title">clean ${FAKE_2_ID}</h2>`);
+  expect(page.text('dialog')).toContain('autofocus>clean</button>');
+  expect(page.text('list')).not.toContain('armed');
+  expect(page.posted).toEqual([]);
+}, 30_000);
+
+test('undoable tier: on the real bundle, clear-attention empties attention and draws an undo-toast button, and clicking it brings back the badge of 3', async () => {
+  m = seedFixtures();
+  const started = startDashboard({ registryDir: m.registryDir, port: 0, followPollMs: 20, indexPollMs: 50 });
+  if ('refused' in started) throw new Error(started.refused);
+  server = started;
+  const page = await bootHeadless(server);
+  expect(await until(() => page.text('attention').includes('<span class="badge">3</span>'))).toBe(true);
+  page.click({ action: 'clear-attention' });
+  expect(await until(() => page.text('toasts').includes('data-action="undo-toast"'))).toBe(true);
+  expect(page.text('attention')).not.toContain('<span class="badge">');
+  expect(page.text('toasts')).toContain('<span class="toast-head">all clear</span>');
+  const id = /data-action="undo-toast" data-toast="(\d+)"/.exec(page.text('toasts'))?.[1] ?? '';
+  page.click({ action: 'undo-toast', toast: id });
+  expect(await until(() => page.text('attention').includes('<span class="badge">3</span>'))).toBe(true);
+  expect(page.text('toasts')).not.toContain('toast ok');
+  expect(page.posted).toEqual([]);
 }, 30_000);

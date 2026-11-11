@@ -8,16 +8,23 @@
 //   new <dir> … --runs <folder>   with either form, seeds <dir>/repo/.sail-runs/ before the first commit; repeatable. A
 //                                  folder holding run.json is copied in under its runId, any other folder's entries
 //                                  as they are (a .sail-runs/ with its runs and queue/)
+//   new <dir> … --clone <name>=<folder>
+//                                  with any form, registers a second clone for the dashboard: <folder> is copied to
+//                                  <dir>/clones/<name>/.sail-runs/ beside a copy of the demo's .sail/, and a registry
+//                                  entry for it goes in the demo's SAIL_HOME; repeatable, one name once, a name of
+//                                  lower-case letters, digits and -, not first. Prints `demo: registered <name>` for each
 //   run <dir> sail [args…]         commits what changed in <dir>/repo, runs this checkout's sail there, prints what
 //                                  it printed and appends it to <dir>/transcript.txt; exits with sail's code. Only
 //                                  sail runs, so a stage allowed this harness runs nothing else through it
-//   dashboard <dir> <name> [repo=… run=… key=… tab=… steps=… live=…]
+//   dashboard <dir> <name> [repo=… run=… key=… tab=… width=… steps=… live=…]
 //                                  serves <dir>'s runs with this checkout's `sail dashboard`, opens it in headless
 //                                  Chrome on the run, call and tab named, writes what Chrome drew to <dir>/<name>.png
 //                                  and the page's DOM to <dir>/<name>.html, and stops the dashboard whatever happens.
 //                                  Each selection is a word of its own, not a query: a command gate reads a quoted
 //                                  `&` as a background job. Chrome is found where it installs, or named by
 //                                  SAIL_DEMO_CHROME
+//     width=<px>                   the window's width, a whole number from 800 to 2560 (1440 when left out); the
+//                                  height is 900, and the page is not told it
 //     steps=<file>                 a JSON list of steps run in order on one page load, each shot written to
 //                                  <name>-<shot>.png and .html: {"click": css}, {"scroll": css, "top": px},
 //                                  {"wait": css} (up to 20s) or {"wait": ms}, and {"shot": name}. The transcript
@@ -132,6 +139,23 @@ function planRuns(folders) {
   });
 }
 
+/** The clones `--clone` names, checked: a name the registry schema takes (lower-case letters, digits and -, not first), once, and a folder that exists. */
+function planClones(specs) {
+  const seen = new Set();
+  return specs.map((spec) => {
+    const at = spec.indexOf('=');
+    const name = at < 0 ? spec : spec.slice(0, at);
+    const folder = at < 0 ? '' : resolve(spec.slice(at + 1));
+    if (at < 0 || !/^[a-z0-9][a-z0-9-]*$/.test(name))
+      refuse(`--clone ${spec}: a clone is <name>=<folder>, its name lower-case letters, digits and -, not first`);
+    if (seen.has(name)) refuse(`--clone ${name} is given twice`);
+    seen.add(name);
+    if (!existsSync(folder) || !statSync(folder).isDirectory())
+      refuse(`--clone ${name}=${folder}: ${folder} is no folder`);
+    return { name, folder };
+  });
+}
+
 /** Makes every file under `path` writable, as a copy of a read-only fixture must be; a link and what it points to stay. */
 function makeWritable(path) {
   const stat = lstatSync(path);
@@ -142,10 +166,11 @@ function makeWritable(path) {
   } else chmodSync(path, 0o644);
 }
 
-function create(dir, from, own, runs) {
+function create(dir, from, own, runs, clones) {
   if (existsSync(join(dir, 'repo'))) refuse(`${join(dir, 'repo')} exists already`);
   if (!own) checkFake(from, `${from} holds no project.yaml`);
   const seeds = planRuns(runs);
+  const registered = planClones(clones);
   mkdirSync(join(dir, 'repo'), { recursive: true });
   mkdirSync(join(dir, 'home'), { recursive: true });
   git(dir, 'init', '--quiet', '-b', 'main');
@@ -166,6 +191,25 @@ function create(dir, from, own, runs) {
   }
   git(dir, 'add', '-A');
   git(dir, 'commit', '--quiet', '-m', 'demo repository');
+  // A clone beside the demo repository, whose runs the dashboard lists once its registry entry is in SAIL_HOME.
+  const watchers = join(envOf(dir).SAIL_HOME, 'watchers');
+  for (const { name, folder } of registered) {
+    const clone = join(dir, 'clones', name);
+    cpSync(folder, join(clone, '.sail-runs'), { recursive: true });
+    cpSync(join(dir, 'repo', '.sail'), join(clone, '.sail'), { recursive: true });
+    makeWritable(clone);
+    mkdirSync(watchers, { recursive: true });
+    const entry = {
+      schema: 'sail.registry.v1',
+      name,
+      remote: `https://example.com/${name}.git`,
+      clone,
+      sailDir: join(clone, '.sail'),
+      updatedAt: '2026-10-14T09:00:00.000Z',
+    };
+    writeFileSync(join(watchers, `${name}.json`), `${JSON.stringify(entry)}\n`);
+    console.log(`demo: registered ${name}`);
+  }
   console.log(`demo: ${join(dir, 'repo')} holds ${from}, every port on fake; its HOME is ${join(dir, 'home')}`);
 }
 
@@ -297,7 +341,7 @@ async function settle(session, lenient, seconds = CAPTURE_SECONDS) {
  * taken at load would show the page empty, since it draws from its sockets. A page that keeps changing fails the
  * capture, unless `lenient`: a live run's page may never settle, and the steps carry on after CAPTURE_SECONDS.
  */
-async function openPage(browser, profile, page, lenient) {
+async function openPage(browser, profile, page, lenient, width) {
   // Chrome writes the port it picked, then the browser's path, to DevToolsActivePort in its profile: a file left by
   // an earlier capture would name a port no one listens on.
   const portFile = join(profile, 'DevToolsActivePort');
@@ -308,7 +352,7 @@ async function openPage(browser, profile, page, lenient) {
       '--headless=new',
       '--remote-debugging-port=0',
       `--user-data-dir=${profile}`,
-      '--window-size=1440,900',
+      `--window-size=${width},900`,
       '--hide-scrollbars',
       '--no-first-run',
       '--no-default-browser-check',
@@ -488,7 +532,7 @@ async function startLive(dir, key) {
   }
 }
 
-async function capture(dir, name, query, stepsFile, steps, live) {
+async function capture(dir, name, query, stepsFile, steps, live, width) {
   checkFake(join(dir, 'repo', '.sail'), `${dir} holds no demo repository: run \`demo.sh new ${dir}\` first`);
   if (!/^[\w-]+$/.test(name)) refuse(`a capture's name is letters, digits, - and _, not ${name}`);
   const browser = findChrome();
@@ -533,7 +577,7 @@ async function capture(dir, name, query, stepsFile, steps, live) {
     let work;
     try {
       const opened = await Promise.race([
-        openPage(browser, join(dir, 'chrome'), page, steps !== undefined),
+        openPage(browser, join(dir, 'chrome'), page, steps !== undefined, width),
         new Promise((_, fail) =>
           setTimeout(() => fail(new Error(`no capture in ${TIMEOUT_SECONDS}s`)), TIMEOUT_SECONDS * 1000).unref(),
         ),
@@ -580,41 +624,49 @@ async function capture(dir, name, query, stepsFile, steps, live) {
 const [command, target, ...rest] = process.argv.slice(2);
 if (target === undefined)
   refuse(
-    'usage: demo.sh new <dir> [--from <sail-dir> | --own] [--runs <folder>]… | run <dir> sail [args…] | dashboard <dir> <name> [<k>=<v>…]',
+    'usage: demo.sh new <dir> [--from <sail-dir> | --own] [--runs <folder>]… [--clone <name>=<folder>]… | run <dir> sail [args…] | dashboard <dir> <name> [<k>=<v>…]',
   );
 const dir = resolve(target);
 if (command === 'new') {
-  const usage = 'usage: demo.sh new <dir> [--from <sail-dir> | --own] [--runs <folder>]…';
+  const usage = 'usage: demo.sh new <dir> [--from <sail-dir> | --own] [--runs <folder>]… [--clone <name>=<folder>]…';
   let own = false;
   let from;
   const runs = [];
+  const clones = [];
   for (let at = 0; at < rest.length; at++) {
     if (rest[at] === '--own' && !own && from === undefined) own = true;
     else if (rest[at] === '--from' && !own && from === undefined && rest[at + 1] !== undefined) from = rest[++at];
     else if (rest[at] === '--runs' && rest[at + 1] !== undefined) runs.push(resolve(rest[++at]));
+    else if (rest[at] === '--clone' && rest[at + 1] !== undefined) clones.push(rest[++at]);
     else refuse(usage);
   }
-  create(dir, own ? join(root, '.sail') : resolve(from ?? FIXTURE_SAIL), own, runs);
+  create(dir, own ? join(root, '.sail') : resolve(from ?? FIXTURE_SAIL), own, runs, clones);
 } else if (command === 'run') {
   if (rest[0] !== 'sail') refuse('usage: demo.sh run <dir> sail [args…]: only sail runs here');
   await runIn(dir, rest);
 } else if (command === 'dashboard') {
   const [name, ...picks] = rest;
-  if (name === undefined) refuse('usage: demo.sh dashboard <dir> <name> [repo=… run=… key=… tab=… steps=… live=…]');
+  if (name === undefined)
+    refuse('usage: demo.sh dashboard <dir> <name> [repo=… run=… key=… tab=… width=… steps=… live=…]');
   const query = new URLSearchParams();
   let stepsFile;
   let live;
+  let width = 1440;
   for (const pick of picks) {
-    const [, field, value] = /^(repo|run|key|tab|steps|live)=(.+)$/.exec(pick) ?? [];
-    if (field === undefined) refuse(`${pick} picks nothing: repo=, run=, key=, tab=, steps= or live=`);
-    if (field === 'steps') stepsFile = resolve(value);
+    const [, field, value] = /^(repo|run|key|tab|width|steps|live)=(.+)$/.exec(pick) ?? [];
+    if (field === undefined) refuse(`${pick} picks nothing: repo=, run=, key=, tab=, width=, steps= or live=`);
+    if (field === 'width') {
+      if (!/^\d+$/.test(value) || Number(value) < 800 || Number(value) > 2560)
+        refuse(`width= takes a whole number of pixels from 800 to 2560, not ${value}`);
+      width = Number(value);
+    } else if (field === 'steps') stepsFile = resolve(value);
     else if (field === 'live') {
       if (!/^[A-Z][A-Z0-9]*-\d+$/.test(value)) refuse(`live= takes a ticket key such as FAKE-1, not ${value}`);
       live = value;
     } else query.set(field, value);
   }
   const steps = stepsFile === undefined ? undefined : readSteps(stepsFile);
-  process.exit(await capture(dir, name, query, stepsFile, steps, live));
+  process.exit(await capture(dir, name, query, stepsFile, steps, live, width));
 } else {
   refuse(`no command ${command}: new, run or dashboard`);
 }

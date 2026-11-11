@@ -7,7 +7,7 @@ import type { IndexRepo } from '../../../src/dashboard/files';
 import { type Actor, createActor, inertActor } from '../../../src/dashboard/page/act';
 import type { ActionDef, OfferSource } from '../../../src/dashboard/page/action-registry';
 import { ACTIONS } from '../../../src/dashboard/page/action-registry';
-import { actionControl, resultOf } from '../../../src/dashboard/page/action-view';
+import { actionControl } from '../../../src/dashboard/page/action-view';
 import { initialUi } from '../../../src/dashboard/page/ui-state';
 
 const on = { enabled: true };
@@ -18,6 +18,9 @@ interface Rig {
   posts: { path: string; body: unknown }[];
   fields: Record<string, string>;
   effects: string[];
+  toasts: string[];
+  undos: (() => void)[];
+  dialogs: string[];
   marks: string[][];
   answer(status: number, body: unknown): Promise<void>;
   open: { repo: string; runId: string } | undefined;
@@ -34,6 +37,9 @@ function rig(run?: RunActions, index: IndexRepo[] = []): Rig {
     posts: [] as Rig['posts'],
     fields: {} as Record<string, string>,
     effects: [] as string[],
+    toasts: [] as string[],
+    undos: [] as (() => void)[],
+    dialogs: [] as string[],
     marks: [] as string[][],
     open: { repo: 'alpha', runId: 'R1' } as Rig['open'],
     stopped: false,
@@ -47,6 +53,8 @@ function rig(run?: RunActions, index: IndexRepo[] = []): Rig {
         return new Promise((resolve) => waiting.push(resolve));
       },
       value: (name) => state.fields[name],
+      openDialog: (html) => state.dialogs.push(html),
+      closeDialog: () => state.dialogs.push('closed'),
     },
     ui: state.ui,
     source: () => ({ run: state.run, index }),
@@ -56,7 +64,16 @@ function rig(run?: RunActions, index: IndexRepo[] = []): Rig {
       open: (repo, runId) => state.effects.push(`open ${repo}/${runId}`),
       leave: () => state.effects.push('leave'),
       took: () => state.effects.push('took'),
-      local: { 'clear-attention': () => state.effects.push('cleared') },
+      toast: (kind, head, text, undo) => {
+        state.toasts.push(`${kind} ${head}: ${text}${undo === undefined ? '' : ' (undo)'}`);
+        if (undo !== undefined) state.undos.push(undo);
+      },
+      local: {
+        'clear-attention': () => {
+          state.effects.push('cleared');
+          return { text: '3 hidden', undo: () => state.effects.push('uncleared') };
+        },
+      },
     },
     mark: (...regions) => state.marks.push(regions),
     stopped: () => state.stopped,
@@ -89,128 +106,150 @@ const RESTART = {
   resume: { ...on, spentUsd: 1, budget: { maxUsd: 2 }, raise: 'usd' },
 } as unknown as RunActions;
 
-test('a first click on Restart arms it, a second with another stage chosen arms again, and one with the same stage posts it and opens the run the answer names', async () => {
+const R1 = { kind: 'run', repo: 'alpha', runId: 'R1' } as const;
+
+test('a first click on Restart opens a dialog naming the chosen stage and the budget and posts nothing; confirm posts { stage } and opens the run the answer names', async () => {
   const r = rig(RESTART);
   r.fields.stage = 'spec';
   r.actor.act('restart-run', {});
-  expect([r.posts, r.ui.act.pending]).toEqual([
+  expect([r.posts, r.ui.dialog, r.actor.dialogFor()]).toEqual([
     [],
-    { id: 'restart-run', subject: { kind: 'run', repo: 'alpha', runId: 'R1' }, values: { stage: 'spec' }, sent: false },
+    {
+      title: 'restart R1',
+      lines: ['runs again: s', 'budget $10.00', 'starts a new run seeded from R1'],
+      verb: 'restart',
+    },
+    R1,
   ]);
-  r.fields.stage = 'tests';
-  r.actor.act('restart-run', {});
-  expect([r.posts, r.ui.act.pending?.values, r.ui.act.pending?.sent]).toEqual([[], { stage: 'tests' }, false]);
-  r.actor.act('restart-run', {});
-  expect(r.posts).toEqual([{ path: '/api/repos/alpha/runs/R1/restart', body: { stage: 'tests' } }]);
-  expect([r.ui.act.pending?.sent, r.ui.act.results.run?.text]).toEqual([true, 'restarting R1…']);
+  r.actor.confirm();
+  expect(r.posts).toEqual([{ path: '/api/repos/alpha/runs/R1/restart', body: { stage: 'spec' } }]);
+  expect(r.ui.underway).toEqual({ 'run:alpha/R1': 'restarting…' });
   await r.answer(202, { runId: 'NEW' });
-  expect([r.effects, r.ui.act.pending, r.ui.act.results.run]).toEqual([['open alpha/NEW'], undefined, undefined]);
+  expect([r.effects, r.ui.underway, r.toasts]).toEqual([['open alpha/NEW'], {}, ['ok restart R1: started NEW']]);
 });
 
-test('a Resume that needs a raise with none typed says so and stays unarmed, and with a number typed arms and posts the raise and reopens the run', async () => {
+test('a Resume that needs a raise with none typed is a red toast and opens no dialog; with 5 typed its dialog reads raises the budget by $5.00, and its confirm posts the raise and reopens the run', async () => {
   const r = rig(RESTART);
   r.actor.act('resume-run', {});
-  expect([r.posts, r.ui.act.pending, r.ui.act.results.run?.text]).toEqual([
+  expect([r.posts, r.ui.dialog, r.dialogs, r.toasts]).toEqual([
     [],
     undefined,
-    'give the dollars to raise the budget by: at least 0.01',
+    [],
+    ['bad resume R1: give the dollars to raise the budget by: at least 0.01'],
   ]);
   r.fields.raise = '5';
   r.actor.act('resume-run', {});
-  expect([r.posts, r.ui.act.pending?.sent, r.ui.act.results.run]).toEqual([[], false, undefined]);
-  r.actor.act('resume-run', {});
+  expect([r.posts, r.ui.dialog]).toEqual([
+    [],
+    { title: 'resume R1', lines: ['spent $1.00 of $2.00', 'raises the budget by $5.00'], verb: 'resume' },
+  ]);
+  r.actor.confirm();
   expect(r.posts).toEqual([{ path: '/api/repos/alpha/runs/R1/resume', body: { raise: { usd: 5 } } }]);
   await r.answer(200, {});
-  expect([r.effects, r.ui.act.results.run]).toEqual([['reopen alpha/R1'], undefined]);
+  expect([r.effects, r.toasts.at(-1)]).toEqual([['reopen alpha/R1'], 'ok resume R1: resumed']);
 });
 
-test('a refused resume shows the refusal and performs no effect', async () => {
+test('a resume of minutes says the raise in minutes, and a resume with no raise has only what was spent', () => {
+  const minutes = rig({
+    resume: { ...on, spentMinutes: 4, budget: { maxMinutes: 10 }, raise: 'minutes' },
+  } as unknown as RunActions);
+  minutes.fields.raise = '30';
+  minutes.actor.act('resume-run', {});
+  expect(minutes.ui.dialog?.lines).toEqual(['spent 4 min of 10 min', 'raises the budget by 30 min']);
+  const plain = rig({ resume: { ...on, spentUsd: 0.5, budget: {} } } as unknown as RunActions);
+  plain.actor.act('resume-run', {});
+  expect(plain.ui.dialog?.lines).toEqual(['spent $0.50']);
+});
+
+test('a refused resume is a red toast quoting the refusal and performs no effect', async () => {
   const r = rig({ resume: { ...on, spentUsd: 0, budget: {} } } as unknown as RunActions);
   r.actor.act('resume-run', {});
-  r.actor.act('resume-run', {});
+  r.actor.confirm();
   await r.answer(409, { error: 'run is running' });
-  expect([r.effects, r.ui.act.results.run?.text, r.ui.act.results.run?.place, r.ui.act.pending]).toEqual([
-    [],
-    'run is running',
-    'run',
-    undefined,
-  ]);
+  expect([r.effects, r.toasts, r.ui.underway]).toEqual([[], ['bad resume R1: run is running'], {}]);
 });
 
-test('Stop now ticked after Stop is armed is what the second click sends, and the answer reopens the run keeping its menu, with its message', async () => {
+test('Stop now ticked is what the dialog reads and its confirm sends, and the answer reopens the run keeping its menu, with its message', async () => {
   const r = rig(RESTART);
   r.actor.act('stop-run', {});
+  expect(r.ui.dialog).toEqual({
+    title: 'stop R1',
+    lines: ['stops at its next call boundary', 'the run fails as stopped'],
+    verb: 'stop',
+  });
+  r.actor.cancel();
   r.fields.now = 'on';
   r.actor.act('stop-run', {});
+  expect(r.ui.dialog?.lines).toEqual(['ends its running call now', 'the run fails as stopped']);
+  expect(r.posts).toEqual([]);
+  r.actor.confirm();
   expect(r.posts).toEqual([{ path: '/api/repos/alpha/runs/R1/stop', body: { now: true } }]);
+  expect(r.ui.underway).toEqual({ 'run:alpha/R1': 'stopping…' });
   await r.answer(200, { message: 'stopping R1' });
-  expect([r.effects, r.ui.act.results.run]).toEqual([
-    ['reopen alpha/R1 keep'],
-    { id: 'stop-run', subject: { kind: 'run', repo: 'alpha', runId: 'R1' }, text: 'stopping R1', place: 'run' },
-  ]);
+  expect([r.effects, r.toasts]).toEqual([['reopen alpha/R1 keep'], ['ok stop R1: stopping R1']]);
 });
 
-test('a confirmed Clean leaves the run and puts the answer in the rail, and marks every region it changes', async () => {
+test('a first click on Clean opens a dialog with a removes line per thing and the archive, and its confirm posts once, leaves the run and toasts the message', async () => {
   const r = rig(RESTART);
   r.actor.act('clean-run', {});
-  r.actor.act('clean-run', {});
+  expect([r.posts, r.ui.dialog]).toEqual([
+    [],
+    { title: 'clean R1', lines: ['removes a', 'run directory → /x'], verb: 'clean' },
+  ]);
+  r.actor.confirm();
+  r.actor.confirm();
   expect(r.posts).toEqual([{ path: '/api/repos/alpha/runs/R1/clean', body: {} }]);
   await r.answer(200, { message: 'cleaned R1' });
-  expect([r.effects, r.ui.act.results.rail?.text, r.ui.act.results.rail?.place]).toEqual([
-    ['leave'],
-    'cleaned R1',
-    'rail',
-  ]);
-  expect(r.marks.flat()).toEqual(expect.arrayContaining(['rail', 'main', 'inspector', 'status']));
+  expect([r.effects, r.toasts]).toEqual([['leave'], ['ok clean R1: cleaned R1']]);
+  expect(r.marks.flat()).toEqual(expect.arrayContaining(['list', 'sidebar', 'main', 'inspector', 'status']));
 });
 
-test('any other action clicked disarms an armed one, and the same one on another run arms afresh', () => {
+test('a clean that removes nothing and has no archive says removes nothing', () => {
+  const r = rig({ clean: { ...on, removes: [] } } as unknown as RunActions);
+  r.actor.act('clean-run', {});
+  expect(r.ui.dialog?.lines).toEqual(['removes nothing']);
+});
+
+test('the same action on another run opens its own dialog, and a dialog for a run is closed by forget', () => {
   const r = rig(RESTART);
   r.actor.act('stop-run', {});
-  expect(r.actor.armed('stop-run', {})).toBe(true);
-  r.actor.act('clean-run', {});
-  expect([r.ui.act.pending?.id, r.actor.armed('stop-run', {}), r.actor.armed('clean-run', {})]).toEqual([
-    'clean-run',
-    false,
-    true,
-  ]);
-  expect(r.actor.disarm({ id: 'clean-run', subject: { kind: 'run', repo: 'alpha', runId: 'R1' } })).toBe(false);
-  expect(r.actor.disarm()).toBe(true);
-  expect([r.ui.act.pending, r.actor.disarm()]).toEqual([undefined, false]);
+  r.actor.cancel();
   r.actor.act('stop-run', { repo: 'alpha', run: 'R2' });
-  expect(r.ui.act.pending?.subject).toEqual({ kind: 'run', repo: 'alpha', runId: 'R2' });
+  expect(r.actor.dialogFor()).toEqual({ kind: 'run', repo: 'alpha', runId: 'R2' });
+  r.actor.forget('run');
+  expect([r.actor.dialogFor(), r.ui.dialog, r.dialogs.at(-1), r.posts]).toEqual([undefined, undefined, 'closed', []]);
 });
 
 test('a second run action clicked while one is out is ignored, and a disabled offer stops the click before its request', async () => {
   const r = rig(RESTART);
   r.actor.act('stop-run', {});
-  r.actor.act('stop-run', {});
+  r.actor.confirm();
   r.actor.act('clean-run', {});
-  r.actor.act('clean-run', {});
-  expect([r.posts.length, r.ui.act.pending?.id]).toEqual([1, 'stop-run']);
+  expect([r.posts.length, r.ui.dialog]).toEqual([1, undefined]);
   await r.answer(200, {});
+  r.actor.act('clean-run', {});
+  expect(r.ui.dialog?.title).toBe('clean R1');
   const off = rig({ stop: { enabled: false, why: 'no' }, clean: undefined } as unknown as RunActions);
   off.actor.act('stop-run', {});
-  off.actor.act('stop-run', {});
-  expect([off.posts, off.ui.act.pending]).toEqual([[], undefined]);
+  expect([off.posts, off.ui.dialog]).toEqual([[], undefined]);
   const none = rig(undefined);
   none.actor.act('stop-run', {});
-  expect(none.ui.act.pending).toBeUndefined();
+  expect(none.ui.dialog).toBeUndefined();
 });
 
-test('an answer for a run no longer open performs no run effect and shows nothing, and one after the page stopped is dropped', async () => {
+test('an answer for a run no longer open performs no run effect but still toasts, and one after the page stopped is dropped', async () => {
   const r = rig(RESTART);
   r.actor.act('stop-run', {});
-  r.actor.act('stop-run', {});
+  r.actor.confirm();
   r.open = { repo: 'alpha', runId: 'OTHER' };
   await r.answer(200, { message: 'stopped' });
-  expect([r.effects, r.ui.act.results.run]).toEqual([[], undefined]);
+  expect([r.effects, r.toasts]).toEqual([[], ['ok stop R1: stopped']]);
   const s = rig(RESTART);
   s.actor.act('clean-run', {});
-  s.actor.act('clean-run', {});
+  s.actor.confirm();
   s.stopped = true;
   await s.answer(200, {});
-  expect([s.effects, s.ui.act.pending?.sent]).toEqual([[], true]);
+  expect([s.effects, s.toasts]).toEqual([[], []]);
 });
 
 test('no open run and no data means a run action does nothing, and an unknown action is ignored', () => {
@@ -218,10 +257,10 @@ test('no open run and no data means a run action does nothing, and an unknown ac
   r.open = undefined;
   r.actor.act('stop-run', {});
   r.actor.act('no-such-action', {});
-  expect([r.ui.act.pending, r.posts]).toEqual([undefined, []]);
+  expect([r.ui.dialog, r.posts]).toEqual([undefined, []]);
 });
 
-test('forget drops what a run left: its pending action, its notice, its drafts, and the next keep leaves the page fields alone', () => {
+test('forget drops what a run left: its drafts, and the next keep leaves the page fields alone', () => {
   const r = rig(RESTART);
   r.fields = { raise: '3', stage: 'spec', now: 'on' };
   r.actor.keep('run');
@@ -230,10 +269,8 @@ test('forget drops what a run left: its pending action, its notice, its drafts, 
     'restart-run': { stage: 'spec' },
     'stop-run': { now: 'on' },
   });
-  r.actor.act('stop-run', {});
-  r.ui.act.results.run = { id: 'x', subject: { kind: 'none' }, text: 'n', place: 'run' };
   r.actor.forget('run');
-  expect([r.ui.act.pending, r.ui.act.results.run, r.ui.act.drafts]).toEqual([undefined, undefined, {}]);
+  expect(r.ui.act.drafts).toEqual({});
   r.actor.keep('run');
   expect(r.ui.act.drafts).toEqual({});
   r.actor.keep('run');
@@ -242,14 +279,9 @@ test('forget drops what a run left: its pending action, its notice, its drafts, 
     'restart-run': { stage: 'spec' },
     'stop-run': { now: 'on' },
   });
-  r.ui.act.results.rail = { id: 'x', subject: { kind: 'none' }, text: 'rail', place: 'rail' };
-  r.actor.clearResult('run');
-  expect(r.ui.act.results.rail?.text).toBe('rail');
-  r.actor.clearResult('rail');
-  expect(r.ui.act.results.rail).toBeUndefined();
 });
 
-test('an action added as one entry is drawn, sent and answered', async () => {
+test('an action added as one entry is drawn, sent and answered in a toast', async () => {
   const poke: ActionDef = {
     id: 'poke-run',
     label: () => 'poke',
@@ -262,25 +294,24 @@ test('an action added as one entry is drawn, sent and answered', async () => {
       subject.kind === 'run'
         ? { path: `/api/repos/${subject.repo}/runs/${subject.runId}/poke`, body: { note: values.note } }
         : undefined,
-    answer: (status, body) => ({ place: 'run', text: `poked: ${status} ${body}` }),
+    answer: (status, body) => ({ text: `poked: ${status} ${body}` }),
   };
   const r = rig(RESTART);
   r.registry.push(poke);
-  const subject = { kind: 'run', repo: 'alpha', runId: 'R1' } as const;
-  expect(actionControl(poke, subject, r.ui.act, { index: [] }).toString()).toContain(
-    'data-action="poke-run">poke</button>',
-  );
+  expect(actionControl(poke, R1, r.ui.act, { index: [] }).toString()).toContain('data-action="poke-run">poke</button>');
   r.fields.note = 'hello';
   r.actor.act('poke-run', {});
   expect(r.posts).toEqual([{ path: '/api/repos/alpha/runs/R1/poke', body: { note: 'hello' } }]);
   await r.answer(200, 'ok');
-  expect(r.ui.act.results.run).toEqual({ id: 'poke-run', subject, text: 'poked: 200 ok', place: 'run' });
+  expect(r.toasts).toEqual(['ok poke R1: poked: 200 ok']);
 });
 
-test('a local action performs its effect and posts nothing', () => {
+test('a local action performs its effect and posts nothing, and its toast carries the undo the effect gave', () => {
   const r = rig();
   r.actor.act('clear-attention', {});
-  expect([r.effects, r.posts]).toEqual([['cleared'], []]);
+  expect([r.effects, r.posts, r.toasts]).toEqual([['cleared'], [], ['ok all clear: 3 hidden (undo)']]);
+  r.undos[0]?.();
+  expect(r.effects).toEqual(['cleared', 'uncleared']);
 });
 
 test('an index of no offers is the source an action has none to read', () => {
@@ -308,23 +339,23 @@ const queueIndex = [
   },
 ] as unknown as IndexRepo[];
 
-test('a first click on drop arms it, a click elsewhere disarms it, and a second posts the dedup key and shows the answer for the queue', async () => {
+test('a poll clicked while the drop dialog is open leaves it open, and the drop is posted once on confirm, its answer a toast', async () => {
   const r = rig(undefined, queueIndex);
   r.actor.act('drop-item', { ...BETA, item: 'ticket:FAKE-5' });
-  expect([r.posts, r.actor.armed('drop-item', { ...BETA, item: 'ticket:FAKE-5' })]).toEqual([[], true]);
-  expect(r.actor.armed('drop-item', { ...BETA, item: 'ticket:FAKE-6' })).toBe(false);
   r.actor.act('poll-queue', BETA);
-  expect([r.ui.act.pending, r.posts]).toEqual([undefined, [{ path: '/api/repos/beta/queues/wf/poll', body: {} }]]);
+  expect([r.posts, r.actor.dialogFor()?.kind]).toEqual([
+    [{ path: '/api/repos/beta/queues/wf/poll', body: {} }],
+    'item',
+  ]);
   await r.answer(202, { waiting: 'the watcher has not taken it' });
-  r.actor.act('drop-item', { ...BETA, item: 'ticket:FAKE-5' });
-  r.actor.act('drop-item', { ...BETA, item: 'ticket:FAKE-5' });
+  r.actor.confirm();
   expect(r.posts[1]).toEqual({ path: '/api/repos/beta/queues/wf/drop', body: { dedupKey: 'ticket:FAKE-5' } });
+  expect(r.ui.underway).toEqual({ 'item:beta/wf/ticket:FAKE-5': 'dropping…' });
   await r.answer(200, { message: 'ticket:FAKE-5 dropped' });
-  expect([r.ui.act.results.queue?.text, r.ui.act.results.queue?.place, r.effects, r.ui.act.pending]).toEqual([
-    'ticket:FAKE-5 dropped',
-    'queue',
+  expect([r.toasts, r.ui.underway, r.effects]).toEqual([
+    ['ok poll beta / wf: the watcher has not taken it', 'ok drop ticket:FAKE-5: ticket:FAKE-5 dropped'],
+    {},
     [],
-    undefined,
   ]);
 });
 
@@ -338,13 +369,13 @@ test('a move posts before for up and after for down, a requeue posts at once, an
     { path: '/api/repos/beta/queues/wf/move', body: { dedupKey: 'ticket:FAKE-5', after: 'ticket:FAKE-7' } },
     { path: '/api/repos/beta/queues/wf/requeue', body: { dedupKey: 'ticket:FAKE-6' } },
   ]);
-  await r.answer(409, { error: 'no watcher is running' });
-  expect(r.ui.act.results.queue).toEqual({
-    id: 'move-item',
-    subject: { kind: 'item', repo: 'beta', workflow: 'wf', item: 'ticket:FAKE-5' },
-    text: 'no watcher is running',
-    place: 'queue',
+  expect(r.ui.underway).toEqual({
+    'item:beta/wf/ticket:FAKE-5': 'moving…',
+    'item:beta/wf/ticket:FAKE-6': 'requeuing…',
   });
+  await r.answer(409, { error: 'no watcher is running' });
+  expect(r.toasts).toEqual(['bad move ticket:FAKE-5: no watcher is running']);
+  expect(r.ui.underway).toEqual({ 'item:beta/wf/ticket:FAKE-6': 'requeuing…' });
 });
 
 test('an add posts the ticket key, with force when ticked, and one that took empties the ticket field and keeps force ticked', async () => {
@@ -373,11 +404,52 @@ test('an add that was only waiting keeps what was typed, since the watcher has n
   r.fields['add-ticket'] = 'FAKE-9';
   r.actor.act('add-ticket', BETA);
   await r.answer(202, { waiting: 'not yet' });
-  expect([r.ui.act.drafts['add-ticket'], r.effects, r.ui.act.results.queue?.text]).toEqual([
+  expect([r.ui.act.drafts['add-ticket'], r.effects, r.toasts]).toEqual([
     { ticket: 'FAKE-9' },
     [],
-    'not yet',
+    ['ok add beta / wf: not yet'],
   ]);
+});
+
+test('a first click on drop opens a dialog naming the item and posts nothing; confirm posts the dedup key once, and a second confirm does nothing', async () => {
+  const r = rig(undefined, queueIndex);
+  r.actor.act('drop-item', { ...BETA, item: 'ticket:FAKE-5' });
+  expect([r.posts, r.ui.dialog, r.actor.dialogFor()]).toEqual([
+    [],
+    { title: 'drop ticket:FAKE-5', lines: ["removes ticket:FAKE-5 from beta / wf's queue"], verb: 'drop' },
+    { kind: 'item', repo: 'beta', workflow: 'wf', item: 'ticket:FAKE-5' },
+  ]);
+  expect(r.dialogs).toHaveLength(1);
+  r.actor.confirm();
+  r.actor.confirm();
+  expect([r.posts, r.ui.dialog, r.actor.dialogFor(), r.dialogs.at(-1)]).toEqual([
+    [{ path: '/api/repos/beta/queues/wf/drop', body: { dedupKey: 'ticket:FAKE-5' } }],
+    undefined,
+    undefined,
+    'closed',
+  ]);
+});
+
+test('cancelling the dialog sends nothing and a cancel with none open does nothing', () => {
+  const r = rig(undefined, queueIndex);
+  r.actor.cancel();
+  expect(r.dialogs).toEqual([]);
+  r.actor.act('drop-item', { ...BETA, item: 'ticket:FAKE-5' });
+  r.actor.cancel();
+  r.actor.confirm();
+  expect([r.posts, r.ui.dialog, r.dialogs.at(-1)]).toEqual([[], undefined, 'closed']);
+});
+
+test('the drop dialog adds the item state and attempts when the index lists the item', () => {
+  const listed = structuredClone(queueIndex) as unknown as {
+    queues: { queue?: unknown }[];
+  }[];
+  const [first] = listed;
+  if (first?.queues[0] !== undefined)
+    first.queues[0].queue = { items: [{ dedupKey: 'ticket:FAKE-6', state: 'parked', attempts: 2 }] };
+  const r = rig(undefined, listed as unknown as IndexRepo[]);
+  r.actor.act('drop-item', { ...BETA, item: 'ticket:FAKE-6' });
+  expect(r.ui.dialog?.lines).toEqual(["removes ticket:FAKE-6 from beta / wf's queue", 'it is parked after 2 attempts']);
 });
 
 test('an action the queue does not offer for an item is not carried out', () => {
@@ -385,7 +457,7 @@ test('an action the queue does not offer for an item is not carried out', () => 
   r.actor.act('requeue-item', { ...BETA, item: 'ticket:FAKE-5' });
   r.actor.act('drop-item', { ...BETA, item: 'ticket:FAKE-9' });
   r.actor.act('poll-queue', { repo: 'beta', workflow: 'other' });
-  expect([r.posts, r.ui.act.pending]).toEqual([[], undefined]);
+  expect(r.posts).toEqual([]);
 });
 
 const watchIndex = [
@@ -401,43 +473,68 @@ const watchIndex = [
   },
 ] as unknown as IndexRepo[];
 
-test('a watch posts the workflow at once and says it is watching until the answer, which replaces it under the repository', async () => {
+test('a watch posts the workflow at once and reads watching… until the answer, which is a toast', async () => {
   const r = rig(undefined, watchIndex);
   r.actor.act('watch', { repo: 'beta', workflow: 'side' });
   expect(r.posts).toEqual([{ path: '/api/repos/beta/watch', body: { workflows: ['side'] } }]);
-  expect([r.ui.act.results.repo?.text, r.ui.act.results.repo?.place, r.ui.act.pending]).toEqual([
-    'watching…',
-    'repo',
-    undefined,
-  ]);
+  expect(r.ui.underway).toEqual({ 'watch:beta/side': 'watching…' });
   await r.answer(200, { message: 'sail watch: it watches side' });
-  expect(r.ui.act.results.repo).toEqual({
-    id: 'watch',
-    subject: { kind: 'workflow', repo: 'beta', workflow: 'side' },
-    text: 'sail watch: it watches side',
-    place: 'repo',
-  });
+  expect([r.toasts, r.ui.underway]).toEqual([['ok watch beta / side: sail watch: it watches side'], {}]);
   r.actor.act('watch', { repo: 'beta' });
   expect(r.posts[1]).toEqual({ path: '/api/repos/beta/watch', body: { workflows: [] } });
+  expect(r.ui.underway).toEqual({ 'watch:beta': 'watching…' });
   await r.answer(202, {});
-  expect(r.ui.act.results.repo).toBeUndefined();
+  expect(r.toasts.at(-1)).toBe('ok watch all beta: asked');
 });
 
-test('an unwatch arms on a first click, any other action disarms it, and a second click posts it', async () => {
+test('an unwatch posts at once, its ok toast carries an undo that posts the watch with the same workflow, and the undo answers in a toast of its own', async () => {
   const r = rig(undefined, watchIndex);
   r.actor.act('unwatch', { repo: 'beta', workflow: 'wf' });
-  expect([
-    r.posts,
-    r.actor.armed('unwatch', { repo: 'beta', workflow: 'wf' }),
-    r.actor.armed('unwatch', { repo: 'beta' }),
-  ]).toEqual([[], true, false]);
-  r.actor.act('watch', { repo: 'beta', workflow: 'side' });
-  expect(r.ui.act.pending).toBeUndefined();
+  expect([r.posts, r.ui.dialog, r.ui.underway]).toEqual([
+    [{ path: '/api/repos/beta/unwatch', body: { workflows: ['wf'] } }],
+    undefined,
+    { 'watch:beta/wf': 'unwatching…' },
+  ]);
+  await r.answer(200, { message: 'sail unwatch: done' });
+  expect([r.toasts, r.undos.length]).toEqual([['ok unwatch beta / wf: sail unwatch: done (undo)'], 1]);
+  r.undos[0]?.();
+  expect(r.posts[1]).toEqual({ path: '/api/repos/beta/watch', body: { workflows: ['wf'] } });
+  await r.answer(200, { message: 'sail watch: it watches wf' });
+  expect(r.toasts.at(-1)).toBe('ok watch beta / wf: sail watch: it watches wf');
+});
+
+test('Unwatch all undoes with the workflows the index listed as watched at the click, whatever the index says by then', async () => {
+  const watched = structuredClone(watchIndex) as unknown as { watching?: unknown }[];
+  if (watched[0] !== undefined) watched[0].watching = { pid: 7, workflows: ['wf', 'side'] };
+  const r = rig(undefined, watched as unknown as IndexRepo[]);
   r.actor.act('unwatch', { repo: 'beta' });
+  expect(r.posts).toEqual([{ path: '/api/repos/beta/unwatch', body: { workflows: [] } }]);
+  await r.answer(200, { message: 'sail unwatch: all' });
+  watched[0] = { ...(watched[0] as object), watching: undefined };
+  r.undos[0]?.();
+  expect(r.posts[1]).toEqual({ path: '/api/repos/beta/watch', body: { workflows: ['wf', 'side'] } });
+});
+
+test('a refused unwatch is a red toast with no undo, and a refused undo is a red toast quoting sail', async () => {
+  const r = rig(undefined, watchIndex);
   r.actor.act('unwatch', { repo: 'beta' });
-  expect(r.posts.at(-1)).toEqual({ path: '/api/repos/beta/unwatch', body: { workflows: [] } });
   await r.answer(409, { error: 'sail unwatch: nothing to do' });
-  expect(r.ui.act.results.repo?.text).toBe('sail unwatch: nothing to do');
+  expect([r.toasts, r.undos.length]).toEqual([['bad unwatch all beta: sail unwatch: nothing to do'], 0]);
+  r.actor.act('unwatch', { repo: 'beta', workflow: 'wf' });
+  await r.answer(200, { message: 'done' });
+  r.undos[0]?.();
+  await r.answer(409, { error: 'sail watch: no workflow declares a watch' });
+  expect(r.toasts.at(-1)).toBe('bad watch beta / wf: sail watch: no workflow declares a watch');
+});
+
+test('an undo after the page stopped does nothing more', async () => {
+  const r = rig(undefined, watchIndex);
+  r.actor.act('unwatch', { repo: 'beta', workflow: 'wf' });
+  await r.answer(200, {});
+  r.undos[0]?.();
+  r.stopped = true;
+  await r.answer(200, {});
+  expect(r.toasts).toHaveLength(1);
 });
 
 test('a watch of a workflow the repository does not offer it for is not sent', () => {
@@ -447,27 +544,23 @@ test('a watch of a workflow the repository does not offer it for is not sent', (
   expect(r.posts).toEqual([]);
 });
 
-test('each place keeps its own answer: a poll answered while a watch is out leaves the watch line, and a run answer for a run no longer open clears neither', async () => {
+test('each subject keeps its own word under way: a poll answered while a watch is out leaves the watch reading watching…, and a run answer for a run no longer open touches neither', async () => {
   const both = [{ ...queueIndex[0], offers: watchIndex[0]?.offers }] as unknown as IndexRepo[];
   const r = rig(RESTART, both);
   r.actor.act('poll-queue', BETA);
   r.actor.act('watch', { repo: 'beta' });
   await r.answer(200, { message: 'polls wf now' });
-  expect([resultOf(r.ui.act, 'repo', { repo: 'beta' }), resultOf(r.ui.act, 'queue', BETA)]).toEqual([
-    'watching…',
-    'polls wf now',
-  ]);
+  expect([r.ui.underway, r.toasts]).toEqual([{ 'watch:beta': 'watching…' }, ['ok poll beta / wf: polls wf now']]);
   r.actor.act('stop-run', {});
-  r.actor.act('stop-run', {});
+  r.actor.confirm();
   await r.answer(200, { message: 'sail watch: it watches all' });
-  expect(resultOf(r.ui.act, 'run')).toBe('stopping R1…');
+  expect(r.ui.underway).toEqual({ 'run:alpha/R1': 'stopping…' });
   r.open = { repo: 'alpha', runId: 'OTHER' };
   await r.answer(200, { message: 'stopped' });
-  expect([
-    resultOf(r.ui.act, 'run'),
-    resultOf(r.ui.act, 'repo', { repo: 'beta' }),
-    resultOf(r.ui.act, 'queue', BETA),
-  ]).toEqual([undefined, 'sail watch: it watches all', 'polls wf now']);
+  expect([r.ui.underway, r.toasts]).toEqual([
+    {},
+    ['ok poll beta / wf: polls wf now', 'ok watch all beta: sail watch: it watches all', 'ok stop R1: stopped'],
+  ]);
 });
 
 test('a poll, drop, requeue or move that took leaves the add field as typed: only an add that took empties it', async () => {
@@ -477,37 +570,33 @@ test('a poll, drop, requeue or move that took leaves the add field as typed: onl
   r.actor.act('requeue-item', { ...BETA, item: 'ticket:FAKE-6' });
   r.actor.act('move-item', { ...BETA, key: 'ticket:FAKE-5', dir: 'up', target: 'ticket:FAKE-4' });
   r.actor.act('drop-item', { ...BETA, item: 'ticket:FAKE-5' });
-  r.actor.act('drop-item', { ...BETA, item: 'ticket:FAKE-5' });
+  r.actor.confirm();
   for (let each = 0; each < 4; each++) await r.answer(200, { message: 'took' });
   r.fields['add-ticket'] = 'FAKE-12';
   r.actor.keep('queue', { kind: 'workflow', ...BETA });
   expect([r.posts.length, r.effects, r.ui.act.drafts['add-ticket']]).toEqual([4, [], { ticket: 'FAKE-12' }]);
 });
 
-test('a run action is ignored until the run action out is answered, though an unwatch armed or the run forgotten took its pending slot', async () => {
+test('a run action is ignored until the run action out is answered, though the run was forgotten meanwhile', async () => {
   const r = rig(RESTART, watchIndex);
   r.actor.act('clean-run', {});
-  r.actor.act('clean-run', {});
+  r.actor.confirm();
   r.actor.act('unwatch', { repo: 'beta' });
-  r.actor.disarm();
-  r.actor.act('stop-run', {});
   r.actor.act('stop-run', {});
   r.actor.forget('run');
   r.actor.act('stop-run', {});
-  r.actor.act('stop-run', {});
-  expect(r.posts).toEqual([{ path: '/api/repos/alpha/runs/R1/clean', body: {} }]);
+  r.actor.confirm();
+  expect(r.posts.map((post) => post.path)).toEqual(['/api/repos/alpha/runs/R1/clean', '/api/repos/beta/unwatch']);
   await r.answer(409, { error: 'no' });
   r.actor.act('stop-run', {});
-  r.actor.act('stop-run', {});
+  r.actor.confirm();
   expect(r.posts.at(-1)).toEqual({ path: '/api/repos/alpha/runs/R1/stop', body: { now: false } });
 });
 
-test('the inert actor, the store holds until the shell wires the real one, does nothing and finds nothing armed', () => {
+test('the inert actor, the store holds until the shell wires the real one, does nothing and has no dialog', () => {
   const actor = inertActor();
   expect(actor.act('stop-run', {})).toBeUndefined();
-  expect(actor.disarm()).toBe(false);
-  expect(actor.armed('stop-run', {})).toBe(false);
   expect(actor.keep('run')).toBeUndefined();
   expect(actor.forget('run')).toBeUndefined();
-  expect(actor.clearResult('run')).toBeUndefined();
+  expect([actor.dialogFor(), actor.confirm(), actor.cancel()]).toEqual([undefined, undefined, undefined]);
 });

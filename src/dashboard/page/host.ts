@@ -4,7 +4,7 @@
 // members the page uses, since the project's TypeScript has no DOM library.
 
 /** The page's regions, each an element id in `index.html`. */
-export const REGIONS = ['rail', 'attention', 'main', 'inspector', 'status', 'drawer'] as const;
+export const REGIONS = ['sidebar', 'list', 'attention', 'main', 'inspector', 'status', 'drawer', 'toasts'] as const;
 export type Region = (typeof REGIONS)[number];
 
 export interface Connection {
@@ -28,7 +28,26 @@ export interface PageHost {
   /** Scrolls what holds `region` to its end. */
   scrollToEnd(region: Region): void;
   onAction(handler: (action: string, data: Record<string, string>) => void): void;
-  onKey(handler: (key: string, inInput: boolean) => void): void;
+  /**
+   * `handler` is told each key, whether it was typed in an input, and `on`, the `data-action` of the element the key
+   * landed on; answering true suppresses the key's default, as typing it would.
+   */
+  onKey(handler: (key: string, inInput: boolean, on?: string) => boolean): void;
+  /** `handler` is told the value of a named field each time it is typed into. */
+  onInput(handler: (name: string, value: string) => void): void;
+  /** Focuses the field named `name`, in whichever region draws it. */
+  focus(name: string): void;
+  /** Takes the focus off the focused element. */
+  blur(): void;
+  /** Scrolls the `.cur` element of `region` into view, as little as it takes. */
+  reveal(region: Region): void;
+  /**
+   * Opens the confirmation dialog with `html`, modal, and remembers what had the focus. A close the browser makes
+   * itself reaches the action handler as `dialog-cancel`.
+   */
+  openDialog(html: string): void;
+  /** Closes the dialog and gives the focus back to what had it at the open. */
+  closeDialog(): void;
   /** A GET of `path` on the dashboard, with the client header. A failed request answers status 0. */
   get(path: string): Promise<{ status: number; body: string }>;
   /** A POST of `body` as JSON to `path`, with the client header. A failed request answers status 0. */
@@ -47,10 +66,14 @@ export interface PageHost {
   /** Copies to the clipboard: false when it can't. */
   copy(text: string): Promise<boolean>;
   setTheme(theme: string): void;
+  /** Sets the URL's parameter `name` to `value`, keeping the others, without a history entry. */
+  setParam(name: string, value: string): void;
   setInspector(open: boolean): void;
+  /** Whether a run or queue is open beside the list: the centre is laid out by it. */
+  setDetail(open: boolean): void;
   /** The browser's offset east of UTC, in minutes. */
   offset(): number;
-  /** What the page's URL asks it to open first, from `?repo=…&run=…&key=…&tab=…`: empty when it asks nothing. */
+  /** What the page's URL asks it to open first, from `?repo=…&run=…&key=…&tab=…&view=…`: empty when it asks nothing. */
   start(): Record<string, string>;
 }
 
@@ -71,8 +94,15 @@ export interface ElementLike {
   selectionEnd?: number | null;
   selectionDirection?: string | null;
   setSelectionRange?(start: number, end: number, direction?: string): void;
+  /** A `<dialog>`'s. */
+  showModal?(): void;
+  close?(): void;
+  open?: boolean;
+  onclose?: (() => void) | null;
   contains?(other: ElementLike): boolean;
   focus?(options?: { preventScroll?: boolean }): void;
+  blur?(): void;
+  scrollIntoView?(options?: { block?: string }): void;
   getAttribute?(name: string): string | null;
   querySelectorAll?(selectors: string): ArrayLike<ElementLike>;
   querySelector?(selectors: string): ElementLike | null;
@@ -101,7 +131,8 @@ export interface BrowserWindow {
     documentElement: { dataset: Record<string, string | undefined> };
     activeElement?: ElementLike | null;
   };
-  location: { host: string; search: string };
+  location: { host: string; pathname: string; search: string };
+  history: { replaceState(state: unknown, title: string, url: string): void };
   fetch(
     url: string,
     init: { headers: Record<string, string>; method?: string; body?: string },
@@ -176,7 +207,7 @@ const INPUTS = new Set(['INPUT', 'TEXTAREA', 'SELECT']);
 
 /** How wide each resizable column may be, and its CSS variable. */
 const COLUMNS: Record<string, { variable: string; min: number; max: number; start: number; sign: number }> = {
-  left: { variable: '--rail-w', min: 160, max: 480, start: 260, sign: 1 },
+  left: { variable: '--side-w', min: 140, max: 480, start: 180, sign: 1 },
   right: { variable: '--ins-w', min: 240, max: 640, start: 360, sign: -1 },
 };
 
@@ -209,6 +240,8 @@ function installResize(win: BrowserWindow): void {
 export function browserHost(win: BrowserWindow): PageHost {
   const doc = win.document;
   installResize(win);
+  /** The focus key of what had the focus when the dialog opened. */
+  let opener: string | undefined;
   let onAction: (action: string, data: Record<string, string>) => void = () => {};
   /** Delivers `element`'s action with its data, as a click on it would. */
   const fire = (element: ElementLike) => {
@@ -292,6 +325,35 @@ export function browserHost(win: BrowserWindow): PageHost {
         }
       }
     },
+    openDialog(markup) {
+      const dialog = doc.getElementById('dialog');
+      if (dialog === null) return;
+      const active = doc.activeElement;
+      opener = active === null || active === undefined ? undefined : focusKey(active);
+      dialog.innerHTML = markup;
+      // A close the browser makes itself, with no Escape the page saw, cancels the dialog as its cancel button does.
+      // A close event that finds it open again is an earlier close's, made before a reopen.
+      dialog.onclose = () => {
+        if (dialog.open !== true) onAction('dialog-cancel', {});
+      };
+      dialog.showModal?.();
+    },
+    closeDialog() {
+      const dialog = doc.getElementById('dialog');
+      if (dialog !== null) dialog.onclose = null;
+      dialog?.close?.();
+      const key = opener;
+      opener = undefined;
+      if (key === undefined) return;
+      for (const region of REGIONS) {
+        const root = doc.getElementById(region);
+        const target = root === null ? undefined : keyed(root, key)[0];
+        if (target !== undefined) {
+          target.focus?.({ preventScroll: true });
+          return;
+        }
+      }
+    },
     scrollToEnd(region) {
       const box = doc.getElementById(region)?.parentElement;
       if (box !== null && box !== undefined) box.scrollTop = box.scrollHeight ?? 0;
@@ -302,6 +364,27 @@ export function browserHost(win: BrowserWindow): PageHost {
         const element = actionOf(event.target);
         if (element !== undefined) fire(element);
       });
+    },
+    onInput(handler) {
+      doc.addEventListener('input', (event) => {
+        const target = isElement(event.target) ? event.target : undefined;
+        if (target?.name !== undefined && target.name !== '') handler(target.name, target.value ?? '');
+      });
+    },
+    focus(name) {
+      for (const region of REGIONS) {
+        const field = doc.getElementById(region)?.querySelector?.(`[name="${name}"]`);
+        if (field !== null && field !== undefined) {
+          field.focus?.();
+          return;
+        }
+      }
+    },
+    blur() {
+      doc.activeElement?.blur?.();
+    },
+    reveal(region) {
+      doc.getElementById(region)?.querySelector?.('.cur')?.scrollIntoView?.({ block: 'nearest' });
     },
     onKey(handler) {
       doc.addEventListener('keydown', (event) => {
@@ -317,7 +400,11 @@ export function browserHost(win: BrowserWindow): PageHost {
             return;
           }
         }
-        handler(event.key ?? '', tag !== undefined && INPUTS.has(tag));
+        if (
+          handler(event.key ?? '', tag !== undefined && INPUTS.has(tag), actionOf(event.target)?.dataset.action) ===
+          true
+        )
+          event.preventDefault?.();
       });
     },
     async get(path) {
@@ -390,8 +477,16 @@ export function browserHost(win: BrowserWindow): PageHost {
       doc.documentElement.dataset.theme = theme;
     },
     start: () => Object.fromEntries(new URLSearchParams(win.location.search)),
+    setParam(name, value) {
+      const params = new URLSearchParams(win.location.search);
+      params.set(name, value);
+      win.history.replaceState(null, '', `${win.location.pathname}?${params}`);
+    },
     setInspector(open) {
       doc.documentElement.dataset.inspector = open ? 'open' : 'closed';
+    },
+    setDetail(open) {
+      doc.documentElement.dataset.detail = open ? 'open' : 'closed';
     },
     offset: () => -new win.Date().getTimezoneOffset(),
   };

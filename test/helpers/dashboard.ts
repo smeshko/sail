@@ -118,6 +118,29 @@ function copyFixture(repo: 'alpha' | 'beta', runId: string) {
   };
 }
 
+/** The clones of the dense fixture, in the order the index lists them. */
+export const DENSE_REPOS = ['atlas', 'borealis', 'cirrus', 'delta', 'ember'] as const;
+
+export interface DenseMachine {
+  root: string;
+  sailHome: string;
+  registryDir: string;
+  clones: Clone[];
+  remove(): void;
+}
+
+/** A machine whose registry holds the five clones of `test/fixtures/dashboard/dense/`, each with its recorded `.sail-runs/`. */
+export function seedDense(): DenseMachine {
+  const { root, sailHome, registryDir } = machineRoot();
+  const clones = DENSE_REPOS.map((name) =>
+    register(root, registryDir, name, (clone) => {
+      cpSync(join(DASHBOARD_FIXTURES, 'dense', name), join(clone, '.sail-runs'), { recursive: true });
+      return join(clone, '.sail-runs');
+    }),
+  );
+  return { root, sailHome, registryDir, clones, remove: () => rmSync(root, { recursive: true, force: true }) };
+}
+
 /**
  * A machine whose registry holds alpha, with the golden run and FAKE-2, and beta, with FAKE-3 and its queue. alpha's
  * `runDir` is its golden run, and beta's is FAKE-3.

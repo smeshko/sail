@@ -6,26 +6,34 @@ import { renderAttention } from './attention-view';
 import { renderDrawer } from './drawer-view';
 import { REGIONS, type Region } from './host';
 import { html } from './html';
-import { railRepos, statusOf } from './index-model';
+import { listRepos, statusOf } from './index-model';
 import { renderInspector } from './inspector-view';
+import { viewCounts } from './list-model';
+import { renderList } from './list-view';
 import { hasItemActions, offeredDrop, renderQueue } from './queue-view';
-import { renderRail } from './rail-view';
 import { renderRun, renderStatus } from './run-view';
+import { renderSidebar } from './sidebar-view';
 import { listed, opened, openQueue, type Store, selected, summaryOf } from './store';
 import { renderTimeline } from './timeline-view';
+import { renderToasts } from './toast-view';
 
 /** How often a running time is drawn again. */
 export const TICK_MS = 1000;
 
-/** What each region is drawn from, field-keeping and armed-drop rules included. */
+/** What each region is drawn from, field-keeping and open-dialog rules included. */
 export function regions(store: Store): Record<Region, () => string> {
   const { ui, host } = store;
   return {
-    rail: () => {
+    sidebar: () => {
+      if (store.index === undefined) return '';
+      const repos = listRepos(store.index, host.now());
+      return renderSidebar(repos, viewCounts(repos, ui.repoFilter), listed(store).length, ui).value;
+    },
+    list: () => {
       if (store.index === undefined) return html`<div class="qempty">connecting…</div>`.value;
       // A raise typed and a stage chosen in the open run's menu survive the draw, but not a switch of run.
       store.actor.keep('run');
-      return renderRail(railRepos(store.index, host.now()), ui, host.now(), store.offers).value;
+      return renderList(ui.view, listRepos(store.index, host.now()), ui, host.now(), store.offers).value;
     },
     attention: () => {
       const items = listed(store);
@@ -37,35 +45,27 @@ export function regions(store: Store): Record<Region, () => string> {
       if (panel !== undefined) {
         // What was typed in the add field survives the draw, but not an add that took.
         store.actor.keep('queue', { kind: 'workflow', repo: panel.repo, workflow: panel.workflow });
-        // An armed drop whose item can't be dropped now (it runs, or is gone) asks again once it can, and its menu shuts.
+        // A drop dialog whose item can't be dropped now (it runs, or is gone) closes with nothing sent, and its menu shuts.
         // So do both while the workflow isn't watched: the controls are disabled then.
         const unwatched = panel.watch.state !== 'watched';
-        const armed = ui.act.pending;
-        if (armed?.id === 'drop-item' && armed.subject.kind === 'item') {
-          const { repo, workflow, item } = armed.subject;
-          const target = panel.items.find((each) => each.dedupKey === item);
-          if (
-            repo === panel.repo &&
-            workflow === panel.workflow &&
-            (unwatched || target === undefined || !offeredDrop(panel, target))
-          ) {
-            store.actor.disarm();
-          }
+        const asked = store.actor.dialogFor();
+        if (asked?.kind === 'item' && asked.repo === panel.repo && asked.workflow === panel.workflow) {
+          const target = panel.items.find((each) => each.dedupKey === asked.item);
+          if (unwatched || target === undefined || !offeredDrop(panel, target)) store.actor.cancel();
         }
-        // An armed release asks again once its queue is held on that key no more, and an armed one of another queue is dropped.
-        const releasing = ui.act.pending;
+        // A release dialog, the one a queue's banner opens, closes with nothing sent once its queue is held on a key no more.
         if (
-          releasing?.id === 'release-hold' &&
-          (panel.queue?.held?.harnessKey === undefined ||
-            releasing.subject.kind !== 'workflow' ||
-            releasing.subject.repo !== panel.repo ||
-            releasing.subject.workflow !== panel.workflow)
+          asked?.kind === 'workflow' &&
+          asked.repo === panel.repo &&
+          asked.workflow === panel.workflow &&
+          panel.queue?.held?.harnessKey === undefined
         ) {
-          store.actor.disarm();
+          store.actor.cancel();
         }
         const menuItem = panel.items.find((item) => item.dedupKey === ui.itemMenu);
         if (unwatched || menuItem === undefined || !hasItemActions(panel, menuItem)) delete ui.itemMenu;
-        return renderQueue(panel, store.queues.get(ui.queue ?? '')?.stream, ui, host.now()).value;
+        const repoOffers = store.index?.find((repo) => repo.name === panel.repo)?.offers;
+        return renderQueue(panel, store.queues.get(ui.queue ?? '')?.stream, ui, host.now(), repoOffers).value;
       }
       if (store.run === undefined) return html`<div class="qempty">no run selected</div>`.value;
       const error = store.run.error === undefined ? '' : html`<div class="code bad">${store.run.error}</div>`;
@@ -79,6 +79,7 @@ export function regions(store: Store): Record<Region, () => string> {
     inspector: () => renderInspector(selected(store), store.run?.model.roster, store.result, store.log, ui).value,
     status: () => (store.run === undefined ? '' : renderStatus(store.run.model, summaryOf(store, store.run)).value),
     drawer: () => renderDrawer(ui, store.doc).value,
+    toasts: () => renderToasts(ui.toasts).value,
   };
 }
 
@@ -89,6 +90,12 @@ export function flush(store: Store): void {
   store.flushTimer = undefined;
   const dirty = REGIONS.filter((region) => store.dirty.has(region));
   store.dirty.clear();
+  // The run or queue beside the list, or the list alone: the host lays the centre out by it.
+  const detail = store.run !== undefined || openQueue(store) !== undefined;
+  if (detail !== store.detail) {
+    store.detail = detail;
+    host.setDetail(detail);
+  }
   for (const region of dirty) {
     // A region that can't be drawn says so, and the others are still drawn (review R2-1).
     let markup: string;
@@ -103,6 +110,11 @@ export function flush(store: Store): void {
     if (!isFresh && store.written.get(region) === markup) continue;
     store.written.set(region, markup);
     host.render(region, markup, isFresh);
+    // Only a cursor move scrolls the list: a redraw such as the tick leaves where the person scrolled it (review R8).
+    if (region === 'list' && store.revealList) {
+      store.revealList = false;
+      host.reveal('list');
+    }
     // A running call's timeline, followed, shows its newest entry: not while the queue holds the centre.
     if (region === 'main' && ui.follow && openQueue(store) === undefined && opened(store)?.state === 'running')
       host.scrollToEnd(region);
@@ -114,7 +126,7 @@ export function startDraw(store: Store): void {
   store.flush = () => flush(store);
 }
 
-/** Whether a running time is on screen: the open run's, one of its calls', or a run's in the rail. */
+/** Whether a running time is on screen: the open run's, one of its calls', or a run's in the list. */
 export function anyRunning(store: Store): boolean {
   return (
     (store.run !== undefined &&
@@ -130,7 +142,7 @@ export function tick(store: Store): void {
   store.tickTimer = store.host.later(() => {
     store.tickTimer = undefined;
     if (!anyRunning(store)) return;
-    store.mark('rail', 'main', 'status');
+    store.mark('list', 'main', 'status');
     if (selected(store)?.state === 'running') store.mark('inspector');
     tick(store);
   }, TICK_MS);

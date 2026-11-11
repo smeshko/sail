@@ -2,11 +2,11 @@
 // group's cards side by side under a header of their own, the roster stages not called yet, the pull request it opened,
 // and the CLI commands to copy. The cards come from the run model, fed by the run's events. The totals come from the
 // summary in the index when there is one, and from the cards otherwise. The Resume, Restart, Stop or Clean a run offers
-// are drawn here too, by `runControls`, but shown in the rail's ⋯ menu for the open run.
+// are drawn here too, by `runControls`, but shown in the ⋯ menu under the open run's list row.
 import type { Summary } from '../../events/summary';
 import type { RunActions } from '../actions';
 import { ACTIONS, type Subject } from './action-registry';
-import { actionControl, resultOf } from './action-view';
+import { actionControl } from './action-view';
 import { runCommands } from './commands';
 import { cost, duration, percent, tokens } from './format';
 import { html, type SafeHtml, safeHref, text } from './html';
@@ -118,12 +118,12 @@ function totals(model: RunModel, summary: Summary | null | undefined, now: numbe
 </div>`;
 }
 
-/** The run actions the rail's ⋯ menu draws, in the registry's order: every action done to a run. */
+/** The run actions the list row's ⋯ menu draws, in the registry's order: every action done to a run. */
 const RUN_ACTIONS = ACTIONS.filter((def) => def.appliesTo.includes('run'));
 
 /**
- * What the run offers (Resume, Restart, Stop, Clean), whichever it does, with the notice of the last one: the body of
- * the rail's ⋯ menu for the open run, drawn from the registry. Undefined when it offers none of them.
+ * What the run offers (Resume, Restart, Stop, Clean), whichever it does: the body of the ⋯ menu under the open run's
+ * list row, drawn from the registry. Undefined when it offers none of them.
  */
 export function runControls(actions: RunActions | undefined, ui: UiState): SafeHtml | undefined {
   if (
@@ -137,10 +137,9 @@ export function runControls(actions: RunActions | undefined, ui: UiState): SafeH
   }
   const subject: Subject = { kind: 'run', repo: ui.repo ?? '', runId: ui.runId ?? '' };
   const source = { run: actions, index: [] };
-  const notice = resultOf(ui.act, 'run');
   return html`<div class="acts">${RUN_ACTIONS.map((def) =>
     actionControl(def, subject, ui.act, source, { honourDisabled: true, wrap: true }),
-  )}${notice === undefined ? '' : html`<span class="warnchip">${notice}</span>`}</div>`;
+  )}</div>`;
 }
 
 /** The run view. `now` is ms since the epoch, for the running cards' durations. */
