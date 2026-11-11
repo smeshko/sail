@@ -327,6 +327,7 @@ export default workflow(
         rounds,
         resolved,
         open,
+        nits: [],
         thin,
         bannedWordsNote: banned.output.jev.candidates > 0 ? banned.output.jev.note : '',
       },

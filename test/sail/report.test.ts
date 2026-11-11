@@ -20,6 +20,7 @@ interface Record {
   resolved: boolean;
   thin: { lens: string; why: string }[];
   open: { finding: string; detail: string }[];
+  nits: string[];
 }
 
 const LIMIT = 60_000;
@@ -47,6 +48,7 @@ function record(
   verdict: (finding: Finding) => string,
   open: string[] = [],
   summary = SUMMARY,
+  nits: string[] = [],
 ): Record {
   return {
     findings,
@@ -71,6 +73,7 @@ function record(
     resolved: open.length === 0,
     thin: [],
     open: open.map((finding) => ({ finding, detail: `${finding} is not fixed` })),
+    nits,
   };
 }
 
@@ -197,4 +200,46 @@ test('a record that is not resolved still takes the label off after the comment'
     'port codehost add-label 7 needs-human',
   ]);
   expect(result.stdout).toBe('{"unlabelled":true}');
+});
+
+const low = (n: number): Finding => ({ ...bug(n), severity: 'low' });
+
+test('a mergeable record with nits says they were not fixed, and shows each with the verdict nit', async () => {
+  const value = record([low(1), bug(2)], (finding) => (finding.id === 'R1' ? 'fix' : 'drop'), [], SUMMARY, ['R1']);
+  value.rounds = [];
+  const result = await report(value);
+  expect(result.code).toBe(0);
+  expect(result.comment).toBe(result.full);
+  expect(result.full).toContain(
+    'No finding at medium or above is left to fix, and validation passes. 1 low finding is listed as a nit, not fixed: a fix pass starts only for a finding at medium or above.',
+  );
+  expect(result.full).toContain('| R1 A bug 1 | bugs | low | nit | Because. |');
+  expect(result.full).toContain('| R2 A bug 2 | bugs | medium | drop | Because. |');
+  expect(result.calls).toHaveLength(1);
+  expect(result.calls[0]).toContain('codehost comment');
+});
+
+test('a record with no nits keeps its headline', async () => {
+  const result = await report(record([bug(1)], () => 'drop'));
+  expect(result.full).toContain('Every finding to fix is fixed, and validation passes.');
+  expect(result.full).not.toContain('| nit |');
+});
+
+test('a shortened report counts nits under the verdict nit', async () => {
+  const findings = Array.from({ length: 4000 }, (_, i) => low(i + 1));
+  const result = await report(
+    record(
+      findings,
+      () => 'fix',
+      [],
+      SUMMARY,
+      findings.map((finding) => finding.id),
+    ),
+  );
+  expect(result.code).toBe(0);
+  expect(size(result.comment)).toBeLessThanOrEqual(LIMIT);
+  expect(result.comment).toContain('| bugs |  | nit | 4000 |');
+  expect(result.comment).toContain('4000 low findings are listed as nits, not fixed');
+  for (const finding of findings)
+    expect(result.full).toContain(`| ${finding.id} A bug ${finding.id.slice(1)} | bugs | low | nit |`);
 });
