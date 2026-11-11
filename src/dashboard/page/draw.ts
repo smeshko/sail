@@ -40,6 +40,9 @@ export function regions(store: Store): Record<Region, () => string> {
       store.drawn = items.map(identity);
       return renderAttention(items, ui.attention).value;
     },
+    link: () =>
+      html`<button class="btn" type="button" data-action="copy-link" aria-label="copy link" title="copy link">⧉</button>`
+        .value,
     main: () => {
       const panel = openQueue(store);
       if (panel !== undefined) {
