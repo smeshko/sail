@@ -224,13 +224,13 @@ test("a seeded run's header names the run it was seeded from, and an unseeded ru
   expect([foldRun(events).fromRun, header(foldRun(events))]).toEqual([undefined, `${GOLDEN_RUN_ID} · ticket-to-pr@1`]);
 });
 
-test('Resume shows its raise field with what was typed and one button reading resume, and shows a disabled one with its reason', () => {
+test('Resume shows one button reading resume and no raise field, and shows a disabled one with its reason', () => {
   const resume = RESUME_OFFER;
   const view = (ui: Partial<ReturnType<typeof initialUi>>, offers: Parameters<typeof runControls>[0]) =>
     runControls(offers, { ...initialUi(0), ...ui })?.value ?? '';
   const idle = view(act({ 'resume-run': { raise: '5' } }), { resume });
   expect(idle).toBe(
-    '<div class="acts"><span class="act"><label class="lbl">raise $ <input class="num" type="number" name="raise" min="0.01" step="any" value="5"></label><button class="btn" data-action="resume-run">resume</button></span></div>',
+    '<div class="acts"><span class="act"><button class="btn" data-action="resume-run">resume</button></span></div>',
   );
   expect(idle).not.toContain('restart');
   expect(idle).not.toContain('armed');
@@ -241,7 +241,7 @@ test('Resume shows its raise field with what was typed and one button reading re
   expect(runControls({ why: 'run completed' }, initialUi(0))).toBeUndefined();
 });
 
-test('Restart lists the stages with what runs again as titles, the failed one selected unless another was chosen, and no armed label, since the dialog names the stage and budget', () => {
+test('Restart is one button and no stage choice, since the dialog asks the stage and names the budget', () => {
   const restart: RestartOffer = {
     enabled: true,
     stages: [
@@ -253,31 +253,22 @@ test('Restart lists the stages with what runs again as titles, the failed one se
   };
   const view = (ui: Partial<ReturnType<typeof initialUi>>, offer = restart) =>
     runControls({ restart: offer }, { ...initialUi(0), ...ui })?.value;
-  expect(view({})).toContain(
-    '<select name="stage"><option value="spec" title="spec#1 and everything after it">spec</option><option value="implement" title="implement#1 and everything after it, in loop fix from iteration 1" selected>implement</option></select>',
-  );
-  expect(view(act({ 'restart-run': { stage: 'spec' } }))).toContain(
-    '<option value="spec" title="spec#1 and everything after it" selected>spec</option>',
-  );
-  expect(view(act({ 'restart-run': { stage: 'nonesuch' } }))).toContain('implement</option></select>');
-  expect(view(act({ 'restart-run': { stage: 'spec' } }))).toContain(
-    '<button class="btn" data-action="restart-run">restart</button>',
-  );
+  expect(view({})).toContain('<button class="btn" data-action="restart-run">restart</button>');
+  expect(view(act({ 'restart-run': { stage: 'spec' } }))).not.toContain('<select');
+  expect(view({})).not.toContain('name="stage"');
   expect(view({}, { ...restart, budget: {} })).toContain('restart</button>');
   expect(view({}, { enabled: false, why: 'branch sail/x is leased by run FAKE-9', stages: [], budget: {} })).toContain(
     '<button class="btn" disabled>restart</button><span class="act-why">branch sail/x is leased by run FAKE-9</span>',
   );
 });
 
-test('Stop shows a Stop now box that is ticked as chosen, and a disabled one gives its reason', () => {
+test('Stop shows two buttons, stop and stop now, and no box, and a disabled one gives its reason', () => {
   const view = (ui: Partial<ReturnType<typeof initialUi>>, stop: StopOffer = { enabled: true }) =>
     runControls({ stop }, { ...initialUi(0), ...ui })?.value;
   expect(view({})).toContain(
-    '<span class="act"><label class="lbl"><input type="checkbox" name="now" data-action="stop-now"> stop now</label><button class="btn" data-action="stop-run">stop</button></span>',
+    '<span class="act"><button class="btn" data-action="stop-run">stop</button></span><span class="act"><button class="btn" data-action="stop-run-now">stop now</button></span>',
   );
-  expect(view(act({ 'stop-run': { now: 'on' } }))).toContain(
-    '<input type="checkbox" name="now" data-action="stop-now" checked> stop now',
-  );
+  expect(view({})).not.toContain('type="checkbox"');
   expect(view({}, { enabled: false, why: 'run is not running' })).toContain(
     '<button class="btn" disabled>stop</button><span class="act-why">run is not running</span>',
   );
@@ -356,9 +347,9 @@ test("a suspended run's header holds resume as a button and stop in the ⋯ menu
   expect(closed).toContain(MORE);
   const open = header(model, offers, { runMenu: { runId: model.runId ?? '', at: 'header' } });
   expect(open).toContain(
-    '<div class="h-menu"><div class="acts"><span class="act"><label class="lbl"><input type="checkbox" name="now"',
+    '<div class="h-menu"><div class="acts"><span class="act"><button class="btn" data-action="stop-run">stop</button>',
   );
-  expect(open).toContain('data-action="stop-run">stop</button>');
+  expect(open).toContain('data-action="stop-run-now">stop now</button>');
 });
 
 test("a failed run's header holds restart and clean, and no ⋯", () => {
@@ -388,17 +379,16 @@ test('a completed run, offers that offer nothing and offers not read yet draw no
   expect(header(foldRun(readEvents(FAKE_2)), undefined)).not.toContain('restart');
 });
 
-test("the header's actions yield to an open row menu, so no field is drawn twice", () => {
+test("the header's actions yield to an open row menu, so no action is drawn twice", () => {
   const offers = { stop: STOP, resume: RESUME_OFFER };
   const model = foldRun(readEvents(FAKE_3));
   const ui = { ...initialUi(0), ...HEADER_UI, runMenu: { runId: FAKE_2_ID, at: 'row' as const } };
   const markup = renderRun(model, null, ui, NOW, offers).value;
   expect(markup).not.toContain('data-action="resume-run"');
-  expect(markup).not.toContain('name="raise"');
   expect(markup).not.toContain(MORE);
   const row = runControls(offers, ui)?.value ?? '';
-  expect(`${markup}${row}`.match(/name="raise"/g)).toHaveLength(1);
-  expect(`${markup}${row}`.match(/name="now"/g)).toHaveLength(1);
+  expect(`${markup}${row}`.match(/data-action="resume-run"/g)).toHaveLength(1);
+  expect(`${markup}${row}`.match(/data-action="stop-run"/g)).toHaveLength(1);
 });
 
 test('runControls draws only the actions it is given, and none when none is offered', () => {

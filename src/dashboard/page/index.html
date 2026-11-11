@@ -242,6 +242,21 @@
         padding-left: 18px;
         font-size: 12px;
       }
+      .dlg-fields {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        margin-top: 8px;
+        font-family: var(--mono);
+        font-size: 12px;
+      }
+      .dlg-bad {
+        color: var(--del);
+      }
+      .dlg .num {
+        width: 7em;
+      }
       .dlg-acts {
         display: flex;
         gap: 8px;
@@ -1860,6 +1875,7 @@
         <div class="brand"><i></i>sail dashboard</div>
         <div class="spacer"></div>
         <div id="attention"></div>
+        <div id="link"></div>
         <button class="btn" type="button" data-action="toggle-theme" aria-label="switch theme" title="theme">◐</button>
         <button class="btn" type="button" data-action="toggle-inspector" aria-label="toggle inspector" title="inspector (i)">⇥</button>
       </header>

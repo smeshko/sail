@@ -227,9 +227,18 @@ test("sail watch is refused by a live watcher of this name in another clone, or 
       const interrupts = fakeInterrupts();
       const handle = io(repo.dir, world.env, interrupts.onInterrupt);
       const deps: WatchDeps = { timers: fakeTimers(START), isAlive: (pid) => alive.includes(pid), pid: WATCHER_PID };
-      const exited = watchCommand(deps)({ values: {}, positionals: ['a'] }, handle.io);
-      const ended = await Promise.race([exited, Bun.sleep(2000).then(() => 'running' as const)]);
-      if (ended !== 'running') return { code: ended, stderr: handle.printed.stderr };
+      let code: number | undefined;
+      const exited = Promise.resolve(watchCommand(deps)({ values: {}, positionals: ['a'] }, handle.io)).then((exit) => {
+        code = exit;
+        return exit;
+      });
+      // Until it exits, or it is running: recorded in the registry and listening for Ctrl-C, so the interrupt below is
+      // never lost on a start a loaded machine slows. Bounded, and never a throw: the assertion names what it got.
+      const deadline = performance.now() + 20_000;
+      const started = () =>
+        readEntry(world.registry, 'stub')?.watcher?.pid === WATCHER_PID && interrupts.registered > 0;
+      while (code === undefined && !started() && performance.now() < deadline) await Bun.sleep(5);
+      if (code !== undefined) return { code, stderr: handle.printed.stderr };
       interrupts.interrupt();
       return { code: await exited, stderr: handle.printed.stderr, ran: true };
     };

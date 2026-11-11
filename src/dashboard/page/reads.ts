@@ -167,7 +167,8 @@ export function closeFile(store: Store) {
   store.mark('drawer');
 }
 
-export function openFile(store: Store, name: string, path: string) {
+/** Opens `path` in the drawer. `onMissing` is called when the latest read of it answers other than 200. */
+export function openFile(store: Store, name: string, path: string, onMissing?: () => void) {
   const { ui, host } = store;
   const open = store.run;
   if (open === undefined) return;
@@ -179,6 +180,7 @@ export function openFile(store: Store, name: string, path: string) {
     if (asked !== store.docRead) return;
     store.doc = answer.status === 200 ? { state: 'loaded', value: answer.body } : { state: 'missing' };
     store.mark('drawer');
+    if (answer.status !== 200) onMissing?.();
   });
   store.mark('drawer');
 }

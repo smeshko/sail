@@ -2,9 +2,9 @@
 // run, with its polling, a box of items for each state that has any, running first, each folding from its heading, and
 // its recent events from the queue's own stream, folded until the person opens them, and the error that stream sent.
 // The controls ask the watcher and change nothing themselves: the header's poll button and its workflow's Watch or
-// Unwatch, drawn from the registry and, when the offer is disabled, drawn disabled with its reason, a field to add a ticket (for a
-// workflow that polls tickets), and, at a row's right, ▲ and ▼ on a waiting item to move it before or after its waiting
-// neighbour, and a ⋯ on any item but a running one, which opens its menu: requeue, on a parked item or a failed one
+// Unwatch, drawn from the registry and, when the offer is disabled, drawn disabled with its reason, a field to add a
+// ticket, with an add and an add that skips its checks (for a workflow that polls tickets), and, at a row's right, ▲
+// and ▼ on a waiting item to move it before or after its waiting neighbour, and a ⋯ on any item but a running one, which opens its menu: requeue, on a parked item or a failed one
 // whose run has ended, and drop, which opens the confirmation dialog. One menu is open at a time. The answer to any of
 // them, a refusal or that the watcher has not taken it yet, is a toast, and while a request is out the header or the
 // item's row reads the word under way. A queue held on the usage limit of a harness key also offers a release of that
@@ -140,13 +140,13 @@ function releaseControl(panel: QueuePanel, key: string, ui: UiState): SafeHtml |
   });
 }
 
-/** The field to add a ticket by its key, with Force, as typed so far. */
+/** The field to add a ticket by its key, as typed so far, and the two buttons that add it, the second skipping its checks. */
 function addForm(panel: QueuePanel, ui: UiState, why: string | undefined): SafeHtml {
   const typed = ui.act.drafts['add-ticket'];
   if (why !== undefined) {
-    return html`<div class="qadd"><input class="txt" type="text" name="add-ticket" placeholder="ticket key" value="${typed?.ticket ?? ''}" disabled title="${why}"><label class="lbl"><input type="checkbox" name="add-force"${typed?.force === 'on' ? ' checked' : ''} disabled title="${why}"> force</label><button class="btn" disabled title="${why}">add</button></div>`;
+    return html`<div class="qadd"><input class="txt" type="text" name="add-ticket" placeholder="ticket key" value="${typed?.ticket ?? ''}" disabled title="${why}"><button class="btn" disabled title="${why}">add</button><button class="btn" disabled title="${why}">add, skipping its checks</button></div>`;
   }
-  return html`<div class="qadd"><input class="txt" type="text" name="add-ticket" placeholder="ticket key" value="${typed?.ticket ?? ''}"><label class="lbl"><input type="checkbox" name="add-force"${typed?.force === 'on' ? ' checked' : ''}> force</label><button class="btn" data-action="add-ticket" data-repo="${panel.repo}" data-workflow="${panel.workflow}" title="add the ticket to the queue">add</button></div>`;
+  return html`<div class="qadd"><input class="txt" type="text" name="add-ticket" placeholder="ticket key" value="${typed?.ticket ?? ''}"><button class="btn" data-action="add-ticket" data-repo="${panel.repo}" data-workflow="${panel.workflow}" title="add the ticket to the queue">add</button><button class="btn" data-action="add-ticket-force" data-repo="${panel.repo}" data-workflow="${panel.workflow}" title="add the ticket without checking its label or state">add, skipping its checks</button></div>`;
 }
 
 /** A waiting row's ▲ or ▼: `target` is the waiting neighbour the item moves before or after. */

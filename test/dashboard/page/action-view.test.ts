@@ -2,7 +2,7 @@
 // why, nothing when not offered, and the parameters each kind draws.
 import { expect, test } from 'bun:test';
 import { ACTIONS, type ActionDef, type OfferSource, type Subject } from '../../../src/dashboard/page/action-registry';
-import { actionControl } from '../../../src/dashboard/page/action-view';
+import { actionControl, field } from '../../../src/dashboard/page/action-view';
 import type { ActState } from '../../../src/dashboard/page/ui-state';
 
 const RUN: Subject = { kind: 'run', repo: 'alpha', runId: 'R1' };
@@ -78,7 +78,7 @@ test("a button carries its subject's data, its class and its title when asked", 
   );
 });
 
-test('a choice is drawn as a select with the draft chosen, else the initial one, and a tick as a checkbox', () => {
+test('a choice is drawn as a select with the draft chosen, else the initial one, and Stop draws no box', () => {
   const stop = ACTIONS.find((each) => each.id === 'stop-run');
   const restart = ACTIONS.find((each) => each.id === 'restart-run');
   if (stop === undefined || restart === undefined) throw new Error('missing');
@@ -97,13 +97,12 @@ test('a choice is drawn as a select with the draft chosen, else the initial one,
       },
     },
   } as unknown as OfferSource;
-  expect(actionControl(stop, RUN, idle, source).toString()).toContain(
-    '<input type="checkbox" name="now" data-action="stop-now"> stop now</label>',
+  expect(actionControl(stop, RUN, idle, source).toString()).toBe(
+    '<button class="btn" data-action="stop-run">stop</button>',
   );
-  expect(actionControl(stop, RUN, { drafts: { 'stop-run': { now: 'on' } } }, source).toString()).toContain(
-    'name="now" data-action="stop-now" checked>',
-  );
-  const select = (act: ActState) => actionControl(restart, RUN, act, source).toString();
+  const stage = restart.params(RUN, source)[0];
+  if (stage === undefined) throw new Error('no stage');
+  const select = (act: ActState) => String(field(stage, act.drafts['restart-run'] ?? {}));
   expect(select(idle)).toContain(
     '<option value="a" title="a once">a</option><option value="b" title="b once" selected>b</option>',
   );
@@ -136,4 +135,66 @@ test('a parameter the row gives is not drawn', () => {
   expect(actionControl(move, item, idle, source).toString()).toBe(
     '<button class="btn" data-action="move-item">move</button>',
   );
+});
+
+test('a parameter asked in the dialog is not drawn beside its button', () => {
+  const restart = ACTIONS.find((each) => each.id === 'restart-run');
+  const resume = ACTIONS.find((each) => each.id === 'resume-run');
+  if (restart === undefined || resume === undefined) throw new Error('missing');
+  const source = {
+    index: [],
+    run: {
+      resume: { enabled: true, spentUsd: 1, budget: {}, raise: 'usd' },
+      restart: { enabled: true, stage: 'b', stages: [{ stage: 'b', runsAgain: 'b once' }], budget: {} },
+    },
+  } as unknown as OfferSource;
+  expect(actionControl(restart, RUN, idle, source).toString()).toBe(
+    '<button class="btn" data-action="restart-run">restart</button>',
+  );
+  expect(actionControl(resume, RUN, idle, source).toString()).toBe(
+    '<button class="btn" data-action="resume-run">resume</button>',
+  );
+});
+
+test('no action draws a checkbox', () => {
+  const on = { enabled: true };
+  const source = {
+    run: {
+      resume: { ...on, spentUsd: 1, budget: {}, raise: 'usd' },
+      restart: { ...on, stage: 'b', stages: [{ stage: 'b', runsAgain: 'b once' }], budget: {} },
+      stop: on,
+      clean: { ...on, removes: [] },
+    },
+    index: [
+      {
+        name: 'alpha',
+        runs: [],
+        watching: { workflows: ['wf'] },
+        offers: { watch: on, unwatch: on, workflows: { wf: { watch: on, unwatch: on } } },
+        queues: [
+          {
+            workflow: 'wf',
+            offers: { poll: on, add: on, items: { k: { requeue: on, drop: on, move: on } } },
+          },
+        ],
+      },
+    ],
+  } as unknown as OfferSource;
+  const subjects: Subject[] = [
+    RUN,
+    { kind: 'item', repo: 'alpha', workflow: 'wf', item: 'k' },
+    { kind: 'workflow', repo: 'alpha', workflow: 'wf' },
+    { kind: 'repo', repo: 'alpha' },
+    { kind: 'none' },
+  ];
+  let drawn = 0;
+  for (const def of ACTIONS)
+    for (const subject of subjects) {
+      if (!def.appliesTo.includes(subject.kind)) continue;
+      const out = actionControl(def, subject, idle, source).toString();
+      if (out !== '') drawn++;
+      expect([def.id, out.includes('type="checkbox"')]).toEqual([def.id, false]);
+      for (const param of def.params(subject, source)) expect(['number', 'text', 'choice']).toContain(param.type);
+    }
+  expect(drawn).toBeGreaterThanOrEqual(12);
 });
