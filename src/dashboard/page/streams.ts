@@ -1,4 +1,4 @@
-// The page's sockets and the rules they follow: one index socket feeding the sidebar, the list, needs attention, the queue view and
+// The page's sockets and the rules they follow: one index socket feeding the sidebar, the list, the queue view and
 // the open run's summary; one run socket for the open run, whose events are folded into the run model; and one queue
 // socket per watched workflow in the index. A run or queue socket that closes without `end` reconnects after 2 s from an
 // empty model, unless its stream sent `error`: then the error stays, with no reconnect, until it is clicked again. The
@@ -302,7 +302,9 @@ export function onIndex(store: Store, text: string, onStart: (asked: Record<stri
   }
   if (ui.queue !== undefined && openQueue(store) === undefined) delete ui.queue;
   syncUrl(store, false);
-  store.mark('sidebar', 'list', 'attention', 'main', 'status');
+  store.mark('sidebar', 'list', 'main', 'status');
+  // The command menu draws its rows from the index's offers too.
+  if (ui.menu !== undefined) store.mark('menu');
   tick(store);
 }
 

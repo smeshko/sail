@@ -31,19 +31,22 @@ test('the committed dashboard views are what the fixtures render now', async () 
   const fresh = join(temp, 'fresh');
   expect(await renderDashboardViews(fresh)).toEqual([
     'sidebar.html',
+    'list-inbox.html',
     'list-active.html',
     'list-history.html',
     'list-history-selected.html',
     'list-queues.html',
     'list-queues-problem.html',
-    'attention.html',
+    'list-queues-held.html',
     'queue.html',
     'queue-watched.html',
+    'menu-item.html',
     'run-golden.html',
     'run-fake-2.html',
     'list-menu-fake-2.html',
     'dialog-clean.html',
     'dialog-clean-several.html',
+    'menu-fake-2.html',
     'dialog-restart.html',
     'run-fake-3.html',
     'list-menu-fake-3.html',
@@ -62,6 +65,15 @@ test('the committed dashboard views are what the fixtures render now', async () 
     'dense-queues.html',
   ]);
   expect(stale(fresh, COMMITTED)).toEqual([]);
+});
+
+test("the committed paused, held, watched queue's row holds both chips, an enabled poll and an unwatch", () => {
+  const row = readFileSync(join(COMMITTED, 'list-queues-held.html'), 'utf8');
+  expect(row).toContain('paused: ticketSource fake: the provider did not answer');
+  expect(row).toMatch(/held until \d\d:\d\d:\d\d: usage limit/);
+  expect(row).toContain('data-action="poll-queue" data-repo="beta" data-workflow="ticket-to-pr"');
+  expect(row).toContain('data-action="unwatch" data-repo="beta" data-workflow="ticket-to-pr"');
+  expect(row).toContain('watched</span>');
 });
 
 test('a view changed by one byte is named as stale, and so is one missing', async () => {

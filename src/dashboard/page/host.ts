@@ -4,17 +4,7 @@
 // members the page uses, since the project's TypeScript has no DOM library.
 
 /** The page's regions, each an element id in `index.html`. */
-export const REGIONS = [
-  'sidebar',
-  'list',
-  'attention',
-  'link',
-  'main',
-  'inspector',
-  'status',
-  'drawer',
-  'toasts',
-] as const;
+export const REGIONS = ['sidebar', 'list', 'link', 'main', 'inspector', 'status', 'drawer', 'menu', 'toasts'] as const;
 export type Region = (typeof REGIONS)[number];
 
 export interface Connection {
@@ -39,14 +29,28 @@ export interface PageHost {
   scrollToEnd(region: Region): void;
   onAction(handler: (action: string, data: Record<string, string>) => void): void;
   /**
-   * `handler` is told each key, whether it was typed in an input, and `on`, the `data-action` of the element the key
-   * landed on; answering true suppresses the key's default, as typing it would.
+   * `handler` is told each key, whether it was typed in an input, `on`, the `data-action` of the element the key
+   * landed on, and `mod`, whether Cmd or Ctrl is held; answering true suppresses the key's default, as typing it would.
    */
-  onKey(handler: (key: string, inInput: boolean, on?: string) => boolean): void;
+  onKey(handler: (key: string, inInput: boolean, on?: string, mod?: boolean) => boolean): void;
+  /**
+   * `handler` is told where the pointer is: `hover` when it moves onto an element, `context` when a right-click lands.
+   * `data` is the dataset of the nearest ancestor with a `data-subject`, or undefined when the element is on no row.
+   * A `context` answered true has its default prevented.
+   */
+  onPoint(
+    handler: (
+      kind: 'hover' | 'context',
+      data: Record<string, string> | undefined,
+      point: { x: number; y: number },
+    ) => boolean | undefined,
+  ): void;
   /** `handler` is told the value of a named field each time it is typed into. */
   onInput(handler: (name: string, value: string) => void): void;
   /** Focuses the field named `name`, in whichever region draws it. */
   focus(name: string): void;
+  /** Focuses the command menu's field, else the menu itself. */
+  focusMenu(): void;
   /** Takes the focus off the focused element. */
   blur(): void;
   /** Scrolls the `.cur` element of `region` into view, as little as it takes. */
@@ -133,7 +137,12 @@ export interface ElementLike {
 export interface EventLike {
   target: unknown;
   key?: string;
+  shiftKey?: boolean;
+  ctrlKey?: boolean;
+  metaKey?: boolean;
+  altKey?: boolean;
   clientX?: number;
+  clientY?: number;
   preventDefault?(): void;
 }
 
@@ -177,6 +186,17 @@ const isElement = (value: unknown): value is ElementLike =>
 function actionOf(target: unknown): ElementLike | undefined {
   for (let at = isElement(target) ? target : null; at !== null; at = at.parentElement) {
     if (at.dataset.action !== undefined) return at;
+  }
+  return undefined;
+}
+
+/** The dataset of the nearest ancestor of `target` that names a subject, as a plain record. */
+function subjectData(target: unknown): Record<string, string> | undefined {
+  for (let at = isElement(target) ? target : null; at !== null; at = at.parentElement) {
+    if (at.dataset.subject === undefined) continue;
+    const data: Record<string, string> = {};
+    for (const [name, value] of Object.entries(at.dataset)) if (value !== undefined) data[name] = value;
+    return data;
   }
   return undefined;
 }
@@ -409,6 +429,17 @@ export function browserHost(win: BrowserWindow): PageHost {
           onAction('dialog-change', {});
       });
     },
+    onPoint(handler) {
+      doc.addEventListener('mouseover', (event) => {
+        handler('hover', subjectData(event.target), { x: event.clientX ?? 0, y: event.clientY ?? 0 });
+      });
+      // A right-click on a row is the page's, and its default is prevented only when the handler took it: one on no row
+      // keeps the browser's own menu.
+      doc.addEventListener('contextmenu', (event) => {
+        const point = { x: event.clientX ?? 0, y: event.clientY ?? 0 };
+        if (handler('context', subjectData(event.target), point) === true) event.preventDefault?.();
+      });
+    },
     onInput(handler) {
       doc.addEventListener('input', (event) => {
         const target = isElement(event.target) ? event.target : undefined;
@@ -423,6 +454,11 @@ export function browserHost(win: BrowserWindow): PageHost {
           return;
         }
       }
+    },
+    focusMenu() {
+      const menu = doc.getElementById('menu');
+      const target = menu?.querySelector?.('[name="menu-query"]') ?? menu?.querySelector?.('.cmdk');
+      target?.focus?.();
     },
     blur() {
       doc.activeElement?.blur?.();
@@ -444,10 +480,15 @@ export function browserHost(win: BrowserWindow): PageHost {
             return;
           }
         }
-        if (
-          handler(event.key ?? '', tag !== undefined && INPUTS.has(tag), actionOf(event.target)?.dataset.action) ===
-          true
-        )
+        // A key held with Alt is the browser's, and so is one held with Cmd or Ctrl but K, which the handler takes as
+        // the command menu's chord. A letter's case is Shift's, never Caps Lock's: `e` and `E` change saved state
+        // (review R5).
+        if (event.altKey === true) return;
+        const mod = event.metaKey === true || event.ctrlKey === true;
+        let key = event.key ?? '';
+        if (/^[a-z]$/i.test(key) && event.shiftKey !== undefined)
+          key = event.shiftKey ? key.toUpperCase() : key.toLowerCase();
+        if (handler(key, tag !== undefined && INPUTS.has(tag), actionOf(event.target)?.dataset.action, mod) === true)
           event.preventDefault?.();
       });
     },

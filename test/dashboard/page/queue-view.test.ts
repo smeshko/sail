@@ -58,7 +58,7 @@ test("beta's queue view lists running first, shows its header, its four items ea
   expect(
     [
       ...markup.matchAll(
-        /<button class="qsec grp-t open" data-action="toggle-queue-section" data-section="beta\/ticket-to-pr:\w+" aria-expanded="true"><span class="caret">›<\/span>([\w ·]+)<\/button><div class="qbox"><div class="qrow2[\w ]*"><span class="c-dot"><i class="(\w+)"><\/i><\/span><span class="c-ref">([\w:-]+)<\/span>/g,
+        /<button class="qsec grp-t open" data-action="toggle-queue-section" data-section="beta\/ticket-to-pr:\w+" aria-expanded="true"><span class="caret">›<\/span>([\w ·]+)<\/button><div class="qbox"><div class="qrow2[\w ]*"[^>]*><span class="c-dot"><i class="(\w+)"><\/i><\/span><span class="c-ref">([\w:-]+)<\/span>/g,
       ),
     ].map(([, box, state, key]) => `${box}: ${key} ${state}`),
   ).toEqual([
@@ -74,7 +74,7 @@ test("beta's queue view lists running first, shows its header, its four items ea
     'parked',
     'done',
   ]);
-  expect(markup).toContain('<div class="qrow2 done">');
+  expect(markup).toContain('<div class="qrow2 done" data-subject="item"');
   expect(markup).toContain(
     '<button class="qrecent-h" data-action="toggle-queue-events" aria-expanded="false"><span class="caret">›</span>recent queue events<span class="n">9</span></button>\n</section>',
   );
@@ -207,7 +207,7 @@ function waiting() {
 
 /** The rows of the waiting box, each as its key and the buttons it has. */
 function waitingRows(markup: string) {
-  return [...markup.matchAll(/<div class="qrow2[^"]*">((?:(?!<\/div>).)*)<\/div>/gs)]
+  return [...markup.matchAll(/<div class="qrow2[^"]*"[^>]*>((?:(?!<\/div>).)*)<\/div>/gs)]
     .filter(([, row]) => row?.includes('data-dir=') || row?.includes('>queued ·'))
     .map(([, row]) => ({
       key: /class="c-ref">([^<]+)</.exec(row ?? '')?.[1],
@@ -348,7 +348,7 @@ test('a waiting item with open prerequisites shows waiting on their keys in its 
 
 /** The queue-changing buttons of each row, as `<key>: <action>[ <label>]`, in row order. */
 function controls(markup: string): string[] {
-  return [...markup.matchAll(/<div class="qrow2[^"]*">(.*?)<\/div>/gs)].map(([, row]) => {
+  return [...markup.matchAll(/<div class="qrow2[^"]*"[^>]*>(.*?)<\/div>/gs)].map(([, row]) => {
     const key = /class="c-ref">([^<]+)</.exec(row ?? '')?.[1];
     const buttons = [
       ...(row ?? '').matchAll(/<button class="btn[^"]*" data-action="(requeue-item|drop-item)"[^>]*>([^<]*)</g),
@@ -476,7 +476,7 @@ test('a queue section, the recent events fold and an item ⋯ say whether they a
   expect(moves).toContain('aria-label="move down, after ticket:FAKE-7"');
 });
 
-const headerOf = (markup: string) => markup.match(/<div class="srcbar">.*?<\/span><\/span><\/div>/s)?.[0] ?? '';
+const headerOf = (markup: string) => markup.match(/<div class="srcbar"[^>]*>.*?<\/span><\/span><\/div>/s)?.[0] ?? '';
 const ON = { enabled: true };
 
 test("a queue's header draws poll and unwatch for a watched workflow, and no watch", () => {

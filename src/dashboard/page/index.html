@@ -108,11 +108,10 @@
         outline-offset: 1px;
       }
       .r-open:focus-visible,
-      .q-row:focus-visible,
+      .q-open:focus-visible,
       .qsec:focus-visible,
       .qrecent-h:focus-visible,
-      .trow:focus-visible,
-      .sig:focus-visible {
+      .trow:focus-visible {
         outline-offset: -2px;
       }
       button,
@@ -371,21 +370,6 @@
         min-width: 28px;
         padding: 2px 8px;
         line-height: 1.4;
-      }
-      .pane-h {
-        display: flex;
-        align-items: center;
-        gap: 7px;
-        padding: 11px 12px 6px;
-        font-family: var(--mono);
-        font-size: 10px;
-        letter-spacing: 0.1em;
-        text-transform: uppercase;
-        color: var(--fg-3);
-      }
-      .pane-h .c {
-        margin-left: auto;
-        color: var(--fg-4);
       }
       .qsec .caret,
       .qrecent-h .caret {
@@ -860,6 +844,39 @@
         color: var(--fg-3);
         border-left: 2px solid transparent;
       }
+      .q-open {
+        flex: 1 1 auto;
+        min-width: 0;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 7px;
+        min-height: var(--row-h);
+        padding: 0;
+        font: inherit;
+        color: inherit;
+        text-align: left;
+      }
+      .q-c,
+      .q-polled {
+        font-family: var(--mono);
+        color: var(--fg-4);
+        white-space: nowrap;
+      }
+      .q-c.failed {
+        color: var(--del);
+      }
+      .q-c.parked {
+        color: var(--warn);
+      }
+      .q-row .warnchip {
+        overflow-wrap: anywhere;
+        white-space: normal;
+      }
+      .wf-act[disabled] {
+        opacity: 0.5;
+        cursor: default;
+      }
       .q-row .nm {
         min-width: 0;
         overflow-wrap: anywhere;
@@ -881,7 +898,6 @@
         color: var(--fg);
       }
       .q-row .n {
-        margin-left: auto;
         color: var(--warn);
       }
       .q-row {
@@ -892,101 +908,49 @@
         overflow-wrap: anywhere;
         text-align: left;
       }
-      /* needs attention: a button in the top bar, and the pane it opens */
-      .att-btn {
-        display: inline-flex;
-        align-items: center;
+      /* the Inbox's rows */
+      .in-row {
+        display: flex;
+        align-items: flex-start;
         gap: 6px;
+        width: 100%;
+        min-height: var(--row-h);
+        padding: 0 12px 0 10px;
+        font-family: var(--mono);
+        font-size: 11.5px;
+        border-left: 2px solid transparent;
       }
-      .att-btn .badge {
-        min-width: 16px;
-        padding: 0 5px;
-        border-radius: 8px;
-        background: var(--err);
-        color: #fff;
-        font-size: 10px;
-        font-weight: 700;
-        text-align: center;
-      }
-      .att-btn.on {
-        border-color: var(--err);
+      .in-row.sel {
+        background: var(--panel-2);
         color: var(--fg);
       }
-      .att-scrim {
-        position: fixed;
-        inset: 0;
-        z-index: 39;
-      }
-      .att-pane {
-        position: fixed;
-        top: 52px;
-        right: 14px;
-        z-index: 40;
-        width: min(440px, calc(100vw - 28px));
-        max-height: 70vh;
-        overflow-y: auto;
-        background: var(--panel);
-        border: 1px solid var(--line-2);
-        border-radius: 10px;
-        box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
-      }
-      .att-pane .pane-h {
-        position: sticky;
-        top: 0;
-        background: var(--panel);
-        padding-bottom: 8px;
-        border-bottom: 1px solid var(--line);
-      }
-      .att-pane .pane-h .att-clear {
-        text-transform: none;
-        letter-spacing: 0;
-        padding: 2px 8px;
-        font-size: 11px;
-      }
-      .att-list {
-        padding: 10px 12px 4px;
-      }
-      .sig {
-        display: block;
-        width: 100%;
-        padding: 9px 10px;
-        border: 1px solid var(--line);
-        border-left: 2px solid var(--idle);
-        border-radius: 6px;
-        background: var(--panel-2);
-        margin-bottom: 6px;
-      }
-      .sig:hover {
-        border-color: var(--line-2);
-      }
-      .sig b {
-        font-size: 12px;
-        display: block;
-        overflow-wrap: anywhere;
-      }
-      .sig .w {
-        display: block;
-        font-family: var(--mono);
-        font-size: 10.5px;
-        color: var(--fg-4);
-        overflow-wrap: anywhere;
-      }
-      .sig .p {
-        display: block;
-        font-size: 11.5px;
-        color: var(--fg-3);
-        margin-top: 2px;
-        overflow-wrap: anywhere;
-      }
-      .sig-failed,
-      .sig-error {
+      .in-failed,
+      .in-error {
         border-left-color: var(--err);
       }
-      .sig-parked,
-      .sig-problem {
+      .in-parked,
+      .in-problem {
         border-left-color: var(--del);
       }
-      .att-empty,
+      .r-dismiss {
+        flex: none;
+        align-self: center;
+        padding: 0 8px;
+        border: 0;
+        background: transparent;
+        color: var(--fg-4);
+        cursor: pointer;
+      }
+      .r-dismiss:hover {
+        color: var(--fg);
+      }
+      .r-detail {
+        color: var(--fg-3);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        min-width: 0;
+      }
       .qempty {
         padding: 18px;
         text-align: center;
@@ -1213,6 +1177,101 @@
         font-family: var(--mono);
         font-size: 11px;
         opacity: 0.7;
+      }
+      .menu:empty {
+        display: none;
+      }
+      .cmdk-back {
+        position: fixed;
+        inset: 0;
+        z-index: 60;
+        background: rgba(0, 0, 0, 0.4);
+        border: 0;
+        cursor: default;
+      }
+      .cmdk {
+        position: fixed;
+        z-index: 61;
+        top: 12vh;
+        left: 50%;
+        transform: translateX(-50%);
+        width: min(560px, 92vw);
+        max-height: 70vh;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        border: 1px solid var(--line-2);
+        border-radius: 8px;
+        background: var(--inset);
+        color: var(--fg);
+        padding: 8px;
+        font-size: 13px;
+      }
+      .cmdk.ctx {
+        transform: none;
+        width: min(320px, 92vw);
+      }
+      .cmdk-subj {
+        padding: 4px 8px;
+        color: var(--fg-3);
+        font-family: var(--mono);
+        font-size: 12px;
+      }
+      .cmdk-in {
+        margin: 4px 0;
+        padding: 6px 8px;
+        border: 1px solid var(--line-2);
+        border-radius: 6px;
+        background: var(--panel);
+        color: var(--fg);
+        font: inherit;
+      }
+      .cmdk-step,
+      .cmdk-grp {
+        padding: 6px 8px 2px;
+        color: var(--fg-3);
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .cmdk-line {
+        padding: 0 8px;
+        color: var(--fg-2);
+        font-size: 12px;
+      }
+      .cmdk-err {
+        padding: 4px 8px;
+        color: var(--del);
+        font-size: 12px;
+      }
+      .cmdk-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        text-align: left;
+        border: 0;
+        border-radius: 6px;
+        background: transparent;
+        color: var(--fg);
+        font: inherit;
+        padding: 4px 8px;
+      }
+      .cmdk-row:hover,
+      .cmdk-row.sel {
+        background: var(--hover);
+      }
+      .cmdk-row:disabled {
+        color: var(--fg-3);
+        cursor: default;
+      }
+      .cmdk-label {
+        flex: 1;
+      }
+      .cmdk-hint,
+      .cmdk-why {
+        color: var(--fg-3);
+        font-size: 11px;
       }
       .toasts {
         position: fixed;
@@ -1895,7 +1954,6 @@
       <header class="top">
         <div class="brand"><i></i>sail dashboard</div>
         <div class="spacer"></div>
-        <div id="attention"></div>
         <div id="link"></div>
         <button class="btn" type="button" data-action="toggle-theme" aria-label="switch theme" title="theme">◐</button>
         <button class="btn" type="button" data-action="toggle-inspector" aria-label="toggle inspector" title="inspector (i)">⇥</button>
@@ -1920,6 +1978,7 @@
       <aside class="drawer" id="drawer"></aside>
       <!-- biome-ignore lint/a11y/noRedundantRoles: older browsers and the review read the role off the element -->
       <dialog id="dialog" class="dlg" role="dialog" aria-modal="true" aria-labelledby="dialog-title"></dialog>
+      <div id="menu" class="menu"></div>
       <div id="toasts" class="toasts" aria-live="polite"></div>
     </div>
     <script type="module" id="sail-page"></script>

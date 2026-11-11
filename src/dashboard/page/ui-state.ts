@@ -1,9 +1,10 @@
 // What a person has chosen on the page, which every view reads: the open run, card and tab, whether the card's timeline
 // is open, which of its tool calls and which kinds of its entries it hides, the queue open in its place with its folded
-// sections, the list's view, filter, cursor and folded groups, whether needs attention is open, the theme, the offset their
+// sections, the list's view, filter, cursor and folded groups, the theme, the offset their
 // clock is at, and the file open in the drawer. `act` is the one state of carrying an action out: the parameters typed. It
 // holds nothing about the runs themselves.
 
+import type { Subject } from './action-registry';
 import type { DialogView } from './dialog-view';
 import type { ViewName } from './list-model';
 import type { Toast } from './toasts';
@@ -21,6 +22,46 @@ export type Theme = (typeof THEMES)[number];
 /** Carrying an action out, for every action alike: what was typed for each action's parameters, kept across a draw. */
 export interface ActState {
   drafts: Record<string, Record<string, string>>;
+}
+
+/** Where the focused subject comes from: the row under the pointer, the keyboard's cursor, or the open run or queue. */
+export type FocusSource = 'hover' | 'cursor' | 'open';
+
+/** The subject each source holds, with the sequence number of its last change: the highest is the focused subject. */
+export interface FocusState {
+  seq: number;
+  hover?: { subject: Subject; at: number };
+  cursor?: { subject: Subject; at: number };
+  open?: { subject: Subject; at: number };
+}
+
+/**
+ * One step the command menu asks: the `at`-th parameter of an action for a subject, with what the earlier steps took,
+ * or the choice of the queue an action without a subject is done to.
+ */
+export type MenuStep =
+  | {
+      action: string;
+      subject: Subject;
+      data: Record<string, string>;
+      values: Record<string, string>;
+      at: number;
+    }
+  | { pick: 'queue'; action: string };
+
+/** The command menu while it is open: the subject frozen at the open, what is typed, the highlighted row and the steps. */
+export interface MenuState {
+  mode: 'full' | 'context';
+  subject?: Subject;
+  query: string;
+  /** The highlighted row, by its place in the rows drawn. */
+  at: number;
+  /** The row a person moved the highlight to, by `rowKey()`: it keeps the highlight while rows before it come and go. */
+  row?: string;
+  steps: MenuStep[];
+  error?: string;
+  /** Where a right-click opened it, in the page's pixels. */
+  point?: { x: number; y: number };
 }
 
 export interface UiState {
@@ -54,8 +95,6 @@ export interface UiState {
   listFolded: string[];
   /** The History rows marked with `x`, by row id: the selection. */
   listSelected: string[];
-  /** Whether the needs attention pane is open. */
-  attention: boolean;
   /** The queue view's folded sections, as `<repo>/<workflow>:<state>`. */
   folded: string[];
   /** Whether the queue view shows its recent events. */
@@ -78,6 +117,10 @@ export interface UiState {
   dialog?: DialogView;
   /** The toasts on the stack, oldest first. */
   toasts: Toast[];
+  /** The command menu, while it is open. */
+  menu?: MenuState;
+  /** The subject each source of the focus holds. */
+  focus: FocusState;
   /** What a subject reads while a request for it is out, by the id `underwayId()` gives: `stopping…`. */
   underway: Record<string, string>;
 }
@@ -92,7 +135,6 @@ export function initialUi(tz: number): UiState {
     listFilter: '',
     listFolded: [],
     listSelected: [],
-    attention: false,
     folded: [],
     queueEvents: false,
     theme: 'dark',
@@ -103,6 +145,7 @@ export function initialUi(tz: number): UiState {
     act: { drafts: {} },
     toasts: [],
     underway: {},
+    focus: { seq: 0 },
   };
 }
 

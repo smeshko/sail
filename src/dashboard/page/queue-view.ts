@@ -16,7 +16,7 @@
 import type { QueueEvent } from '../../events/types';
 import type { QueueItemState } from '../../watch/queue-store';
 import { ACTIONS, actionOf, type OfferSource, type Subject } from './action-registry';
-import { actionControl } from './action-view';
+import { actionControl, subjectAttrs } from './action-view';
 import { ago, clock } from './format';
 import { html, type SafeHtml, safeHref } from './html';
 import { type PanelItem, panelSource, QUEUE_STATES, type QueuePanel } from './index-model';
@@ -187,7 +187,7 @@ function itemRow(panel: QueuePanel, item: PanelItem, ui: UiState, why: string | 
         ? html`<button class="run-link" data-action="select-run" data-repo="${panel.repo}" data-run="${item.runId}" title="open ${item.runId}">${item.runId} ›</button>`
         : html`<span class="c-run">${item.runId}</span>`;
   const underway = ui.underway[`item:${panel.repo}/${panel.workflow}/${item.dedupKey}`];
-  return html`<div class="qrow2${item.state === 'done' ? ' done' : ''}"><span class="c-dot"><i class="${item.state}"></i></span><span class="c-ref">${item.dedupKey}</span><span class="c-main">${title}<span class="c-sub">${underway === undefined ? item.state : html`<span class="busy">${underway}</span>`} · ${plural(item.attempts, 'attempt')}${
+  return html`<div class="qrow2${item.state === 'done' ? ' done' : ''}"${subjectAttrs({ kind: 'item', repo: panel.repo, workflow: panel.workflow, item: item.dedupKey })}><span class="c-dot"><i class="${item.state}"></i></span><span class="c-ref">${item.dedupKey}</span><span class="c-main">${title}<span class="c-sub">${underway === undefined ? item.state : html`<span class="busy">${underway}</span>`} · ${plural(item.attempts, 'attempt')}${
     item.priority === undefined || item.priority === 'none' ? '' : ` · priority ${item.priority}`
   }${item.moved === true ? ' · moved' : ''}${
     item.retryAt === undefined ? '' : html` · retry at ${clock(item.retryAt, ui.tz)}`
@@ -247,7 +247,7 @@ function panelView(panel: QueuePanel, stream: QueueStream | undefined, ui: UiSta
   const held = panel.queue?.held;
   const underway = ui.underway[`queue:${panel.repo}/${panel.workflow}`];
   return html`<section class="qpanel">
-<div class="srcbar"><span class="h${why === undefined ? '' : ' held'}"></span><span class="nm">${panel.repo} / ${panel.workflow}</span>${
+<div class="srcbar"${subjectAttrs({ kind: 'workflow', repo: panel.repo, workflow: panel.workflow })}><span class="h${why === undefined ? '' : ' held'}"></span><span class="nm">${panel.repo} / ${panel.workflow}</span>${
     underway === undefined
       ? html`<span class="pill ${why === undefined ? 'p-pass' : 'p-skip'}">${state}</span>`
       : html`<span class="busy">${underway}</span>`

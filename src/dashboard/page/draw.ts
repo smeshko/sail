@@ -1,15 +1,16 @@
 // The page's draw loop: what each region is drawn from, the flush that draws the regions marked dirty and writes only
 // those whose markup changed, and the one-second tick that draws the running times again while anything runs. A region
 // that can't be drawn says so, and the others are still drawn.
-import { identity } from './attention';
-import { renderAttention } from './attention-view';
 import { renderDrawer } from './drawer-view';
+import { syncOpen } from './focus';
 import { REGIONS, type Region } from './host';
 import { html } from './html';
 import { listRepos, statusOf } from './index-model';
 import { renderInspector } from './inspector-view';
-import { viewCounts } from './list-model';
+import { filterRows, groupsOf, viewCounts } from './list-model';
 import { renderList } from './list-view';
+import { highlighted, modelOf } from './menu';
+import { renderMenu } from './menu-view';
 import { hasItemActions, offeredDrop, renderQueue } from './queue-view';
 import { renderRun, renderStatus } from './run-view';
 import { renderSidebar } from './sidebar-view';
@@ -27,16 +28,23 @@ export function regions(store: Store): Record<Region, () => string> {
     sidebar: () => {
       if (store.index === undefined) return '';
       const repos = listRepos(store.index, host.now());
-      return renderSidebar(repos, viewCounts(repos, ui.repoFilter), listed(store).length, ui).value;
+      return renderSidebar(repos, viewCounts(repos, ui.repoFilter, listed(store)), ui).value;
     },
     list: () => {
       if (store.index === undefined) return html`<div class="qempty">connecting…</div>`.value;
-      return renderList(ui.view, listRepos(store.index, host.now()), ui, host.now(), store.offers).value;
-    },
-    attention: () => {
       const items = listed(store);
-      store.drawn = items.map(identity);
-      return renderAttention(items, ui.attention).value;
+      const repos = listRepos(store.index, host.now());
+      // All clear hides the Inbox's rows as they are drawn: its shown rows, under the repository filter and the filter field.
+      store.drawn =
+        ui.view === 'inbox'
+          ? filterRows(
+              groupsOf('inbox', repos, ui.repoFilter, { now: host.now(), tz: ui.tz }, items),
+              ui.listFilter,
+            ).flatMap((group) =>
+              group.rows.flatMap((row) => (row.kind === 'attention' ? [row.id.slice('inbox:'.length)] : [])),
+            )
+          : [];
+      return renderList(ui.view, repos, ui, host.now(), store.offers, items).value;
     },
     link: () =>
       html`<button class="btn" type="button" data-action="copy-link" aria-label="copy link" title="copy link">⧉</button>`
@@ -82,6 +90,12 @@ export function regions(store: Store): Record<Region, () => string> {
     inspector: () => renderInspector(selected(store), store.run?.model.roster, store.result, store.log, ui).value,
     status: () => (store.run === undefined ? '' : renderStatus(store.run.model, summaryOf(store, store.run)).value),
     drawer: () => renderDrawer(ui, store.doc).value,
+    menu: () => {
+      const { menu } = ui;
+      if (menu === undefined) return '';
+      const model = modelOf(store, menu);
+      return renderMenu({ ...menu, at: highlighted(model, menu.at, menu.row) }, model).value;
+    },
     toasts: () => renderToasts(ui.toasts).value,
   };
 }
@@ -89,6 +103,7 @@ export function regions(store: Store): Record<Region, () => string> {
 /** Draws each dirty region in `REGIONS` order, and writes only those whose markup is not what it was. */
 export function flush(store: Store): void {
   const { ui, host } = store;
+  syncOpen(store);
   const draw = regions(store);
   store.flushTimer = undefined;
   const dirty = REGIONS.filter((region) => store.dirty.has(region));
@@ -116,6 +131,11 @@ export function flush(store: Store): void {
     if (!isFresh && store.written.get(region) === markup) continue;
     store.written.set(region, markup);
     host.render(region, markup, isFresh);
+    // The menu takes the focus once it is drawn: its field, or the menu itself.
+    if (region === 'menu' && store.menuFocus) {
+      store.menuFocus = false;
+      host.focusMenu();
+    }
     // Only a cursor move scrolls the list: a redraw such as the tick leaves where the person scrolled it (review R8).
     if (region === 'list' && store.revealList) {
       store.revealList = false;

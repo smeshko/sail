@@ -29,20 +29,21 @@ import { runActions } from '../src/dashboard/actions';
 import { findRepo, index } from '../src/dashboard/files';
 import { actionOf } from '../src/dashboard/page/action-registry';
 import { attention } from '../src/dashboard/page/attention';
-import { renderAttention } from '../src/dashboard/page/attention-view';
 import { renderDialog } from '../src/dashboard/page/dialog-view';
 import type { SafeHtml } from '../src/dashboard/page/html';
 import { listRepos, pollKind, queuePanels } from '../src/dashboard/page/index-model';
 import { renderInspector } from '../src/dashboard/page/inspector-view';
 import { shownGroups, viewCounts } from '../src/dashboard/page/list-model';
 import { renderList } from '../src/dashboard/page/list-view';
+import { menuRows } from '../src/dashboard/page/menu-model';
+import { renderMenu } from '../src/dashboard/page/menu-view';
 import { queueId, renderQueue } from '../src/dashboard/page/queue-view';
 import { foldRun } from '../src/dashboard/page/run-model';
 import { renderRun, runControls } from '../src/dashboard/page/run-view';
 import { renderSidebar } from '../src/dashboard/page/sidebar-view';
 import { renderTimeline } from '../src/dashboard/page/timeline-view';
 import { renderToasts } from '../src/dashboard/page/toast-view';
-import { type InspectorTab, initialUi, type UiState } from '../src/dashboard/page/ui-state';
+import { type InspectorTab, initialUi, type MenuState, type UiState } from '../src/dashboard/page/ui-state';
 import { resolveAdapters } from '../src/engine/adapters';
 import { type AdapterConfig, readConfig } from '../src/engine/config';
 import { recordingKeepAwake } from '../src/engine/keep-awake';
@@ -256,7 +257,8 @@ const VIEWS_TZ = 0;
 function renderDenseViews(): Record<string, SafeHtml> {
   const machine = seedDense();
   try {
-    const repos = listRepos(index(machine.registryDir), VIEWS_NOW).map((repo) => ({
+    const denseIndex = index(machine.registryDir);
+    const repos = listRepos(denseIndex, VIEWS_NOW).map((repo) => ({
       ...repo,
       runs: repo.runs.map((run) =>
         run.problem === undefined ? run : { ...run, problem: run.problem.replaceAll(machine.root, '<machine>') },
@@ -264,7 +266,7 @@ function renderDenseViews(): Record<string, SafeHtml> {
     }));
     const ui: UiState = { ...initialUi(VIEWS_TZ) };
     return {
-      'dense-sidebar.html': renderSidebar(repos, viewCounts(repos), 0, ui),
+      'dense-sidebar.html': renderSidebar(repos, viewCounts(repos, undefined, attention(denseIndex)), ui),
       'dense-active.html': renderList('active', repos, ui, VIEWS_NOW),
       'dense-history.html': renderList('history', repos, ui, VIEWS_NOW),
       'dense-queues.html': renderList('queues', repos, ui, VIEWS_NOW),
@@ -291,7 +293,8 @@ export async function renderDashboardViews(outDir: string): Promise<string[]> {
     const views: Record<string, SafeHtml> = {};
     const selected = ui({ repo: 'alpha', runId: GOLDEN_RUN_ID });
     const listed = listRepos(repos, VIEWS_NOW);
-    views['sidebar.html'] = renderSidebar(listed, viewCounts(listed), attention(repos).length, selected);
+    views['sidebar.html'] = renderSidebar(listed, viewCounts(listed, undefined, attention(repos)), selected);
+    views['list-inbox.html'] = renderList('inbox', listed, selected, VIEWS_NOW, undefined, attention(repos));
     views['list-active.html'] = renderList('active', listed, selected, VIEWS_NOW);
     views['list-history.html'] = renderList('history', listed, selected, VIEWS_NOW);
     const firstRun = shownGroups('history', listed, { listFilter: '', tz: VIEWS_TZ }, VIEWS_NOW)[0]?.rows[0];
@@ -330,7 +333,51 @@ export async function renderDashboardViews(outDir: string): Promise<string[]> {
         : repo,
     );
     views['list-queues-problem.html'] = renderList('queues', listRepos(unreadable, VIEWS_NOW), selected, VIEWS_NOW);
-    views['attention.html'] = renderAttention(attention(repos), true);
+    // A watched queue that is paused and held, with its poll and unwatch offered: the row at its fullest.
+    const held = repos.map((repo) =>
+      repo.name === 'beta'
+        ? {
+            ...repo,
+            watching: { pid: 1, workflows: [QUEUE_WORKFLOW] },
+            queues: repo.queues.map((view) =>
+              view.workflow === QUEUE_WORKFLOW && view.queue !== undefined && view.offers !== undefined
+                ? {
+                    ...view,
+                    watch: { state: 'watched' as const },
+                    offers: { ...view.offers, poll: { enabled: true } },
+                    queue: {
+                      ...view.queue,
+                      polling: {
+                        ...view.queue.polling,
+                        paused: {
+                          port: 'ticketSource' as const,
+                          adapter: 'fake',
+                          message: 'the provider did not answer',
+                          at: '2026-09-24T11:05:00.000Z',
+                        },
+                      },
+                      held: {
+                        until: '2026-09-24T12:00:00.000Z',
+                        runId: FAKE_3_ID,
+                        reason: 'usage limit',
+                        at: '2026-09-24T11:05:00.000Z',
+                      },
+                    },
+                  }
+                : view,
+            ),
+            ...(repo.offers === undefined
+              ? {}
+              : {
+                  offers: {
+                    ...repo.offers,
+                    workflows: { ...repo.offers.workflows, [QUEUE_WORKFLOW]: { unwatch: { enabled: true } } },
+                  },
+                }),
+          }
+        : repo,
+    );
+    views['list-queues-held.html'] = renderList('queues', listRepos(held, VIEWS_NOW), selected, VIEWS_NOW);
     const queueEvents = readEvents(queueDirOf(machine)) as unknown as QueueEvent[];
     const stream = { recent: queueEvents.slice(-20), polls: pollKind(queueEvents) };
     const queue = queueId('beta', QUEUE_WORKFLOW);
@@ -351,6 +398,16 @@ export async function renderDashboardViews(outDir: string): Promise<string[]> {
       { ...selected, queue },
       VIEWS_NOW,
     );
+    // A right-click on a waiting queue item: its offered actions alone, at the pointer.
+    const itemMenu: MenuState = {
+      mode: 'context',
+      subject: { kind: 'item', repo: 'beta', workflow: QUEUE_WORKFLOW, item: 'ticket:FAKE-5' },
+      query: '',
+      at: 0,
+      steps: [],
+      point: { x: 240, y: 120 },
+    };
+    views['menu-item.html'] = renderMenu(itemMenu, menuRows(itemMenu, { index: repos }, repos, VIEWS_NOW));
     for (const [name, [repo, dir]] of Object.entries(runDirs)) {
       const runId = runIdOf[name as keyof typeof runIdOf];
       const model = foldRun(readEvents(dir));
@@ -402,6 +459,11 @@ export async function renderDashboardViews(outDir: string): Promise<string[]> {
         );
         if (several === undefined) throw new Error('clean-run has no several form');
         views['dialog-clean-several.html'] = renderDialog(several);
+      }
+      // The command menu of the failed run: its subject line and its offered actions, then the general ones.
+      if (name === 'fake-2' && offers !== undefined) {
+        const state: MenuState = { mode: 'full', subject: { kind: 'run', repo, runId }, query: '', at: 0, steps: [] };
+        views['menu-fake-2.html'] = renderMenu(state, menuRows(state, { run: offers, index: repos }, repos, VIEWS_NOW));
       }
       // The dialog a restart of the failed run opens: the stage is asked in it, at the offer's choice.
       if (name === 'fake-2' && offers?.restart !== undefined) {

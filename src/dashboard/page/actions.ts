@@ -7,6 +7,7 @@ import { actionOf } from './action-registry';
 import { listRepos } from './index-model';
 import { historyWorkflows, VIEWS, type ViewName } from './list-model';
 import { syncUrl } from './location';
+import { closeMenu, runRow } from './menu';
 import { cleanSelected, closeFile, openedOutputKeys, openFile, readLog, readOutput, selectCard } from './reads';
 import { FILTER_KEY, LIST_KEY, THEME_KEY } from './saved';
 import type { Store } from './store';
@@ -38,13 +39,6 @@ export function leaveQueue(store: Store) {
   store.mark('list', 'main');
 }
 
-export function closeAttention(store: Store) {
-  const { ui } = store;
-  if (!ui.attention) return;
-  ui.attention = false;
-  store.mark('attention');
-}
-
 export const actions: Record<string, Action> = {
   'select-run': (store, data) => {
     if (data.repo === undefined || data.run === undefined) return;
@@ -60,7 +54,6 @@ export const actions: Record<string, Action> = {
   'select-card': (store, data) => selectCard(store, data.key, undefined, true),
   open: (store, data) => {
     if (data.repo === undefined || data.run === undefined) return;
-    closeAttention(store);
     leaveQueue(store);
     selectRun(store, data.repo, data.run);
     const tab = (TABS as readonly string[]).includes(data.tab ?? '') ? (data.tab as InspectorTab) : 'overview';
@@ -230,10 +223,6 @@ export const actions: Record<string, Action> = {
       : [...store.ui.folded, section];
     store.mark('main');
   },
-  'toggle-attention': (store) => {
-    store.ui.attention = !store.ui.attention;
-    store.mark('attention');
-  },
   'toggle-inspector': (store) => {
     store.ui.inspector = !store.ui.inspector;
     store.host.setInspector(store.ui.inspector);
@@ -265,6 +254,8 @@ export const actions: Record<string, Action> = {
       else toast(store, 'bad', 'copy', 'the clipboard refused it');
     });
   },
+  'menu-run': (store, data) => runRow(store, Number(data.row)),
+  'menu-close': (store) => closeMenu(store),
   'dialog-confirm': (store) => store.actor.confirm(),
   'dialog-cancel': (store) => store.actor.cancel(),
   // A field of the dialog changed: its lines follow it.

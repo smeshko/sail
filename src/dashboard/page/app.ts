@@ -14,15 +14,20 @@
 // The rules each module follows are in its own header.
 import { createActor } from './act';
 import { dispatch } from './actions';
+import { identity } from './attention';
 import { startDraw } from './draw';
+import { setFocus, subjectFrom } from './focus';
 import type { PageHost } from './host';
 import { REGIONS } from './host';
-import { onKey } from './keys';
+import { listRepos } from './index-model';
+import { inboxRow, onKey } from './keys';
+import { entries, filterRows, groupsOf } from './list-model';
 import { syncUrl } from './location';
+import { menuInput, openMenu } from './menu';
 import { navigate, showView } from './navigate';
 import { stopReads } from './reads';
 import { saveCleared, storedCleared } from './saved';
-import { createStore } from './store';
+import { createStore, listed, type Store, sourceFor } from './store';
 import { closeRun, openIndex, selectRun, stopStreams } from './streams';
 import { toast } from './toast';
 import type { UiState } from './ui-state';
@@ -37,6 +42,8 @@ export interface Page {
   stop(): void;
   /** What the page holds, for tests. */
   readonly ui: UiState;
+  /** The store behind it, for tests. */
+  readonly store: Store;
 }
 
 export function boot(host: PageHost): Page {
@@ -44,7 +51,7 @@ export function boot(host: PageHost): Page {
   store.actor = createActor({
     host,
     ui: store.ui,
-    source: () => ({ run: store.offers, index: store.index ?? [] }),
+    source: (subject) => sourceFor(store, subject),
     openRun: () => (store.run === undefined ? undefined : { repo: store.run.repo, runId: store.run.runId }),
     effects: {
       reopen(repo, runId, keepMenu) {
@@ -63,12 +70,55 @@ export function boot(host: PageHost): Page {
       took: () => store.fresh.add('main'),
       toast: (kind, head, text, undo) => toast(store, kind, head, text, undo),
       local: {
+        'dismiss-attention': (data) => {
+          // The menu's dismiss names no item: it dismisses the Inbox row `e` would.
+          const named = data.item ?? inboxRow(store)?.id.slice('inbox:'.length);
+          const item = listed(store).find((each) => identity(each) === named);
+          if (item === undefined) return undefined;
+          const id = identity(item);
+          const { ui } = store;
+          // The cursor leaves the row for the next entry of the Inbox, else the previous row, else it is deleted.
+          const groups = filterRows(
+            groupsOf(
+              'inbox',
+              listRepos(store.index ?? [], host.now()),
+              ui.repoFilter,
+              { now: host.now(), tz: ui.tz },
+              listed(store),
+            ),
+            ui.listFilter,
+          );
+          if (ui.listCursor === `inbox:${id}`) {
+            const ids = entries(groups, ui.listFolded);
+            const at = ids.indexOf(ui.listCursor);
+            const rows = new Set(groups.flatMap((group) => group.rows.map((row) => row.id)));
+            const next =
+              ids[at + 1] ??
+              ids
+                .slice(0, at)
+                .reverse()
+                .find((each) => rows.has(each));
+            if (next === undefined) delete ui.listCursor;
+            else ui.listCursor = next;
+          }
+          store.cleared = new Set([...storedCleared(host), ...store.cleared, id]);
+          saveCleared(host, store.cleared);
+          store.mark('sidebar', 'list');
+          return {
+            text: `${item.title} hidden`,
+            undo: () => {
+              store.cleared = new Set([...storedCleared(host), ...store.cleared].filter((each) => each !== id));
+              saveCleared(host, store.cleared);
+              store.mark('sidebar', 'list');
+            },
+          };
+        },
         'clear-attention': () => {
           const before = new Set([...storedCleared(host), ...store.cleared]);
           const added = new Set(store.drawn.filter((each) => !before.has(each)));
           store.cleared = new Set([...before, ...store.drawn]);
           saveCleared(host, store.cleared);
-          store.mark('attention');
+          store.mark('sidebar', 'list');
           if (added.size === 0) return undefined;
           return {
             text: `${added.size} hidden`,
@@ -77,7 +127,7 @@ export function boot(host: PageHost): Page {
             undo: () => {
               store.cleared = new Set([...storedCleared(host), ...store.cleared].filter((each) => !added.has(each)));
               saveCleared(host, store.cleared);
-              store.mark('attention');
+              store.mark('sidebar', 'list');
             },
           };
         },
@@ -88,11 +138,24 @@ export function boot(host: PageHost): Page {
   });
   startDraw(store);
   host.onAction((action, data) => dispatch(store, action, data));
-  host.onKey((key, inInput, on) => onKey(store, key, inInput, on));
+  host.onKey((key, inInput, on, mod) => onKey(store, key, inInput, on, mod === true));
+  host.onPoint((kind, data, point) => {
+    const subject = subjectFrom(data);
+    if (kind === 'hover') {
+      // The subject is frozen while the menu is open.
+      if (store.ui.menu === undefined) setFocus(store.ui, 'hover', subject);
+      return false;
+    }
+    // A right-click on a row opens that row's actions in place; on no row, or under the dialog, the browser's own menu.
+    if (subject === undefined || store.actor.dialogFor() !== undefined) return false;
+    openMenu(store, 'context', subject, point);
+    return true;
+  });
   host.onInput((name, value) => {
     if (name === 'list-filter') dispatch(store, 'list-filter', { value });
     if (name === 'list-status') dispatch(store, 'filter-status', { value });
     if (name === 'list-workflow') dispatch(store, 'filter-workflow', { value });
+    if (name === 'menu-query') menuInput(store, value);
   });
   host.onNavigate((asked) => {
     // Before the first index the entry's view is shown and its query is what the index opens; after it, what the entry
@@ -112,6 +175,7 @@ export function boot(host: PageHost): Page {
 
   return {
     ui: store.ui,
+    store,
     stop() {
       store.stopped = true;
       stopStreams(store);
