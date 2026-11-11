@@ -984,6 +984,29 @@ test('a key that changes the list or moves its cursor shuts the open sidebar too
   expect(host.navs).toEqual([true, false, true, false, true, false]);
 });
 
+test('a view or repository chosen in the open sidebar over an open run closes the run, so the list shows (review R3) (ADW-528)', () => {
+  page = boot(host);
+  firstIndex();
+  replay(host.open('run=')[0], GOLDEN());
+  host.click({ action: 'select-run', repo: 'alpha', run: GOLDEN_RUN_ID });
+  host.advance(100);
+  expect(host.regions.main).not.toContain('no run selected');
+  host.click({ action: 'toggle-nav' });
+  host.click({ action: 'select-view', view: 'history' });
+  host.advance(100);
+  expect([page.ui.view, host.regions.main]).toEqual(['history', expect.stringContaining('no run selected')]);
+  host.click({ action: 'select-queue', queue: `beta/${QUEUE_WORKFLOW}` });
+  host.click({ action: 'toggle-nav' });
+  host.click({ action: 'filter-repo', repo: 'beta' });
+  host.advance(100);
+  expect([page.ui.repoFilter, page.ui.queue]).toEqual(['beta', undefined]);
+  // With the sidebar shut, as it is from 800px, choosing a view keeps the open run beside the list.
+  host.click({ action: 'select-run', repo: 'alpha', run: GOLDEN_RUN_ID });
+  host.click({ action: 'select-view', view: 'active' });
+  host.advance(100);
+  expect(host.regions.main).not.toContain('no run selected');
+});
+
 test('a copy that took draws one ok toast reading what it copied, and 4,000 ms on it is gone', async () => {
   page = boot(host);
   host.click({ action: 'copy', text: 'sail show X' });

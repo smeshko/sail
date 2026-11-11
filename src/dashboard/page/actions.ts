@@ -247,7 +247,9 @@ export function dispatch(store: Store, action: string, data: Record<string, stri
   const dialogClick = action === 'dialog-confirm' || action === 'dialog-cancel' || action === 'dialog-change';
   const shuts = ui.itemMenu !== undefined && action !== 'item-menu' && !confirming && !dialogClick;
   const shutsRun = ui.runMenu !== undefined && !runAction && action !== 'run-menu' && !dialogClick;
-  // The folded sidebar shuts on any action but its own button, so choosing a view or a repository shows the list.
+  // The folded sidebar shuts on any action but its own button. A view or a repository chosen in it closes the open run
+  // or queue, which hides the list under 800px, so the choice shows.
+  if (ui.nav && (action === 'select-view' || action === 'filter-repo')) closeDetail(store);
   if (action !== 'toggle-nav') shutNav(store);
   if (shuts) delete ui.itemMenu;
   if (shutsRun) delete ui.runMenu;
