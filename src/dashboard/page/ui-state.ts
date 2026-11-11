@@ -5,6 +5,7 @@
 // its subject, the last result and the parameters typed. It holds nothing about the runs themselves.
 
 import type { Subject } from './action-registry';
+import type { Toast } from './toasts';
 
 export const TABS = ['overview', 'files', 'permissions', 'log'] as const;
 export type InspectorTab = (typeof TABS)[number];
@@ -82,6 +83,8 @@ export interface UiState {
   tz: number;
   /** The action being carried out, the last result of each place and the parameters typed. */
   act: ActState;
+  /** The toasts on the stack, oldest first. */
+  toasts: Toast[];
 }
 
 export function initialUi(tz: number): UiState {
@@ -101,6 +104,7 @@ export function initialUi(tz: number): UiState {
     follow: false,
     tz,
     act: { results: {}, drafts: {} },
+    toasts: [],
   };
 }
 

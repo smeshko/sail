@@ -32,6 +32,11 @@ test('the page builds into one document with exactly one script, inline, holding
   }
 });
 
+test('the page has a toasts region announced politely', async () => {
+  const html = await (await built).clone().text();
+  expect(html).toContain('<div id="toasts" class="toasts" aria-live="polite"></div>');
+});
+
 test('nothing in the page points outside it: no src, no href, and no @import or url() in its style', async () => {
   const html = await (await built).clone().text();
   const style = /<style>([\s\S]*)<\/style>/.exec(html)?.[1] ?? '';

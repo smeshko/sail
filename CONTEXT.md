@@ -680,3 +680,7 @@ _Avoid_: details pane, drawer
 **Needs attention**:
 The dashboard's one list, across every repository, of what a person should look at because it failed: failed runs, calls whose outcome is `error`, parked items and problems. Each item opens its run and call. It opens as a pane from a button in the top bar, which counts its items. An All clear button in the pane's header, shown while it lists any, empties it in that browser, with no request and no change to any run: the items listed at the click stay hidden across reloads until their run, call, workflow, title or detail changes, and a new failure is listed as usual.
 _Avoid_: alerts, signals, triage
+
+**Toast**:
+The dashboard's answer to an action, drawn at the bottom right and naming the action and its subject. A success leaves after 4 s; a refusal is red, quotes `sail`'s own words and stays until it is dismissed.
+_Avoid_: notice, snackbar, chip

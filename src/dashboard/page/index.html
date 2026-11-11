@@ -1067,6 +1067,30 @@
       .code.bad {
         color: var(--del);
       }
+      .toasts {
+        position: fixed;
+        right: 16px;
+        bottom: 16px;
+        z-index: 50;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        max-width: min(420px, 90vw);
+      }
+      .toast {
+        padding: 8px 10px;
+        border-radius: 6px;
+        border: 1px solid var(--line);
+        background: var(--inset);
+        font-size: 12px;
+      }
+      .toast.bad {
+        border-color: var(--del);
+        color: var(--del);
+      }
+      .toast-head {
+        font-weight: 600;
+      }
       .hint {
         margin-bottom: 8px;
         padding: 6px 8px;
@@ -1744,6 +1768,7 @@
       </div>
       <footer class="status" id="status"></footer>
       <aside class="drawer" id="drawer"></aside>
+      <div id="toasts" class="toasts" aria-live="polite"></div>
     </div>
     <script type="module" id="sail-page"></script>
   </body>

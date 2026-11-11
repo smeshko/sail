@@ -8,6 +8,7 @@ import { closeFile, openedOutputKeys, openFile, readLog, readOutput, selectCard 
 import { FILTER_KEY, RAIL_KEY, THEME_KEY } from './saved';
 import type { Store } from './store';
 import { reopenQueue, selectRun } from './streams';
+import { dismissToast, toast, undoToast } from './toast';
 import { FILTERS, type InspectorTab, TABS, THEMES, type TimelineFilter } from './ui-state';
 
 export type Action = (store: Store, data: Record<string, string>) => void;
@@ -189,8 +190,16 @@ export const actions: Record<string, Action> = {
     store.mark('main', 'inspector');
   },
   copy: (store, data) => {
-    if (data.text !== undefined) void store.host.copy(data.text);
+    const { text } = data;
+    if (text === undefined) return;
+    void store.host.copy(text).then((copied) => {
+      if (store.stopped) return;
+      if (copied) toast(store, 'ok', 'copy', `copied ${text}`);
+      else toast(store, 'bad', 'copy', 'the clipboard refused it');
+    });
   },
+  'dismiss-toast': (store, data) => dismissToast(store, Number(data.toast)),
+  'undo-toast': (store, data) => undoToast(store, Number(data.toast)),
 };
 
 export function dispatch(store: Store, action: string, data: Record<string, string>) {

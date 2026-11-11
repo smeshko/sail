@@ -13,6 +13,7 @@ import { renderRail } from './rail-view';
 import { renderRun, renderStatus } from './run-view';
 import { listed, opened, openQueue, type Store, selected, summaryOf } from './store';
 import { renderTimeline } from './timeline-view';
+import { renderToasts } from './toast-view';
 
 /** How often a running time is drawn again. */
 export const TICK_MS = 1000;
@@ -66,6 +67,7 @@ export function regions(store: Store): Record<Region, () => string> {
     inspector: () => renderInspector(selected(store), store.run?.model.roster, store.result, store.log, ui).value,
     status: () => (store.run === undefined ? '' : renderStatus(store.run.model, summaryOf(store, store.run)).value),
     drawer: () => renderDrawer(ui, store.doc).value,
+    toasts: () => renderToasts(ui.toasts).value,
   };
 }
 

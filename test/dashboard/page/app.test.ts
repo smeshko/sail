@@ -157,9 +157,11 @@ class FakeHost implements PageHost {
   save(key: string, value: string) {
     this.storage.set(key, value);
   }
+  /** Whether the clipboard takes a copy. */
+  copyTakes = true;
   async copy(text: string) {
     this.copied.push(text);
-    return true;
+    return this.copyTakes;
   }
   setTheme(theme: string) {
     this.theme = theme;
@@ -251,7 +253,7 @@ test('boot renders the rail with alpha and beta from the first index, opens the 
   page = boot(host);
   expect(host.sockets.map((socket) => socket.query)).toEqual(['index=1']);
   host.advance(100);
-  expect(host.renders.sort()).toEqual(['attention', 'drawer', 'inspector', 'main', 'rail', 'status']);
+  expect(host.renders.sort()).toEqual(['attention', 'drawer', 'inspector', 'main', 'rail', 'status', 'toasts']);
   host.push(host.open('index')[0], indexMessage());
   expect(host.open('run=').map((socket) => socket.query)).toEqual([runQuery('alpha', GOLDEN_RUN_ID)]);
   replay(host.open('run=')[0], GOLDEN());
@@ -726,6 +728,35 @@ test('keys move the cursor, Enter opens a timeline, ] and [ step it, Escape goes
   for (let i = 0; i < 20; i++) host.press('ArrowRight');
   host.advance(100);
   expect(cursor()).toBe('publish#1');
+});
+
+test('a copy that took draws one ok toast reading what it copied, and 4,000 ms on it is gone', async () => {
+  page = boot(host);
+  host.click({ action: 'copy', text: 'sail show X' });
+  await settle();
+  host.advance(100);
+  expect(host.regions.toasts).toContain('<div class="toast ok" role="status" data-toast="1">');
+  expect(host.regions.toasts).toContain(
+    '<span class="toast-head">copy</span> <span class="toast-text">copied sail show X</span>',
+  );
+  host.advance(3899);
+  expect(host.regions.toasts).toContain('copied sail show X');
+  host.advance(1);
+  host.advance(100);
+  expect(host.regions.toasts).toBe('');
+});
+
+test('a copy the host refuses draws a red alert that is still drawn 60 s on, until dismiss-toast removes it', async () => {
+  page = boot(host);
+  host.copyTakes = false;
+  host.click({ action: 'copy', text: 'x' });
+  await settle();
+  host.advance(60_000);
+  expect(host.regions.toasts).toContain('<div class="toast bad" role="alert" data-toast="1">');
+  expect(host.regions.toasts).toContain('the clipboard refused it');
+  host.click({ action: 'dismiss-toast', toast: '1' });
+  host.advance(100);
+  expect(host.regions.toasts).toBe('');
 });
 
 test('the theme cycles and is saved, a section toggles, copy copies, follow toggles, and the stream buttons read that stream', async () => {

@@ -80,6 +80,10 @@ export interface Store {
   tickTimer: number | undefined;
   indexRetry: number | undefined;
   indexConnection: { close(): void } | undefined;
+  /** The last toast's id, the Undo each toast with one runs, and the timers that take a success off the stack. */
+  toastSeq: number;
+  readonly undos: Map<number, () => void>;
+  readonly toastTimers: Map<number, number>;
   /** The regions to draw at the next flush. */
   readonly dirty: Set<Region>;
   /** What each region was last written with, and the regions whose fields the shell has just given up. */
@@ -131,6 +135,9 @@ export function createStore(host: PageHost): Store {
     tickTimer: undefined,
     indexRetry: undefined,
     indexConnection: undefined,
+    toastSeq: 0,
+    undos: new Map(),
+    toastTimers: new Map(),
     dirty: new Set(),
     written: new Map(),
     fresh: new Set(),

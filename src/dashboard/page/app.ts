@@ -75,6 +75,7 @@ export function boot(host: PageHost): Page {
       stopStreams(store);
       if (store.flushTimer !== undefined) host.cancel(store.flushTimer);
       stopReads(store);
+      for (const timer of store.toastTimers.values()) host.cancel(timer);
       if (store.tickTimer !== undefined) host.cancel(store.tickTimer);
     },
   };
