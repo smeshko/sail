@@ -65,6 +65,8 @@ export interface Store {
   drawn: string[];
   /** Set when a call is selected before its card exists: the cursor moves to it once it does. */
   cursorPending: boolean;
+  /** Whether the list's cursor has moved since the list was drawn, so the next draw scrolls it into sight. */
+  revealList: boolean;
   /** Whether the host was last told a run or queue is open beside the list. */
   detail: boolean | undefined;
   /** What the URL asks to open, until the first index: then it is opened, or dropped when its run isn't listed. */
@@ -126,6 +128,7 @@ export function createStore(host: PageHost): Store {
     cleared,
     drawn: [],
     cursorPending: false,
+    revealList: false,
     detail: undefined,
     start: host.start(),
     stopped: false,

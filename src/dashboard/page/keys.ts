@@ -36,6 +36,7 @@ function moveList(store: Store, by: number) {
   const at = ids.indexOf(ui.listCursor ?? '');
   const next = at < 0 ? ids[0] : ids[Math.max(0, Math.min(ids.length - 1, at + by))];
   if (next !== undefined) ui.listCursor = next;
+  store.revealList = true;
   store.mark('list');
 }
 

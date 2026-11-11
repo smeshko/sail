@@ -1630,6 +1630,17 @@ describe('the list by keyboard (ADW-522)', () => {
     expect(p.ui.listCursor).toBe('history:done');
   });
 
+  test('a redraw of the list that moves no cursor, such as the tick, leaves its scroll alone (review R8)', () => {
+    bootHistory();
+    host.press('j');
+    host.advance(100);
+    host.revealed = [];
+    host.click({ action: 'toggle-list-group', group: 'history:done' });
+    host.advance(100);
+    expect(host.regions.list).toBeDefined();
+    expect(host.revealed).toEqual([]);
+  });
+
   test('the list is revealed after it is drawn, so the cursor stays in sight', () => {
     bootHistory();
     host.press('j');

@@ -107,7 +107,11 @@ export function flush(store: Store): void {
     if (!isFresh && store.written.get(region) === markup) continue;
     store.written.set(region, markup);
     host.render(region, markup, isFresh);
-    if (region === 'list') host.reveal('list');
+    // Only a cursor move scrolls the list: a redraw such as the tick leaves where the person scrolled it (review R8).
+    if (region === 'list' && store.revealList) {
+      store.revealList = false;
+      host.reveal('list');
+    }
     // A running call's timeline, followed, shows its newest entry: not while the queue holds the centre.
     if (region === 'main' && ui.follow && openQueue(store) === undefined && opened(store)?.state === 'running')
       host.scrollToEnd(region);
