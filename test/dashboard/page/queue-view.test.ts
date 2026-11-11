@@ -69,6 +69,16 @@ describe('the status bar with a queue open (ADW-548)', () => {
       '<span>beta / ticket-to-pr</span><span>watcher not running</span><span>waiting <b>0</b></span><span>running <b>0</b></span>',
     );
   });
+
+  test("names a queue's problem in place of counts nothing is known about, when its file can't be read", () => {
+    const [panel] = watchedPanels();
+    if (panel === undefined) throw new Error('beta has no queue');
+    const { queue: _queue, ...unread } = panel;
+    const counts = { queued: 0, dispatched: 0, failed: 0, parked: 0, done: 0 };
+    expect(renderQueueStatus({ ...unread, counts, problem: 'queue.json is not JSON' }).value).toBe(
+      '<span>beta / ticket-to-pr</span><span>watched</span><span>queue.json is not JSON</span>',
+    );
+  });
 });
 
 describe('audit 2: rows say what they are (ADW-543)', () => {
