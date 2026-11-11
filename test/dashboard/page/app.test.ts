@@ -1656,6 +1656,19 @@ describe('the list by keyboard (ADW-522)', () => {
     expect(host.revealed).toEqual([]);
   });
 
+  test('a cursor move that moves nothing, k at the first entry, leaves no reveal for a later redraw (review R10)', () => {
+    bootHistory();
+    host.press('j');
+    host.advance(100);
+    host.press('k');
+    host.advance(100);
+    host.revealed = [];
+    host.click({ action: 'toggle-list-group', group: 'history:done' });
+    host.advance(100);
+    expect(host.regions.list).toBeDefined();
+    expect(host.revealed).toEqual([]);
+  });
+
   test('the list is revealed after it is drawn, so the cursor stays in sight', () => {
     bootHistory();
     host.press('j');

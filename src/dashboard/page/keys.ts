@@ -35,7 +35,9 @@ function moveList(store: Store, by: number) {
   const ids = entries(shown(store), ui.listFolded);
   const at = ids.indexOf(ui.listCursor ?? '');
   const next = at < 0 ? ids[0] : ids[Math.max(0, Math.min(ids.length - 1, at + by))];
-  if (next !== undefined) ui.listCursor = next;
+  // Only a move that changes the cursor asks for a reveal: one left set would scroll a later redraw (review R10).
+  if (next === undefined || next === ui.listCursor) return;
+  ui.listCursor = next;
   store.revealList = true;
   store.mark('list');
 }
