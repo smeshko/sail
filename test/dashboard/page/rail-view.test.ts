@@ -3,7 +3,6 @@
 // workflows closing when asked unless they hold it, and every run a delegated `select-run` action.
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { index } from '../../../src/dashboard/files';
-import type { Subject } from '../../../src/dashboard/page/action-registry';
 import { type RailRepo, type RailRun, railRepos } from '../../../src/dashboard/page/index-model';
 import { renderRail } from '../../../src/dashboard/page/rail-view';
 import { initialUi, pillOf } from '../../../src/dashboard/page/ui-state';
@@ -252,8 +251,8 @@ test('a run selected from the running block is marked sel', () => {
 const DOWN =
   '<span class="wf-watch down" title="no watcher is running for &#39;beta&#39;: sail watch ticket-to-pr first">watcher not running</span>';
 
-const button = (repo: string, op: string, text: string, workflow?: string, armed = false) =>
-  `<button class="wf-act${armed ? ' armed' : ''}" data-action="${op}" data-repo="${repo}"${
+const button = (repo: string, op: string, text: string, workflow?: string) =>
+  `<button class="wf-act" data-action="${op}" data-repo="${repo}"${
     workflow === undefined ? '' : ` data-workflow="${workflow}"`
   }>${text}</button>`;
 
@@ -320,32 +319,20 @@ test('a watched workflow draws unwatch, an unwatched one with a queue draws watc
   expect(gamma(undefined)).not.toContain('unwatch all');
 });
 
-test('an armed unwatch reads unwatch? click again, and an armed unwatch all unwatch all? click again, and nothing else is armed', () => {
-  const arm = (subject: Subject) => ({
-    act: { drafts: {}, results: {}, pending: { id: 'unwatch', subject, values: {}, sent: false } },
-  });
-  const one = gamma(['flow'], arm({ kind: 'workflow', repo: 'gamma', workflow: 'flow' }));
-  expect(one).toContain(button('gamma', 'unwatch', 'unwatch? click again', 'flow', true));
-  expect(one).toContain(button('gamma', 'unwatch', 'unwatch all'));
-  const all = gamma(['flow'], arm({ kind: 'repo', repo: 'gamma' }));
-  expect(all).toContain(button('gamma', 'unwatch', 'unwatch all? click again', undefined, true));
-  expect(all).toContain(button('gamma', 'unwatch', 'unwatch', 'flow'));
-  expect(all.match(/armed/g)).toHaveLength(1);
+test('unwatch and unwatch all read their own words and are never armed: a first click runs them', () => {
+  const markup = gamma(['flow']);
+  expect(markup).toContain(button('gamma', 'unwatch', 'unwatch', 'flow'));
+  expect(markup).toContain(button('gamma', 'unwatch', 'unwatch all'));
+  expect(markup).not.toContain('armed');
 });
 
-test("the watch notice shows under its own repository's header, open or folded, and under no other", () => {
-  const text = 'sail watch: no workflow declares a watch';
-  const said = {
-    act: {
-      drafts: {},
-      results: { repo: { id: 'watch', subject: { kind: 'repo', repo: 'gamma' }, text, place: 'repo' } },
-    },
-  } as const;
-  expect(gamma(['flow'], said)).toContain(`</button>\n<div class="lgrp-p">${text}</div>`);
-  const folded = renderRail(watchedRepo(['flow']), { ...initialUi(0), ...said }, NOW).value;
-  expect(folded).toContain(`<div class="lgrp-p">${text}</div>`);
-  expect(folded).not.toContain('lgrp-acts');
-  expect(rail(said)).not.toContain(text);
+test("while a watch request is out a workflow's or repository's watch buttons read the word under way, and a repository's header shows no answer", () => {
+  const underway = { underway: { 'watch:gamma': 'watching…', 'watch:gamma/flow': 'unwatching…' } };
+  const markup = gamma(['flow'], underway);
+  expect(markup).toContain('<span class="busy">unwatching…</span>');
+  expect(markup).toContain('<div class="lgrp-acts"><span class="busy">watching…</span></div>');
+  expect(gamma(['flow'])).not.toContain('busy');
+  expect(markup).not.toContain('lgrp-p');
 });
 
 test("every run but a completed one has a ⋯ in its row, and only the open run's menu opens under its row, with what it offers (ADW-466)", () => {
@@ -426,6 +413,16 @@ test("a run's ⋯ is named for its run and says whether its menu is open (ADW-50
   expect(open).toContain(
     `<button class="r-more open" type="button" data-action="run-menu" data-repo="alpha" data-run="${FAKE_2_ID}" aria-label="actions for ${FAKE_2_ID}" aria-expanded="true"`,
   );
+});
+
+test('while a request for a run is out its live row and its history row read the word under way in place of the status dot', () => {
+  const underway = { underway: { [`run:beta/${FAKE_3_ID}`]: 'stopping…', [`run:alpha/${FAKE_2_ID}`]: 'cleaning…' } };
+  const live = folded({ repo: 'beta', runId: FAKE_3_ID, ...underway });
+  expect(live).toContain('<span class="r-line"><span class="busy">stopping…</span><span class="r-id">FAKE-3</span>');
+  expect(live).not.toContain('<span class="r-line"><span class="st');
+  const history = rail({ open: ['alpha/ticket-to-pr:failed'], ...underway });
+  expect(history).toContain(`<span class="busy">cleaning…</span><span class="r-id">FAKE-2</span>`);
+  expect(rail()).not.toContain('busy');
 });
 
 test("a queue that can't be read has a marked row in the queued block with its problem, and a marked badge that opens it", () => {

@@ -1,6 +1,6 @@
 // Opens what a query names, at the page's first index and on the browser's Back and forward. A listed queue opens in the
 // centre; a listed run opens with its call, tab, timeline and file, each only when it differs from what is open. A run
-// or queue the index does not list sets `ui.indexNotice` and, as `fallback` says, opens the newest run (`first`, at
+// or queue the index does not list is said in a toast and, as `fallback` says, opens the newest run (`first`, at
 // load) or keeps what is shown (`keep`, on Back and forward). An empty query leaves a queue for the run open, or the
 // newest run when none is, with no notice. The caller writes the URL once it has opened what it can,
 // but for a file the run turns out not to have: `missing()` replaces the URL itself, when the file's read answers.
@@ -11,6 +11,7 @@ import { queueId } from './queue-view';
 import { closeFile, openFile, readLog, selectCard } from './reads';
 import type { Store } from './store';
 import { firstRun, reopenQueue, selectRun } from './streams';
+import { sayMissing } from './toast';
 
 /** Opens the newest run, as the first index does with nothing named. */
 function openFirst(store: Store) {
@@ -21,8 +22,7 @@ function openFirst(store: Store) {
 /** Closes the file a read found missing, and says so. */
 function missing(store: Store, path: string, runId: string) {
   closeFile(store);
-  store.ui.indexNotice = `file ${path} is not in run ${runId}`;
-  store.mark('rail');
+  sayMissing(store, `file ${path} is not in run ${runId}`);
   syncUrl(store, false);
 }
 
@@ -35,11 +35,10 @@ export function navigate(store: Store, asked: Record<string, string>, fallback: 
     if (queuePanels(repos).some((panel) => queueId(panel.repo, panel.workflow) === id)) {
       reopenQueue(store, id);
       ui.queue = id;
-      store.actor.clearResult('queue');
       if (store.run === undefined && fallback === 'first') openFirst(store);
     } else {
       if (fallback === 'first') openFirst(store);
-      ui.indexNotice = `queue ${id} is not listed`;
+      sayMissing(store, `queue ${id} is not listed`);
     }
   } else if (target.repo !== undefined && target.run !== undefined) {
     const { repo, run } = target;
@@ -61,7 +60,7 @@ export function navigate(store: Store, asked: Record<string, string>, fallback: 
         );
     } else {
       if (fallback === 'first') openFirst(store);
-      ui.indexNotice = `run ${run} of ${repo} is not listed`;
+      sayMissing(store, `run ${run} of ${repo} is not listed`);
     }
   } else {
     // An empty query names no queue: the centre shows a run, the one open or else the newest.

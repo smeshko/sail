@@ -672,6 +672,88 @@ test('render puts the focus back on the element with the same data-action and da
   expect(fake.focus.active).toBe(rail.els[2] as ElementLike);
 });
 
+test('a key reaches the handler with the data-action of the element it landed on', () => {
+  const fake = fakeWindow();
+  const host = browserHost(fake.win);
+  const got: (string | undefined)[] = [];
+  host.onKey((_, __, on) => got.push(on));
+  fake.fire('keydown', { key: 'j', target: element({ tagName: 'BUTTON', dataset: { action: 'dialog-cancel' } }) });
+  fake.fire('keydown', { key: 'j', target: element({ tagName: 'BODY' }) });
+  expect(got).toEqual(['dialog-cancel', undefined]);
+});
+
+describe('the confirmation dialog', () => {
+  const dialogWindow = () => {
+    const fake = fakeWindow();
+    const calls: string[] = [];
+    fake.elements.dialog = element({
+      showModal: () => calls.push('showModal'),
+      close: () => calls.push('close'),
+    });
+    const rail = fake.live('rail');
+    return { fake, calls, rail, host: browserHost(fake.win) };
+  };
+
+  test('openDialog writes its markup into #dialog and calls showModal', () => {
+    const { fake, calls, host } = dialogWindow();
+    host.openDialog('<h2 id="dialog-title">clean R1</h2>');
+    expect([fake.elements.dialog?.innerHTML, calls]).toEqual(['<h2 id="dialog-title">clean R1</h2>', ['showModal']]);
+  });
+
+  test('closeDialog calls close and focuses the element that had the focus at the open, after its region was redrawn', () => {
+    const { fake, calls, rail, host } = dialogWindow();
+    host.render('rail', `${row('r1')}${row('r2')}`);
+    fake.tab();
+    fake.tab();
+    expect((fake.focus.active as ElementLike | null)?.dataset.run).toBe('r2');
+    host.openDialog('<button data-action="dialog-confirm">drop</button>');
+    // The dialog takes the focus, and the region behind it is redrawn: its opener is a new element.
+    fake.focus.active = null;
+    host.render('rail', `${row('r1')}${row('r2')}<span>more</span>`);
+    fake.focus.calls.length = 0;
+    host.closeDialog();
+    expect(calls).toEqual(['showModal', 'close']);
+    expect(fake.focus.active as ElementLike | null).toBe(rail.els[1] as ElementLike);
+    expect((fake.focus.active as ElementLike | null)?.dataset).toEqual({
+      action: 'select-run',
+      repo: 'alpha',
+      run: 'r2',
+    });
+    expect(fake.focus.calls).toEqual([{ preventScroll: true }]);
+  });
+
+  test('a close the browser makes itself cancels the dialog, and the close closeDialog makes, or one after a reopen, does not', () => {
+    const { fake, host } = dialogWindow();
+    const got: string[] = [];
+    host.onAction((action) => got.push(action));
+    const dialog = fake.elements.dialog as ElementLike;
+    host.openDialog('x');
+    // The platform closes the modal (a close request no keydown reports): the dialog is no longer open.
+    dialog.open = false;
+    dialog.onclose?.();
+    expect(got).toEqual(['dialog-cancel']);
+    host.openDialog('y');
+    host.closeDialog();
+    dialog.onclose?.();
+    host.openDialog('z');
+    // A close event that arrives once the dialog is open again is the earlier close's.
+    dialog.open = true;
+    dialog.onclose?.();
+    expect(got).toEqual(['dialog-cancel']);
+  });
+
+  test('closeDialog with nothing focused at the open closes and focuses nothing, and with no #dialog does nothing', () => {
+    const { fake, calls, host } = dialogWindow();
+    host.openDialog('x');
+    host.closeDialog();
+    expect([calls, fake.focus.calls]).toEqual([['showModal', 'close'], []]);
+    const bare = fakeWindow();
+    const bareHost = browserHost(bare.win);
+    expect(bareHost.openDialog('x')).toBeUndefined();
+    expect(bareHost.closeDialog()).toBeUndefined();
+  });
+});
+
 test("of two elements with one key, the one at the focused one's place is focused, and the last when one is gone", () => {
   const fake = fakeWindow();
   const rail = fake.live('rail');

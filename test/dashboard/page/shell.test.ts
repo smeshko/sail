@@ -164,6 +164,10 @@ test("the shell's actions are exactly the page's view actions: every action of t
       'toggle-follow',
       'copy',
       'copy-link',
+      'dialog-confirm',
+      'dialog-cancel',
+      'dismiss-toast',
+      'undo-toast',
     ].sort(),
   );
 });

@@ -5,14 +5,14 @@
 // that status's finished runs, so a long tail of them never buries live work. Whatever is folded, the open run's row
 // and the open queue's workflow stay in sight under it, so the selection is never hidden. A workflow's header also
 // carries its watch state as a word, the live watcher's, which its queue view's pill reads too, and its Watch or Unwatch, which is never disabled, since a watch with no live watcher starts one; and an opened repository a row with Watch all and, while its watch set isn't empty,
-// Unwatch all; an Unwatch armed by a first click reads `click again`. The answer to the last change shows under the
-// repository's header. A run's row is a `div` holding two sibling buttons: its own, which opens the run, and, but on
+// Unwatch all; each runs at once, its answer is a toast, and while its request is out the buttons read the word under way.
+// A run's row is a `div` holding two sibling buttons: its own, which opens the run, and, but on
 // a completed run, a ⋯ of its own that opens the run and, under the row, a menu of what it offers: Resume, Restart,
 // Stop and Clean.
 import type { RunActions } from '../actions';
 import type { RepoOffers } from '../offers';
 import { ACTIONS, type OfferSource, type Subject } from './action-registry';
-import { actionControl, resultOf } from './action-view';
+import { actionControl } from './action-view';
 import { ago, cost, duration } from './format';
 import { html, type SafeHtml } from './html';
 import { newestFirst, type RailRepo, type RailRun, type RailWorkflow, workflowOf } from './index-model';
@@ -52,13 +52,21 @@ function runMenu(repo: string, run: RailRun, ui: UiState, offers: RunActions | u
   return html`<div class="r-menu"><span class="act-why">${why}</span></div>`;
 }
 
+/** A run's status dot, or the word under way while a request for the run is out. */
+function statusMark(repo: string, run: RailRun, ui: UiState): SafeHtml {
+  const underway = ui.underway[`run:${repo}/${run.runId}`];
+  return underway === undefined
+    ? html`<span class="st ${pillOf(run.status)}"></span>`
+    : html`<span class="busy">${underway}</span>`;
+}
+
 function liveRow(repo: string, run: RailRun, ui: UiState, offers: RunActions | undefined): SafeHtml {
   const tip = tooltipOf(run);
   const facts = [duration(run.durationMs), cost(run.costUsd)].join(' · ');
   return html`<div class="run live-run${isOpen(repo, run, ui) ? ' sel' : ''}"><button class="r-open"${
     tip === undefined ? '' : html` title="${tip}"`
   } data-action="select-run" data-repo="${repo}" data-run="${run.runId}">
-<span class="r-main"><span class="r-line"><span class="st ${pillOf(run.status)}"></span><span class="r-id">${runLabel(run)}</span>${
+<span class="r-main"><span class="r-line">${statusMark(repo, run, ui)}<span class="r-id">${runLabel(run)}</span>${
     run.title === undefined ? '' : html` <span class="r-title">${run.title}</span>`
   }</span><span class="r-sub">${repo} › ${workflowOf(run)}${
     run.status === 'running' && run.stalled !== undefined
@@ -111,7 +119,7 @@ const finished = (run: RailRun) => SECTIONS.some((each) => each.holds(run));
 function historyRow(repo: string, run: RailRun, ui: UiState, offers: RunActions | undefined): SafeHtml {
   const tip = cost(run.costUsd);
   return html`<div class="run hist-run${isOpen(repo, run, ui) ? ' sel' : ''}"><button class="r-open" title="${tip}" data-action="select-run" data-repo="${repo}" data-run="${run.runId}">
-<span class="st ${pillOf(run.status)}"></span><span class="r-id">${runLabel(run)}</span>${
+${statusMark(repo, run, ui)}<span class="r-id">${runLabel(run)}</span>${
     run.title === undefined ? '' : html` <span class="r-title">${run.title}</span>`
   }<span class="r-el">${duration(run.durationMs)}</span></button>${more(repo, run, ui)}</div>${runMenu(repo, run, ui, offers)}`;
 }
@@ -172,11 +180,13 @@ const watchSource = (repo: string, offers: RepoOffers | undefined): OfferSource 
 
 /**
  * The watch or unwatch button each offered, drawn from the registry, for a workflow, or for the whole repository when
- * `workflow` is left out. An armed unwatch asks for its second click.
+ * `workflow` is left out. While a request for it is out, the word under way takes their place.
  */
 function watchButtons(repo: string, offers: RepoOffers | undefined, ui: UiState, workflow?: string): SafeHtml {
   const subject: Subject = workflow === undefined ? { kind: 'repo', repo } : { kind: 'workflow', repo, workflow };
   const source = watchSource(repo, offers);
+  const underway = ui.underway[workflow === undefined ? `watch:${repo}` : `watch:${repo}/${workflow}`];
+  if (underway !== undefined) return html`<span class="busy">${underway}</span>`;
   return html`${ACTIONS.filter((def) => def.place === 'repo' && def.appliesTo.includes(subject.kind)).map((def) =>
     actionControl(def, subject, ui.act, source, { class: 'wf-act', data: true }),
   )}`;
@@ -227,14 +237,11 @@ function repoSelection(repo: RailRepo, ui: UiState, now: number, offers: RunActi
 
 function repoGroup(repo: RailRepo, ui: UiState, now: number, offers: RunActions | undefined): SafeHtml {
   const open = ui.expanded.includes(repo.name);
-  const said = resultOf(ui.act, 'repo', { repo: repo.name });
   return html`<div class="lgrp">
 <button class="lgrp-h${open ? ' open' : ''}"${
     repo.remote === null ? '' : html` title="${repo.remote}"`
   } data-action="toggle-group" data-group="${repo.name}" aria-expanded="${open ? 'true' : 'false'}"><span class="caret">›</span><span class="nm">${repo.name}</span>${counts(repo.runs)}</button>
-${repo.problem === undefined ? '' : html`<div class="lgrp-p">${repo.problem}</div>`}${
-  said === undefined ? '' : html`<div class="lgrp-p">${said}</div>`
-}${open ? html`<div class="lgrp-acts">${watchButtons(repo.name, repo.offers, ui)}</div>` : ''}
+${repo.problem === undefined ? '' : html`<div class="lgrp-p">${repo.problem}</div>`}${open ? html`<div class="lgrp-acts">${watchButtons(repo.name, repo.offers, ui)}</div>` : ''}
 ${open ? repo.workflows.map((workflow) => workflowGroup(repo, workflow, ui, now, offers)) : repoSelection(repo, ui, now, offers)}</div>`;
 }
 
@@ -249,10 +256,6 @@ export function renderRail(
   offers?: RunActions | undefined,
 ): SafeHtml {
   const runs = repos.reduce((sum, repo) => sum + repo.runs.length, 0);
-  const left = resultOf(ui.act, 'rail');
-  const notice = left === undefined ? '' : html`<div class="act"><span class="warnchip">${left}</span></div>`;
-  const gone =
-    ui.indexNotice === undefined ? '' : html`<div class="act"><span class="warnchip">${ui.indexNotice}</span></div>`;
-  return html`${notice}${gone}${runningBlock(repos, ui, offers)}${queuedBlock(repos, ui, now)}<div class="rail-h"><span>repositories</span><span class="c">${runs} runs</span></div>
+  return html`${runningBlock(repos, ui, offers)}${queuedBlock(repos, ui, now)}<div class="rail-h"><span>repositories</span><span class="c">${runs} runs</span></div>
 ${repos.length === 0 ? html`<div class="qempty">no repository is registered yet: run sail watch in one</div>` : ''}${repos.map((repo) => repoGroup(repo, ui, now, offers))}`;
 }

@@ -198,16 +198,8 @@ test("a group inside a loop iteration is headed by the iteration and the group, 
   ]);
 });
 
-const RUN_SUBJECT = { kind: 'run', repo: '', runId: '' } as const;
-/** A UI whose action state has `armed` pending, these drafts typed and this result shown in the run's menu. */
-const act = (armed?: string, drafts: Record<string, Record<string, string>> = {}, result?: string) => ({
-  act: {
-    drafts,
-    results:
-      result === undefined ? {} : { run: { id: 'x', subject: RUN_SUBJECT, text: result, place: 'run' as const } },
-    ...(armed === undefined ? {} : { pending: { id: armed, subject: RUN_SUBJECT, values: {}, sent: false } }),
-  },
-});
+/** A UI whose action state has these drafts typed. */
+const act = (drafts: Record<string, Record<string, string>> = {}) => ({ act: { drafts } });
 
 const SOURCE_RUN = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N';
 const RESUME_OFFER: ResumeOffer = {
@@ -231,31 +223,24 @@ test("a seeded run's header names the run it was seeded from, and an unseeded ru
   expect([foldRun(events).fromRun, header(foldRun(events))]).toEqual([undefined, `${GOLDEN_RUN_ID} · ticket-to-pr@1`]);
 });
 
-test('Resume shows its raise field with what was typed, arms into the confirmation with what was spent, and shows a disabled one with its reason', () => {
+test('Resume shows its raise field with what was typed and one button reading resume, and shows a disabled one with its reason', () => {
   const resume = RESUME_OFFER;
   const view = (ui: Partial<ReturnType<typeof initialUi>>, offers: Parameters<typeof runControls>[0]) =>
     runControls(offers, { ...initialUi(0), ...ui })?.value ?? '';
-  const idle = view(act(undefined, { 'resume-run': { raise: '5' } }), { resume });
+  const idle = view(act({ 'resume-run': { raise: '5' } }), { resume });
   expect(idle).toBe(
     '<div class="acts"><span class="act"><label class="lbl">raise $ <input class="num" type="number" name="raise" min="0.01" step="any" value="5"></label><button class="btn" data-action="resume-run">resume</button></span></div>',
   );
   expect(idle).not.toContain('restart');
-  expect(view(act('resume-run'), { resume })).toContain(
-    '<button class="btn armed" data-action="resume-run">confirm resume · spent $1.06 of $1.00</button>',
-  );
-  expect(view(act('resume-run'), { resume: { ...resume, raise: 'minutes', spentMinutes: 91.5 } })).toContain(
-    'confirm resume · spent 91.5 min of 90 min</button>',
-  );
-  expect(
-    view(act(undefined, {}, 'refused <b>'), { resume: { ...resume, enabled: false, why: 'run is running' } }),
-  ).toContain(
-    '<span class="act"><button class="btn" disabled>resume</button><span class="act-why">run is running</span></span><span class="warnchip">refused &lt;b&gt;</span>',
+  expect(idle).not.toContain('armed');
+  expect(view(act(), { resume: { ...resume, enabled: false, why: 'run is running' } })).toContain(
+    '<span class="act"><button class="btn" disabled>resume</button><span class="act-why">run is running</span></span>',
   );
   expect(runControls(undefined, initialUi(0))).toBeUndefined();
   expect(runControls({ why: 'run completed' }, initialUi(0))).toBeUndefined();
 });
 
-test('Restart lists the stages with what runs again as titles, the failed one selected unless another was chosen, and arms into the confirmation with the stage and budget', () => {
+test('Restart lists the stages with what runs again as titles, the failed one selected unless another was chosen, and no armed label, since the dialog names the stage and budget', () => {
   const restart: RestartOffer = {
     enabled: true,
     stages: [
@@ -270,44 +255,34 @@ test('Restart lists the stages with what runs again as titles, the failed one se
   expect(view({})).toContain(
     '<select name="stage"><option value="spec" title="spec#1 and everything after it">spec</option><option value="implement" title="implement#1 and everything after it, in loop fix from iteration 1" selected>implement</option></select>',
   );
-  expect(view(act(undefined, { 'restart-run': { stage: 'spec' } }))).toContain(
+  expect(view(act({ 'restart-run': { stage: 'spec' } }))).toContain(
     '<option value="spec" title="spec#1 and everything after it" selected>spec</option>',
   );
-  expect(view(act(undefined, { 'restart-run': { stage: 'nonesuch' } }))).toContain('implement</option></select>');
-  expect(view(act('restart-run', { 'restart-run': { stage: 'spec' } }))).toContain(
-    '<button class="btn armed" data-action="restart-run">confirm restart from spec · budget $25.00</button>',
-  );
-  expect(view(act('restart-run'), { ...restart, budget: { maxMinutes: 90 } })).toContain(
-    'confirm restart from implement · budget 90 min</button>',
+  expect(view(act({ 'restart-run': { stage: 'nonesuch' } }))).toContain('implement</option></select>');
+  expect(view(act({ 'restart-run': { stage: 'spec' } }))).toContain(
+    '<button class="btn" data-action="restart-run">restart</button>',
   );
   expect(view({}, { ...restart, budget: {} })).toContain('restart</button>');
-  expect(view(act('restart-run'), { ...restart, budget: {} })).toContain('· no budget</button>');
   expect(view({}, { enabled: false, why: 'branch sail/x is leased by run FAKE-9', stages: [], budget: {} })).toContain(
     '<button class="btn" disabled>restart</button><span class="act-why">branch sail/x is leased by run FAKE-9</span>',
   );
 });
 
-test('Stop shows a Stop now box that is ticked as chosen, arms into the confirmation each way names, and a disabled one gives its reason', () => {
+test('Stop shows a Stop now box that is ticked as chosen, and a disabled one gives its reason', () => {
   const view = (ui: Partial<ReturnType<typeof initialUi>>, stop: StopOffer = { enabled: true }) =>
     runControls({ stop }, { ...initialUi(0), ...ui })?.value;
   expect(view({})).toContain(
     '<span class="act"><label class="lbl"><input type="checkbox" name="now" data-action="stop-now"> stop now</label><button class="btn" data-action="stop-run">stop</button></span>',
   );
-  expect(view(act(undefined, { 'stop-run': { now: 'on' } }))).toContain(
+  expect(view(act({ 'stop-run': { now: 'on' } }))).toContain(
     '<input type="checkbox" name="now" data-action="stop-now" checked> stop now',
-  );
-  expect(view(act('stop-run'))).toContain(
-    '<button class="btn armed" data-action="stop-run">confirm stop · at its next call boundary</button>',
-  );
-  expect(view(act('stop-run', { 'stop-run': { now: 'on' } }))).toContain(
-    '<button class="btn armed" data-action="stop-run">confirm stop now · ends its running call</button>',
   );
   expect(view({}, { enabled: false, why: 'run is not running' })).toContain(
     '<button class="btn" disabled>stop</button><span class="act-why">run is not running</span>',
   );
 });
 
-test('Clean sits beside Restart, arms into a confirmation that lists what it removes and where the run directory goes, and a disabled one gives its reason', () => {
+test('Clean sits beside Restart, reads clean whatever it removes, and a disabled one gives its reason', () => {
   const clean: CleanOffer = {
     enabled: true,
     removes: ['worktree', 'branch sail/x', 'run ref'],
@@ -320,9 +295,8 @@ test('Clean sits beside Restart, arms into a confirmation that lists what it rem
   expect(idle).toContain(
     'data-action="restart-run">restart</button></span><span class="act"><button class="btn" data-action="clean-run">clean</button></span>',
   );
-  expect(view(act('clean-run'))).toContain(
-    '<button class="btn armed" data-action="clean-run">confirm clean · removes worktree, branch sail/x, run ref · run directory -&gt; ~/.sail/failed-runs/2026-11-01/FAKE-2</button>',
-  );
+  expect(idle).not.toContain('armed');
+  expect(idle).not.toContain('confirm');
   expect(view({}, { enabled: false, removes: [], why: 'a queue item names it' })).toContain(
     '<button class="btn" disabled>clean</button><span class="act-why">a queue item names it</span>',
   );

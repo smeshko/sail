@@ -25,6 +25,7 @@ import {
 import { applyEvent, emptyRun } from './run-model';
 import { saveCleared, storedCleared } from './saved';
 import { type OpenQueue, type OpenRun, openQueue, type Store } from './store';
+import { endMissing, sayMissing } from './toast';
 
 export const RECONNECT_MS = 2000;
 /** How many of a queue's events its panel lists. */
@@ -89,9 +90,9 @@ export function onRunMessage(store: Store, open: OpenRun, text: string) {
     store.mark('main', 'status');
     // A call the URL named that the run never made is dropped, keeping the run.
     if (store.cursorPending && ui.key !== undefined) {
-      ui.indexNotice = `call ${ui.key} is not in run ${open.runId}`;
+      const missing = `call ${ui.key} is not in run ${open.runId}`;
       selectCard(store, undefined);
-      store.mark('rail');
+      sayMissing(store, missing);
       syncUrl(store, false);
     }
     // An index saying the run runs again may have come before this end: look again once the index has caught up
@@ -170,8 +171,8 @@ export function closeRun(store: Store) {
 
 export function selectRun(store: Store, repo: string, runId: string) {
   const { ui } = store;
-  // Opening a run, by any path, ends a notice that a URL named what is not listed.
-  delete ui.indexNotice;
+  // Opening a run, by any path, ends the toast that a URL named what is not listed.
+  endMissing(store);
   if (store.run?.repo === repo && store.run.runId === runId && store.run.error === undefined) return;
   closeRun(store);
   clearCall(store);
@@ -280,7 +281,8 @@ export function onIndex(store: Store, text: string, onStart: (asked: Record<stri
   }
   if (store.run !== undefined) followAgain(store, store.run, true);
   if (store.run !== undefined && offerSignature(store, store.run) !== store.offersFor) {
-    store.actor.disarm();
+    // A dialog open for the run asks of what the run offered before: it closes with nothing sent.
+    if (store.actor.dialogFor()?.kind === 'run') store.actor.cancel();
     readOffers(store);
   }
   if (ui.queue !== undefined && openQueue(store) === undefined) delete ui.queue;
@@ -303,10 +305,10 @@ export function openIndex(store: Store, onStart: (asked: Record<string, string>)
   });
 }
 
-/** Ends a notice that a URL named what is not listed, and connects the queue `id` again from an empty stream when its
+/** Ends the toast that a URL named what is not listed, and connects the queue `id` again from an empty stream when its
  * stream sent `error`. */
 export function reopenQueue(store: Store, id: string): void {
-  delete store.ui.indexNotice;
+  endMissing(store);
   const failed = store.queues.get(id);
   if (failed?.stream.error !== undefined) {
     failed.stream = { recent: [] };

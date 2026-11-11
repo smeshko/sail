@@ -21,11 +21,9 @@ export const keys: Record<string, (store: Store) => void> = {
     const { ui } = store;
     if (ui.runMenu !== undefined) {
       delete ui.runMenu;
-      store.actor.disarm();
       store.mark('rail');
     } else if (ui.itemMenu !== undefined) {
       delete ui.itemMenu;
-      store.actor.disarm();
       store.mark('main');
     } else if (ui.attention) closeAttention(store);
     else if (ui.file !== undefined) closeFile(store);
@@ -38,8 +36,15 @@ export const keys: Record<string, (store: Store) => void> = {
   a: (store) => actions['toggle-attention']?.(store, {}),
 };
 
-/** Handles `key`: nothing in an input, a cursor move clamped to the cards, else the key's function. */
-export function onKey(store: Store, key: string, inInput: boolean): void {
+/** Handles `key`: while the dialog is open its keys alone; else nothing in an input, a cursor move clamped to the cards, else the key's function. */
+export function onKey(store: Store, key: string, inInput: boolean, on?: string): void {
+  // While the dialog is open, Escape cancels it, Enter confirms it unless the cancel button holds the focus, and no
+  // other key does anything.
+  if (store.actor.dialogFor() !== undefined) {
+    if (key === 'Escape') store.actor.cancel();
+    else if (key === 'Enter' && on !== 'dialog-cancel') store.actor.confirm();
+    return;
+  }
   if (inInput) return;
   const by = MOVES[key];
   if (by === undefined) {

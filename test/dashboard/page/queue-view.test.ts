@@ -245,30 +245,30 @@ test('the first waiting row has a down button only, the last an up button only, 
   expect(renderQueue(panel, undefined, initialUi(0), NOW).value).not.toContain('move-item');
 });
 
-test("the panel's notice is drawn as a warn chip beside its header, and not when there is none", () => {
+test('while a request for the queue is out its header reads the word under way in place of the watch pill, and its paused and held chips stay', () => {
   const panel = waiting();
-  const plain = renderQueue(panel, undefined, initialUi(0), NOW).value;
-  const noticed = renderQueue(
+  const at = `queue:${panel.repo}/${panel.workflow}`;
+  const plain = renderQueue(panel, { recent: [] }, initialUi(0), NOW).value;
+  const polling = renderQueue(panel, { recent: [] }, { ...initialUi(0), underway: { [at]: 'polling…' } }, NOW).value;
+  expect(plain).toContain('<span class="pill p-pass">watched</span>');
+  expect(polling).toContain('<span class="busy">polling…</span>');
+  expect(polling).not.toContain('<span class="pill p-pass">watched</span>');
+  expect(polling).not.toContain('warnchip">no watcher');
+});
+
+test('while a request for an item is out its row reads the word under way in place of its state, and no other row does', () => {
+  const panel = waiting();
+  const [first, second] = panel.items;
+  const markup = renderQueue(
     panel,
     undefined,
-    {
-      ...initialUi(0),
-      act: {
-        drafts: {},
-        results: {
-          queue: {
-            id: 'poll-queue',
-            subject: { kind: 'workflow', repo: panel.repo, workflow: panel.workflow },
-            text: 'no watcher is running <now>',
-            place: 'queue',
-          },
-        },
-      },
-    },
+    { ...initialUi(0), underway: { [`item:${panel.repo}/${panel.workflow}/${first?.dedupKey}`]: 'requeuing…' } },
     NOW,
   ).value;
-  expect(plain).not.toContain('no watcher is running');
-  expect(noticed).toContain('<span class="warnchip">no watcher is running &lt;now&gt;</span>');
+  expect(markup.match(/<span class="c-sub"><span class="busy">requeuing…<\/span> · /g)).toHaveLength(1);
+  const plain = renderQueue(panel, undefined, initialUi(0), NOW).value;
+  expect(plain).not.toContain('busy');
+  expect(second?.state).toBeDefined();
 });
 
 test("the stream's error is drawn as an escaped code bad div, and none is drawn without one (ADW-209)", () => {
@@ -410,21 +410,16 @@ test("a row's controls sit after its title column, at its right: the run link, t
   expect(sides).toEqual([['select-run'], ['item-menu'], ['item-menu'], ['item-menu']]);
 });
 
-test('the drop an armed click named reads confirm drop and is armed; the others stay drop', () => {
+test('the drop in an open item menu reads drop and is never armed: the dialog confirms it', () => {
   const [panel] = watchedPanels();
   if (panel === undefined) throw new Error('beta has no queue');
-  const subject = { kind: 'item', repo: 'beta', workflow: 'ticket-to-pr', item: 'ticket:FAKE-6' } as const;
-  const ui = {
-    ...initialUi(0),
-    act: { drafts: {}, results: {}, pending: { id: 'drop-item', subject, values: {}, sent: false } },
-    itemMenu: 'ticket:FAKE-6',
-  };
+  const ui = { ...initialUi(0), itemMenu: 'ticket:FAKE-6' };
   const markup = renderQueue(panel, undefined, ui, NOW).value;
-  expect(controls(markup).filter((row) => row.includes('confirm'))).toEqual([
-    'ticket:FAKE-6: requeue-item requeue, drop-item confirm drop',
+  expect(controls(markup).filter((row) => row.startsWith('ticket:FAKE-6'))).toEqual([
+    'ticket:FAKE-6: requeue-item requeue, drop-item drop',
   ]);
-  expect(markup).toContain('<button class="btn armed" data-action="drop-item"');
-  expect(markup.match(/btn armed/g)).toHaveLength(1);
+  expect(markup).not.toContain('armed');
+  expect(markup).not.toContain('confirm drop');
 });
 
 test('the header has a poll button for the workflow, and the add form shows only for a workflow that polls tickets (ADW-460)', () => {

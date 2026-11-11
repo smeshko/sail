@@ -13,11 +13,12 @@ import { renderRail } from './rail-view';
 import { renderRun, renderStatus } from './run-view';
 import { listed, opened, openQueue, type Store, selected, summaryOf } from './store';
 import { renderTimeline } from './timeline-view';
+import { renderToasts } from './toast-view';
 
 /** How often a running time is drawn again. */
 export const TICK_MS = 1000;
 
-/** What each region is drawn from, field-keeping and armed-drop rules included. */
+/** What each region is drawn from, field-keeping and open-dialog rules included. */
 export function regions(store: Store): Record<Region, () => string> {
   const { ui, host } = store;
   return {
@@ -33,28 +34,20 @@ export function regions(store: Store): Record<Region, () => string> {
       return renderAttention(items, ui.attention).value;
     },
     link: () =>
-      html`<button class="btn" type="button" data-action="copy-link" aria-label="copy link" title="copy link">⧉</button>${
-        ui.linkNotice === undefined ? '' : html`<span class="warnchip">${ui.linkNotice}</span>`
-      }`.value,
+      html`<button class="btn" type="button" data-action="copy-link" aria-label="copy link" title="copy link">⧉</button>`
+        .value,
     main: () => {
       const panel = openQueue(store);
       if (panel !== undefined) {
         // What was typed in the add field survives the draw, but not an add that took.
         store.actor.keep('queue', { kind: 'workflow', repo: panel.repo, workflow: panel.workflow });
-        // An armed drop whose item can't be dropped now (it runs, or is gone) asks again once it can, and its menu shuts.
+        // A drop dialog whose item can't be dropped now (it runs, or is gone) closes with nothing sent, and its menu shuts.
         // So do both while the workflow isn't watched: the controls are disabled then.
         const unwatched = panel.watch.state !== 'watched';
-        const armed = ui.act.pending;
-        if (armed?.id === 'drop-item' && armed.subject.kind === 'item') {
-          const { repo, workflow, item } = armed.subject;
-          const target = panel.items.find((each) => each.dedupKey === item);
-          if (
-            repo === panel.repo &&
-            workflow === panel.workflow &&
-            (unwatched || target === undefined || !offeredDrop(panel, target))
-          ) {
-            store.actor.disarm();
-          }
+        const asked = store.actor.dialogFor();
+        if (asked?.kind === 'item' && asked.repo === panel.repo && asked.workflow === panel.workflow) {
+          const target = panel.items.find((each) => each.dedupKey === asked.item);
+          if (unwatched || target === undefined || !offeredDrop(panel, target)) store.actor.cancel();
         }
         const menuItem = panel.items.find((item) => item.dedupKey === ui.itemMenu);
         if (unwatched || menuItem === undefined || !hasItemActions(panel, menuItem)) delete ui.itemMenu;
@@ -72,6 +65,7 @@ export function regions(store: Store): Record<Region, () => string> {
     inspector: () => renderInspector(selected(store), store.run?.model.roster, store.result, store.log, ui).value,
     status: () => (store.run === undefined ? '' : renderStatus(store.run.model, summaryOf(store, store.run)).value),
     drawer: () => renderDrawer(ui, store.doc).value,
+    toasts: () => renderToasts(ui.toasts).value,
   };
 }
 

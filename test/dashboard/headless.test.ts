@@ -7,7 +7,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { BrowserWindow, ElementLike, EventLike } from '../../src/dashboard/page/host';
 import { type Dashboard, startDashboard } from '../../src/dashboard/server';
-import { FAKE_2_ID, type Machine, seedFixtures } from '../helpers/dashboard';
+import { betaWatcher, FAKE_2_ID, fakeClonePorts, type Machine, seedFixtures } from '../helpers/dashboard';
 
 let m: Machine | undefined;
 let server: Dashboard | undefined;
@@ -44,6 +44,7 @@ async function bootHeadless(dashboard: Dashboard, search = '') {
   const origin = `http://127.0.0.1:${dashboard.port}`;
   const sockets: WebSocket[] = [];
   const history: { kind: string; data: unknown; unused: string; url: string }[] = [];
+  const posted: string[] = [];
   const timers = new Set<ReturnType<typeof setTimeout>>();
   const win: BrowserWindow = {
     document: {
@@ -60,7 +61,10 @@ async function bootHeadless(dashboard: Dashboard, search = '') {
       pushState: (data, unused, url) => history.push({ kind: 'push', data, unused, url }),
       replaceState: (data, unused, url) => history.push({ kind: 'replace', data, unused, url }),
     },
-    fetch: (path, init) => fetch(`${origin}${path}`, init),
+    fetch: (path, init) => {
+      if (init.method === 'POST') posted.push(path);
+      return fetch(`${origin}${path}`, init);
+    },
     // Bun's own WebSocket, with the Origin a browser would send.
     WebSocket: class extends WebSocket {
       constructor(url: string) {
@@ -92,7 +96,7 @@ async function bootHeadless(dashboard: Dashboard, search = '') {
       listener({ target: { innerHTML: '', dataset, parentElement: null } satisfies ElementLike });
     }
   };
-  return { ids, text, click, history };
+  return { ids, text, click, history, posted };
 }
 
 test("the real bundle boots headless: both repositories, the golden run's eight cards and its $1.35, then FAKE-2's denial on the permissions tab", async () => {
@@ -107,7 +111,7 @@ test("the real bundle boots headless: both repositories, the golden run's eight 
   expect(page.text('rail')).toContain('<span class="nm">alpha</span>');
   expect(await until(() => (page.text('main').match(/data-action="select-card"/g) ?? []).length === 8)).toBe(true);
   expect(page.text('main')).toContain('<div class="stat"><b>$1.35</b><span>of $25.00 (5.4%)</span></div>');
-  expect(page.text('attention')).toContain('<span class="badge">4</span>');
+  expect(page.text('attention')).toContain('<span class="badge">3</span>');
   expect(page.text('link')).toContain('data-action="copy-link"');
   page.click({ action: 'select-queue', queue: 'beta/ticket-to-pr' });
   expect(page.history.filter((entry) => entry.kind === 'push').map((entry) => entry.url)).toContain(
@@ -155,13 +159,81 @@ test("a beta queue that can't be read is listed in the rail with its problem, an
   expect(page.text('main')).toContain('queue.json can&#39;t be read');
 }, 30_000);
 
-test('a page loaded at a run the index does not list says so in the rail and replaces the URL with the run it opens (ADW-513)', async () => {
+test('instant tier: on the real bundle and server, a move the watcher refuses draws a red toast quoting the refusal, with no dialog', async () => {
+  m = seedFixtures();
+  betaWatcher(m, { pid: process.pid, sailDir: m.beta.sailDir });
+  const started = startDashboard({ registryDir: m.registryDir, port: 0, followPollMs: 20, indexPollMs: 50 });
+  if ('refused' in started) throw new Error(started.refused);
+  server = started;
+  const page = await bootHeadless(server);
+  expect(page.ids).toEqual(expect.arrayContaining(['toasts']));
+  expect(await until(() => page.text('rail').includes('data-action="select-queue"'))).toBe(true);
+  page.click({ action: 'select-queue', queue: 'beta/ticket-to-pr' });
+  expect(await until(() => page.text('main').includes('data-action="poll-queue"'))).toBe(true);
+  page.click({
+    action: 'move-item',
+    dir: 'down',
+    repo: 'beta',
+    workflow: 'ticket-to-pr',
+    key: 'ticket:FAKE-5',
+    target: 'ticket:FAKE-6',
+  });
+  expect(await until(() => page.text('toasts').includes('toast bad'))).toBe(true);
+  expect(page.text('toasts')).toContain('role="alert"');
+  expect(page.text('toasts')).toContain('ticket:FAKE-6 is parked: only a queued item is moved');
+  expect(page.text('dialog')).not.toContain('data-action="dialog-confirm"');
+}, 30_000);
+
+test('confirmed tier: on the real bundle and server, a click on FAKE-2 clean-run fills the dialog with a clean button, and no POST was made', async () => {
+  m = seedFixtures();
+  const leasesDir = join(m.root, 'leases');
+  const started = startDashboard({
+    registryDir: m.registryDir,
+    port: 0,
+    followPollMs: 20,
+    indexPollMs: 50,
+    leasesDir,
+    ports: fakeClonePorts(leasesDir),
+  });
+  if ('refused' in started) throw new Error(started.refused);
+  server = started;
+  const page = await bootHeadless(server);
+  expect(await until(() => page.text('rail').includes('<span class="nm">alpha</span>'))).toBe(true);
+  page.click({ action: 'run-menu', repo: 'alpha', run: FAKE_2_ID });
+  expect(await until(() => page.text('rail').includes('data-action="clean-run"'))).toBe(true);
+  page.click({ action: 'clean-run', repo: 'alpha', run: FAKE_2_ID });
+  expect(await until(() => page.text('dialog').includes('data-action="dialog-confirm"'))).toBe(true);
+  expect(page.text('dialog')).toContain(`<h2 id="dialog-title">clean ${FAKE_2_ID}</h2>`);
+  expect(page.text('dialog')).toContain('autofocus>clean</button>');
+  expect(page.text('rail')).not.toContain('armed');
+  expect(page.posted).toEqual([]);
+}, 30_000);
+
+test('undoable tier: on the real bundle, clear-attention empties attention and draws an undo-toast button, and clicking it brings back the badge of 3', async () => {
+  m = seedFixtures();
+  const started = startDashboard({ registryDir: m.registryDir, port: 0, followPollMs: 20, indexPollMs: 50 });
+  if ('refused' in started) throw new Error(started.refused);
+  server = started;
+  const page = await bootHeadless(server);
+  expect(await until(() => page.text('attention').includes('<span class="badge">3</span>'))).toBe(true);
+  page.click({ action: 'clear-attention' });
+  expect(await until(() => page.text('toasts').includes('data-action="undo-toast"'))).toBe(true);
+  expect(page.text('attention')).not.toContain('<span class="badge">');
+  expect(page.text('toasts')).toContain('<span class="toast-head">all clear</span>');
+  const id = /data-action="undo-toast" data-toast="(\d+)"/.exec(page.text('toasts'))?.[1] ?? '';
+  page.click({ action: 'undo-toast', toast: id });
+  expect(await until(() => page.text('attention').includes('<span class="badge">3</span>'))).toBe(true);
+  expect(page.text('toasts')).not.toContain('toast ok');
+  expect(page.posted).toEqual([]);
+}, 30_000);
+
+test('a page loaded at a run the index does not list says so in a toast and replaces the URL with the run it opens (ADW-513)', async () => {
   m = seedFixtures();
   const started = startDashboard({ registryDir: m.registryDir, port: 0, followPollMs: 20, indexPollMs: 50 });
   if ('refused' in started) throw new Error(started.refused);
   server = started;
   const page = await bootHeadless(server, '?repo=alpha&run=NOPE-1');
-  expect(await until(() => page.text('rail').includes('run NOPE-1 of alpha is not listed'))).toBe(true);
+  expect(await until(() => page.text('toasts').includes('run NOPE-1 of alpha is not listed'))).toBe(true);
   expect(await until(() => (page.text('main').match(/data-action="select-card"/g) ?? []).length > 0)).toBe(true);
   const written = page.history.map((entry) => [entry.kind, entry.url]);
   expect(written[0]?.[0]).toBe('replace');
