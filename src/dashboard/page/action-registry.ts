@@ -1,5 +1,5 @@
 // The page's actions, defined once: each thing a person can have done from the page (stop, stop now, suspend and hold, resume, restart,
-// clean, drop, requeue, move, poll, release a usage-limit hold, add, add skipping its checks, watch, unwatch, all clear,
+// clean, clean every failed run, drop, requeue, move, poll, release a usage-limit hold, add, add skipping its checks, watch, unwatch, all clear,
 // dismiss) with its id and label, the subject it applies to, its
 // availability from the server's offers, its parameters, its tier, its request and what its answer means. Pure: it
 // holds no host, no state and no storage, so `act.ts` carries any entry out and `action-view.ts` draws any entry, and an
@@ -130,6 +130,8 @@ export type ActResult = {
   keepMenu?: true;
   /** The request was refused: its text is sail's refusal. */
   refused?: true;
+  /** The runs the answer says no longer exist: the page leaves the open run when it is one. */
+  gone?: { repo: string; runId: string }[];
 };
 export type Effect = 'reopen' | 'leave' | 'took' | { open: string };
 
@@ -256,6 +258,7 @@ export function subjectName(subject: Subject): string {
 /** The key of `ui.underway` that `def` done to `subject` sets while its request is out. */
 export function underwayId(def: ActionDef, subject: Subject): string {
   const watching = def.id === 'watch' || def.id === 'unwatch';
+  if (def.id === 'clean-failed') return subject.kind === 'repo' ? `clean:${subject.repo}` : 'clean:*';
   switch (subject.kind) {
     case 'run':
       return `run:${subject.repo}/${subject.runId}`;
@@ -492,6 +495,61 @@ function cleanSkips(offers: RunActions | undefined): string | undefined {
     : `queue item ${item.dedupKey} names it: clean it alone to requeue or drop the item`;
 }
 
+/** A failed run a clean of every failed run lists, with the queue item that names it. */
+type FailedRun = { repo: string; runId: string; item?: { workflow: string; dedupKey: string; state: string } };
+
+/** The failed runs `subject` (a repository, or nothing for every repository) would clean, from the index's offers. */
+function failedRunsOf(subject: Subject, source: OfferSource): FailedRun[] {
+  const repos = source.index.filter((each) =>
+    subject.kind === 'repo' ? each.name === subject.repo : each.offers?.clean?.enabled === true,
+  );
+  return repos.flatMap((each) => (each.offers?.clean?.runs ?? []).map((run) => ({ ...run, repo: each.name })));
+}
+
+const itemWord = { skip: 'skipped', requeue: 'requeued', drop: 'dropped' } as const;
+
+/** The one dialog of a clean of every failed run: the count, and a line for each run and what becomes of its queue item. */
+function cleanFailedDialog(subject: Subject, values: Values, source: OfferSource): DialogView {
+  const runs = failedRunsOf(subject, source);
+  const choice = values.items === 'requeue' || values.items === 'drop' ? values.items : 'skip';
+  const left = choice === 'skip' ? runs.filter((run) => run.item !== undefined).length : 0;
+  const n = runs.length - left;
+  return {
+    title: subject.kind === 'repo' ? `clean all failed runs of ${subject.repo}` : 'clean every failed run',
+    lines: [
+      `cleans ${n} failed ${n === 1 ? 'run' : 'runs'}`,
+      ...(left === 0 ? [] : [`leaves ${left} a queue item names`]),
+      ...runs.map((run) => {
+        const name = subject.kind === 'repo' ? run.runId : `${run.repo}: ${run.runId}`;
+        return run.item === undefined
+          ? name
+          : `${name} · queue item ${run.item.dedupKey} of ${run.item.workflow}: ${itemWord[choice]}`;
+      }),
+    ],
+    verb: 'clean',
+  };
+}
+
+/** What a clean of every failed run answers: its message, the runs it archived as gone, and red when one was left. */
+function cleanFailedAnswer(status: number, body: string): ActResult {
+  if (!ok(status)) return { text: refusal(status, body, 'clean'), refused: true };
+  const text = answerField(body, 'message');
+  let parsed: { runs?: unknown; left?: unknown; failed?: unknown } = {};
+  try {
+    parsed = JSON.parse(body) as typeof parsed;
+  } catch {
+    // An answer that isn't JSON says nothing of its runs.
+  }
+  const gone = (Array.isArray(parsed.runs) ? parsed.runs : []).flatMap((run: unknown) => {
+    const each = run as { repo?: unknown; runId?: unknown; cleaned?: unknown };
+    return each.cleaned === true && typeof each.repo === 'string' && typeof each.runId === 'string'
+      ? [{ repo: each.repo, runId: each.runId }]
+      : [];
+  });
+  const left = Number(parsed.left ?? 0) + Number(parsed.failed ?? 0) > 0;
+  return { ...(text === undefined ? {} : { text }), gone, ...(left ? { refused: true as const } : {}) };
+}
+
 /** The ticket key field the two adds share. */
 const addParams = (): Param[] => [
   { name: 'ticket', dom: 'add-ticket', label: 'ticket key', type: 'text', placeholder: 'ticket key' },
@@ -690,6 +748,44 @@ export const ACTIONS: readonly ActionDef[] = [
       if (problems.length > 0) return { effect: 'leave', refused: true, text: [message, ...problems].join('\n') };
       return { effect: 'leave', ...(message === undefined ? {} : { text: message }) };
     },
+  },
+  {
+    id: 'clean-failed',
+    label: () => 'clean all failed',
+    appliesTo: ['repo', 'none'],
+    tier: 'confirmed',
+    place: 'list',
+    holdsDisabled: true,
+    params: (subject, source) =>
+      failedRunsOf(subject, source).some((run) => run.item !== undefined)
+        ? [
+            {
+              name: 'items',
+              dom: 'clean-items',
+              label: 'runs with a queue item',
+              type: 'choice',
+              options: [{ value: 'skip' }, { value: 'requeue' }, { value: 'drop' }],
+              initial: 'skip',
+              ask: 'dialog',
+            },
+          ]
+        : [],
+    available: (subject, source) => {
+      if (failedRunsOf(subject, source).length === 0) return NOT_OFFERED;
+      if (subject.kind !== 'repo') return { offered: true, enabled: true };
+      return availability(source.index.find((each) => each.name === subject.repo)?.offers?.clean);
+    },
+    underway: 'cleaning…',
+    dialog: cleanFailedDialog,
+    request: (subject, values, source) => {
+      const runs = failedRunsOf(subject, source).map(({ repo, runId }) => ({ repo, runId }));
+      if (runs.length === 0) return undefined;
+      return {
+        path: subject.kind === 'repo' ? `/api/repos/${enc(subject.repo)}/clean-failed` : '/api/clean-failed',
+        body: { runs, items: values.items ?? 'skip' },
+      };
+    },
+    answer: cleanFailedAnswer,
   },
   queueItemAction('requeue-item', 'requeue', 'instant', '/requeue'),
   queueItemAction('drop-item', 'drop', 'confirmed', '/drop'),
