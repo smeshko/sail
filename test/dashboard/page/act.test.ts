@@ -632,7 +632,7 @@ test('an add that was only waiting keeps what was typed, since the watcher has n
   expect([r.ui.act.drafts['add-ticket'], r.effects, r.toasts]).toEqual([
     { ticket: 'FAKE-9' },
     [],
-    ['ok add beta / wf: not yet'],
+    ['ok add a ticket… beta / wf: not yet'],
   ]);
 });
 

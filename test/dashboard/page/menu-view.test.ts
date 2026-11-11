@@ -1,6 +1,6 @@
 // The command menu's markup: the head, the field, the rows with the highlighted one marked, a disabled row and its
 // reason, the context menu at the pointer with no field, and what a hostile string can't do.
-import { expect, test } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 import type { MenuModel } from '../../../src/dashboard/page/menu-model';
 import { iconOf, renderMenu } from '../../../src/dashboard/page/menu-view';
 import type { MenuState } from '../../../src/dashboard/page/ui-state';
@@ -18,6 +18,23 @@ const state = (fields: Partial<MenuState> = {}): MenuState => ({
   at: 1,
   steps: [],
   ...fields,
+});
+
+describe('audit 2: a reason every row of the subject shares (ADW-544)', () => {
+  test('is drawn once, as a quiet line under the chip, and the disabled rows carry none', () => {
+    const model: MenuModel = {
+      head: 'FAKE-6 · Tidy the docs',
+      why: 'no watcher is running',
+      rows: [row('drop', { disabled: true }), row('move up', { disabled: true })],
+    };
+    const markup = renderMenu(state(), model).value;
+    expect(markup).toContain(
+      '<div class="cmdk-subj">FAKE-6 · Tidy the docs</div><div class="cmdk-note">no watcher is running</div>',
+    );
+    expect(markup.match(/no watcher is running/g)).toHaveLength(1);
+    expect(markup).not.toContain('cmdk-why');
+    expect(renderMenu(state(), { rows: model.rows }).value).not.toContain('cmdk-note');
+  });
 });
 
 test('the full menu draws the head, a field, one row per row with the highlight, and a heading for each other group', () => {
