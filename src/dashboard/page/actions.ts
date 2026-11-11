@@ -214,6 +214,8 @@ export const actions: Record<string, Action> = {
   },
   'dialog-confirm': (store) => store.actor.confirm(),
   'dialog-cancel': (store) => store.actor.cancel(),
+  // A field of the dialog changed: its lines follow it.
+  'dialog-change': (store) => store.actor.changed(),
   'dismiss-toast': (store, data) => dismissToast(store, Number(data.toast)),
   'undo-toast': (store, data) => undoToast(store, Number(data.toast)),
 };
@@ -227,7 +229,7 @@ export function dispatch(store: Store, action: string, data: Record<string, stri
   const acts = def !== undefined;
   const runAction = action === 'stop-now' || (def?.appliesTo.includes('run') ?? false);
   const confirming = def?.appliesTo.includes('item') === true && def.tier === 'confirmed';
-  const dialogClick = action === 'dialog-confirm' || action === 'dialog-cancel';
+  const dialogClick = action === 'dialog-confirm' || action === 'dialog-cancel' || action === 'dialog-change';
   const shuts = ui.itemMenu !== undefined && action !== 'item-menu' && !confirming && !dialogClick;
   const shutsRun = ui.runMenu !== undefined && !runAction && action !== 'run-menu' && !dialogClick;
   if (shuts) delete ui.itemMenu;

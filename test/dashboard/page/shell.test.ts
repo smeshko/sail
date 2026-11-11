@@ -165,6 +165,7 @@ test("the shell's actions are exactly the page's view actions: every action of t
       'copy',
       'dialog-confirm',
       'dialog-cancel',
+      'dialog-change',
       'dismiss-toast',
       'undo-toast',
     ].sort(),

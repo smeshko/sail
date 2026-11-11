@@ -38,18 +38,19 @@ function dataOf(subject: Subject): SafeHtml | '' {
   }
 }
 
-function field(param: Param, values: Values): SafeHtml | '' {
+/** The field that draws `param`, with what was typed; `focus` makes it the one the page focuses when it is drawn. */
+export function field(param: Param, values: Values, focus = false): SafeHtml | '' {
   if (param.given !== undefined) return '';
   const typed = values[param.name];
   switch (param.type) {
     case 'number':
       return html`<label class="lbl">${param.label} <input class="num" type="number" name="${param.dom}"${
         param.min === undefined ? '' : html` min="${param.min}"`
-      } step="any" value="${typed ?? ''}"></label>`;
+      } step="any" value="${typed ?? ''}"${focus ? ' autofocus' : ''}></label>`;
     case 'text':
       return html`<label class="lbl">${param.label} <input class="txt" type="text" name="${param.dom}"${
         param.placeholder === undefined ? '' : html` placeholder="${param.placeholder}"`
-      } value="${typed ?? ''}"></label>`;
+      } value="${typed ?? ''}"${focus ? ' autofocus' : ''}></label>`;
     case 'choice': {
       if (param.tick === true) {
         return html`<label class="lbl"><input type="checkbox" name="${param.dom}"${
@@ -57,7 +58,7 @@ function field(param: Param, values: Values): SafeHtml | '' {
         }${typed === 'on' ? ' checked' : ''}> ${param.label}</label>`;
       }
       const chosen = param.options.some((each) => each.value === typed) ? typed : param.initial;
-      return html`<label class="lbl">${param.label} <select name="${param.dom}">${param.options.map(
+      return html`<label class="lbl">${param.label} <select name="${param.dom}"${focus ? ' autofocus' : ''}>${param.options.map(
         (each) =>
           html`<option value="${each.value}"${each.title === undefined ? '' : html` title="${each.title}"`}${each.value === chosen ? ' selected' : ''}>${each.value}</option>`,
       )}</select></label>`;
@@ -83,7 +84,10 @@ export function actionControl(
   }
   const values = act.drafts[def.id] ?? {};
   const label = def.label(subject);
-  const params = def.params(subject, source).map((param) => field(param, values));
+  const params = def
+    .params(subject, source)
+    .filter((param) => param.ask !== 'dialog')
+    .map((param) => field(param, values));
   return wrap(
     html`${params}<button class="${options.class ?? 'btn'}" data-action="${def.id}"${
       options.data === true ? dataOf(subject) : ''

@@ -31,7 +31,7 @@ export function regions(store: Store): Record<Region, () => string> {
     },
     list: () => {
       if (store.index === undefined) return html`<div class="qempty">connecting…</div>`.value;
-      // A raise typed and a stage chosen in the open run's menu survive the draw, but not a switch of run.
+      // What the open run's menu holds survives the draw, but not a switch of run.
       store.actor.keep('run');
       return renderList(ui.view, listRepos(store.index, host.now()), ui, host.now(), store.offers).value;
     },

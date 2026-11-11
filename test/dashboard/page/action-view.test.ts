@@ -2,7 +2,7 @@
 // why, nothing when not offered, and the parameters each kind draws.
 import { expect, test } from 'bun:test';
 import { ACTIONS, type ActionDef, type OfferSource, type Subject } from '../../../src/dashboard/page/action-registry';
-import { actionControl } from '../../../src/dashboard/page/action-view';
+import { actionControl, field } from '../../../src/dashboard/page/action-view';
 import type { ActState } from '../../../src/dashboard/page/ui-state';
 
 const RUN: Subject = { kind: 'run', repo: 'alpha', runId: 'R1' };
@@ -103,7 +103,9 @@ test('a choice is drawn as a select with the draft chosen, else the initial one,
   expect(actionControl(stop, RUN, { drafts: { 'stop-run': { now: 'on' } } }, source).toString()).toContain(
     'name="now" data-action="stop-now" checked>',
   );
-  const select = (act: ActState) => actionControl(restart, RUN, act, source).toString();
+  const stage = restart.params(RUN, source)[0];
+  if (stage === undefined) throw new Error('no stage');
+  const select = (act: ActState) => String(field(stage, act.drafts['restart-run'] ?? {}));
   expect(select(idle)).toContain(
     '<option value="a" title="a once">a</option><option value="b" title="b once" selected>b</option>',
   );
@@ -135,5 +137,24 @@ test('a parameter the row gives is not drawn', () => {
   } as unknown as OfferSource;
   expect(actionControl(move, item, idle, source).toString()).toBe(
     '<button class="btn" data-action="move-item">move</button>',
+  );
+});
+
+test('a parameter asked in the dialog is not drawn beside its button', () => {
+  const restart = ACTIONS.find((each) => each.id === 'restart-run');
+  const resume = ACTIONS.find((each) => each.id === 'resume-run');
+  if (restart === undefined || resume === undefined) throw new Error('missing');
+  const source = {
+    index: [],
+    run: {
+      resume: { enabled: true, spentUsd: 1, budget: {}, raise: 'usd' },
+      restart: { enabled: true, stage: 'b', stages: [{ stage: 'b', runsAgain: 'b once' }], budget: {} },
+    },
+  } as unknown as OfferSource;
+  expect(actionControl(restart, RUN, idle, source).toString()).toBe(
+    '<button class="btn" data-action="restart-run">restart</button>',
+  );
+  expect(actionControl(resume, RUN, idle, source).toString()).toBe(
+    '<button class="btn" data-action="resume-run">resume</button>',
   );
 });

@@ -71,6 +71,8 @@ interface ParamBase {
   label?: string;
   /** The row supplies its value with its click (`data-<name>`): it is not drawn. */
   given?: 'data';
+  /** Asked in the confirmation dialog, not drawn beside the button: the dialog's field, read at confirm. */
+  ask?: 'dialog';
 }
 
 /** A number, a choice or a text. A tick is a choice whose value is `on` while ticked and `''` while not. */
@@ -402,6 +404,7 @@ export const ACTIONS: readonly ActionDef[] = [
               type: 'number',
               min: 0.01,
               required: true,
+              ask: 'dialog',
             },
           ];
     },
@@ -455,6 +458,7 @@ export const ACTIONS: readonly ActionDef[] = [
               type: 'choice',
               options: offer.stages.map((each) => ({ value: each.stage, title: each.runsAgain })),
               initial: offer.stage,
+              ask: 'dialog',
             },
           ];
     },

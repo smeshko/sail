@@ -714,5 +714,5 @@ The dashboard's answer to an action, drawn at the bottom right and naming the ac
 _Avoid_: notice, snackbar, chip
 
 **Confirmation dialog**:
-The one dialog a stop, resume, restart, drop or clean opens before it is done: a title naming the action and its subject, one line per consequence, and one button with the verb. Enter confirms and Esc cancels.
+The one dialog a stop, resume, restart, drop or clean opens before it is done: a title naming the action and its subject, a field for each parameter the action asks there (Resume's raise, Restart's stage), one line per consequence, which a change of a field draws again, and one button with the verb. A value it can't send keeps it open with the reason beside the field. Enter confirms and Esc cancels.
 _Avoid_: modal, popup, prompt, armed button
