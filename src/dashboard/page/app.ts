@@ -68,7 +68,7 @@ export function boot(host: PageHost): Page {
           const added = new Set(store.drawn.filter((each) => !before.has(each)));
           store.cleared = new Set([...before, ...store.drawn]);
           saveCleared(host, store.cleared);
-          store.mark('attention');
+          store.mark('sidebar', 'list');
           if (added.size === 0) return undefined;
           return {
             text: `${added.size} hidden`,
@@ -77,7 +77,7 @@ export function boot(host: PageHost): Page {
             undo: () => {
               store.cleared = new Set([...storedCleared(host), ...store.cleared].filter((each) => !added.has(each)));
               saveCleared(host, store.cleared);
-              store.mark('attention');
+              store.mark('sidebar', 'list');
             },
           };
         },

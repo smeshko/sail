@@ -1,14 +1,12 @@
 // The page's draw loop: what each region is drawn from, the flush that draws the regions marked dirty and writes only
 // those whose markup changed, and the one-second tick that draws the running times again while anything runs. A region
 // that can't be drawn says so, and the others are still drawn.
-import { identity } from './attention';
-import { renderAttention } from './attention-view';
 import { renderDrawer } from './drawer-view';
 import { REGIONS, type Region } from './host';
 import { html } from './html';
 import { listRepos, statusOf } from './index-model';
 import { renderInspector } from './inspector-view';
-import { viewCounts } from './list-model';
+import { filterRows, groupsOf, viewCounts } from './list-model';
 import { renderList } from './list-view';
 import { hasItemActions, offeredDrop, renderQueue } from './queue-view';
 import { renderRun, renderStatus } from './run-view';
@@ -33,12 +31,16 @@ export function regions(store: Store): Record<Region, () => string> {
       if (store.index === undefined) return html`<div class="qempty">connecting…</div>`.value;
       // A raise typed and a stage chosen in the open run's menu survive the draw, but not a switch of run.
       store.actor.keep('run');
-      return renderList(ui.view, listRepos(store.index, host.now()), ui, host.now(), store.offers, listed(store)).value;
-    },
-    attention: () => {
       const items = listed(store);
-      store.drawn = items.map(identity);
-      return renderAttention(items, ui.attention).value;
+      const repos = listRepos(store.index, host.now());
+      // All clear hides the Inbox's rows as they are drawn: its shown rows, under the repository filter and the filter field.
+      store.drawn =
+        ui.view === 'inbox'
+          ? filterRows(groupsOf('inbox', repos, ui.repoFilter, items), ui.listFilter).flatMap((group) =>
+              group.rows.flatMap((row) => (row.kind === 'attention' ? [row.id.slice('inbox:'.length)] : [])),
+            )
+          : [];
+      return renderList(ui.view, repos, ui, host.now(), store.offers, items).value;
     },
     link: () =>
       html`<button class="btn" type="button" data-action="copy-link" aria-label="copy link" title="copy link">⧉</button>`

@@ -2,10 +2,10 @@
 // `Enter` opens the card under it and `]` and `[` step to the next and previous card; with none open, they move the
 // list's cursor over its entries (group headers and the rows of the groups not folded), `Enter` opens the row under it
 // or folds the group, and `.` opens the menu of the run under it. `Escape` shuts, in order, the run menu, the item menu,
-// needs attention, the drawer and the timeline, then the selection and, last, the open run or queue, which gives the
+// the drawer and the timeline, then the selection and, last, the open run or queue, which gives the
 // list the centre. `/` focuses the list's filter field, `1` to `4` open Inbox, Active, Queues and History, `a` opens the Inbox and `i`
 // toggles the inspector. A key typed in an input does nothing but, for Escape, take the focus off.
-import { actions, closeAttention, step } from './actions';
+import { actions, step } from './actions';
 import { listRepos } from './index-model';
 import { entries, filterRows, groupsOf, type ListRow, VIEWS } from './list-model';
 import { syncUrl } from './location';
@@ -72,7 +72,7 @@ export const keys: Record<string, (store: Store) => void> = {
     const card = store.run?.model.cards[store.ui.cursor];
     if (card !== undefined) selectCard(store, card.key, undefined, true);
   },
-  // The run menu, the item menu, needs attention and the drawer shut first, in that order; then back to the cards
+  // The run menu, the item menu and the drawer shut first, in that order; then back to the cards
   // from a timeline, keeping the selection; from the cards, no selection; last, the run or queue itself.
   Escape: (store) => {
     const { ui } = store;
@@ -82,8 +82,7 @@ export const keys: Record<string, (store: Store) => void> = {
     } else if (ui.itemMenu !== undefined) {
       delete ui.itemMenu;
       store.mark('main');
-    } else if (ui.attention) closeAttention(store);
-    else if (ui.file !== undefined) closeFile(store);
+    } else if (ui.file !== undefined) closeFile(store);
     else if (ui.timeline) actions['close-timeline']?.(store, {});
     else if (ui.key !== undefined) selectCard(store, undefined);
     else actions['close-detail']?.(store, {});

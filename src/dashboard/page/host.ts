@@ -4,17 +4,7 @@
 // members the page uses, since the project's TypeScript has no DOM library.
 
 /** The page's regions, each an element id in `index.html`. */
-export const REGIONS = [
-  'sidebar',
-  'list',
-  'attention',
-  'link',
-  'main',
-  'inspector',
-  'status',
-  'drawer',
-  'toasts',
-] as const;
+export const REGIONS = ['sidebar', 'list', 'link', 'main', 'inspector', 'status', 'drawer', 'toasts'] as const;
 export type Region = (typeof REGIONS)[number];
 
 export interface Connection {

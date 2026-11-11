@@ -36,7 +36,6 @@ test('the committed dashboard views are what the fixtures render now', async () 
     'list-history.html',
     'list-queues.html',
     'list-queues-problem.html',
-    'attention.html',
     'queue.html',
     'queue-watched.html',
     'run-golden.html',

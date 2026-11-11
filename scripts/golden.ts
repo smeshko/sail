@@ -29,7 +29,6 @@ import { runActions } from '../src/dashboard/actions';
 import { findRepo, index } from '../src/dashboard/files';
 import { actionOf } from '../src/dashboard/page/action-registry';
 import { attention } from '../src/dashboard/page/attention';
-import { renderAttention } from '../src/dashboard/page/attention-view';
 import { renderDialog } from '../src/dashboard/page/dialog-view';
 import type { SafeHtml } from '../src/dashboard/page/html';
 import { listRepos, pollKind, queuePanels } from '../src/dashboard/page/index-model';
@@ -325,7 +324,6 @@ export async function renderDashboardViews(outDir: string): Promise<string[]> {
         : repo,
     );
     views['list-queues-problem.html'] = renderList('queues', listRepos(unreadable, VIEWS_NOW), selected, VIEWS_NOW);
-    views['attention.html'] = renderAttention(attention(repos), true);
     const queueEvents = readEvents(queueDirOf(machine)) as unknown as QueueEvent[];
     const stream = { recent: queueEvents.slice(-20), polls: pollKind(queueEvents) };
     const queue = queueId('beta', QUEUE_WORKFLOW);
