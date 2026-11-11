@@ -65,3 +65,14 @@ export function percent(used: number | undefined, limit: number | undefined): st
   if (!isNumber(used) || !isNumber(limit) || limit <= 0) return DASH;
   return `${Number(((used / limit) * 100).toFixed(1))}%`;
 }
+
+/** `YYYY-MM-DD` of `ms` (since the epoch) at `offsetMinutes` east of UTC. */
+export function dayOfMs(ms: number, offsetMinutes: number): string {
+  return new Date(ms + offsetMinutes * 60_000).toISOString().slice(0, 10);
+}
+
+/** `YYYY-MM-DD` of `iso` at `offsetMinutes` east of UTC, and undefined for a missing or invalid time. */
+export function dayOf(iso: string | undefined, offsetMinutes: number): string | undefined {
+  const at = typeof iso === 'string' ? Date.parse(iso) : Number.NaN;
+  return Number.isNaN(at) ? undefined : dayOfMs(at, offsetMinutes);
+}

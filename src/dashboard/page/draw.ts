@@ -14,7 +14,17 @@ import { renderMenu } from './menu-view';
 import { hasItemActions, offeredDrop, renderQueue } from './queue-view';
 import { renderRun, renderStatus } from './run-view';
 import { renderSidebar } from './sidebar-view';
-import { listed, opened, openQueue, type Store, selected, summaryOf } from './store';
+import {
+  centreCard,
+  centreRun,
+  inspectorOpen,
+  listed,
+  opened,
+  openQueue,
+  type Store,
+  selected,
+  summaryOf,
+} from './store';
 import { renderTimeline } from './timeline-view';
 import { renderToasts } from './toast-view';
 
@@ -37,7 +47,10 @@ export function regions(store: Store): Record<Region, () => string> {
       // All clear hides the Inbox's rows as they are drawn: its shown rows, under the repository filter and the filter field.
       store.drawn =
         ui.view === 'inbox'
-          ? filterRows(groupsOf('inbox', repos, ui.repoFilter, items), ui.listFilter).flatMap((group) =>
+          ? filterRows(
+              groupsOf('inbox', repos, ui.repoFilter, { now: host.now(), tz: ui.tz }, items),
+              ui.listFilter,
+            ).flatMap((group) =>
               group.rows.flatMap((row) => (row.kind === 'attention' ? [row.id.slice('inbox:'.length)] : [])),
             )
           : [];
@@ -84,8 +97,12 @@ export function regions(store: Store): Record<Region, () => string> {
           : renderTimeline(card, ui, host.now(), store.outputs);
       return html`${error}${view}`.value;
     },
-    inspector: () => renderInspector(selected(store), store.run?.model.roster, store.result, store.log, ui).value,
-    status: () => (store.run === undefined ? '' : renderStatus(store.run.model, summaryOf(store, store.run)).value),
+    inspector: () =>
+      renderInspector(centreCard(store), centreRun(store)?.model.roster, store.result, store.log, ui).value,
+    status: () => {
+      const run = centreRun(store);
+      return run === undefined ? '' : renderStatus(run.model, summaryOf(store, run)).value;
+    },
     drawer: () => renderDrawer(ui, store.doc).value,
     menu: () => {
       const { menu } = ui;
@@ -110,6 +127,12 @@ export function flush(store: Store): void {
   if (detail !== store.detail) {
     store.detail = detail;
     host.setDetail(detail);
+  }
+  // The inspector's room: open with a selected card of the run the centre shows, or pinned.
+  const inspector = `${inspectorOpen(store)} ${ui.pinned}`;
+  if (inspector !== store.inspector) {
+    store.inspector = inspector;
+    host.setInspector(inspectorOpen(store), ui.pinned);
   }
   // A raise typed and a stage chosen in the open run's view header or row menu survive the draw, but not a switch of run:
   // read once, before either region is written, so the one-shot flag covers both.

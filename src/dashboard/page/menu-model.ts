@@ -92,6 +92,29 @@ export function headOf(subject: Subject | undefined): string | undefined {
   return `${word} ${subjectName(subject)}`;
 }
 
+/**
+ * The menu's chip: a run as its ticket key or pull request and its title, a queue item as its key and title, when the
+ * index has them; anything else as `headOf` names it.
+ */
+export function chipOf(subject: Subject | undefined, index: readonly IndexRepo[], now: number): string | undefined {
+  const named = (key: string | undefined, title: string | undefined) =>
+    key !== undefined && title !== undefined && title !== '' ? `${key} · ${title}` : undefined;
+  if (subject?.kind === 'run') {
+    const run = listRepos(index, now)
+      .find((repo) => repo.name === subject.repo)
+      ?.runs.find((each) => each.runId === subject.runId);
+    const key = run?.ticketKey ?? (run?.pr === undefined ? undefined : `#${run.pr}`);
+    return named(key, run?.title) ?? headOf(subject);
+  }
+  if (subject?.kind === 'item') {
+    const item = queuePanels(index)
+      .find((panel) => panel.repo === subject.repo && panel.workflow === subject.workflow)
+      ?.items.find((each) => each.dedupKey === subject.item);
+    return named(subject.item.replace(/^[a-z-]+:/, ''), item?.title) ?? headOf(subject);
+  }
+  return headOf(subject);
+}
+
 /** Each action of the registry that applies to `subject` and is offered, as a row: disabled, with its reason, when it isn't enabled. */
 export function subjectRows(subject: Subject, source: OfferSource): MenuRow[] {
   return ACTIONS.flatMap((def) => {
@@ -309,7 +332,7 @@ export function stepOf(step: MenuStep, source: OfferSource, typed = ''): StepMod
  * subject's group alone, unfiltered.
  */
 export function menuRows(state: MenuState, source: OfferSource, index: readonly IndexRepo[], now: number): MenuModel {
-  const head = headOf(state.subject);
+  const head = chipOf(state.subject, index, now);
   const step = state.steps.at(-1);
   if (step !== undefined) {
     const model = stepOf(step, source, state.query);

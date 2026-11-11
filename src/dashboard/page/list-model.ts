@@ -1,11 +1,12 @@
 // The list's model: the index's repositories (from `listRepos`) turned into the grouped rows each view draws, and the
 // counts the sidebar shows. Pure, with no markup. The views are Inbox (what needs attention: runs, parked items and
 // problems, from the items it is given), Active (live runs, those that wait on a person first), Queues (one row per
-// queue, under its repository) and History (finished runs, failed then done).
+// queue, under its repository) and History (finished runs, one group per start day).
 
 import type { QueueOffers } from '../offers';
 import type { Subject } from './action-registry';
 import { type AttentionItem, identity } from './attention';
+import { dayOf, dayOfMs } from './format';
 import { type ListRepo, type ListRun, type ListWorkflow, newestFirst, workflowOf } from './index-model';
 
 export const VIEWS = ['inbox', 'active', 'queues', 'history'] as const;
@@ -100,21 +101,34 @@ export function activeGroups(repos: readonly ListRepo[]): ListGroup[] {
   ];
 }
 
-/** The finished runs, failed then done, newest first. */
-export function historyGroups(repos: readonly ListRepo[]): ListGroup[] {
+export interface DayClock {
+  /** ms since the epoch */
+  now: number;
+  /** minutes east of UTC */
+  tz: number;
+}
+
+/**
+ * The finished runs, newest first across statuses, cut into one group per start day at the clock's offset: `Today`,
+ * `Yesterday`, then the date. A run with no readable start time goes in a last group.
+ */
+export function historyGroups(repos: readonly ListRepo[], clock: DayClock): ListGroup[] {
+  const today = dayOfMs(clock.now, clock.tz);
+  const yesterday = dayOfMs(clock.now - 86_400_000, clock.tz);
+  const days = new Map<string, RunRow[]>();
+  const undated: RunRow[] = [];
+  for (const row of runRows(repos, isFinished)) {
+    const day = dayOf(row.run.startedAt, clock.tz);
+    if (day === undefined) undated.push(row);
+    else days.set(day, [...(days.get(day) ?? []), row]);
+  }
   return [
-    ...groupOf(
-      'history',
-      'failed',
-      'failed',
-      runRows(repos, (run) => run.status === 'failed'),
-    ),
-    ...groupOf(
-      'history',
-      'done',
-      'done',
-      runRows(repos, (run) => run.status === 'completed'),
-    ),
+    ...[...days].map(([day, rows]) => ({
+      id: `history:${day}`,
+      label: day === today ? 'Today' : day === yesterday ? 'Yesterday' : day,
+      rows,
+    })),
+    ...groupOf('history', 'undated', 'no start time', undated),
   ];
 }
 
@@ -161,18 +175,22 @@ export function inboxGroups(items: readonly AttentionItem[]): ListGroup[] {
   ];
 }
 
-/** The view's groups, over `repoFilter`'s repository alone when one is given. `inbox` is the Inbox's items. */
+/**
+ * The view's groups, over `repoFilter`'s repository alone when one is given. `clock` cuts History into days, and
+ * `inbox` is the Inbox's items.
+ */
 export function groupsOf(
   view: ViewName,
   repos: readonly ListRepo[],
-  repoFilter?: string,
+  repoFilter: string | undefined,
+  clock: DayClock,
   inbox: readonly AttentionItem[] = [],
 ): ListGroup[] {
   if (view === 'inbox')
     return inboxGroups(repoFilter === undefined ? inbox : inbox.filter((item) => item.repo === repoFilter));
   const kept = repoFilter === undefined ? repos : repos.filter((repo) => repo.name === repoFilter);
   if (view === 'active') return activeGroups(kept);
-  if (view === 'history') return historyGroups(kept);
+  if (view === 'history') return historyGroups(kept, clock);
   return queueGroups(kept);
 }
 
@@ -206,6 +224,64 @@ export function filterRows(groups: readonly ListGroup[], text: string): ListGrou
   });
 }
 
+export interface HistoryFilter {
+  status?: 'failed' | 'completed' | undefined;
+  workflow?: string | undefined;
+}
+
+/** The History rows of a status and of a workflow (`name@3` counts as `name`). A group left empty goes. */
+export function filterHistory(groups: readonly ListGroup[], filter: HistoryFilter): ListGroup[] {
+  const { status, workflow } = filter;
+  if (status === undefined && workflow === undefined) return [...groups];
+  return groups.flatMap((group) => {
+    const rows = group.rows.filter(
+      (row) =>
+        row.kind === 'run' &&
+        (status === undefined || row.run.status === status) &&
+        (workflow === undefined || workflowOf(row.run) === workflow),
+    );
+    return rows.length === 0 ? [] : [{ ...group, rows }];
+  });
+}
+
+/** The distinct workflows of the finished runs under the repository filter, sorted. */
+export function historyWorkflows(repos: readonly ListRepo[], repoFilter?: string): string[] {
+  const kept = repoFilter === undefined ? repos : repos.filter((repo) => repo.name === repoFilter);
+  const names = kept.flatMap((repo) => repo.runs.filter(isFinished).map(workflowOf));
+  return [...new Set(names)].sort();
+}
+
+export interface ListFilters {
+  repoFilter?: string | undefined;
+  listFilter: string;
+  historyStatus?: 'failed' | 'completed' | undefined;
+  historyWorkflow?: string | undefined;
+  tz: number;
+}
+
+/** What the list shows: the view's groups under the repository filter, then History's status and workflow, then the text. */
+export function shownGroups(
+  view: ViewName,
+  repos: readonly ListRepo[],
+  filters: ListFilters,
+  now: number,
+  inbox: readonly AttentionItem[] = [],
+): ListGroup[] {
+  const groups = groupsOf(view, repos, filters.repoFilter, { now, tz: filters.tz }, inbox);
+  const narrowed =
+    view === 'history'
+      ? filterHistory(groups, { status: filters.historyStatus, workflow: filters.historyWorkflow })
+      : groups;
+  return filterRows(narrowed, filters.listFilter);
+}
+
+/** The run rows of `groups` whose id is in `selected`, in list order. */
+export function selectedRows(groups: readonly ListGroup[], selected: readonly string[]): RunRow[] {
+  return groups.flatMap((group) =>
+    group.rows.filter((row): row is RunRow => row.kind === 'run' && selected.includes(row.id)),
+  );
+}
+
 /** What each view lists under the repository filter: the sidebar's counts. */
 export function viewCounts(
   repos: readonly ListRepo[],
@@ -213,7 +289,7 @@ export function viewCounts(
   inbox: readonly AttentionItem[] = [],
 ): Record<ViewName, number> {
   const count = (view: ViewName) =>
-    groupsOf(view, repos, repoFilter, inbox).reduce((sum, group) => sum + group.rows.length, 0);
+    groupsOf(view, repos, repoFilter, { now: 0, tz: 0 }, inbox).reduce((sum, group) => sum + group.rows.length, 0);
   return { inbox: count('inbox'), active: count('active'), queues: count('queues'), history: count('history') };
 }
 
