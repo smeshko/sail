@@ -54,6 +54,8 @@ export interface PageHost {
   start(): Record<string, string>;
   /** Writes the page's URL to `?query` (the path alone for an empty one), as a new history entry when `push`, else in place of the current one. */
   setUrl(query: string, push: boolean): void;
+  /** Calls `handler` with the URL's query, parsed as `start()` parses it, when the browser moves to another history entry. */
+  onNavigate(handler: (asked: Record<string, string>) => void): void;
 }
 
 /** The members of an element the page uses. */
@@ -108,6 +110,7 @@ export interface BrowserWindow {
     pushState(data: unknown, unused: string, url: string): void;
     replaceState(data: unknown, unused: string, url: string): void;
   };
+  addEventListener(type: string, listener: () => void): void;
   fetch(
     url: string,
     init: { headers: Record<string, string>; method?: string; body?: string },
@@ -396,6 +399,9 @@ export function browserHost(win: BrowserWindow): PageHost {
       doc.documentElement.dataset.theme = theme;
     },
     start: () => Object.fromEntries(new URLSearchParams(win.location.search)),
+    onNavigate(handler) {
+      win.addEventListener('popstate', () => handler(Object.fromEntries(new URLSearchParams(win.location.search))));
+    },
     setUrl(query, push) {
       const url = query === '' ? win.location.pathname : `?${query}`;
       if (push) win.history.pushState(null, '', url);

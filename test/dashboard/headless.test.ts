@@ -55,6 +55,7 @@ async function bootHeadless(dashboard: Dashboard) {
       documentElement: { dataset: {} },
     },
     location: { host: `127.0.0.1:${dashboard.port}`, search: '', pathname: '/' },
+    addEventListener() {},
     history: {
       pushState: (data, unused, url) => history.push({ kind: 'push', data, unused, url }),
       replaceState: (data, unused, url) => history.push({ kind: 'replace', data, unused, url }),

@@ -55,6 +55,7 @@ function fakeHost(stored: Record<string, string>) {
     offset: () => 120,
     start: () => ({ run: 'r-1' }),
     setUrl: () => {},
+    onNavigate: () => {},
     later: (_fn: () => void, ms: number) => timers.push({ ms }),
     cancel: () => {},
   } as unknown as PageHost;

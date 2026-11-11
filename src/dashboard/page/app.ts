@@ -71,6 +71,17 @@ export function boot(host: PageHost): Page {
   startDraw(store);
   host.onAction((action, data) => dispatch(store, action, data));
   host.onKey((key, inInput) => onKey(store, key, inInput));
+  host.onNavigate((asked) => {
+    // Before the first index the entry's query is what the index opens; after it, what the entry names is opened, and
+    // the URL is only replaced where what is shown differs from it.
+    if (store.start !== undefined) {
+      store.start = asked;
+      return;
+    }
+    navigate(store, asked, 'keep');
+    store.url = new URLSearchParams(asked).toString();
+    syncUrl(store, false);
+  });
   openIndex(store, (asked) => navigate(store, asked, 'first'));
   store.mark(...REGIONS);
 
