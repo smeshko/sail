@@ -6,15 +6,20 @@
 // - A row's place is `ui.menu.at`, the one a person moved to. A row that is missing or disabled once the offers arrive
 //   is skipped for the first enabled row (`highlighted()`), so a read that lands late can't leave the highlight on it.
 // - Enter on a row that is disabled does nothing.
+// - An action whose parameters its click doesn't give asks them as steps, one for each, in the menu: a choice or a tick
+//   lists its options, a number or a text is typed in the field. After the last, the registry's `request()` decides:
+//   `invalid` shows its words and keeps the step, nothing to send keeps it too, else the menu closes and the actor is
+//   handed the action with the values asked, which opens the confirmation dialog for a confirmed one. Escape goes back
+//   one step before it closes the menu.
 
-import type { Subject } from './action-registry';
+import { actionOf, type Subject } from './action-registry';
 import { actions } from './actions';
 import { focused, setFocus, syncOpen } from './focus';
-import { type MenuModel, menuRows } from './menu-model';
+import { askedParams, type MenuModel, type MenuRow, menuRows, subjectData } from './menu-model';
 import { queueId } from './queue-view';
 import { readSubjectOffers } from './reads';
 import { type Store, sourceFor } from './store';
-import type { MenuState } from './ui-state';
+import type { MenuState, MenuStep } from './ui-state';
 
 /** What the open menu draws now, from its state, the offers and the index. */
 export function modelOf(store: Store, menu: MenuState): MenuModel {
@@ -106,6 +111,94 @@ function goTo(store: Store, subject: Subject): void {
   setFocus(ui, 'cursor', subject);
 }
 
+/** Shows a step: the field empties, the menu takes the focus, and the highlight starts on `start`. */
+function enter(store: Store, menu: MenuState, start = 0): void {
+  menu.query = '';
+  menu.at = start;
+  delete menu.error;
+  store.fresh.add('menu');
+  store.menuFocus = true;
+  store.mark('menu');
+}
+
+/** The step `action` asks first for `subject`, or undefined when its click gives everything. */
+function firstStep(store: Store, action: string, subject: Subject, data: Record<string, string>): MenuStep | undefined {
+  const def = actionOf(action);
+  if (def === undefined || askedParams(def, subject, sourceFor(store, subject)).length === 0) return undefined;
+  return { action, subject, data, values: {}, at: 0 };
+}
+
+/** Hands the action to the actor, with what was asked, and closes the menu. */
+function carryOut(store: Store, action: string, data: Record<string, string>, values?: Record<string, string>): void {
+  closeMenu(store);
+  store.actor.act(action, data, values);
+}
+
+/** Pushes `step` and shows it, starting the highlight on the option its model starts on. */
+function push(store: Store, menu: MenuState, step: MenuStep): void {
+  menu.steps.push(step);
+  enter(store, menu, modelOf(store, menu).step?.start ?? 0);
+}
+
+/** Takes `value` for the parameter the open step asks: the next step, or the action itself after the last. */
+function answer(store: Store, menu: MenuState, step: Extract<MenuStep, { action: string; at: number }>, value: string) {
+  const def = actionOf(step.action);
+  if (def === undefined) return;
+  const source = sourceFor(store, step.subject);
+  const asked = askedParams(def, step.subject, source);
+  const name = asked[step.at]?.name;
+  if (name === undefined) return;
+  const values = { ...step.values, [name]: value };
+  if (step.at + 1 < asked.length) {
+    push(store, menu, { ...step, values, at: step.at + 1 });
+    return;
+  }
+  // After the last parameter the registry decides: words it refuses with stay in the menu, and so does nothing to send.
+  const request = def.request?.(step.subject, values, source);
+  if (request === undefined) return;
+  if ('invalid' in request) {
+    menu.error = request.invalid;
+    store.mark('menu');
+    return;
+  }
+  carryOut(store, step.action, step.data, values);
+}
+
+/** Polls every queue that offers a poll and has it enabled, one request each. */
+function pollAll(store: Store): void {
+  const source = sourceFor(store);
+  const poll = actionOf('poll-queue');
+  closeMenu(store);
+  for (const repo of source.index) {
+    for (const queue of repo.queues) {
+      const subject: Subject = { kind: 'workflow', repo: repo.name, workflow: queue.workflow };
+      const available = poll?.available(subject, source);
+      if (available?.offered === true && available.enabled)
+        store.actor.act('poll-queue', { repo: repo.name, workflow: queue.workflow });
+    }
+  }
+}
+
+/** The step open, if it is one that asks a parameter. */
+const openStep = (menu: MenuState) => {
+  const step = menu.steps.at(-1);
+  return step !== undefined && 'at' in step ? step : undefined;
+};
+
+function runStepRow(store: Store, menu: MenuState, row: MenuRow): void {
+  const { run } = row;
+  const step = openStep(menu);
+  if ('value' in run && step !== undefined) answer(store, menu, step, run.value);
+  else if ('queue' in run) {
+    const last = menu.steps.at(-1);
+    const subject: Subject = { kind: 'workflow', repo: run.queue.repo, workflow: run.queue.workflow };
+    const action = last !== undefined && 'pick' in last ? last.action : '';
+    const first = firstStep(store, action, subject, subjectData(subject));
+    if (first === undefined) carryOut(store, action, subjectData(subject));
+    else push(store, menu, first);
+  }
+}
+
 /** Runs the `n`-th row of the menu. A disabled row, or one that isn't there, does nothing. */
 export function runRow(store: Store, n: number): void {
   const { menu } = store.ui;
@@ -119,7 +212,23 @@ export function runRow(store: Store, n: number): void {
   } else if ('view' in run) {
     closeMenu(store);
     actions[run.view]?.(store, {});
+  } else if ('act' in run) {
+    const first = firstStep(store, run.act, run.subject, run.data);
+    if (first === undefined) carryOut(store, run.act, run.data);
+    else push(store, menu, first);
+  } else if ('pollAll' in run) pollAll(store);
+  else if ('pick' in run) push(store, menu, { pick: 'queue', action: run.pick });
+  else runStepRow(store, menu, row);
+}
+
+/** Escape: back one step, and with none open, closes the menu. */
+function back(store: Store, menu: MenuState): void {
+  if (menu.steps.length === 0) {
+    closeMenu(store);
+    return;
   }
+  menu.steps.pop();
+  enter(store, menu, modelOf(store, menu).step?.start ?? 0);
 }
 
 /** Handles a key while the menu is open. Answers true for a key it took. */
@@ -127,8 +236,14 @@ export function menuKey(store: Store, key: string): boolean {
   const { menu } = store.ui;
   if (menu === undefined) return false;
   if (key === 'ArrowDown' || key === 'ArrowUp') move(store, menu, key === 'ArrowDown' ? 1 : -1);
-  else if (key === 'Enter') runRow(store, highlighted(modelOf(store, menu), menu.at));
-  else if (key === 'Escape') closeMenu(store);
+  else if (key === 'Enter') {
+    const model = modelOf(store, menu);
+    const step = openStep(menu);
+    // A typed step takes what is in the field, from the page's own, else what was typed.
+    if (step !== undefined && model.step?.field !== undefined)
+      answer(store, menu, step, store.host.value('menu-query') ?? menu.query);
+    else runRow(store, highlighted(model, menu.at));
+  } else if (key === 'Escape') back(store, menu);
   else return false;
   return true;
 }

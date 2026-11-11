@@ -3051,3 +3051,270 @@ test('moving the list cursor over a run row and then a queue row makes each the 
   for (let at = 0; at < 3; at++) host.press('j');
   expect(page?.ui.focus.cursor?.subject).toEqual({ kind: 'workflow', repo: 'beta', workflow: QUEUE_WORKFLOW });
 });
+
+// Every action of the registry, carried out from the command menu by key presses and typing alone (ADW-520).
+const typeIn = (text: string) => {
+  host.type('menu-query', text);
+  host.advance(100);
+};
+const enter = () => {
+  host.press('Enter', true);
+  host.advance(100);
+};
+/** Opens the menu on the row `data` names, its offers read. */
+async function menuOn(data: Record<string, string>) {
+  host.point('hover', data);
+  cmdK();
+  await settle();
+  host.advance(100);
+}
+const stepLabel = () => cmdk().match(/<div class="cmdk-step">([^<]*)<\/div>/)?.[1];
+const FAKE_3_ROW = { subject: 'run', repo: 'beta', run: FAKE_3_ID };
+const FAKE_2_ROW = { subject: 'run', repo: 'alpha', run: FAKE_2_ID };
+const ITEM_6 = { ...ITEM_ROW, item: 'ticket:FAKE-6' };
+const WORKFLOW_ROW = { subject: 'workflow', repo: 'beta', workflow: QUEUE_WORKFLOW };
+/** Boots on the first index with the menu closed and nothing open. */
+function bootIndexed() {
+  page = boot(host);
+  host.push(host.open('index')[0], indexMessage());
+  host.advance(100);
+}
+
+test('by keyboard alone: stop', async () => {
+  settleQueue();
+  bootIndexed();
+  await menuOn(FAKE_3_ROW);
+  typeIn('stop');
+  enter();
+  expect(stepLabel()).toBe('stop now');
+  expect(host.posts).toEqual([]);
+  enter();
+  expect(dialogTitle()).toBe(`stop ${FAKE_3_ID}`);
+  expect(host.posts).toEqual([]);
+  host.press('Enter');
+  expect(host.posts).toEqual([{ path: `${FAKE_3_PATH}/stop`, body: { now: false } }]);
+});
+
+test('by keyboard alone: stop now', async () => {
+  settleQueue();
+  bootIndexed();
+  await menuOn(FAKE_3_ROW);
+  typeIn('stop');
+  enter();
+  host.press('ArrowDown', true);
+  enter();
+  expect(dialogLines()[0]).toBe('ends its running call now');
+  host.press('Enter');
+  expect(host.posts).toEqual([{ path: `${FAKE_3_PATH}/stop`, body: { now: true } }]);
+});
+
+test('by keyboard alone: resume, the amount asked beside what was spent', async () => {
+  settleQueue();
+  bootIndexed();
+  await menuOn(FAKE_3_ROW);
+  typeIn('resume');
+  enter();
+  expect(stepLabel()).toBe('raise $');
+  expect(cmdk()).toContain('<div class="cmdk-line">spent $1.06 of $1.00</div>');
+  typeIn('5');
+  expect(cmdk()).toContain('<div class="cmdk-line">raises the budget by $5.00</div>');
+  enter();
+  expect([dialogTitle(), dialogLines(), host.posts]).toEqual([
+    `resume ${FAKE_3_ID}`,
+    ['spent $1.06 of $1.00', 'raises the budget by $5.00'],
+    [],
+  ]);
+  host.press('Enter');
+  expect(host.posts).toEqual([{ path: `${FAKE_3_PATH}/resume`, body: { raise: { usd: 5 } } }]);
+});
+
+test('an invalid raise stays in the menu: its words shown, nothing sent and no dialog', async () => {
+  settleQueue();
+  bootIndexed();
+  await menuOn(FAKE_3_ROW);
+  typeIn('resume');
+  enter();
+  typeIn('0');
+  enter();
+  expect(cmdk()).toContain('<div class="cmdk-err">give the dollars to raise the budget by: at least 0.01</div>');
+  expect([stepLabel(), host.posts, host.dialog]).toEqual(['raise $', [], undefined]);
+  typeIn('3');
+  expect(cmdk()).not.toContain('cmdk-err');
+});
+
+test('by keyboard alone: restart from a chosen stage', async () => {
+  bootIndexed();
+  await menuOn(FAKE_2_ROW);
+  typeIn('restart');
+  enter();
+  expect(stepLabel()).toBe('from');
+  const stages = [...cmdk().matchAll(/<span class="cmdk-label">([^<]*)<\/span>/g)].map(([, label]) => label);
+  expect(stages.length).toBeGreaterThan(1);
+  const start = cmdk().match(/class="cmdk-row sel"[^>]*><span class="cmdk-label">([^<]*)</)?.[1];
+  const other = stages.find((stage) => stage !== start);
+  host.press('ArrowUp', true);
+  host.press('ArrowDown', true);
+  host.press('ArrowDown', true);
+  host.advance(100);
+  const chosen = cmdk().match(/class="cmdk-row sel"[^>]*><span class="cmdk-label">([^<]*)</)?.[1];
+  expect(chosen).not.toBe(start);
+  expect(other).toBeDefined();
+  enter();
+  expect(dialogTitle()).toBe(`restart ${FAKE_2_ID}`);
+  expect(host.posts).toEqual([]);
+  host.press('Enter');
+  expect(host.posts).toEqual([{ path: `/api/repos/alpha/runs/${FAKE_2_ID}/restart`, body: { stage: chosen } }]);
+});
+
+test('by keyboard alone: clean', async () => {
+  bootIndexed();
+  await menuOn(FAKE_2_ROW);
+  typeIn('clean');
+  enter();
+  expect(dialogTitle()).toBe(`clean ${FAKE_2_ID}`);
+  expect(host.posts).toEqual([]);
+  host.press('Enter');
+  expect(host.posts).toEqual([{ path: `/api/repos/alpha/runs/${FAKE_2_ID}/clean`, body: {} }]);
+});
+
+test('by keyboard alone: requeue', async () => {
+  bootIndexed();
+  await menuOn(ITEM_6);
+  typeIn('requeue');
+  enter();
+  expect(host.posts).toEqual([{ path: `${QUEUE_PATH}/requeue`, body: { dedupKey: 'ticket:FAKE-6' } }]);
+  expect(cmdk()).toBe('');
+});
+
+test('by keyboard alone: drop', async () => {
+  bootIndexed();
+  await menuOn(ITEM_6);
+  typeIn('drop');
+  enter();
+  expect(dialogTitle()).toBe('drop ticket:FAKE-6');
+  expect(host.posts).toEqual([]);
+  host.press('Enter');
+  expect(host.posts).toEqual([{ path: `${QUEUE_PATH}/drop`, body: { dedupKey: 'ticket:FAKE-6' } }]);
+});
+
+/** Adds a second waiting item to the queue, so the first can move down and the second up. */
+function twoWaiting() {
+  const file = join(queueDirOf(m), 'queue.json');
+  const queue = JSON.parse(readFileSync(file, 'utf8'));
+  const waiting = queue.items.find((item: { state: string }) => item.state === 'queued');
+  queue.items.push({ ...waiting, dedupKey: 'ticket:FAKE-7', source: { kind: 'ticket', ticketKey: 'FAKE-7' } });
+  writeFileSync(file, JSON.stringify(queue));
+}
+
+test('by keyboard alone: move down and move up', async () => {
+  twoWaiting();
+  bootIndexed();
+  await menuOn(ITEM_ROW);
+  typeIn('move down');
+  enter();
+  await menuOn({ ...ITEM_ROW, item: 'ticket:FAKE-7' });
+  typeIn('move up');
+  enter();
+  expect(host.posts).toEqual([
+    { path: `${QUEUE_PATH}/move`, body: { dedupKey: 'ticket:FAKE-5', after: 'ticket:FAKE-7' } },
+    { path: `${QUEUE_PATH}/move`, body: { dedupKey: 'ticket:FAKE-7', before: 'ticket:FAKE-5' } },
+  ]);
+});
+
+test('by keyboard alone: poll', async () => {
+  bootIndexed();
+  await menuOn(WORKFLOW_ROW);
+  typeIn('poll');
+  enter();
+  expect(host.posts).toEqual([{ path: `${QUEUE_PATH}/poll`, body: {} }]);
+});
+
+test('by keyboard alone: add without force, and add with force', async () => {
+  bootIndexed();
+  await menuOn(WORKFLOW_ROW);
+  typeIn('add');
+  enter();
+  expect(stepLabel()).toBe('ticket key');
+  typeIn('FAKE-9');
+  enter();
+  expect(stepLabel()).toBe('force');
+  enter();
+  expect(host.posts).toEqual([{ path: `${QUEUE_PATH}/add`, body: { ticketKey: 'FAKE-9' } }]);
+  await settle();
+  await menuOn(WORKFLOW_ROW);
+  typeIn('add');
+  enter();
+  typeIn('FAKE-10');
+  enter();
+  host.press('ArrowDown', true);
+  enter();
+  expect(host.posts.at(-1)).toEqual({ path: `${QUEUE_PATH}/add`, body: { ticketKey: 'FAKE-10', force: true } });
+});
+
+test('by keyboard alone: watch and unwatch', async () => {
+  bootWatching(['ticket-to-pr']);
+  await menuOn({ subject: 'workflow', repo: 'beta', workflow: QUEUE_WORKFLOW });
+  typeIn('unwatch');
+  enter();
+  expect(host.posts).toEqual([{ path: '/api/repos/beta/unwatch', body: { workflows: [QUEUE_WORKFLOW] } }]);
+  await settle();
+  await menuOn({ subject: 'repo', repo: 'beta' });
+  typeIn('watch all');
+  enter();
+  expect(host.posts.at(-1)).toEqual({ path: '/api/repos/beta/watch', body: { workflows: [] } });
+});
+
+test('by keyboard alone: all clear', async () => {
+  bootIndexed();
+  cmdK();
+  host.advance(100);
+  typeIn('all clear');
+  enter();
+  expect(toasts()).toEqual(['ok all clear: 3 hidden']);
+  expect(host.posts).toEqual([]);
+});
+
+test('Esc steps back through add’s steps, then closes', async () => {
+  bootIndexed();
+  cmdK();
+  host.advance(100);
+  typeIn('add a ticket');
+  enter();
+  expect(stepLabel()).toBe('queue');
+  enter();
+  expect(stepLabel()).toBe('ticket key');
+  typeIn('FAKE-9');
+  enter();
+  expect(stepLabel()).toBe('force');
+  host.press('Escape', true);
+  host.advance(100);
+  expect(stepLabel()).toBe('ticket key');
+  host.press('Escape', true);
+  host.advance(100);
+  expect(stepLabel()).toBe('queue');
+  host.press('Escape', true);
+  host.advance(100);
+  expect([stepLabel(), cmdk()]).toEqual([undefined, expect.stringContaining('switch theme')]);
+  host.press('Escape', true);
+  host.advance(100);
+  expect(cmdk()).toBe('');
+  expect(host.posts).toEqual([]);
+});
+
+test('poll every queue posts one poll for each queue that offers it enabled, and a disabled row sends nothing on Enter or a click', async () => {
+  bootIndexed();
+  cmdK();
+  host.advance(100);
+  typeIn('poll every');
+  enter();
+  expect(host.posts).toEqual([{ path: `${QUEUE_PATH}/poll`, body: {} }]);
+  host.posts.length = 0;
+  host.push(host.open('index')[0], indexMessage({ state: 'watcher not running', why: 'no watcher is running' }));
+  cmdK();
+  host.advance(100);
+  typeIn('poll every');
+  expect(cmdk()).toContain('<span class="cmdk-why">no watcher is running</span>');
+  enter();
+  host.click({ action: 'menu-run', row: '0' });
+  expect(host.posts).toEqual([]);
+});

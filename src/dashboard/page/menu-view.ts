@@ -16,9 +16,9 @@ function row(item: MenuRow, place: number, state: MenuState): SafeHtml {
 }
 
 function field(state: MenuState, model: MenuModel): SafeHtml | '' {
-  if (state.mode === 'context') return '';
   const step = model.step;
   if (step === undefined) {
+    if (state.mode === 'context') return '';
     return html`<input class="cmdk-in" name="menu-query" type="text" value="${state.query}" placeholder="type an action or where to go" aria-label="command menu" autocomplete="off" spellcheck="false">`;
   }
   if (step.field === undefined) return '';
