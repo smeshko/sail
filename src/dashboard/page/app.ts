@@ -29,7 +29,7 @@ import type { UiState } from './ui-state';
 
 export { TICK_MS } from './draw';
 export { LOG_REFRESH_MS } from './reads';
-export { CLEARED_KEY, FILTER_KEY, RAIL_KEY, THEME_KEY } from './saved';
+export { CLEARED_KEY, FILTER_KEY, LIST_KEY, THEME_KEY } from './saved';
 export { FLUSH_MS } from './store';
 export { RECENT_EVENTS, RECONNECT_MS } from './streams';
 
@@ -89,6 +89,9 @@ export function boot(host: PageHost): Page {
   startDraw(store);
   host.onAction((action, data) => dispatch(store, action, data));
   host.onKey((key, inInput, on) => onKey(store, key, inInput, on));
+  host.onInput((name, value) => {
+    if (name === 'list-filter') dispatch(store, 'list-filter', { value });
+  });
   host.onNavigate((asked) => {
     // Before the first index the entry's query is what the index opens; after it, what the entry names is opened, and
     // the URL is only replaced where what is shown differs from it.
@@ -96,11 +99,11 @@ export function boot(host: PageHost): Page {
       store.start = asked;
       return;
     }
-    navigate(store, asked, 'keep');
+    navigate(store, asked, true);
     store.url = new URLSearchParams(asked).toString();
     syncUrl(store, false);
   });
-  openIndex(store, (asked) => navigate(store, asked, 'first'));
+  openIndex(store, (asked) => navigate(store, asked, false));
   store.mark(...REGIONS);
 
   return {

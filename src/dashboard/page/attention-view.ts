@@ -27,7 +27,7 @@ export function renderAttention(items: readonly AttentionItem[], open: boolean):
     items.length === 0 ? '' : html`<span class="badge">${items.length}</span>`
   }</button>`;
   if (!open) return button;
-  return html`${button}<div class="att-scrim" data-action="toggle-attention"></div><div class="att-pane"><div class="rail-h"><span>needs attention</span><span class="c">${items.length}</span>${
+  return html`${button}<div class="att-scrim" data-action="toggle-attention"></div><div class="att-pane"><div class="pane-h"><span>needs attention</span><span class="c">${items.length}</span>${
     items.length === 0
       ? ''
       : html`<button class="btn att-clear" type="button" data-action="clear-attention">all clear</button>`

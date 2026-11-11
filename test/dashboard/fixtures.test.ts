@@ -2,21 +2,26 @@
 // summary is what its events fold into, the queue is one the watcher could have written, and nothing names a machine
 // or internal work. `test/fixtures/dashboard/<repo>/` holds what that clone's `.sail-runs/` holds; `seedFixtures()`
 // copies it into a registered clone, beside the golden run in alpha.
-import { afterEach, expect, test } from 'bun:test';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { afterEach, describe, expect, test } from 'bun:test';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
+import { writeDenseFixture } from '../../scripts/dense-fixture';
 import { index } from '../../src/dashboard/files';
+import { statusOf } from '../../src/dashboard/page/index-model';
 import { formatIssue, validateDocument, validateRunDir } from '../../src/engine/schemas';
 import { readEvents } from '../../src/events/consumers/ndjson';
 import { summarize } from '../../src/events/summary';
 import { QueueFile } from '../../src/watch/queue-store';
 import {
   DASHBOARD_FIXTURES,
+  type DenseMachine,
   FAKE_2_ID,
   FAKE_3_ID,
   GOLDEN_RUN_ID,
   type Machine,
   QUEUE_WORKFLOW,
+  seedDense,
   seedFixtures,
 } from '../helpers/dashboard';
 import { FAKE_4_ID } from '../helpers/review-fixture';
@@ -146,4 +151,68 @@ test('no recorded file holds a path of this machine or names internal work', () 
   );
   expect(found).toEqual([]);
   expect(filesIn(DASHBOARD_FIXTURES).length).toBeGreaterThan(40);
+});
+
+describe('the dense fixture (ADW-522)', () => {
+  const DENSE = join(DASHBOARD_FIXTURES, 'dense');
+  let dense: DenseMachine | undefined;
+  afterEach(() => {
+    dense?.remove();
+    dense = undefined;
+  });
+
+  test('index() over seedDense() lists 5 repositories and 44 runs: 4 running, 3 suspended, 1 with a problem and no status, 9 failed and 27 completed', () => {
+    dense = seedDense();
+    const repos = index(dense.registryDir);
+    expect(repos.map((repo) => [repo.name, repo.runs.length, repo.queues.length])).toEqual([
+      ['atlas', 10, 1],
+      ['borealis', 10, 0],
+      ['cirrus', 9, 1],
+      ['delta', 9, 0],
+      ['ember', 6, 0],
+    ]);
+    const runs = repos.flatMap((repo) => repo.runs);
+    const statuses: Record<string, number> = {};
+    for (const run of runs) {
+      const status = run.problem !== undefined && run.status === undefined ? 'problem' : statusOf(run);
+      statuses[status] = (statuses[status] ?? 0) + 1;
+    }
+    expect(runs).toHaveLength(44);
+    expect(statuses).toEqual({ running: 4, suspended: 3, problem: 1, failed: 9, completed: 27 });
+    expect(runs.filter((run) => run.problem !== undefined).map((run) => run.summary)).toEqual([null]);
+    expect(
+      repos.find((repo) => repo.name === 'atlas')?.queues[0]?.queue?.items.filter((item) => item.state === 'queued'),
+    ).toHaveLength(2);
+  });
+
+  test('the committed dense folder is byte for byte what writeDenseFixture writes, holds no machine path, and stays under 1 MB', () => {
+    const fresh = mkdtempSync(join(tmpdir(), 'sail-dense-'));
+    try {
+      const written = writeDenseFixture(fresh);
+      expect(filesIn(DENSE)).toEqual([...written].sort());
+      const stale = written.filter(
+        (file) => readFileSync(join(fresh, file), 'utf8') !== readFileSync(join(DENSE, file), 'utf8'),
+      );
+      expect(stale).toEqual([]);
+      const text = written.map((file) => readFileSync(join(DENSE, file), 'utf8'));
+      expect(text.reduce((sum, each) => sum + each.length, 0)).toBeLessThan(1_000_000);
+      const machine = [homedir(), tmpdir(), process.cwd(), '/Users/', '/home/', '/private/', '/var/folders/'];
+      expect(text.flatMap((each) => machine.filter((path) => path !== '' && each.includes(path)))).toEqual([]);
+    } finally {
+      rmSync(fresh, { recursive: true, force: true });
+    }
+  });
+
+  test('every readable dense run has the status its STATUS, summary and last event agree on', () => {
+    const disagree: string[] = [];
+    for (const file of filesIn(DENSE).filter((each) => each.endsWith('/STATUS'))) {
+      const status = readFileSync(join(DENSE, file), 'utf8').split(/\s/)[0];
+      const dir = join(DENSE, file.replace(/\/STATUS$/, ''));
+      const summary = JSON.parse(readFileSync(join(dir, 'summary.json'), 'utf8')) as { status: string };
+      const last = readEvents(dir).at(-1);
+      const ended = last?.type === 'run:end' ? last.status : 'running';
+      if (new Set([status, summary.status, ended]).size !== 1) disagree.push(file);
+    }
+    expect(disagree).toEqual([]);
+  });
 });

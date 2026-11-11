@@ -160,7 +160,7 @@ test('a resume that needs a raise refuses an empty, zero or non-numeric one in t
   expect(request('add-ticket', WORKFLOW, {})).toBeUndefined();
 });
 
-test('each answer means what it meant: resume reopens, restart opens the run named, stop reopens with its message, clean leaves into the rail', () => {
+test('each answer means what it meant: resume reopens, restart opens the run named, stop reopens with its message, clean leaves into the list', () => {
   expect(def('resume-run').answer?.(200, '{}', RUN)).toEqual({ effect: 'reopen', text: 'resumed' });
   expect(def('restart-run').answer?.(200, '{"runId":"NEW"}', RUN)).toEqual({
     effect: { open: 'NEW' },

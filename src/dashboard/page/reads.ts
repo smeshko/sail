@@ -213,7 +213,7 @@ export function readOffers(store: Store) {
         // An answer that isn't JSON offers nothing.
       }
     }
-    store.mark('rail');
+    store.mark('list');
   });
 }
 

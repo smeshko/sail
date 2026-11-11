@@ -8,7 +8,7 @@ import { ACTIONS } from '../../../src/dashboard/page/action-registry';
 import { actions } from '../../../src/dashboard/page/actions';
 import * as app from '../../../src/dashboard/page/app';
 import type { PageHost } from '../../../src/dashboard/page/host';
-import { CLEARED_KEY, FILTER_KEY, RAIL_KEY, THEME_KEY } from '../../../src/dashboard/page/saved';
+import { CLEARED_KEY, FILTER_KEY, LIST_KEY, THEME_KEY } from '../../../src/dashboard/page/saved';
 import { createStore, FLUSH_MS } from '../../../src/dashboard/page/store';
 
 const PAGE = join(import.meta.dir, '..', '..', '..', 'src', 'dashboard', 'page');
@@ -52,6 +52,7 @@ function fakeHost(stored: Record<string, string>) {
     save: () => {},
     setTheme: () => {},
     setInspector: () => {},
+    setDetail: () => {},
     offset: () => 120,
     start: () => ({ run: 'r-1' }),
     setUrl: () => {},
@@ -63,17 +64,17 @@ function fakeHost(stored: Record<string, string>) {
   return { host, timers };
 }
 
-test('createStore reads the saved theme, filter, rail and cleared identities', () => {
+test('createStore reads the saved theme, filter, list folds and cleared identities', () => {
   const { host } = fakeHost({
     [THEME_KEY]: 'light',
     [FILTER_KEY]: 'tools,errors,bogus',
-    [RAIL_KEY]: '["repo","repo/flow"]',
+    [LIST_KEY]: '["active:running","queues:repo"]',
     [CLEARED_KEY]: '["a","b"]',
   });
   const store = createStore(host);
   expect(store.ui.theme).toBe('light');
   expect(store.ui.hidden).toEqual(['tools', 'errors']);
-  expect(store.ui.expanded).toEqual(['repo', 'repo/flow']);
+  expect(store.ui.listFolded).toEqual(['active:running', 'queues:repo']);
   expect([...store.cleared]).toEqual(['a', 'b']);
   expect(store.ui.tz).toBe(120);
   expect(store.start).toEqual({ run: 'r-1' });
@@ -82,30 +83,30 @@ test('createStore reads the saved theme, filter, rail and cleared identities', (
 test('createStore falls back when what is stored is not valid', () => {
   const { host } = fakeHost({
     [THEME_KEY]: 'neon',
-    [RAIL_KEY]: '{"not":"a list"}',
+    [LIST_KEY]: '{"not":"a list"}',
     [CLEARED_KEY]: '[1,2]',
   });
   const store = createStore(host);
   expect(store.ui.theme).toBe('dark');
   expect(store.ui.hidden).toEqual([]);
-  expect(store.ui.expanded).toEqual([]);
+  expect(store.ui.listFolded).toEqual([]);
   expect([...store.cleared]).toEqual([]);
-  const broken = createStore(fakeHost({ [RAIL_KEY]: 'not json', [CLEARED_KEY]: 'not json' }).host);
-  expect(broken.ui.expanded).toEqual([]);
+  const broken = createStore(fakeHost({ [LIST_KEY]: 'not json', [CLEARED_KEY]: 'not json' }).host);
+  expect(broken.ui.listFolded).toEqual([]);
   expect([...broken.cleared]).toEqual([]);
 });
 
 test('two marks before the timer runs schedule one flush, at the flush delay, and none once stopped', () => {
   const { host, timers } = fakeHost({});
   const store = createStore(host);
-  store.mark('rail');
-  store.mark('main', 'rail');
+  store.mark('list');
+  store.mark('main', 'list');
   expect(timers).toEqual([{ ms: FLUSH_MS }]);
-  expect([...store.dirty]).toEqual(['rail', 'main']);
+  expect([...store.dirty]).toEqual(['list', 'main']);
   const stopped = fakeHost({});
   const other = createStore(stopped.host);
   other.stopped = true;
-  other.mark('rail');
+  other.mark('list');
   expect(stopped.timers).toEqual([]);
 });
 
@@ -151,14 +152,17 @@ test("the shell's actions are exactly the page's view actions: every action of t
       'tab',
       'stream',
       'log-step',
-      'toggle-group',
+      'select-view',
+      'filter-repo',
+      'toggle-list-group',
+      'close-detail',
+      'list-filter',
       'item-menu',
       'stop-now',
       'run-menu',
       'toggle-queue-events',
       'toggle-queue-section',
       'toggle-attention',
-      'toggle-section',
       'toggle-inspector',
       'toggle-theme',
       'toggle-follow',
@@ -177,7 +181,7 @@ test('app.ts exports boot and the nine constants, and nothing else at runtime', 
     [
       'boot',
       'THEME_KEY',
-      'RAIL_KEY',
+      'LIST_KEY',
       'FILTER_KEY',
       'CLEARED_KEY',
       'RECONNECT_MS',

@@ -1,9 +1,11 @@
 // What a person has chosen on the page, which every view reads: the open run, card and tab, whether the card's timeline
 // is open, which of its tool calls and which kinds of its entries it hides, the queue open in its place with its folded
-// sections, the rail's open sections and opened groups, whether needs attention is open, the theme, the offset their
-// clock is at, and the file open in the drawer. `act` is the one state of carrying an action out: the parameters typed. It holds nothing about the runs themselves.
+// sections, the list's view, filter, cursor and folded groups, whether needs attention is open, the theme, the offset their
+// clock is at, and the file open in the drawer. `act` is the one state of carrying an action out: the parameters typed. It
+// holds nothing about the runs themselves.
 
 import type { DialogView } from './dialog-view';
+import type { ViewName } from './list-model';
 import type { Toast } from './toasts';
 
 export const TABS = ['overview', 'files', 'permissions', 'log'] as const;
@@ -41,10 +43,12 @@ export interface UiState {
   stream?: string;
   /** The step the log tab shows for a multi-step call, when one is chosen. */
   step?: string;
-  /** The rail's open sections, as `<repo>/<workflow>:completed`. */
-  open: string[];
-  /** The rail's opened repositories and workflows, as `<repo>` and `<repo>/<workflow>`: every one starts folded. */
-  expanded: string[];
+  /** The view the list shows, the repository it is narrowed to, what the filter field holds, the entry under the cursor (by id) and the folded groups (by id). */
+  view: ViewName;
+  repoFilter?: string;
+  listFilter: string;
+  listCursor?: string;
+  listFolded: string[];
   /** Whether the needs attention pane is open. */
   attention: boolean;
   /** The queue view's folded sections, as `<repo>/<workflow>:<state>`. */
@@ -53,7 +57,7 @@ export interface UiState {
   queueEvents: boolean;
   /** The item whose ⋯ menu is open, by dedup key. */
   itemMenu?: string;
-  /** The open run whose ⋯ menu is open in the rail, by run id. */
+  /** The open run whose ⋯ menu is open in the list, by run id. */
   runMenu?: string;
   theme: Theme;
   inspector: boolean;
@@ -79,8 +83,9 @@ export function initialUi(tz: number): UiState {
     timeline: false,
     opened: [],
     hidden: [],
-    open: [],
-    expanded: [],
+    view: 'active',
+    listFilter: '',
+    listFolded: [],
     attention: false,
     folded: [],
     queueEvents: false,

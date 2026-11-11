@@ -1,8 +1,10 @@
 // The page's URL, kept in step with what it shows. `toQuery()` is the query string of a `UiState`: a queue open in the
-// centre is `queue=<repo>/<workflow>` alone, else a run is `repo`, `run`, then, with a call selected, `key`, `tab`
-// unless it is `overview`, `timeline=1` while the centre shows the call's timeline, and `file` while the drawer holds a
-// file. `syncUrl()` is the one place the shell writes the URL: a person's selections (a click, a key) push a history
-// entry, and what a stream or an answer changes replaces the current one.
+// centre is `queue=<repo>/<workflow>`, else a run is `repo`, `run`, then, with a call selected, `key`, `tab` unless it
+// is `overview`, `timeline=1` while the centre shows the call's timeline, and `file` while the drawer holds a file.
+// Last comes `view`, the list's view, unless it is `active`. `syncUrl()` is the one place the shell writes the URL: a
+// person's selections (a click, a key) push a history entry, and what a stream or an answer changes replaces the
+// current one.
+import { VIEWS, type ViewName } from './list-model';
 import type { Store } from './store';
 import { type InspectorTab, TABS, type UiState } from './ui-state';
 
@@ -20,6 +22,7 @@ export function toQuery(ui: UiState): string {
     }
     if (ui.file !== undefined) query.set('file', ui.file.path);
   }
+  if (ui.view !== 'active') query.set('view', ui.view);
   return query.toString();
 }
 
@@ -44,11 +47,14 @@ export interface Target {
   tab: InspectorTab;
   timeline: boolean;
   file?: string;
+  /** The list's view, when the query names a known one. */
+  view?: ViewName;
 }
 
 /** The target a query names: a queue alone, else a run with its call, tab, timeline and file. */
 export function fromQuery(asked: Record<string, string>): Target {
-  if (asked.queue !== undefined) return { queue: asked.queue, tab: 'overview', timeline: false };
+  const view = (VIEWS as readonly string[]).includes(asked.view ?? '') ? { view: asked.view as ViewName } : {};
+  if (asked.queue !== undefined) return { queue: asked.queue, tab: 'overview', timeline: false, ...view };
   const tab = (TABS as readonly string[]).includes(asked.tab ?? '') ? (asked.tab as InspectorTab) : 'overview';
   return {
     ...(asked.repo === undefined ? {} : { repo: asked.repo }),
@@ -57,5 +63,6 @@ export function fromQuery(asked: Record<string, string>): Target {
     tab,
     timeline: asked.timeline === '1',
     ...(asked.file === undefined ? {} : { file: asked.file }),
+    ...view,
   };
 }

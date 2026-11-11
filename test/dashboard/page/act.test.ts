@@ -201,7 +201,7 @@ test('a first click on Clean opens a dialog with a removes line per thing and th
   expect(r.posts).toEqual([{ path: '/api/repos/alpha/runs/R1/clean', body: {} }]);
   await r.answer(200, { message: 'cleaned R1' });
   expect([r.effects, r.toasts]).toEqual([['leave'], ['ok clean R1: cleaned R1']]);
-  expect(r.marks.flat()).toEqual(expect.arrayContaining(['rail', 'main', 'inspector', 'status']));
+  expect(r.marks.flat()).toEqual(expect.arrayContaining(['list', 'sidebar', 'main', 'inspector', 'status']));
 });
 
 test('a clean that removes nothing and has no archive says removes nothing', () => {

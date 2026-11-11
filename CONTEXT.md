@@ -480,7 +480,7 @@ An agent step's `budget.maxIdleMinutes`, by default a quarter of `maxMinutes`: h
 _Avoid_: inactivity timeout, heartbeat
 
 **Stalled**:
-A running agent step that has emitted no event for its idle limit. It is marked, never ended by the idle limit: the dashboard marks its run in the run list until the step speaks again.
+A running agent step that has emitted no event for its idle limit. It is marked, never ended by the idle limit: the dashboard marks its run in the list until the step speaks again.
 _Avoid_: hung, stuck, frozen
 
 **Budget**:
@@ -602,7 +602,7 @@ The watched workflows a watcher is watching now: exactly those named with `sail 
 _Avoid_: enabled workflows, active loops, subscriptions
 
 **Watch state**:
-Whether a watched workflow is being watched now, said from the repository's live watcher alone, never from its queue's `watch:added` and `watch:removed` events: `watched` while the live watcher in this clone has it in its watch set, `not watched` while that watcher runs without it, and `watcher not running` while no watcher runs, or one runs in another clone. Each state but `watched` carries the reason the dashboard's server refuses a queue change with, and the dashboard shows that one state, in the same words, in the rail and in the queue view.
+Whether a watched workflow is being watched now, said from the repository's live watcher alone, never from its queue's `watch:added` and `watch:removed` events: `watched` while the live watcher in this clone has it in its watch set, `not watched` while that watcher runs without it, and `watcher not running` while no watcher runs, or one runs in another clone. Each state but `watched` carries the reason the dashboard's server refuses a queue change with, and the dashboard shows that one state, in the same words, on its row in the Queues view and in the queue view.
 _Avoid_: watch status, watch mode
 
 **Watcher registry**:
@@ -658,8 +658,32 @@ The watcher taking the next queued source and starting an ordinary run, only whi
 _Avoid_: pickup, schedule, spawn
 
 **Dashboard**:
-The live view `sail dashboard` serves on localhost for the whole machine: every watcher in the registry, with its runs, stage cards from the roster, the inspector, what needs attention, and its queues. It reads the run directories and queue files in each registered clone. It controls what its offers allow, and each posts to the local server, which answers in `sail`'s own words. Watch, poll, add a ticket, requeue and move run at once: a watch runs `sail watch` in the clone and starts a watcher, detached, when none is live, which outlives the dashboard, and the queue's commands are checked as `sail queue` checks them, dropped as a command file for the watcher, and wait for the watcher to take it, changing no queue themselves. While the workflow is not watched, or its watcher is not running, the queue's controls are disabled with the server's reason beside them, and the rail and the queue view name that one watch state. Unwatch, Unwatch all and All clear run at once too and can be undone for 8 s. Stop, Resume, Restart, drop and Clean open the confirmation dialog: Resume and Restart start `sail resume` or `sail run --from-run … --continue` themselves, detached in the clone, and answer once the run has started, and the page then opens it; Stop (`sail stop`, with Stop now for `--now`) and Clean (`sail clean`) call the same engine code in the server, and a Clean says first what it removes and where the run directory goes, then goes back to the index. Every answer, a refusal in `sail`'s own words included, is a toast, and while a request is open its subject's row reads the action under way. Everything else is the CLI's. Its URL names what the centre shows (a run or a queue) and the selected call, inspector tab and open file, Back and forward move through a person's selections, and a Copy link button in the top bar copies it; a URL naming what is not there opens the default and says so in a toast.
+The live view `sail dashboard` serves on localhost for the whole machine: every watcher in the registry, with its runs, stage cards from the roster, the inspector, what needs attention, and its queues. It reads the run directories and queue files in each registered clone. It controls what its offers allow, and each posts to the local server, which answers in `sail`'s own words. Watch, poll, add a ticket, requeue and move run at once: the Queues view's repository row watches the repository's workflows, all at once, and a queue view's header one workflow; a watch runs `sail watch` in the clone and starts a watcher, detached, when none is live, which outlives the dashboard, and the queue's commands are checked as `sail queue` checks them, dropped as a command file for the watcher, and wait for the watcher to take it, changing no queue themselves. While the workflow is not watched, or its watcher is not running, the queue's controls are disabled with the server's reason beside them, and the Queues view and the queue view name that one watch state. Unwatch, Unwatch all and All clear run at once too and can be undone for 8 s. A list row's ⋯ opens the run's actions. Stop, Resume, Restart, drop and Clean open the confirmation dialog: Resume and Restart start `sail resume` or `sail run --from-run … --continue` themselves, detached in the clone, and answer once the run has started, and the page then opens it; Stop (`sail stop`, with Stop now for `--now`) and Clean (`sail clean`) call the same engine code in the server, and a Clean says first what it removes and where the run directory goes, then goes back to the index. Every answer, a refusal in `sail`'s own words included, is a toast, and while a request is open its subject's row reads the action under way. Everything else is the CLI's. Its URL names what the centre shows (a run or a queue), the selected call, inspector tab and open file, and the list's view; Back and forward move through a person's selections, and a Copy link button in the top bar copies it. A URL naming a run or queue that is not listed opens none and says so in a toast.
 _Avoid_: UI, console, monitor, board
+
+**Sidebar**:
+The dashboard's navigation column, 180px wide and never growing with activity: Inbox, Active, Queues and History, each with a count, then every repository as a filter, with a dot for its watcher (watching, not watching or broken). It holds no run row, run menu or watch button.
+_Avoid_: rail, nav, menu
+
+**List**:
+The one component every dashboard view draws its rows on, in the centre: folding groups, one line per row, a keyboard cursor and a filter field. A selected row opens its run or queue beside it.
+_Avoid_: table, grid, feed
+
+**Active view**:
+The list of live runs: those that wait on a person, suspended or unreadable, first under `waiting on you`, then the running ones under `running`.
+_Avoid_: running block, live runs
+
+**Inbox**:
+The sidebar's first entry: it opens the needs attention pane, and its count is the pane's. It is no list view of its own.
+_Avoid_: alerts, notifications
+
+**History view**:
+The list of ended runs: the failed ones under `failed`, then the completed ones under `done`.
+_Avoid_: archive, past runs
+
+**Queues view**:
+The list of every workflow's queue: one group per repository, its header carrying the repository's watch buttons, and one row per queue under it. A queue's row opens its queue view beside the list.
+_Avoid_: queue list, watchers view
 
 **Offer**:
 What the dashboard's server says a subject (a run, a queue item, a workflow, a repository) can have done to it now: each action it gives is `enabled`, or carries a `why` it is not, and an action it leaves out is not offered. The index and the queues answer carry the offers of queues, items, workflows and repositories, and a run's actions route those of a run.

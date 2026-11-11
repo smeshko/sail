@@ -136,8 +136,8 @@ export interface ActionDef {
   key?: string;
   /** A disabled offer stops the click before its request: otherwise the server's refusal comes with the POST. */
   holdsDisabled?: boolean;
-  /** Where its parameters are drawn: the run menu, the queue's header, under the repository's header, or the rail's top. */
-  place: 'run' | 'queue' | 'repo' | 'rail';
+  /** Where its parameters are drawn: the run menu, the queue's header, on the repository's row, or the list's head. */
+  place: 'run' | 'queue' | 'repo' | 'list';
   params(subject: Subject, source: OfferSource): Param[];
   available(subject: Subject, source: OfferSource): Availability;
   /** The confirmation dialog a confirmed action opens: its title, a line per consequence, its verb. */
@@ -611,7 +611,7 @@ export const ACTIONS: readonly ActionDef[] = [
     label: () => 'all clear',
     appliesTo: ['none'],
     tier: 'undoable',
-    place: 'rail',
+    place: 'list',
     params: () => [],
     available: () => ({ offered: true, enabled: true }),
     run: 'clear-attention',

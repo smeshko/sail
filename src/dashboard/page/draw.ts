@@ -6,11 +6,13 @@ import { renderAttention } from './attention-view';
 import { renderDrawer } from './drawer-view';
 import { REGIONS, type Region } from './host';
 import { html } from './html';
-import { railRepos, statusOf } from './index-model';
+import { listRepos, statusOf } from './index-model';
 import { renderInspector } from './inspector-view';
+import { viewCounts } from './list-model';
+import { renderList } from './list-view';
 import { hasItemActions, offeredDrop, renderQueue } from './queue-view';
-import { renderRail } from './rail-view';
 import { renderRun, renderStatus } from './run-view';
+import { renderSidebar } from './sidebar-view';
 import { listed, opened, openQueue, type Store, selected, summaryOf } from './store';
 import { renderTimeline } from './timeline-view';
 import { renderToasts } from './toast-view';
@@ -22,11 +24,16 @@ export const TICK_MS = 1000;
 export function regions(store: Store): Record<Region, () => string> {
   const { ui, host } = store;
   return {
-    rail: () => {
+    sidebar: () => {
+      if (store.index === undefined) return '';
+      const repos = listRepos(store.index, host.now());
+      return renderSidebar(repos, viewCounts(repos, ui.repoFilter), listed(store).length, ui).value;
+    },
+    list: () => {
       if (store.index === undefined) return html`<div class="qempty">connecting…</div>`.value;
       // A raise typed and a stage chosen in the open run's menu survive the draw, but not a switch of run.
       store.actor.keep('run');
-      return renderRail(railRepos(store.index, host.now()), ui, host.now(), store.offers).value;
+      return renderList(ui.view, listRepos(store.index, host.now()), ui, host.now(), store.offers).value;
     },
     attention: () => {
       const items = listed(store);
@@ -51,7 +58,8 @@ export function regions(store: Store): Record<Region, () => string> {
         }
         const menuItem = panel.items.find((item) => item.dedupKey === ui.itemMenu);
         if (unwatched || menuItem === undefined || !hasItemActions(panel, menuItem)) delete ui.itemMenu;
-        return renderQueue(panel, store.queues.get(ui.queue ?? '')?.stream, ui, host.now()).value;
+        const repoOffers = store.index?.find((repo) => repo.name === panel.repo)?.offers;
+        return renderQueue(panel, store.queues.get(ui.queue ?? '')?.stream, ui, host.now(), repoOffers).value;
       }
       if (store.run === undefined) return html`<div class="qempty">no run selected</div>`.value;
       const error = store.run.error === undefined ? '' : html`<div class="code bad">${store.run.error}</div>`;
@@ -76,6 +84,12 @@ export function flush(store: Store): void {
   store.flushTimer = undefined;
   const dirty = REGIONS.filter((region) => store.dirty.has(region));
   store.dirty.clear();
+  // The run or queue beside the list, or the list alone: the host lays the centre out by it.
+  const detail = store.run !== undefined || openQueue(store) !== undefined;
+  if (detail !== store.detail) {
+    store.detail = detail;
+    host.setDetail(detail);
+  }
   for (const region of dirty) {
     // A region that can't be drawn says so, and the others are still drawn (review R2-1).
     let markup: string;
@@ -90,6 +104,11 @@ export function flush(store: Store): void {
     if (!isFresh && store.written.get(region) === markup) continue;
     store.written.set(region, markup);
     host.render(region, markup, isFresh);
+    // Only a cursor move scrolls the list: a redraw such as the tick leaves where the person scrolled it (review R8).
+    if (region === 'list' && store.revealList) {
+      store.revealList = false;
+      host.reveal('list');
+    }
     // A running call's timeline, followed, shows its newest entry: not while the queue holds the centre.
     if (region === 'main' && ui.follow && openQueue(store) === undefined && opened(store)?.state === 'running')
       host.scrollToEnd(region);
@@ -101,7 +120,7 @@ export function startDraw(store: Store): void {
   store.flush = () => flush(store);
 }
 
-/** Whether a running time is on screen: the open run's, one of its calls', or a run's in the rail. */
+/** Whether a running time is on screen: the open run's, one of its calls', or a run's in the list. */
 export function anyRunning(store: Store): boolean {
   return (
     (store.run !== undefined &&
@@ -117,7 +136,7 @@ export function tick(store: Store): void {
   store.tickTimer = store.host.later(() => {
     store.tickTimer = undefined;
     if (!anyRunning(store)) return;
-    store.mark('rail', 'main', 'status');
+    store.mark('list', 'main', 'status');
     if (selected(store)?.state === 'running') store.mark('inspector');
     tick(store);
   }, TICK_MS);

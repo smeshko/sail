@@ -9,9 +9,10 @@ import { attention, identity } from './attention';
 import type { PageHost, Region } from './host';
 import { queuePanels } from './index-model';
 import type { Loaded } from './inspector-view';
+import { VIEWS, type ViewName } from './list-model';
 import { type QueueStream, queueId } from './queue-view';
 import type { RunModel } from './run-model';
-import { savedExpanded, savedHidden, savedTheme, storedCleared } from './saved';
+import { savedFolded, savedHidden, savedTheme, storedCleared } from './saved';
 import type { CallOutput } from './timeline-view';
 import { initialUi, type UiState } from './ui-state';
 
@@ -61,6 +62,10 @@ export interface Store {
   drawn: string[];
   /** Set when a call is selected before its card exists: the cursor moves to it once it does. */
   cursorPending: boolean;
+  /** Whether the list's cursor has moved since the list was drawn, so the next draw scrolls it into sight. */
+  revealList: boolean;
+  /** Whether the host was last told a run or queue is open beside the list. */
+  detail: boolean | undefined;
   /** What the URL asks to open, until the first index: then it is opened, or dropped when its run isn't listed. */
   start: Record<string, string> | undefined;
   /** The query last written to the URL, `undefined` until one is. */
@@ -103,7 +108,9 @@ export function createStore(host: PageHost): Store {
   ui.theme = savedTheme(host) ?? ui.theme;
   host.setTheme(ui.theme);
   ui.hidden = savedHidden(host);
-  ui.expanded = savedExpanded(host);
+  ui.listFolded = savedFolded(host);
+  const asked = host.start().view;
+  if ((VIEWS as readonly string[]).includes(asked ?? '')) ui.view = asked as ViewName;
   const cleared = new Set<string>(storedCleared(host));
   host.setInspector(ui.inspector);
   const store: Store = {
@@ -123,6 +130,8 @@ export function createStore(host: PageHost): Store {
     cleared,
     drawn: [],
     cursorPending: false,
+    revealList: false,
+    detail: undefined,
     start: host.start(),
     url: undefined,
     stopped: false,

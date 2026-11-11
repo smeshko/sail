@@ -4,11 +4,12 @@
 // action opens a socket: what needs one goes through `streams.ts`, and what posts goes through the actor.
 
 import { actionOf } from './action-registry';
+import { VIEWS, type ViewName } from './list-model';
 import { syncUrl } from './location';
 import { closeFile, openedOutputKeys, openFile, readLog, readOutput, selectCard } from './reads';
-import { FILTER_KEY, RAIL_KEY, THEME_KEY } from './saved';
+import { FILTER_KEY, LIST_KEY, THEME_KEY } from './saved';
 import type { Store } from './store';
-import { reopenQueue, selectRun } from './streams';
+import { closeDetail, reopenQueue, selectRun } from './streams';
 import { dismissToast, toast, undoToast } from './toast';
 import { FILTERS, type InspectorTab, TABS, THEMES, type TimelineFilter } from './ui-state';
 
@@ -27,7 +28,7 @@ export function leaveQueue(store: Store) {
   const { ui } = store;
   if (ui.queue === undefined) return;
   delete ui.queue;
-  store.mark('rail', 'main');
+  store.mark('list', 'main');
 }
 
 export function closeAttention(store: Store) {
@@ -47,7 +48,7 @@ export const actions: Record<string, Action> = {
     if (data.queue === undefined) return;
     reopenQueue(store, data.queue);
     store.ui.queue = data.queue;
-    store.mark('rail', 'main');
+    store.mark('list', 'main');
   },
   'select-card': (store, data) => selectCard(store, data.key, undefined, true),
   open: (store, data) => {
@@ -112,13 +113,34 @@ export const actions: Record<string, Action> = {
     readLog(store);
     store.mark('inspector');
   },
-  'toggle-group': (store, data) => {
+  'select-view': (store, data) => {
+    if (!(VIEWS as readonly string[]).includes(data.view ?? '')) return;
+    store.ui.view = data.view as ViewName;
+    store.ui.listFilter = '';
+    delete store.ui.listCursor;
+    // The filter field gives up what was typed in it, so it reads as empty as the filter now is.
+    store.fresh.add('list');
+    store.mark('sidebar', 'list');
+  },
+  'filter-repo': (store, data) => {
+    if (data.repo === undefined) return;
+    if (store.ui.repoFilter === data.repo) delete store.ui.repoFilter;
+    else store.ui.repoFilter = data.repo;
+    store.mark('sidebar', 'list');
+  },
+  'toggle-list-group': (store, data) => {
     const group = data.group ?? '';
-    store.ui.expanded = store.ui.expanded.includes(group)
-      ? store.ui.expanded.filter((each) => each !== group)
-      : [...store.ui.expanded, group];
-    store.host.save(RAIL_KEY, JSON.stringify(store.ui.expanded));
-    store.mark('rail');
+    store.ui.listFolded = store.ui.listFolded.includes(group)
+      ? store.ui.listFolded.filter((each) => each !== group)
+      : [...store.ui.listFolded, group];
+    store.host.save(LIST_KEY, JSON.stringify(store.ui.listFolded));
+    store.mark('list');
+  },
+  'close-detail': (store) => closeDetail(store),
+  // What was typed in the list's filter field, which `onInput` delivers under the field's name.
+  'list-filter': (store, data) => {
+    store.ui.listFilter = data.value ?? '';
+    store.mark('list');
   },
   'item-menu': (store, data) => {
     if (store.ui.itemMenu === data.item || data.item === undefined) delete store.ui.itemMenu;
@@ -145,12 +167,12 @@ export const actions: Record<string, Action> = {
       store.run.runId === runId
     ) {
       delete store.ui.runMenu;
-      store.mark('rail');
+      store.mark('list');
       return;
     }
     actions['select-run']?.(store, data);
     store.ui.runMenu = runId;
-    store.mark('rail');
+    store.mark('list');
   },
   'toggle-queue-events': (store) => {
     store.ui.queueEvents = !store.ui.queueEvents;
@@ -167,13 +189,6 @@ export const actions: Record<string, Action> = {
   'toggle-attention': (store) => {
     store.ui.attention = !store.ui.attention;
     store.mark('attention');
-  },
-  'toggle-section': (store, data) => {
-    const section = data.section ?? '';
-    store.ui.open = store.ui.open.includes(section)
-      ? store.ui.open.filter((open) => open !== section)
-      : [...store.ui.open, section];
-    store.mark('rail');
   },
   'toggle-inspector': (store) => {
     store.ui.inspector = !store.ui.inspector;
@@ -226,7 +241,7 @@ export function dispatch(store: Store, action: string, data: Record<string, stri
   const shutsRun = ui.runMenu !== undefined && !runAction && action !== 'run-menu' && !dialogClick;
   if (shuts) delete ui.itemMenu;
   if (shutsRun) delete ui.runMenu;
-  if (shuts || shutsRun) store.mark('main', 'rail');
+  if (shuts || shutsRun) store.mark('main', 'list');
   if (acts) store.actor.act(action, data);
   else actions[action]?.(store, data);
   syncUrl(store, true);

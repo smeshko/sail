@@ -82,3 +82,16 @@ test('a query read back gives the selection it was written from', () => {
     file: 'p/x',
   });
 });
+
+test('a view other than active follows the run or the queue, or stands alone, and active is left out (ADW-522)', () => {
+  expect(toQuery(ui({ view: 'history' }))).toBe('view=history');
+  expect(toQuery(ui({ repo: 'a', runId: 'r', view: 'history' }))).toBe('repo=a&run=r&view=history');
+  expect(toQuery(ui({ queue: 'beta/t', view: 'queues' }))).toBe('queue=beta%2Ft&view=queues');
+  expect(toQuery(ui({ repo: 'a', runId: 'r', view: 'active' }))).toBe('repo=a&run=r');
+});
+
+test('fromQuery reads a known view beside a run or a queue, and drops one that is none (ADW-522)', () => {
+  expect(fromQuery(asked('repo=a&run=r&view=history')).view).toBe('history');
+  expect(fromQuery(asked('queue=beta%2Ft&view=queues')).view).toBe('queues');
+  expect(fromQuery(asked('view=nope'))).toEqual({ tab: 'overview', timeline: false });
+});
