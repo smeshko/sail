@@ -1,6 +1,7 @@
 // The page's actions, defined once: each thing a person can have done from the page (stop, stop now, suspend and hold,
-// resume, restart, clean, rebuild, drop, requeue, move, poll, release a usage-limit hold, add, add skipping its checks,
-// watch, unwatch, start a run and its go and start anyway, all clear, dismiss) with its id and label, the subject it applies to, its
+// resume, restart, clean, clean every failed run, rebuild, drop, requeue, move, poll, release a usage-limit hold, add,
+// add skipping its checks, watch, unwatch, start a run and its go and start anyway, all clear, dismiss) with its id and
+// label, the subject it applies to, its
 // availability from the server's offers, its parameters, its tier, its request and what its answer means. Pure: it
 // holds no host, no state and no storage, so `act.ts` carries any entry out and `action-view.ts` draws any entry, and an
 // entry added here needs nothing else. An entry may also give the `several` form of its dialog, for the one action that
@@ -156,6 +157,8 @@ export type ActResult = {
   start?: RefusedStart | 'forget';
   /** A button the toast carries, in place of Undo: what it is called and the action it carries out. */
   button?: { label: string; action: string; data: Record<string, string> };
+  /** The runs the answer says no longer exist: the page leaves the open run when it is one. */
+  gone?: { repo: string; runId: string }[];
 };
 export type Effect = 'reopen' | 'leave' | 'took' | { open: string; repo?: string };
 
@@ -182,7 +185,7 @@ export function severalPlan(
 ) {
   const goes = runs.filter(({ subject, offers }) => {
     const available = def.available(subject, { run: offers, index });
-    return available.offered && available.enabled;
+    return available.offered && available.enabled && several.skips?.(offers) === undefined;
   });
   const requests = goes.flatMap(({ subject, offers }) => {
     const request = def.request?.(subject, {}, { run: offers, index });
@@ -220,11 +223,25 @@ export interface ActionDef {
   ): { path: string; body: unknown } | { invalid: string } | undefined;
   answer?(status: number, body: string, subject: Subject, values?: Values): ActResult;
   /** The form of the action over several runs: the one dialog that lists what each does. */
-  several?: { dialog(runs: readonly SeveralRun[], source: OfferSource): DialogView };
+  several?: {
+    dialog(runs: readonly SeveralRun[], source: OfferSource): DialogView;
+    /** Why a run its offer enables is still left out of the several form, when it is. */
+    skips?(offers: RunActions | undefined): string | undefined;
+  };
   /** The name of the effect a local action has the shell perform. */
   run?: string;
   /** The rows the action is more than one: each its own label, with the `data-*` a click on it gives. */
   variants?(subject: Subject, source: OfferSource): { label: string; data: Record<string, string> }[];
+}
+
+/** The `problems` a 200 answer carries: what a clean went on to do after the archive and could not finish. */
+function problemsOf(body: string): string[] {
+  try {
+    const { problems } = JSON.parse(body) as { problems?: unknown };
+    return Array.isArray(problems) ? problems.filter((each): each is string => typeof each === 'string') : [];
+  } catch {
+    return [];
+  }
 }
 
 /** Why a request of kind `what` (a move, a resume, a restart) was refused: the `error` its answer carries, else its status. */
@@ -268,6 +285,7 @@ export function subjectName(subject: Subject): string {
 /** The key of `ui.underway` that `def` done to `subject` sets while its request is out. */
 export function underwayId(def: ActionDef, subject: Subject): string {
   const watching = def.id === 'watch' || def.id === 'unwatch';
+  if (def.id === 'clean-failed') return subject.kind === 'repo' ? `clean:${subject.repo}` : 'clean:*';
   switch (subject.kind) {
     case 'run':
       return `run:${subject.repo}/${subject.runId}`;
@@ -647,6 +665,69 @@ const suspendAction: ActionDef = {
   },
 };
 
+/** Why a clean of several leaves a run out although its Clean is enabled: a queue item names it. */
+function cleanSkips(offers: RunActions | undefined): string | undefined {
+  const item = offers?.clean?.item;
+  return item === undefined
+    ? undefined
+    : `queue item ${item.dedupKey} names it: clean it alone to requeue or drop the item`;
+}
+
+/** A failed run a clean of every failed run lists, with the queue item that names it. */
+type FailedRun = { repo: string; runId: string; item?: { workflow: string; dedupKey: string; state: string } };
+
+/** The failed runs `subject` (a repository, or nothing for every repository) would clean, from the index's offers. */
+function failedRunsOf(subject: Subject, source: OfferSource): FailedRun[] {
+  const repos = source.index.filter((each) =>
+    subject.kind === 'repo' ? each.name === subject.repo : each.offers?.clean?.enabled === true,
+  );
+  return repos.flatMap((each) => (each.offers?.clean?.runs ?? []).map((run) => ({ ...run, repo: each.name })));
+}
+
+const itemWord = { skip: 'skipped', requeue: 'requeued', drop: 'dropped' } as const;
+
+/** The one dialog of a clean of every failed run: the count, and a line for each run and what becomes of its queue item. */
+function cleanFailedDialog(subject: Subject, values: Values, source: OfferSource): DialogView {
+  const runs = failedRunsOf(subject, source);
+  const choice = values.items === 'requeue' || values.items === 'drop' ? values.items : 'skip';
+  const left = choice === 'skip' ? runs.filter((run) => run.item !== undefined).length : 0;
+  const n = runs.length - left;
+  return {
+    title: subject.kind === 'repo' ? `clean all failed runs of ${subject.repo}` : 'clean every failed run',
+    lines: [
+      `cleans ${n} failed ${n === 1 ? 'run' : 'runs'}`,
+      ...(left === 0 ? [] : [`leaves ${left} a queue item names`]),
+      ...runs.map((run) => {
+        const name = subject.kind === 'repo' ? run.runId : `${run.repo}: ${run.runId}`;
+        return run.item === undefined
+          ? name
+          : `${name} · queue item ${run.item.dedupKey} of ${run.item.workflow}: ${itemWord[choice]}`;
+      }),
+    ],
+    verb: 'clean',
+  };
+}
+
+/** What a clean of every failed run answers: its message, the runs it archived as gone, and red when one was left. */
+function cleanFailedAnswer(status: number, body: string): ActResult {
+  if (!ok(status)) return { text: refusal(status, body, 'clean'), refused: true };
+  const text = answerField(body, 'message');
+  let parsed: { runs?: unknown; left?: unknown; failed?: unknown } = {};
+  try {
+    parsed = JSON.parse(body) as typeof parsed;
+  } catch {
+    // An answer that isn't JSON says nothing of its runs.
+  }
+  const gone = (Array.isArray(parsed.runs) ? parsed.runs : []).flatMap((run: unknown) => {
+    const each = run as { repo?: unknown; runId?: unknown; cleaned?: unknown };
+    return each.cleaned === true && typeof each.repo === 'string' && typeof each.runId === 'string'
+      ? [{ repo: each.repo, runId: each.runId }]
+      : [];
+  });
+  const left = Number(parsed.left ?? 0) + Number(parsed.failed ?? 0) > 0;
+  return { ...(text === undefined ? {} : { text }), gone, ...(left ? { refused: true as const } : {}) };
+}
+
 /** The ticket key field the two adds share. */
 const addParams = (): Param[] => [
   { name: 'ticket', dom: 'add-ticket', label: 'ticket key', type: 'text', placeholder: 'ticket key' },
@@ -784,11 +865,35 @@ export const ACTIONS: readonly ActionDef[] = [
     tier: 'confirmed',
     place: 'run',
     holdsDisabled: true,
-    params: () => [],
+    params: (_, source) => {
+      const item = source.run?.clean?.item;
+      return item === undefined
+        ? []
+        : [
+            {
+              name: 'item',
+              dom: 'clean-item',
+              label: `queue item ${item.dedupKey}`,
+              type: 'choice',
+              options: [{ value: 'requeue' }, { value: 'drop' }],
+              initial: 'requeue',
+              ask: 'dialog',
+            },
+          ];
+    },
     available: runOffer('clean'),
     underway: 'cleaning…',
-    dialog: (subject, _, source) => {
+    dialog: (subject, values, source) => {
       const offer = source.run?.clean;
+      const { item } = offer ?? {};
+      const settles =
+        item === undefined
+          ? []
+          : [
+              values.item === 'drop'
+                ? `drops ${item.dedupKey} from ${item.workflow}'s queue and takes the watcher's label off its ticket`
+                : `requeues ${item.dedupKey} in ${item.workflow}'s queue`,
+            ];
       return {
         title: `clean ${runName(subject)}`,
         lines:
@@ -797,15 +902,23 @@ export const ACTIONS: readonly ActionDef[] = [
             : [
                 ...(offer.removes.length === 0 ? ['removes nothing'] : offer.removes.map((each) => `removes ${each}`)),
                 ...(offer.archive === undefined ? [] : [`run directory → ${offer.archive}`]),
+                ...(offer.ticketKey === undefined
+                  ? []
+                  : [`moves ${offer.ticketKey} back to unstarted when it is started`]),
+                ...settles,
               ],
         verb: 'clean',
       };
     },
     several: {
+      // A run a queue item names is cleaned alone, where the dialog asks what becomes of its item.
+      skips: cleanSkips,
       dialog: (runs) => ({
         title: `clean ${runs.length} ${runs.length === 1 ? 'run' : 'runs'}`,
         lines: runs.map(({ subject, offers }) => {
           const offer = offers?.clean;
+          const skipped = cleanSkips(offers);
+          if (skipped !== undefined) return `skips ${runName(subject)}: ${skipped}`;
           if (offer?.enabled === true) {
             const removes = offer.removes.length === 0 ? 'removes nothing' : `removes ${offer.removes.join(', ')}`;
             return `${runName(subject)}: ${removes}${offer.archive === undefined ? '' : `; run directory → ${offer.archive}`}`;
@@ -816,12 +929,55 @@ export const ACTIONS: readonly ActionDef[] = [
         verb: 'clean',
       }),
     },
-    request: (subject) => ({ path: runPath(subject, '/clean'), body: {} }),
+    request: (subject, values, source) => ({
+      path: runPath(subject, '/clean'),
+      body: source.run?.clean?.item === undefined ? {} : { item: values.item ?? 'requeue' },
+    }),
     answer: (status, body) => {
       if (!ok(status)) return { text: refusal(status, body, 'clean'), refused: true };
-      const text = answerField(body, 'message');
-      return { effect: 'leave', ...(text === undefined ? {} : { text }) };
+      const message = answerField(body, 'message');
+      const problems = problemsOf(body);
+      if (problems.length > 0) return { effect: 'leave', refused: true, text: [message, ...problems].join('\n') };
+      return { effect: 'leave', ...(message === undefined ? {} : { text: message }) };
     },
+  },
+  {
+    id: 'clean-failed',
+    label: () => 'clean all failed',
+    appliesTo: ['repo', 'none'],
+    tier: 'confirmed',
+    place: 'list',
+    holdsDisabled: true,
+    params: (subject, source) =>
+      failedRunsOf(subject, source).some((run) => run.item !== undefined)
+        ? [
+            {
+              name: 'items',
+              dom: 'clean-items',
+              label: 'runs with a queue item',
+              type: 'choice',
+              options: [{ value: 'skip' }, { value: 'requeue' }, { value: 'drop' }],
+              initial: 'skip',
+              ask: 'dialog',
+            },
+          ]
+        : [],
+    available: (subject, source) => {
+      if (failedRunsOf(subject, source).length === 0) return NOT_OFFERED;
+      if (subject.kind !== 'repo') return { offered: true, enabled: true };
+      return availability(source.index.find((each) => each.name === subject.repo)?.offers?.clean);
+    },
+    underway: 'cleaning…',
+    dialog: cleanFailedDialog,
+    request: (subject, values, source) => {
+      const runs = failedRunsOf(subject, source).map(({ repo, runId }) => ({ repo, runId }));
+      if (runs.length === 0) return undefined;
+      return {
+        path: subject.kind === 'repo' ? `/api/repos/${enc(subject.repo)}/clean-failed` : '/api/clean-failed',
+        body: { runs, items: values.items ?? 'skip' },
+      };
+    },
+    answer: cleanFailedAnswer,
   },
   {
     id: 'rebuild-run',

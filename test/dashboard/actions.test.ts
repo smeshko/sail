@@ -6,8 +6,10 @@ import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'nod
 import { join } from 'node:path';
 import { takeLease } from '../../src/adapters/leases';
 import { runActions } from '../../src/dashboard/actions';
+import { readEntry } from '../../src/watch/registry';
 import {
   appendEvent,
+  betaWatcher,
   entryOf,
   FAKE_2_ID,
   FAKE_3_ID,
@@ -104,7 +106,7 @@ test('a failed ticket run offers Restart with its stages in the order they ran, 
       stage: 'implement',
       budget: { maxUsd: 25, maxMinutes: 90 },
     },
-    clean: { enabled: true, removes: ['run ref'], archive: expect.stringMatching(ARCHIVE) },
+    clean: { enabled: true, removes: ['run ref'], archive: expect.stringMatching(ARCHIVE), ticketKey: 'FAKE-2' },
   });
 });
 
@@ -381,6 +383,7 @@ test('a failed run offers Clean with what it removes and where its directory goe
     enabled: true,
     removes: [`branch ${FAKE_2_BRANCH}`, 'remote branch', 'run ref'],
     archive: expect.stringMatching(ARCHIVE),
+    ticketKey: 'FAKE-2',
   });
   expect(offers.clean?.archive?.startsWith(m.sailHome)).toBe(true);
 });
@@ -394,24 +397,40 @@ test("Clean is disabled for an open pull request, in sail clean's words", async 
   expect((await actions('alpha', FAKE_2_ID, ports)).clean).toEqual({
     enabled: false,
     removes: [],
+    ticketKey: 'FAKE-2',
     why: `run ${FAKE_2_ID}: its branch ${FAKE_2_BRANCH} has an open pull request, #9 (https://example.test/pull/9): close it first`,
   });
 });
 
-test('Clean is disabled while a queue item names the run, saying requeue or drop', async () => {
-  const dir = join(runDir('alpha', FAKE_2_ID), '..', 'queue', 'ticket-to-pr');
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(
-    join(dir, 'queue.json'),
-    readFileSync(queueFile(), 'utf8')
-      .replace('FAKE-3-01M39H4ZW0S46MV303CFX3T4PY', FAKE_2_ID)
-      .replace('"dispatched"', '"parked",\n"reason": "gave up"'),
-  );
-  const { clean } = await actions('alpha', FAKE_2_ID);
-  expect([clean?.enabled, clean?.why]).toEqual([
-    false,
-    expect.stringContaining('names run FAKE-2-01M36VAD801GH3GKJTE239SCP8: requeue it or drop it'),
-  ]);
+/** FAKE-3's run failed, still named by its queue item of ticket-to-pr, which beta's watcher watches when `watched`. */
+function failedNamed(watched: boolean) {
+  writeFileSync(join(runDir('beta', FAKE_3_ID), 'STATUS'), 'failed workflow_failed\n');
+  if (watched) betaWatcher(m, { pid: process.pid, sailDir: m.beta.sailDir });
+  const found = readEntry(m.registryDir, 'beta');
+  if (found === undefined) throw new Error('no beta entry');
+  return runActions(found, FAKE_3_ID, { leasesDir, ports: fakeClonePorts(leasesDir), env: { SAIL_HOME: m.sailHome } });
+}
+
+test('Clean for a run a queue item names carries the item, and is enabled while a watcher of its workflow runs here', async () => {
+  const { clean } = await failedNamed(true);
+  expect(clean).toEqual({
+    enabled: true,
+    removes: expect.any(Array),
+    archive: expect.stringMatching(/\/failed-runs\//),
+    item: { workflow: 'ticket-to-pr', dedupKey: 'ticket:FAKE-3', state: 'dispatched' },
+    ticketKey: 'FAKE-3',
+  });
+});
+
+test("Clean for a run a queue item names is disabled with no live watcher, in sail clean's words", async () => {
+  const { clean } = await failedNamed(false);
+  expect(clean).toEqual({
+    enabled: false,
+    removes: [],
+    why: `run ${FAKE_3_ID}: no watcher is running for 'beta' here: sail watch ticket-to-pr first`,
+    item: { workflow: 'ticket-to-pr', dedupKey: 'ticket:FAKE-3', state: 'dispatched' },
+    ticketKey: 'FAKE-3',
+  });
 });
 
 test('Clean is disabled while another run leases the branch, naming that run', async () => {

@@ -450,3 +450,22 @@ test('start anyway is a general row naming the ticket and the flag only after a 
     'start FAKE-3 anyway (--ignore-prerequisites)',
   );
 });
+
+test('clean all failed is a general row while a repository offers it, and is left out otherwise', () => {
+  const offering = [
+    {
+      name: 'alpha',
+      runs: [],
+      queues: [],
+      offers: { watch: on, workflows: {}, clean: { ...on, runs: [{ runId: 'A-1' }] } },
+    },
+  ] as unknown as IndexRepo[];
+  const rows = generalRows({ index: offering });
+  expect(rows[0]).toEqual({
+    group: 'general',
+    label: 'clean all failed',
+    disabled: false,
+    run: { act: 'clean-failed', subject: { kind: 'none' }, data: {} },
+  });
+  expect(labels(generalRows({ index: [] }))).not.toContain('clean all failed');
+});

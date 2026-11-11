@@ -52,6 +52,7 @@ test('the committed dashboard views are what the fixtures render now', async () 
     'list-menu-fake-2.html',
     'dialog-clean.html',
     'dialog-clean-several.html',
+    'dialog-clean-failed.html',
     'menu-fake-2.html',
     'dialog-restart.html',
     'run-fake-3.html',

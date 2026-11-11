@@ -3765,7 +3765,11 @@ test('ArrowDown and ArrowUp move the highlight over enabled rows only, and j typ
   expect(menuSel()).toBe('clean');
   host.press('ArrowDown', true);
   host.advance(100);
+  expect(menuSel()).toBe('clean all failed');
+  host.press('ArrowDown', true);
+  host.advance(100);
   expect(menuSel()).toBe('all clear');
+  host.press('ArrowUp', true);
   host.press('ArrowUp', true);
   host.press('ArrowUp', true);
   host.advance(100);
@@ -4729,7 +4733,7 @@ test('the highlight stays on the row a person moved to when an index tick remove
   bootIndexed();
   cmdK();
   host.advance(100);
-  for (let i = 0; i < 5; i++) host.press('ArrowDown', true);
+  for (let i = 0; i < 6; i++) host.press('ArrowDown', true);
   host.advance(100);
   expect(menuSel()).toBe('switch theme');
   const message = indexMessage();

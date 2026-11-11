@@ -1,8 +1,8 @@
 // The list: the one component every view draws its rows on, in the centre. A head names the view with its count, which
 // reads `n of m` while the filter field narrows it, and carries the field itself; History's head also carries a status
 // and a workflow control, which narrow it the same way, and, while History rows are selected, their count and a clear
-// button; a selected row is drawn `picked`. Under it, folding groups: Active's `waiting on you` and `running`, History's
-// days, and in Queues one per repository, and the Inbox's one group each of runs, parked items and problems, whose rows
+// button, and `clean all failed` while a listed repository offers it; a selected row is drawn `picked`. Under it,
+// folding groups: Active's `waiting on you` and `running`, History's days, and in Queues one per repository, and the Inbox's one group each of runs, parked items and problems, whose rows
 // open their run (at its last call in error) or queue, the view staying Inbox, and carry a ✕ that dismisses them. A
 // run's row is a `div` holding two sibling buttons: its own, which opens the run and shows on one line
 // its status, id, title, stalled mark, duration and stop reason, with a problem wrapping
@@ -240,6 +240,21 @@ function historyControls(repos: readonly ListRepo[], ui: UiState): SafeHtml {
   return html`<select class="list-s" name="list-status" aria-label="filter by status">${option('', 'any status', ui.historyStatus === undefined)}${option('failed', 'failed', ui.historyStatus === 'failed')}${option('completed', 'done', ui.historyStatus === 'completed')}</select><select class="list-s" name="list-workflow" aria-label="filter by workflow">${option('', 'any workflow', chosen === undefined)}${workflows.map((name) => option(name, name, name === chosen))}</select>`;
 }
 
+/**
+ * History's `clean all failed`, in its head: the repository's while the sidebar filters on one, else every listed
+ * repository's. Drawn only when a listed repository offers it; while its request is out the word under way takes the
+ * button's place.
+ */
+function cleanFailed(repos: readonly ListRepo[], ui: UiState): SafeHtml | '' {
+  const subject: Subject = ui.repoFilter === undefined ? { kind: 'none' } : { kind: 'repo', repo: ui.repoFilter };
+  const def = actionOf('clean-failed');
+  if (def === undefined) return '';
+  const source: OfferSource = { index: repos.map((repo) => ({ name: repo.name, queues: [], offers: repo.offers })) };
+  const underway = ui.underway[subject.kind === 'repo' ? `clean:${subject.repo}` : 'clean:*'];
+  if (underway !== undefined) return html`<span class="busy">${underway}</span>`;
+  return actionControl(def, subject, ui.act, source, { class: 'btn', data: true });
+}
+
 /** What the head says of the selection: its count and a button that clears it, drawn only while a row is selected. */
 const selectionHead = (count: number, checking: string | undefined): SafeHtml =>
   count === 0
@@ -274,7 +289,7 @@ export function renderList(
     view === 'inbox' && total(shown) > 0
       ? html`<button class="btn" type="button" data-action="clear-attention" title="dismiss all (Shift+E)">all clear</button>`
       : '';
-  const head = html`<div class="list-h"><span class="lh-t">${VIEW_LABELS[view]}</span><span class="c">${count}</span>${clear}<input class="list-f" name="list-filter" type="search" value="${ui.listFilter}" placeholder="filter (/)" aria-label="filter the list" autocomplete="off" spellcheck="false">${view === 'history' ? historyControls(repos, ui) : ''}${view === 'history' ? selectionHead(selectedRows(shown, ui.listSelected).length, ui.underway.selection) : ''}</div>`;
+  const head = html`<div class="list-h"><span class="lh-t">${VIEW_LABELS[view]}</span><span class="c">${count}</span>${clear}<input class="list-f" name="list-filter" type="search" value="${ui.listFilter}" placeholder="filter (/)" aria-label="filter the list" autocomplete="off" spellcheck="false">${view === 'history' ? historyControls(repos, ui) : ''}${view === 'history' ? cleanFailed(repos, ui) : ''}${view === 'history' ? selectionHead(selectedRows(shown, ui.listSelected).length, ui.underway.selection) : ''}</div>`;
   const empty =
     repos.length === 0
       ? 'no repository is registered yet: run sail watch in one'

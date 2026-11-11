@@ -1078,3 +1078,172 @@ test('a repository that offers no start, or a disabled one, is not started', () 
   off.actor.act('start-run', ALPHA, ASKED);
   expect([none.posts.length, off.posts.length]).toEqual([0, 0]);
 });
+
+const NAMED = {
+  clean: {
+    ...on,
+    removes: ['a'],
+    archive: '/x',
+    item: { workflow: 'wf', dedupKey: 'ticket:FAKE-1', state: 'parked' },
+  },
+} as unknown as RunActions;
+
+test('a clean whose offer names a queue item asks requeue or drop in its dialog, redraws the line at a change and posts the choice', async () => {
+  const r = rig(NAMED);
+  r.actor.act('clean-run', {});
+  expect(r.ui.dialog?.lines).toEqual(['removes a', 'run directory → /x', "requeues ticket:FAKE-1 in wf's queue"]);
+  expect(r.dialogs[0]).toContain('<select name="clean-item" autofocus>');
+  expect(r.dialogs[0]).toContain('<option value="requeue" selected>requeue</option>');
+  expect(r.dialogs[0]).toContain('<option value="drop">drop</option>');
+  r.dialogFields['clean-item'] = 'drop';
+  r.actor.changed();
+  expect(r.ui.dialog?.lines.at(-1)).toBe(
+    "drops ticket:FAKE-1 from wf's queue and takes the watcher's label off its ticket",
+  );
+  r.actor.confirm();
+  expect(r.posts).toEqual([{ path: '/api/repos/alpha/runs/R1/clean', body: { item: 'drop' } }]);
+  await r.answer(200, { message: 'cleaned R1', problems: ['R1: queue item still names it'] });
+  expect([r.effects, r.toasts]).toEqual([['leave'], ['bad clean R1: cleaned R1\nR1: queue item still names it']]);
+});
+
+test('cancelling the clean dialog of a run a queue item names posts nothing', () => {
+  const r = rig(NAMED);
+  r.actor.act('clean-run', {});
+  r.actor.cancel();
+  expect(r.posts).toEqual([]);
+});
+
+const failedRepos = (withItem: boolean): IndexRepo[] =>
+  [
+    {
+      name: 'alpha',
+      runs: [],
+      queues: [],
+      offers: {
+        watch: on,
+        workflows: {},
+        clean: {
+          ...on,
+          runs: [
+            { runId: 'R1' },
+            { runId: 'R2', ...(withItem ? { item: { workflow: 'wf', dedupKey: 'ticket:R2', state: 'parked' } } : {}) },
+          ],
+        },
+      },
+    },
+    {
+      name: 'beta',
+      runs: [],
+      queues: [],
+      offers: { watch: on, workflows: {}, clean: { ...on, runs: [{ runId: 'B1' }] } },
+    },
+  ] as unknown as IndexRepo[];
+
+test('clean all failed opens one dialog with no field when no listed run has a queue item, posts the listed runs and gives the answer as one toast', async () => {
+  const r = rig(undefined, failedRepos(false));
+  r.actor.act('clean-failed', {});
+  expect(r.ui.dialog).toEqual({
+    title: 'clean every failed run',
+    lines: ['cleans 3 failed runs', 'alpha: R1', 'alpha: R2', 'beta: B1'],
+    verb: 'clean',
+  });
+  expect(r.dialogs[0]).not.toContain('<select');
+  r.actor.confirm();
+  expect(r.posts).toEqual([
+    {
+      path: '/api/clean-failed',
+      body: {
+        runs: [
+          { repo: 'alpha', runId: 'R1' },
+          { repo: 'alpha', runId: 'R2' },
+          { repo: 'beta', runId: 'B1' },
+        ],
+        items: 'skip',
+      },
+    },
+  ]);
+  expect(r.ui.underway).toEqual({ 'clean:*': 'cleaning…' });
+  await r.answer(200, { message: 'cleaned 3 of 3 failed runs\nalpha: cleaned R1', left: 0, failed: 0, runs: [] });
+  expect([r.toasts, r.ui.underway]).toEqual([
+    ['ok clean all failed: cleaned 3 of 3 failed runs\nalpha: cleaned R1'],
+    {},
+  ]);
+});
+
+test('clean all failed for a repository asks skip, requeue or drop when a run has a queue item, redraws at a change and posts the choice', () => {
+  const r = rig(undefined, failedRepos(true));
+  r.actor.act('clean-failed', { repo: 'alpha' });
+  expect(r.ui.dialog?.title).toBe('clean all failed runs of alpha');
+  expect(r.dialogs[0]).toContain('<select name="clean-items" autofocus>');
+  expect(r.dialogs[0]).toContain('<option value="skip" selected>skip</option>');
+  expect(r.ui.dialog?.lines).toEqual([
+    'cleans 1 failed run',
+    'leaves 1 a queue item names',
+    'R1',
+    'R2 · queue item ticket:R2 of wf: skipped',
+  ]);
+  r.dialogFields['clean-items'] = 'requeue';
+  r.actor.changed();
+  expect(r.ui.dialog?.lines).toEqual(['cleans 2 failed runs', 'R1', 'R2 · queue item ticket:R2 of wf: requeued']);
+  expect(r.redraws[0]).toContain('<li>cleans 2 failed runs</li>');
+  r.actor.confirm();
+  expect(r.posts).toEqual([
+    {
+      path: '/api/repos/alpha/clean-failed',
+      body: {
+        runs: [
+          { repo: 'alpha', runId: 'R1' },
+          { repo: 'alpha', runId: 'R2' },
+        ],
+        items: 'requeue',
+      },
+    },
+  ]);
+  expect(r.ui.underway).toEqual({ 'clean:alpha': 'cleaning…' });
+});
+
+test('a clean all failed that left a run is a red toast that stays, and one that cleaned the open run leaves it', async () => {
+  const r = rig(undefined, failedRepos(false));
+  r.actor.act('clean-failed', { repo: 'alpha' });
+  r.actor.confirm();
+  await r.answer(200, {
+    message: 'cleaned 1 of 2 failed runs, left 1',
+    left: 1,
+    failed: 0,
+    runs: [
+      { repo: 'alpha', runId: 'R1', cleaned: true, lines: [] },
+      { repo: 'alpha', runId: 'R2', cleaned: false, lines: [] },
+    ],
+  });
+  // The open run is alpha/R1, which the answer says is gone.
+  expect([r.effects, r.toasts]).toEqual([
+    ['leave'],
+    ['bad clean all failed alpha: cleaned 1 of 2 failed runs, left 1'],
+  ]);
+  expect(r.marks.flat()).toEqual(expect.arrayContaining(['sidebar', 'inspector', 'status']));
+});
+
+test('a clean all failed that cleaned a run other than the open one leaves the open run alone', async () => {
+  const r = rig(undefined, failedRepos(false));
+  r.open = { repo: 'alpha', runId: 'OTHER' };
+  r.actor.act('clean-failed', { repo: 'alpha' });
+  r.actor.confirm();
+  await r.answer(200, {
+    message: 'cleaned 2 of 2 failed runs',
+    left: 0,
+    failed: 0,
+    runs: [{ repo: 'alpha', runId: 'R1', cleaned: true, lines: [] }],
+  });
+  expect([r.effects, r.toasts]).toEqual([[], ['ok clean all failed alpha: cleaned 2 of 2 failed runs']]);
+});
+
+test('a refused clean all failed is a red toast with the server words, and cancelling its dialog posts nothing', async () => {
+  const r = rig(undefined, failedRepos(false));
+  r.actor.act('clean-failed', {});
+  r.actor.cancel();
+  expect(r.posts).toEqual([]);
+  r.actor.act('clean-failed', {});
+  r.actor.confirm();
+  await r.answer(409, { error: 'a clean of every failed run is already under way' });
+  expect(r.toasts).toEqual(['bad clean all failed: a clean of every failed run is already under way']);
+});

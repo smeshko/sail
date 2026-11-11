@@ -389,3 +389,38 @@ test('a page loaded at a run the index does not list says so in a toast, opens n
   expect(written[0]).toEqual(['replace', '/']);
   expect(written.flat().join(' ')).not.toContain('NOPE-1');
 }, 30_000);
+
+test('on the real bundle and server, clean all failed in History lists the two failed runs, and confirming cleans both and empties the list', async () => {
+  m = seedFixtures();
+  writeFileSync(join(m.alpha.runDir, 'STATUS'), 'failed workflow_failed\n');
+  const leasesDir = join(m.root, 'leases');
+  const started = startDashboard({
+    registryDir: m.registryDir,
+    port: 0,
+    followPollMs: 20,
+    indexPollMs: 50,
+    leasesDir,
+    ports: fakeClonePorts(leasesDir),
+    env: { ...process.env, SAIL_HOME: m.sailHome },
+  });
+  if ('refused' in started) throw new Error(started.refused);
+  server = started;
+  const page = await bootHeadless(server);
+  expect(await until(() => page.text('sidebar').includes('<span class="nm">alpha</span>'))).toBe(true);
+  page.click({ action: 'select-view', view: 'history' });
+  expect(await until(() => page.text('list').includes('data-action="clean-failed"'))).toBe(true);
+  expect(page.text('list')).toContain('>clean all failed</button>');
+  page.click({ action: 'clean-failed' });
+  expect(await until(() => page.text('dialog').includes('data-action="dialog-confirm"'))).toBe(true);
+  expect(page.text('dialog')).toContain('<h2 id="dialog-title">clean every failed run</h2>');
+  expect(page.text('dialog')).toContain('<li>cleans 2 failed runs</li>');
+  expect(page.text('dialog')).toContain(`<li>alpha: ${FAKE_2_ID}</li>`);
+  expect(page.text('dialog')).toContain(`<li>alpha: ${GOLDEN_RUN_ID}</li>`);
+  expect(page.posted).toEqual([]);
+  page.click({ action: 'dialog-confirm' });
+  expect(await until(() => page.text('toasts').includes('cleaned 2 of 2 failed runs'))).toBe(true);
+  expect(page.text('toasts')).toContain('toast ok');
+  expect(await until(() => !page.text('list').includes('data-action="clean-failed"'))).toBe(true);
+  expect(page.text('list')).not.toContain(`data-run="${FAKE_2_ID}"`);
+  expect(page.posted).toHaveLength(1);
+}, 30_000);

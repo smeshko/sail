@@ -300,15 +300,18 @@ function startRow(source: OfferSource): MenuRow[] {
 export function generalRows(source: OfferSource): MenuRow[] {
   const none: Subject = { kind: 'none' };
   return [
+    // A local action is always there; one that asks the server is there while its offers give it. One with rows of its
+    // own, such as start anyway, is a row per variant.
     ...ACTIONS.filter((def) => def.appliesTo.includes('none')).flatMap((def): MenuRow[] => {
-      const available = def.available(none, source);
-      if (!available.offered) return [];
+      const available = def.run === undefined ? def.available(none, source) : undefined;
+      if (available !== undefined && !available.offered) return [];
+      const disabled = available !== undefined && !available.enabled;
       const row = (label: string, data: Record<string, string>): MenuRow => ({
         group: 'general',
         label,
         ...(def.key === undefined ? {} : { key: def.key }),
-        ...(available.enabled || available.why === undefined ? {} : { why: available.why }),
-        disabled: !available.enabled,
+        ...(disabled && available?.why !== undefined ? { why: available.why } : {}),
+        disabled,
         run: { act: def.id, subject: none, data },
       });
       return def.variants === undefined
