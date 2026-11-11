@@ -5405,7 +5405,7 @@ describe('a filter that drops the open row selects the first row left (ADW-537)'
     expect(pushes()).toBe(before);
   });
 
-  test("History's status control and the sidebar's repository filter do the same", () => {
+  test("History's status control and the sidebar's repository filter do the same, a push for each choice (ADW-546)", () => {
     const open = onHistory();
     const before = pushes();
     host.type('list-status', 'failed');
@@ -5415,7 +5415,7 @@ describe('a filter that drops the open row selects the first row left (ADW-537)'
     host.click({ action: 'filter-repo', repo: 'beta' });
     host.advance(100);
     expect([open.ui.repo, open.ui.runId]).toEqual(['beta', FAKE_4]);
-    expect(pushes()).toBe(before);
+    expect(pushes()).toBe(before + 3);
   });
 
   test("History's workflow control opens the first row of the workflow when the open run is of another", () => {
@@ -6055,5 +6055,64 @@ describe("the list's filters are in the URL (ADW-546)", () => {
     host.advance(100);
     expect(page.ui.listFilter).toBe('FAKE-4');
     expect(host.urls[0]?.query).toContain('q=FAKE-4');
+  });
+
+  const pushesNow = () => host.urls.filter((write) => write.push).length;
+  const onHistory = () => {
+    const open = boots({ view: 'history' });
+    expect(open.ui.runId).toBe(FAKE_1);
+    return open;
+  };
+
+  test('typing in the filter replaces the history entry and pushes none (ADW-546)', () => {
+    const open = onHistory();
+    const before = pushesNow();
+    for (const text of ['F', 'FA', 'FAKE-1']) host.type('list-filter', text);
+    host.advance(100);
+    expect(pushesNow()).toBe(before);
+    expect(open.ui.runId).toBe(FAKE_1);
+    expect(host.urls.at(-1)).toEqual({ query: `repo=alpha&run=${FAKE_1}&view=history&q=FAKE-1`, push: false });
+  });
+
+  test('a chosen repository, status or workflow pushes one entry, and Back restores the entry before (ADW-546)', () => {
+    const open = onHistory();
+    const before = host.urls.length;
+    host.type('list-status', 'failed');
+    host.advance(100);
+    expect(host.urls.slice(before)).toEqual([
+      { query: `repo=alpha&run=${FAKE_2_ID}&view=history&status=failed`, push: true },
+    ]);
+    host.go(`repo=alpha&run=${FAKE_1}&view=history`);
+    host.advance(100);
+    expect([open.ui.historyStatus, open.ui.runId]).toEqual([undefined, FAKE_1]);
+    const mark = host.urls.length;
+    host.click({ action: 'filter-repo', repo: 'beta' });
+    host.advance(100);
+    expect(host.urls.slice(mark).map((write) => write.push)).toEqual([true]);
+    expect(host.urls.at(-1)?.query).toContain('in=beta');
+    const next = host.urls.length;
+    host.type('list-workflow', 'ticket-to-pr');
+    host.advance(100);
+    expect(host.urls.slice(next).map((write) => write.push)).toEqual([true]);
+    expect(host.urls.at(-1)?.query).toContain('workflow=ticket-to-pr');
+  });
+
+  test("History's status failed keeps an open failed run (ADW-546)", () => {
+    const open = boots({ repo: 'alpha', run: FAKE_2_ID, view: 'history' });
+    const sockets = host.open('run=').length;
+    host.type('list-status', 'failed');
+    host.advance(100);
+    expect(open.ui.runId).toBe(FAKE_2_ID);
+    expect(host.open('run=').length).toBe(sockets);
+    expect(host.urls.at(-1)).toEqual({ query: `repo=alpha&run=${FAKE_2_ID}&view=history&status=failed`, push: true });
+  });
+
+  test("a text filter that still lists the open queue's row keeps the queue open (ADW-546)", () => {
+    const open = boots({ view: 'queues' });
+    const queue = open.ui.queue;
+    expect(queue).toBeDefined();
+    host.type('list-filter', 'ticket');
+    host.advance(100);
+    expect(open.ui.queue).toBe(queue);
   });
 });

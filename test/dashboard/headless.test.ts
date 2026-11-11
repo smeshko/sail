@@ -441,3 +441,20 @@ test('the real bundle loaded at ?view=history&status=failed lists only the faile
   expect(page.history.at(-1)?.url).toContain('view=history');
   expect(page.history.at(-1)?.url).toContain('status=failed');
 }, 30_000);
+
+test('on the real bundle, typing in the filter replaces the entry and choosing a status pushes one (ADW-546)', async () => {
+  m = seedFixtures();
+  const started = startDashboard({ registryDir: m.registryDir, port: 0, followPollMs: 20, indexPollMs: 50 });
+  if ('refused' in started) throw new Error(started.refused);
+  server = started;
+  const page = await bootHeadless(server, '?view=history');
+  expect(await until(() => page.text('list').includes('data-row="run:alpha/FAKE-2-'))).toBe(true);
+  const before = page.history.filter((entry) => entry.kind === 'push').length;
+  page.type('list-filter', 'FAKE-2');
+  expect(await until(() => page.history.at(-1)?.url.includes('q=FAKE-2') === true)).toBe(true);
+  expect(page.history.at(-1)?.kind).toBe('replace');
+  expect(page.history.filter((entry) => entry.kind === 'push').length).toBe(before);
+  page.type('list-status', 'failed');
+  expect(await until(() => page.history.at(-1)?.url.includes('status=failed') === true)).toBe(true);
+  expect(page.history.at(-1)?.kind).toBe('push');
+}, 30_000);

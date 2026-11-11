@@ -32,13 +32,13 @@ export type Action = (store: Store, data: Record<string, string>) => void;
 const OPENS = new Set(['select-run', 'select-queue', 'open']);
 
 /**
- * Applies a change to what the list shows, selecting the first row left when it dropped the open row. The centre and
- * the URL follow it without a history entry: the replace here is what the push at the end of `dispatch` finds written.
+ * Applies a change to what the list shows, selecting the first row left when it dropped the open row. It writes no URL:
+ * a chosen repository, status or workflow is a person's selection, which the push at the end of `dispatch` writes as one
+ * entry, and typing in the filter field replaces the current entry itself, once it has called this.
  */
 function narrowList(store: Store, change: () => void, ...also: Region[]) {
   keepSelection(store, change);
   store.mark('list', 'main', ...also);
-  syncUrl(store, false);
 }
 
 /** Selects the card `by` places from the selected one. */
@@ -197,6 +197,7 @@ export const actions: Record<string, Action> = {
     narrowList(store, () => {
       store.ui.listFilter = data.value ?? '';
     });
+    syncUrl(store, false);
   },
   // What was chosen in History's status and workflow controls; a value that is no status is ignored.
   'filter-status': (store, data) => {

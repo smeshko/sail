@@ -4,8 +4,8 @@
 // Then `view`, the list's view, unless it is `active`, and the list's filters: `in`, the sidebar's repository, `q`, the
 // text typed in the filter field, and in History alone `status` and `workflow`; an empty filter writes no parameter,
 // and `repo` stays the open run's repository. `syncUrl()` is the one place the shell writes the URL: a
-// person's selections (a click, a key) push a history entry, and what a stream or an answer changes replaces the
-// current one.
+// person's selections (a click, a key, a chosen repository, status or workflow) push a history entry, and what a stream,
+// an answer or typing in the list's filter field changes replaces the current one.
 import { VIEWS, type ViewName } from './list-model';
 import type { Store } from './store';
 import { type InspectorTab, TABS, type UiState } from './ui-state';

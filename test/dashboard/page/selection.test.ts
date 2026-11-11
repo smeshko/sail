@@ -195,3 +195,21 @@ test('keepSelection only applies the change in a narrow window', () => {
   expect(made.ui.listFilter).toBe('a-old');
   expect(connects).toEqual([]);
 });
+
+test("keepSelection keeps an open failed run when History's status becomes failed (ADW-546)", () => {
+  const index = [
+    repo('alpha', [
+      runOf('a-ok', 'completed', '2026-10-01T10:00:00Z'),
+      runOf('a-bad', 'failed', '2026-10-01T09:00:00Z'),
+    ]),
+  ];
+  const { store: made, connects } = store(index);
+  made.ui.view = 'history';
+  made.ui.repo = 'alpha';
+  made.ui.runId = 'a-bad';
+  keepSelection(made, () => {
+    made.ui.historyStatus = 'failed';
+  });
+  expect(made.ui.runId).toBe('a-bad');
+  expect(connects).toEqual([]);
+});
