@@ -54,6 +54,8 @@ export interface UiState {
   tab: InspectorTab;
   /** The run file open in the drawer: its name and its path in the run directory. */
   file?: { name: string; path: string };
+  /** What the rail says of the last open the page could not make: a run, queue, call or file a URL named that is not there. */
+  indexNotice?: string;
   /** The log stream the log tab shows, when one is chosen. */
   stream?: string;
   /** The step the log tab shows for a multi-step call, when one is chosen. */

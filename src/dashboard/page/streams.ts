@@ -2,7 +2,7 @@
 // the open run's summary; one run socket for the open run, whose events are folded into the run model; and one queue
 // socket per watched workflow in the index. A run or queue socket that closes without `end` reconnects after 2 s from an
 // empty model, unless its stream sent `error`: then the error stays, with no reconnect, until it is clicked again. The
-// index socket always reconnects. The first index opens what the URL names when it lists it, else the newest running
+// index socket always reconnects. The first index opens what the URL names, else the newest running
 // run, else the newest, and a selection is kept while its run is still listed. Nothing here knows of a click or a key.
 import type { QueueEvent, SailEvent } from '../../events/types';
 import type { IndexRepo } from '../files';
@@ -12,7 +12,16 @@ import { tick } from './draw';
 import { newestFirst, railRepos, statusOf } from './index-model';
 import { syncUrl } from './location';
 import { queueId } from './queue-view';
-import { clearCall, closeFile, offerSignature, readOffers, readResult, refreshLog, refreshOutput } from './reads';
+import {
+  clearCall,
+  closeFile,
+  offerSignature,
+  readOffers,
+  readResult,
+  refreshLog,
+  refreshOutput,
+  selectCard,
+} from './reads';
 import { applyEvent, emptyRun } from './run-model';
 import { saveCleared, storedCleared } from './saved';
 import { type OpenQueue, type OpenRun, openQueue, type Store } from './store';
@@ -78,6 +87,13 @@ export function onRunMessage(store: Store, open: OpenRun, text: string) {
     open.ended = true;
     open.endSeen = host.now();
     store.mark('main', 'status');
+    // A call the URL named that the run never made is dropped, keeping the run.
+    if (store.cursorPending && ui.key !== undefined) {
+      ui.indexNotice = `call ${ui.key} is not in run ${open.runId}`;
+      selectCard(store, undefined);
+      store.mark('rail');
+      syncUrl(store, false);
+    }
     // An index saying the run runs again may have come before this end: look again once the index has caught up
     // (review R2-3).
     open.retry = host.later(() => {
@@ -255,7 +271,7 @@ export function onIndex(store: Store, text: string, onStart: (asked: Record<stri
     repos.some((repo) => repo.name === name && repo.runs.some((entry) => entry.runId === runId));
   const asked = store.start;
   store.start = undefined;
-  if (asked !== undefined && lists(asked.repo, asked.run)) onStart(asked);
+  if (asked !== undefined) onStart(asked);
   else if (!lists(ui.repo, ui.runId)) {
     const first = firstRun(store, repos);
     if (first !== undefined) selectRun(store, first.repo, first.runId);

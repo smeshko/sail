@@ -355,6 +355,9 @@ test('a URL naming a run no repository lists opens the newest run instead', () =
   page = boot(host);
   host.push(host.open('index')[0], indexMessage());
   expect(host.open('run=').map((socket) => socket.query)).toEqual([runQuery('alpha', GOLDEN_RUN_ID)]);
+  host.advance(100);
+  expect(host.regions.rail).toContain('run FAKE-9-01M5PY0000000000000000000 of alpha is not listed');
+  expect(host.urls).toEqual([{ query: `repo=alpha&run=${GOLDEN_RUN_ID}`, push: false }]);
 });
 
 test('the URL is read on the first index only: a run picked since stays open through the next index', () => {
@@ -2386,5 +2389,92 @@ describe('the page keeps its URL in step with what it shows (ADW-513)', () => {
     host.click({ action: 'restart-run' });
     await settle();
     expect(host.urls).toEqual([{ query: `repo=alpha&run=${NEW_ID}`, push: false }]);
+  });
+});
+
+describe('loading a URL opens what it names (ADW-513)', () => {
+  const FILE = 'implement#1/out/notes.txt';
+  const FILE_READ = `${`/api/repos/alpha/runs/${FAKE_2_ID}`}/file?path=${encodeURIComponent(FILE)}`;
+  const start = (query: Record<string, string>) => {
+    host.startAt = query;
+    page = boot(host);
+    host.push(host.open('index')[0], indexMessage());
+  };
+
+  test('repo, run, call, tab and timeline open FAKE-2 at implement#1 on its permissions tab with its timeline, with no push', async () => {
+    start({ repo: 'alpha', run: FAKE_2_ID, key: 'implement#1', tab: 'permissions', timeline: '1' });
+    expect(host.open('run=').map((socket) => socket.query)).toEqual([runQuery('alpha', FAKE_2_ID)]);
+    replay(host.open('run=')[0], fake2Dir(m));
+    await settle();
+    host.advance(100);
+    expect(host.regions.inspector).toContain(
+      '<button class="tab on" data-action="tab" data-tab="permissions">permissions</button>',
+    );
+    expect(host.regions.main).toContain('class="tl-top"');
+    expect(host.urls.filter((url) => url.push)).toEqual([]);
+  });
+
+  test("a file in the URL is read for the drawer, named by the path's last segment", async () => {
+    host.bodies.set(FILE_READ, { status: 200, body: 'hello notes' });
+    start({ repo: 'alpha', run: FAKE_2_ID, file: FILE });
+    await settle();
+    host.advance(100);
+    expect(host.reads.map((read) => read.path)).toEqual([FILE_READ]);
+    expect(host.regions.drawer).toContain('<b>notes.txt</b>');
+    expect(host.regions.drawer).toContain('hello notes');
+  });
+
+  test('a queue in the URL draws the queue view', () => {
+    start({ queue: `beta/${QUEUE_WORKFLOW}` });
+    host.advance(100);
+    expect(host.regions.main).toStartWith('<div class="d-h"><span class="d-title">ticket-to-pr queue</span>');
+  });
+
+  test('a queue the index does not list says so and opens the newest run', () => {
+    start({ queue: 'beta/nope' });
+    host.advance(100);
+    expect(host.regions.rail).toContain('queue beta/nope is not listed');
+    expect(host.open('run=').map((socket) => socket.query)).toEqual([runQuery('alpha', GOLDEN_RUN_ID)]);
+    expect(host.urls).toEqual([{ query: `repo=alpha&run=${GOLDEN_RUN_ID}`, push: false }]);
+  });
+
+  test("a call an ended run does not have is dropped at the stream's end, with a notice, and the URL replaced; before the end it stays", () => {
+    start({ repo: 'alpha', run: FAKE_2_ID, key: 'nope#1' });
+    const [socket] = host.open('run=');
+    host.push(socket, { kind: 'event', event: readEvents(fake2Dir(m))[0] });
+    expect(page?.ui.key).toBe('nope#1');
+    replay(socket, fake2Dir(m));
+    host.advance(100);
+    expect(page?.ui.key).toBeUndefined();
+    expect(host.regions.rail).toContain(`call nope#1 is not in run ${FAKE_2_ID}`);
+    expect(host.urls.at(-1)).toEqual({ query: `repo=alpha&run=${FAKE_2_ID}`, push: false });
+  });
+
+  test('a file whose read answers 404 leaves the drawer empty, says so, and replaces the URL without it', async () => {
+    host.bodies.set(FILE_READ, { status: 404, body: '' });
+    start({ repo: 'alpha', run: FAKE_2_ID, file: FILE });
+    await settle();
+    host.advance(100);
+    expect(host.regions.drawer).toBe('');
+    expect(host.regions.rail).toContain(`file ${FILE} is not in run ${FAKE_2_ID}`);
+    expect(host.urls.at(-1)).toEqual({ query: `repo=alpha&run=${FAKE_2_ID}`, push: false });
+  });
+
+  test('an unknown tab shows the overview and no notice', async () => {
+    start({ repo: 'alpha', run: FAKE_2_ID, key: 'implement#1', tab: 'bogus' });
+    replay(host.open('run=')[0], fake2Dir(m));
+    await settle();
+    host.advance(100);
+    expect(host.regions.inspector).toContain('<button class="tab on" data-action="tab" data-tab="overview">');
+    expect(host.regions.rail).not.toContain('is not');
+  });
+
+  test('a notice shows until a run or a queue is selected', () => {
+    start({ repo: 'alpha', run: 'NOPE-1' });
+    host.advance(100);
+    expect(host.regions.rail).toContain('run NOPE-1 of alpha is not listed');
+    host.click({ action: 'select-run', repo: 'alpha', run: FAKE_2_ID });
+    host.advance(100);
+    expect(host.regions.rail).not.toContain('is not listed');
   });
 });

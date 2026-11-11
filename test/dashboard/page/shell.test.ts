@@ -28,6 +28,7 @@ const SPLIT = [
   'act.ts',
   'keys.ts',
   'location.ts',
+  'navigate.ts',
   'app.ts',
 ];
 

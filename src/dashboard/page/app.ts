@@ -10,12 +10,13 @@
 //
 // The rules each module follows are in its own header.
 import { createActor } from './act';
-import { actions, dispatch } from './actions';
+import { dispatch } from './actions';
 import { startDraw } from './draw';
 import type { PageHost } from './host';
 import { REGIONS } from './host';
 import { onKey } from './keys';
 import { syncUrl } from './location';
+import { navigate } from './navigate';
 import { stopReads } from './reads';
 import { saveCleared, storedCleared } from './saved';
 import { createStore } from './store';
@@ -70,7 +71,7 @@ export function boot(host: PageHost): Page {
   startDraw(store);
   host.onAction((action, data) => dispatch(store, action, data));
   host.onKey((key, inInput) => onKey(store, key, inInput));
-  openIndex(store, (asked) => actions.open?.(store, asked));
+  openIndex(store, (asked) => navigate(store, asked, 'first'));
   store.mark(...REGIONS);
 
   return {

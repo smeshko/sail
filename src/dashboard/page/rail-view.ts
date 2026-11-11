@@ -251,6 +251,8 @@ export function renderRail(
   const runs = repos.reduce((sum, repo) => sum + repo.runs.length, 0);
   const left = resultOf(ui.act, 'rail');
   const notice = left === undefined ? '' : html`<div class="act"><span class="warnchip">${left}</span></div>`;
-  return html`${notice}${runningBlock(repos, ui, offers)}${queuedBlock(repos, ui, now)}<div class="rail-h"><span>repositories</span><span class="c">${runs} runs</span></div>
+  const gone =
+    ui.indexNotice === undefined ? '' : html`<div class="act"><span class="warnchip">${ui.indexNotice}</span></div>`;
+  return html`${notice}${gone}${runningBlock(repos, ui, offers)}${queuedBlock(repos, ui, now)}<div class="rail-h"><span>repositories</span><span class="c">${runs} runs</span></div>
 ${repos.length === 0 ? html`<div class="qempty">no repository is registered yet: run sail watch in one</div>` : ''}${repos.map((repo) => repoGroup(repo, ui, now, offers))}`;
 }

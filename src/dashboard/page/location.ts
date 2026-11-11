@@ -4,7 +4,7 @@
 // file. `syncUrl()` is the one place the shell writes the URL: a person's selections (a click, a key) push a history
 // entry, and what a stream or an answer changes replaces the current one.
 import type { Store } from './store';
-import type { UiState } from './ui-state';
+import { type InspectorTab, TABS, type UiState } from './ui-state';
 
 /** The query string of what `ui` shows, without its `?`: empty when it shows nothing. */
 export function toQuery(ui: UiState): string {
@@ -33,4 +33,29 @@ export function syncUrl(store: Store, push: boolean): void {
   if (query === store.url) return;
   store.url = query;
   store.host.setUrl(query, push);
+}
+
+/** What a query asks the page to show. */
+export interface Target {
+  queue?: string;
+  repo?: string;
+  run?: string;
+  key?: string;
+  tab: InspectorTab;
+  timeline: boolean;
+  file?: string;
+}
+
+/** The target a query names: a queue alone, else a run with its call, tab, timeline and file. */
+export function fromQuery(asked: Record<string, string>): Target {
+  if (asked.queue !== undefined) return { queue: asked.queue, tab: 'overview', timeline: false };
+  const tab = (TABS as readonly string[]).includes(asked.tab ?? '') ? (asked.tab as InspectorTab) : 'overview';
+  return {
+    ...(asked.repo === undefined ? {} : { repo: asked.repo }),
+    ...(asked.run === undefined ? {} : { run: asked.run }),
+    ...(asked.key === undefined ? {} : { key: asked.key }),
+    tab,
+    timeline: asked.timeline === '1',
+    ...(asked.file === undefined ? {} : { file: asked.file }),
+  };
 }
