@@ -3360,4 +3360,134 @@ describe('the Inbox view (ADW-527)', () => {
     expect(page.ui.view).toBe('inbox');
     expect(host.regions.list).toContain('<span class="lh-t">Inbox</span>');
   });
+
+  describe('dismissing', () => {
+    const count = () =>
+      host.regions.sidebar?.match(
+        /data-view="inbox"[^>]*><span class="nm">Inbox<\/span><span class="c">(\d+)<\/span>/,
+      )?.[1];
+    const inbox = () => {
+      page = boot(host);
+      plainIndex();
+      host.press('a');
+      host.advance(100);
+    };
+    const rows = () => [...(host.regions.list ?? '').matchAll(/<b class="r-title">([^<]*)<\/b>/g)].map(([, t]) => t);
+
+    test("e dismisses the row under the cursor and its toast's Undo lists it again", () => {
+      inbox();
+      host.press('j');
+      host.press('j');
+      expect(page?.ui.listCursor).toContain('inbox:');
+      host.press('e');
+      host.advance(100);
+      expect(rows()).toEqual(['implement#1 ended in error', 'ticket:FAKE-6 parked after 2 attempts']);
+      expect(count()).toBe('2');
+      expect(toasts()).toEqual(['ok dismiss: failed: stage_error hidden']);
+      expect(page?.ui.toasts[0]?.undo).toBe(true);
+      expect(host.posts).toEqual([]);
+      expect(page?.ui.listCursor).toContain('implement#1 ended in error');
+      host.click({ action: 'undo-toast', toast: '1' });
+      host.advance(100);
+      expect(rows()).toEqual([
+        'failed: stage_error',
+        'implement#1 ended in error',
+        'ticket:FAKE-6 parked after 2 attempts',
+      ]);
+      expect(count()).toBe('3');
+    });
+
+    test('an identity another tab saved meanwhile stays hidden after Undo', () => {
+      inbox();
+      host.press('j');
+      host.press('j');
+      host.press('e');
+      host.storage.set(
+        CLEARED_KEY,
+        JSON.stringify([...JSON.parse(host.storage.get(CLEARED_KEY) ?? '[]'), 'other tab']),
+      );
+      host.click({ action: 'undo-toast', toast: '1' });
+      expect(JSON.parse(host.storage.get(CLEARED_KEY) ?? '[]')).toEqual(['other tab']);
+    });
+
+    test('e on the last row moves the cursor to the previous row, and repeated e works through the list', () => {
+      inbox();
+      for (let i = 0; i < 5; i++) host.press('j');
+      expect(page?.ui.listCursor).toContain('ticket:FAKE-6');
+      host.press('e');
+      host.advance(100);
+      expect(page?.ui.listCursor).toContain('implement#1 ended in error');
+      host.press('e');
+      host.press('e');
+      host.advance(100);
+      expect([count(), rows()]).toEqual(['0', []]);
+      expect(page?.ui.listCursor).toBeUndefined();
+    });
+
+    test('with a row opened by a click, e dismisses the open run row and the run stays open', () => {
+      inbox();
+      host.click({ action: 'open', repo: 'alpha', run: FAKE_2_ID, key: 'implement#1' });
+      host.advance(100);
+      expect(page?.ui.listCursor).toBeUndefined();
+      host.press('e');
+      host.advance(100);
+      expect(count()).toBe('2');
+      expect(rows()).not.toContain('failed: stage_error');
+      expect([page?.ui.runId, page?.ui.view]).toEqual([FAKE_2_ID, 'inbox']);
+    });
+
+    test("a click on a row's ✕ does what e does and does not open the row", () => {
+      inbox();
+      expect(host.regions.list).toContain('data-action="dismiss-attention" data-item="');
+      const item = attention(index(m.registryDir)).find((each) => each.kind === 'parked');
+      if (item === undefined) throw new Error('no parked item');
+      host.click({ action: 'dismiss-attention', item: identity(item) });
+      host.advance(100);
+      expect([count(), toasts()]).toEqual(['2', ['ok dismiss: ticket:FAKE-6 parked after 2 attempts hidden']]);
+      expect([page?.ui.runId, page?.ui.queue]).toEqual([undefined, undefined]);
+    });
+
+    test('Shift+E hides every row the Inbox shows, and its Undo lists them again', () => {
+      inbox();
+      host.press('E');
+      host.advance(100);
+      expect([count(), rows(), toasts()]).toEqual(['0', [], ['ok all clear: 3 hidden']]);
+      host.click({ action: 'undo-toast', toast: '1' });
+      host.advance(100);
+      expect(count()).toBe('3');
+    });
+
+    test('e and E do nothing outside the Inbox, and e does nothing in an input', () => {
+      inbox();
+      host.press('2');
+      host.press('e');
+      host.press('E');
+      host.press('4');
+      host.press('e');
+      host.press('E');
+      host.press('1');
+      host.press('j');
+      host.press('e', true);
+      host.press('E', true);
+      host.advance(100);
+      expect([count(), toasts()]).toEqual(['3', []]);
+    });
+
+    test('e with no row under the cursor and no open run does nothing and draws no toast', () => {
+      inbox();
+      host.press('e');
+      expect([count(), toasts()]).toEqual(['3', []]);
+    });
+
+    test('a dismissed row stays hidden after the page boots again on the same storage', () => {
+      inbox();
+      host.press('j');
+      host.press('j');
+      host.press('e');
+      page?.stop();
+      inbox();
+      expect(count()).toBe('2');
+      expect(rows()).not.toContain('failed: stage_error');
+    });
+  });
 });

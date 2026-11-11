@@ -303,7 +303,7 @@ test('an Inbox row opens its run at its call, or its queue, or nothing', () => {
   expect(markup).toContain('data-action="select-queue" data-queue="alpha/flow"');
   const problem = markup.match(/<div class="lrow in-row in-problem[^>]*>.*?<\/div><\/div>/s)?.[0] ?? '';
   expect(problem).toContain('<div class="r-open">');
-  expect(problem).not.toContain('data-action');
+  expect(problem.split('<button class="r-dismiss"')[0]).not.toContain('data-action');
 });
 
 test('the open run marks its Inbox row selected, and so does the open queue', () => {
@@ -315,4 +315,16 @@ test('the open run marks its Inbox row selected, and so does the open queue', ()
 test('the Inbox says nothing needs attention with no item', () => {
   expect(inbox({}, [])).toContain('<div class="qempty">nothing needs attention</div>');
   expect(inbox({}, [])).toContain('<span class="c">0</span>');
+});
+
+test('each Inbox row carries a dismiss button naming its identity, beside its opener', () => {
+  const markup = inbox();
+  expect(
+    markup.match(/<button class="r-dismiss" type="button" data-action="dismiss-attention" data-item="/g),
+  ).toHaveLength(3);
+  expect(markup).toContain('aria-label="dismiss" title="dismiss (e)">✕</button>');
+  expect(markup).toContain(
+    `data-item="${JSON.stringify(['beta', 'problem', null, null, null, 'repository', 'cannot <b>read</b>']).replaceAll('"', '&quot;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')}"`,
+  );
+  expect(draw('active')).not.toContain('r-dismiss');
 });

@@ -1,7 +1,8 @@
 // The list: the one component every view draws its rows on, in the centre. A head names the view with its count, which
 // reads `n of m` while the filter field narrows it, and carries the field itself. Under it,
 // folding groups: Active's `waiting on you` and `running`, History's `failed` and `done`, and in Queues one per
-// repository. A run's row is a `div` holding two sibling buttons: its own, which opens the run and shows on one line
+// repository, and the Inbox's one group each of runs, parked items and problems, whose rows open their run (at its last
+// call in error) or queue, the view staying Inbox, and carry a ✕ that dismisses them. A run's row is a `div` holding two sibling buttons: its own, which opens the run and shows on one line
 // its status, id, title, repository › workflow, stalled mark, duration, cost and stop reason, with a problem wrapping
 // inside it, and, but on a completed run, a ⋯ of its own that opens the run and, under the row, a menu of what it
 // offers: Resume, Restart, Stop and Clean. A queue's row opens its queue and names its watch state, the live watcher's;
@@ -13,7 +14,7 @@ import type { RunActions } from '../actions';
 import type { RepoOffers } from '../offers';
 import { ACTIONS, type OfferSource, type Subject } from './action-registry';
 import { actionControl } from './action-view';
-import type { AttentionItem } from './attention';
+import { type AttentionItem, identity } from './attention';
 import { ago, cost, duration } from './format';
 import { html, type SafeHtml } from './html';
 import { type ListRepo, type ListRun, workflowOf } from './index-model';
@@ -151,7 +152,7 @@ function attentionRow(row: AttentionRow, ui: UiState): SafeHtml {
       : queue !== undefined
         ? html`<button class="r-open" data-action="select-queue" data-queue="${queue}">${body}</button>`
         : html`<div class="r-open">${body}</div>`;
-  return html`<div class="lrow in-row in-${item.kind}${sel ? ' sel' : ''}${cur(row.id, ui)}" data-row="${row.id}">${open}</div>`;
+  return html`<div class="lrow in-row in-${item.kind}${sel ? ' sel' : ''}${cur(row.id, ui)}" data-row="${row.id}">${open}<button class="r-dismiss" type="button" data-action="dismiss-attention" data-item="${identity(item)}" aria-label="dismiss" title="dismiss (e)">✕</button></div>`;
 }
 
 const rowOf = (row: ListRow, ui: UiState, now: number, offers: RunActions | undefined): SafeHtml =>

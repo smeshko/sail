@@ -266,6 +266,33 @@ test('undoable tier: on the real bundle, clear-attention empties the Inbox and d
   expect(page.posted).toEqual([]);
 }, 30_000);
 
+test('undoable tier: on the real bundle, dismiss-attention hides one row and Undo brings it back', async () => {
+  m = seedFixtures();
+  const started = startDashboard({ registryDir: m.registryDir, port: 0, followPollMs: 20, indexPollMs: 50 });
+  if ('refused' in started) throw new Error(started.refused);
+  server = started;
+  const page = await bootHeadless(server);
+  const count = () =>
+    /data-view="inbox"[^>]*><span class="nm">Inbox<\/span><span class="c">(\d+)<\/span>/.exec(
+      page.text('sidebar'),
+    )?.[1];
+  expect(await until(() => count() === '3')).toBe(true);
+  page.click({ action: 'select-view', view: 'inbox' });
+  expect(await until(() => page.text('list').includes('data-action="dismiss-attention"'))).toBe(true);
+  const first = /data-action="dismiss-attention" data-item="([^"]*)"/.exec(page.text('list'))?.[1] ?? '';
+  page.click({
+    action: 'dismiss-attention',
+    item: first.replaceAll('&quot;', '"').replaceAll('&lt;', '<').replaceAll('&gt;', '>').replaceAll('&amp;', '&'),
+  });
+  expect(await until(() => page.text('toasts').includes('data-action="undo-toast"'))).toBe(true);
+  expect(count()).toBe('2');
+  expect(page.text('toasts')).toContain('<span class="toast-head">dismiss</span>');
+  const id = /data-action="undo-toast" data-toast="(\d+)"/.exec(page.text('toasts'))?.[1] ?? '';
+  page.click({ action: 'undo-toast', toast: id });
+  expect(await until(() => count() === '3')).toBe(true);
+  expect(page.posted).toEqual([]);
+}, 30_000);
+
 test('a page loaded at a run the index does not list says so in a toast, opens no run and replaces the URL (ADW-513)', async () => {
   m = seedFixtures();
   const started = startDashboard({ registryDir: m.registryDir, port: 0, followPollMs: 20, indexPollMs: 50 });

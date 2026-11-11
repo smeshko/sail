@@ -50,7 +50,7 @@ const def = (id: string) => {
 const request = (id: string, subject: Subject, values: Record<string, string> = {}, from = source()) =>
   def(id).request?.(subject, values, from);
 
-test('ACTIONS has exactly the thirteen ids, each with a label, appliesTo, a tier and a request and answer or a local run', () => {
+test('ACTIONS has exactly the fourteen ids, each with a label, appliesTo, a tier and a request and answer or a local run', () => {
   expect(ACTIONS.map((each) => each.id).sort()).toEqual(
     [
       'resume-run',
@@ -66,14 +66,15 @@ test('ACTIONS has exactly the thirteen ids, each with a label, appliesTo, a tier
       'watch',
       'unwatch',
       'clear-attention',
+      'dismiss-attention',
     ].sort(),
   );
   for (const each of ACTIONS) {
     expect(each.appliesTo.length).toBeGreaterThan(0);
     expect(each.label(RUN)).not.toBe('');
     expect(each.key).toBeUndefined();
-    if (each.id === 'clear-attention')
-      expect([each.run, each.request, each.answer]).toEqual(['clear-attention', undefined, undefined]);
+    if (each.id === 'clear-attention' || each.id === 'dismiss-attention')
+      expect([each.run, each.request, each.answer]).toEqual([each.id, undefined, undefined]);
     else expect([typeof each.request, typeof each.answer, each.run]).toEqual(['function', 'function', undefined]);
   }
   expect(ACTIONS.filter((each) => each.tier === 'confirmed').map((each) => each.id)).toEqual([
@@ -87,6 +88,7 @@ test('ACTIONS has exactly the thirteen ids, each with a label, appliesTo, a tier
   expect(ACTIONS.filter((each) => each.tier === 'undoable').map((each) => each.id)).toEqual([
     'unwatch',
     'clear-attention',
+    'dismiss-attention',
   ]);
 });
 
@@ -253,7 +255,8 @@ test('the word under way is kept by subject, a workflow of a watch apart from th
     underwayId(def('requeue-item'), { kind: 'item', repo: 'a', workflow: 'w', item: 'k' }),
     underwayId(def('stop-run'), { kind: 'run', repo: 'a', runId: 'R1' }),
     underwayId(def('clear-attention'), { kind: 'none' }),
-  ]).toEqual(['queue:a/w', 'watch:a/w', 'watch:a', 'item:a/w/k', 'run:a/R1', '']);
+    underwayId(def('dismiss-attention'), { kind: 'none' }),
+  ]).toEqual(['queue:a/w', 'watch:a/w', 'watch:a', 'item:a/w/k', 'run:a/R1', '', '']);
   expect(
     ['poll-queue', 'add-ticket', 'move-item', 'requeue-item', 'drop-item', 'watch', 'unwatch'].map(
       (id) => def(id).underway,
@@ -311,6 +314,7 @@ test('every confirmed action has a dialog, and unwatch and all clear are the und
   expect(ACTIONS.filter((each) => each.tier === 'undoable').map((each) => each.id)).toEqual([
     'unwatch',
     'clear-attention',
+    'dismiss-attention',
   ]);
   expect(ACTIONS.filter((each) => each.tier === 'confirmed').map((each) => each.id)).toEqual([
     'resume-run',
@@ -365,6 +369,8 @@ test('available() reads a run action from the open run, an item from its queue, 
     why: 'because',
   });
   expect(at('clear-attention', NONE)).toMatchObject({ offered: true, enabled: true });
+  expect(at('dismiss-attention', NONE)).toMatchObject({ offered: true, enabled: true });
+  expect(def('dismiss-attention')).toMatchObject({ label: expect.any(Function), place: 'list', tier: 'undoable' });
 });
 
 test('an index with no offers, and an item keyed __proto__ that has none, offer nothing', () => {

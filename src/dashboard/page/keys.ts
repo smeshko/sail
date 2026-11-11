@@ -4,8 +4,9 @@
 // or folds the group, and `.` opens the menu of the run under it. `Escape` shuts, in order, the run menu, the item menu,
 // the drawer and the timeline, then the selection and, last, the open run or queue, which gives the
 // list the centre. `/` focuses the list's filter field, `1` to `4` open Inbox, Active, Queues and History, `a` opens the Inbox and `i`
-// toggles the inspector. A key typed in an input does nothing but, for Escape, take the focus off.
-import { actions, step } from './actions';
+// toggles the inspector. In the Inbox `e` dismisses the row under the cursor, else the open run's row, and Shift+E
+// all clear. A key typed in an input does nothing but, for Escape, take the focus off.
+import { actions, dispatch, step } from './actions';
 import { listRepos } from './index-model';
 import { entries, filterRows, groupsOf, type ListRow, VIEWS } from './list-model';
 import { syncUrl } from './location';
@@ -90,6 +91,27 @@ export const keys: Record<string, (store: Store) => void> = {
   ']': (store) => step(store, 1),
   '[': (store) => step(store, -1),
   i: (store) => actions['toggle-inspector']?.(store, {}),
+  e: (store) => {
+    if (store.ui.view !== 'inbox') return;
+    const row = rowOf(store, store.ui.listCursor);
+    const open = store.run === undefined || store.ui.queue !== undefined ? undefined : store.run;
+    const target =
+      row?.kind === 'attention'
+        ? row
+        : shown(store)
+            .flatMap((group) => group.rows)
+            .find(
+              (each) =>
+                each.kind === 'attention' &&
+                open !== undefined &&
+                each.item.opens?.repo === open.repo &&
+                each.item.opens.runId === open.runId,
+            );
+    if (target?.kind === 'attention') dispatch(store, 'dismiss-attention', { item: target.id.slice('inbox:'.length) });
+  },
+  E: (store) => {
+    if (store.ui.view === 'inbox') dispatch(store, 'clear-attention', {});
+  },
   a: (store) => actions['select-view']?.(store, { view: 'inbox' }),
   '.': (store) => {
     const row = rowOf(store, store.ui.listCursor);

@@ -73,6 +73,10 @@ function rig(run?: RunActions, index: IndexRepo[] = []): Rig {
           state.effects.push('cleared');
           return { text: '3 hidden', undo: () => state.effects.push('uncleared') };
         },
+        'dismiss-attention': (data) => {
+          state.effects.push(`dismissed ${data.item}`);
+          return { text: `${data.item} hidden`, undo: () => state.effects.push('undismissed') };
+        },
       },
     },
     mark: (...regions) => state.marks.push(regions),
@@ -312,6 +316,14 @@ test('a local action performs its effect and posts nothing, and its toast carrie
   expect([r.effects, r.posts, r.toasts]).toEqual([['cleared'], [], ['ok all clear: 3 hidden (undo)']]);
   r.undos[0]?.();
   expect(r.effects).toEqual(['cleared', 'uncleared']);
+});
+
+test('a local effect receives the data of the click that ran it', () => {
+  const r = rig();
+  r.actor.act('dismiss-attention', { item: 'the-row' });
+  expect([r.effects, r.posts, r.toasts]).toEqual([['dismissed the-row'], [], ['ok dismiss: the-row hidden (undo)']]);
+  r.undos[0]?.();
+  expect(r.effects).toEqual(['dismissed the-row', 'undismissed']);
 });
 
 test('an index of no offers is the source an action has none to read', () => {
