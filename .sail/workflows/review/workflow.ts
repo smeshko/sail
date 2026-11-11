@@ -4,10 +4,11 @@
 // and which reviews are too thin to trust. Up to three fix passes follow, each checked by the agent, with Jev's answers as its hint, beside fresh
 // validation; a pass that commits nothing and leaves the same findings open ends them early. Then
 // the fixes are pushed, the tickets filed, the demonstration attached to the ticket, the review commented, and the pull
-// request merged once its checks pass. Landing it takes what fix passes are left: each merges the base in, an agent
-// resolving any conflict, and sends checks still red after a rerun to fix as findings; each is validated and pushed
-// before the next try. A review that leaves findings open, one too thin to trust, or a pull request that
-// can't land in the passes left, comments why, takes the label off and fails, leaving the pull request to a human; so
+// request merged once its checks pass. Landing has up to three merges of its own, whatever the fix rounds used: each
+// retry merges the base in, an agent resolving any conflict, and sends checks still red after a rerun to fix as
+// findings; each is validated and pushed before the next merge, and the last merge fails instead of retrying. A review
+// that leaves findings open, one too thin to trust, or a pull request that
+// can't land in its three merges, comments why, takes the label off and fails, leaving the pull request to a human; so
 // does one a stage blocked, which also puts needs-human on, since no run of it would get further.
 // A pull request that changes a gate file is handed to a human before any merge.
 // The leak check's findings are grouped: one per tracker-key prefix, denylist term or Jev line, with its count.
@@ -59,6 +60,9 @@ const LENSES = [
 
 const FIX_PASSES = 3;
 
+/** The most merges landing tries: each but the last may hand back a retry, for a sync with the base and a fix. */
+const LAND_PASSES = 3;
+
 /** `word` for one, `words` otherwise. */
 const plural = (count: number, word: string) => (count === 1 ? word : `${word}s`);
 
@@ -66,7 +70,7 @@ export default workflow(
   'review',
   {
     intake: pr,
-    version: 9,
+    version: 10,
     watch: { every: '5m' },
     // Two pull requests at a time, though each merge moves the base the other is being reviewed against.
     maxConcurrentRuns: 2,
@@ -338,24 +342,25 @@ export default workflow(
       return run.fail(`review: ${thin.map((each) => `review-${each.lens}`).join(', ')} too thin to trust`);
     }
 
-    // Merge once the checks on the pushed head pass. A retry takes one of the fix passes the review left: it merges the
-    // base in, then red checks go to fix as findings. Each is validated, a failed validation going to fix too, then
-    // pushed. Anything a pass can't fix blocks the next merge, which comments it and fails, as the last
-    // pass's merge does instead of retrying.
-    let passes = rounds.length;
+    // Merge once the checks on the pushed head pass. Landing has LAND_PASSES merges of its own, whatever the fix rounds
+    // used: a retry merges the base in, then red checks go to fix as findings. Each is validated, a failed validation
+    // going to fix too, then pushed. Anything a pass can't fix blocks the next merge, which comments it and fails, as
+    // the last merge does instead of retrying.
+    let merges = 0;
     let headSha = pushed.output.headSha;
     let blocked: string | undefined;
     const landing: string[] = [];
-    for (const attempt of run.loop('land', { max: FIX_PASSES - passes + 1 })) {
+    for (const attempt of run.loop('land', { max: LAND_PASSES })) {
       const gated = await run.stage(gateFiles, { pr: pullRequest, headSha });
       const { touched } = gated.output;
       if (touched.length > 0)
         return handOff(`the pull request changes gate files: ${touched.join(', ')}; a person merges it`);
+      merges++;
       const merged = await run.stage(merge, {
         pr: pullRequest,
         headSha,
         label: LABEL,
-        lastTry: passes === FIX_PASSES,
+        lastTry: merges === LAND_PASSES,
         landing,
         ...(blocked === undefined ? {} : { blocked }),
       });
@@ -363,7 +368,6 @@ export default workflow(
       const { retry, failed, rerun } = merged.output;
       if (rerun.length > 0) landing.push(`reran ${rerun.join(', ')} once: still red`);
       if (retry === null) return { merged: merged.output, pushed: pushed.output.pushed, tickets: tickets.length };
-      passes++;
       blocked = undefined;
       // Either retry merges the base in first, so a fix for red checks is made on the base it will land on.
       const synced = await run.stage(syncBase, {
@@ -389,7 +393,7 @@ export default workflow(
       const targets: z.infer<typeof NumberedFinding>[] =
         retry === 'checks'
           ? failed.map((check, index) => ({
-              id: `C${passes}-${index + 1}`,
+              id: `C${merges + 1}-${index + 1}`,
               source: 'checks' as const,
               severity: 'high' as const,
               file: '',
@@ -401,7 +405,7 @@ export default workflow(
       const validated = targets.length === 0 ? await run.stage(validate) : undefined;
       if (validated?.outcome === 'failed') {
         targets.push({
-          id: `V${passes}`,
+          id: `V${merges + 1}`,
           source: 'validate',
           severity: 'high',
           file: validated.output.uncommitted[0] ?? '',
@@ -434,6 +438,6 @@ export default workflow(
       headSha = (await run.stage(push, { since: headSha })).output.headSha;
       attempt.fail();
     }
-    return run.fail('merge: no fix pass left');
+    return run.fail('merge: no landing pass left');
   },
 );

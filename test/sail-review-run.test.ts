@@ -2,8 +2,8 @@
 // repository that holds a copy of the repository's own `.sail/`, its ports all fake and, where a case seeds one, a fake
 // Jev. The first cases are about check-fix: it runs on every fix pass, a clear yes from Jev included, with Jev's answers as
 // its hint, and a regression it reports goes to the next pass. One is about the tickets it files. The
-// rest are about landing: a check still red after its rerun goes to fix, a rejected merge merges the base in, and both
-// take the fix passes left. Every merge is preceded by gate-files; a gate change is handed to a human instead.
+// rest are about landing: a check still red after its rerun goes to fix, a rejected merge merges the base in, and landing
+// has three merges of its own, whatever the fix rounds used. Every merge is preceded by gate-files; a gate change is handed to a human instead.
 // A fix pass that commits nothing and leaves the same findings open ends the fix loop early.
 // Triage cases show Jev decisions surviving omissions and judge overrides winning.
 import { expect, test } from 'bun:test';
@@ -114,6 +114,13 @@ function oneRound(repo: TempRepo, extra: string[] = []): void {
   const [answer] = seeds['check-fix'];
   for (const finding of extra) answer.output.items.push({ finding, resolved: true, detail: 'Holds.' });
   seedHarness(sail, 'check-fix#1', [answer]);
+}
+
+/** Seeds `check-fix#2` as `check-fix#1` is, so `R2` stays open after round 2 and the default answer resolves it in round 3. */
+function threeRounds(repo: TempRepo): void {
+  const sail = join(repo.dir, '.sail');
+  const seeds = JSON.parse(readFileSync(join(sail, 'fake', 'harness.json'), 'utf8'));
+  seedHarness(sail, 'check-fix#2', seeds['check-fix#1']);
 }
 
 /** `sail '#7' --workflow review` in `repo`: its exit code and stderr, the keys its journal holds and its run directory. */
@@ -745,28 +752,115 @@ test('a red check whose base has moved merges the base in before the fix, so the
   });
 }, 120_000);
 
-test('landing shares the three fix passes: after two review rounds, one fix for the failed checks is left, then the merge fails and hands the pull request to a human', async () => {
+/** The landing of two review rounds whose checks stay red: a fix for each of the first two merges, the third merge last. */
+const TWO_LANDING_FIXES = [
+  'merge#1',
+  'sync-base#1',
+  'fix#3',
+  'validate#4',
+  'push#2',
+  'gate-files#2',
+  'merge#2',
+  'sync-base#2',
+  'fix#4',
+  'validate#5',
+  'push#3',
+  'gate-files#3',
+  'merge#3',
+];
+
+test('after three fix rounds, a merge the host rejects for a moved base merges the base in, validates, pushes and lands', async () => {
+  await withTempRepo(async (repo) => {
+    setUp(repo);
+    threeRounds(repo);
+    const moved = moveBase(repo, 'other.txt', 'from the base\n');
+    editPullRequest(repo, { merges: ['rejected', 'merged'] });
+    const { code, stderr, keys, dir } = await review(repo);
+    expect({ code, stderr }).toEqual({ code: 0, stderr: '' });
+
+    expect(keys.filter((key) => key.startsWith('fix#'))).toEqual(['fix#1', 'fix#2', 'fix#3']);
+    expect(landing(keys)).toEqual(['merge#1', 'sync-base#1', 'validate#5', 'push#2', 'gate-files#2', 'merge#2']);
+    const pr = await pullRequest(repo);
+    expect(repo.git('log', '-1', '--format=%P', pr.headSha).trim().split(' ')).toContain(moved);
+    expect(pr.comments.at(-1)).toBe('## sail review\n\nMerged after the review:\n\n- merged the base in\n');
+    const iterations = readEvents(dir).filter(
+      (event) => event.type === 'loop:iteration' && (event as { loop?: string }).loop === 'land',
+    );
+    expect(iterations.length).toBeGreaterThan(0);
+    for (const event of iterations) expect(event).toMatchObject({ max: 3 });
+  });
+}, 120_000);
+
+test('after three fix rounds, a base that conflicts goes to sync-base and resolve-conflicts, and the third merge hands the pull request to a human', async () => {
+  await withTempRepo(async (repo) => {
+    setUp(repo);
+    threeRounds(repo);
+    moveBase(repo, 'notes.txt', 'the base wrote here\n');
+    const { code, keys, dir } = await review(repo);
+    expect(code).not.toBe(0);
+
+    expect(landing(keys)).toEqual([
+      'merge#1',
+      'sync-base#1',
+      'resolve-conflicts#1',
+      'validate#5',
+      'push#2',
+      'gate-files#2',
+      'merge#2',
+      'sync-base#2',
+      'resolve-conflicts#2',
+      'validate#6',
+      'push#3',
+      'gate-files#3',
+      'merge#3',
+    ]);
+    const pr = await pullRequest(repo);
+    expect(pr.labels).toContain('needs-human');
+    expect(pr.labels).not.toContain('factory');
+    expect(pr.comments.at(-1)).toStartWith('## sail review\n\nNot merged: it conflicts with its base in notes.txt');
+    const exit = readEvents(dir).find(
+      (event) => event.type === 'loop:exit' && (event as { loop?: string }).loop === 'land',
+    );
+    expect((exit as { reason?: string } | undefined)?.reason).not.toBe('exceeded');
+  });
+}, 240_000);
+
+/** The findings the `fix` stage's call `call` was handed. */
+function fixFindings(dir: string, call: number): { id: string }[] {
+  const folder = readdirSync(dir).find((name) => /^\d+-fix$/.test(name)) ?? '';
+  return JSON.parse(readFileSync(join(dir, folder, `call-${call}`, 'in', 'findings.json'), 'utf8')).findings;
+}
+
+test('after two fix rounds, checks red through two merges are fixed twice and the third merge lands', async () => {
+  await withTempRepo(async (repo) => {
+    setUp(repo);
+    editPullRequest(repo, {
+      checks: [{ name: 'verify', statuses: ['failed', 'failed', 'failed', 'failed', 'passed'], log: 'boom' }],
+    });
+    const { code, keys, dir } = await review(repo);
+    expect(code).toBe(0);
+
+    expect(keys.filter((key) => key.startsWith('fix#'))).toEqual(['fix#1', 'fix#2', 'fix#3', 'fix#4']);
+    expect(landing(keys)).toEqual(TWO_LANDING_FIXES);
+    expect(fixFindings(dir, 3).map((each) => each.id)).toEqual(['C2-1']);
+    expect(fixFindings(dir, 4).map((each) => each.id)).toEqual(['C3-1']);
+  });
+}, 120_000);
+
+test('landing has three merges of its own: after two review rounds, two fixes for the failed checks, then the third merge fails and hands the pull request to a human', async () => {
   await withTempRepo(async (repo) => {
     setUp(repo);
     editPullRequest(repo, { checks: [{ name: 'verify', statuses: ['failed'], log: 'boom' }] });
     const { code, keys } = await review(repo);
     expect(code).not.toBe(0);
 
-    expect(keys.filter((key) => key.startsWith('fix#'))).toEqual(['fix#1', 'fix#2', 'fix#3']);
-    expect(landing(keys)).toEqual([
-      'merge#1',
-      'sync-base#1',
-      'fix#3',
-      'validate#4',
-      'push#2',
-      'gate-files#2',
-      'merge#2',
-    ]);
+    expect(keys.filter((key) => key.startsWith('fix#'))).toEqual(['fix#1', 'fix#2', 'fix#3', 'fix#4']);
+    expect(landing(keys)).toEqual(TWO_LANDING_FIXES);
     const pr = await pullRequest(repo);
     expect(pr.labels).not.toContain('factory');
     expect(pr.labels).toContain('needs-human');
     expect(pr.comments.at(-1)).toBe(
-      '## sail review\n\nNot merged: checks failed: verify\n\nBefore that, the review:\n\n- reran verify once: still red\n- fixed the failed checks verify in 3 commits\n- reran verify once\n\nThe `factory` label is off and `needs-human` is on: this pull request needs a human.\n',
+      '## sail review\n\nNot merged: checks failed: verify\n\nBefore that, the review:\n\n- reran verify once: still red\n- fixed the failed checks verify in 3 commits\n- reran verify once: still red\n- fixed the failed checks verify in 3 commits\n- reran verify once\n\nThe `factory` label is off and `needs-human` is on: this pull request needs a human.\n',
     );
   });
 }, 120_000);
