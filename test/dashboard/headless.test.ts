@@ -30,7 +30,7 @@ async function until(condition: () => boolean, ms = 8000): Promise<boolean> {
 }
 
 /** Boots the bundle `GET /` serves against a fake window on `dashboard`. Its regions, and a click. */
-async function bootHeadless(dashboard: Dashboard) {
+async function bootHeadless(dashboard: Dashboard, search = '') {
   const html = await (await fetch(dashboard.url)).text();
   const script = /<script type="module" id="sail-page">([\s\S]*)<\/script>/.exec(html)?.[1] ?? '';
   const ids = [...html.replace(/<script[\s\S]*<\/script>/, '').matchAll(/\sid="([^"]+)"/g)].map(([, id]) => id ?? '');
@@ -54,7 +54,7 @@ async function bootHeadless(dashboard: Dashboard) {
       removeEventListener() {},
       documentElement: { dataset: {} },
     },
-    location: { host: `127.0.0.1:${dashboard.port}`, search: '', pathname: '/', href: 'http://127.0.0.1/' },
+    location: { host: `127.0.0.1:${dashboard.port}`, search, pathname: '/', href: `http://127.0.0.1/${search}` },
     addEventListener() {},
     history: {
       pushState: (data, unused, url) => history.push({ kind: 'push', data, unused, url }),
@@ -153,4 +153,18 @@ test("a beta queue that can't be read is listed in the rail with its problem, an
   page.click({ action: 'select-queue', queue: 'beta/broken' });
   expect(await until(() => page.text('main').includes('broken queue'))).toBe(true);
   expect(page.text('main')).toContain('queue.json can&#39;t be read');
+}, 30_000);
+
+test('a page loaded at a run the index does not list says so in the rail and replaces the URL with the run it opens (ADW-513)', async () => {
+  m = seedFixtures();
+  const started = startDashboard({ registryDir: m.registryDir, port: 0, followPollMs: 20, indexPollMs: 50 });
+  if ('refused' in started) throw new Error(started.refused);
+  server = started;
+  const page = await bootHeadless(server, '?repo=alpha&run=NOPE-1');
+  expect(await until(() => page.text('rail').includes('run NOPE-1 of alpha is not listed'))).toBe(true);
+  expect(await until(() => (page.text('main').match(/data-action="select-card"/g) ?? []).length > 0)).toBe(true);
+  const written = page.history.map((entry) => [entry.kind, entry.url]);
+  expect(written[0]?.[0]).toBe('replace');
+  expect(written[0]?.[1]).toMatch(/^\?repo=alpha&run=FAKE-/);
+  expect(written.flat().join(' ')).not.toContain('NOPE-1');
 }, 30_000);
