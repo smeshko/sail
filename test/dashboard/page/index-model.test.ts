@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { index } from '../../../src/dashboard/files';
+import type { QueueOffers } from '../../../src/dashboard/offers';
 import { listRepos, pollKind, queuePanels, workflowOf } from '../../../src/dashboard/page/index-model';
 import type { QueueWatch } from '../../../src/dashboard/watch-state';
 import {
@@ -159,8 +160,23 @@ test("listRepos groups each repository's runs by workflow without its version, b
   expect(groups).toEqual([
     ['alpha', 'ticket-to-pr', [GOLDEN_RUN_ID, FAKE_2_ID], undefined],
     ['beta', 'review', [FAKE_4_ID], undefined],
-    ['beta', QUEUE_WORKFLOW, [FAKE_3_ID], { waiting: 1, lastPolledAt: '2026-09-24T11:05:00.000Z' }],
+    [
+      'beta',
+      QUEUE_WORKFLOW,
+      [FAKE_3_ID],
+      {
+        waiting: 1,
+        running: 1,
+        parked: 1,
+        lastPolledAt: '2026-09-24T11:05:00.000Z',
+        offers: index(m.registryDir)
+          .find((repo) => repo.name === 'beta')
+          ?.queues.find((view) => view.workflow === QUEUE_WORKFLOW)?.offers as QueueOffers,
+      },
+    ],
   ]);
+  const queue = repos.find((repo) => repo.name === 'beta')?.workflows[1]?.queue;
+  expect(queue).not.toHaveProperty('failed');
   expect([workflowOf({ workflow: 'review@12' }), workflowOf({}), workflowOf({ workflow: '' })]).toEqual([
     'review',
     'unknown',
@@ -264,6 +280,30 @@ test('a workflow in the watch set with no queue view is listed too, with no runs
     [QUEUE_WORKFLOW, 'watched'],
   ]);
   expect(beta.workflows.find((workflow) => workflow.name === 'ghost')?.runs).toEqual([]);
+  expect(beta.workflows.find((workflow) => workflow.name === 'ghost')?.queue).toEqual({ waiting: 0 });
+});
+
+test("a queue's pause and hold, and its failed items, are carried on its workflow's queue", () => {
+  const file = join(m.beta.clone, '.sail-runs', 'queue', QUEUE_WORKFLOW, 'queue.json');
+  const queue = JSON.parse(readFileSync(file, 'utf8'));
+  queue.polling.paused = {
+    port: 'ticketSource',
+    adapter: 'fake',
+    message: 'unreachable',
+    at: '2026-09-24T11:05:00.000Z',
+  };
+  queue.held = {
+    until: '2026-09-24T12:00:00.000Z',
+    runId: FAKE_3_ID,
+    reason: 'usage limit',
+    at: '2026-09-24T11:05:00.000Z',
+  };
+  queue.items.push({ ...queue.items[0], dedupKey: 'ticket:ADW-9', state: 'failed' });
+  writeFileSync(file, JSON.stringify(queue));
+  const got = betaList().workflows.find((workflow) => workflow.name === QUEUE_WORKFLOW)?.queue;
+  expect(got?.paused).toEqual({ port: 'ticketSource', adapter: 'fake', message: 'unreachable' });
+  expect(got?.held).toEqual({ until: '2026-09-24T12:00:00.000Z', reason: 'usage limit' });
+  expect(got?.failed).toBe(1);
 });
 
 test("a queue whose queue.json can't be read has a problem and no waiting count in the list, and one not written yet has waiting 0", () => {
@@ -275,5 +315,6 @@ test("a queue whose queue.json can't be read has a problem and no waiting count 
   const broken = queueOf('broken');
   expect(broken?.problem?.startsWith("queue.json can't be read")).toBe(true);
   expect(broken).not.toHaveProperty('waiting');
-  expect(queueOf('fresh')).toEqual({ waiting: 0 });
+  expect(broken?.offers).toBeDefined();
+  expect(queueOf('fresh')).toEqual({ waiting: 0, offers: expect.any(Object) });
 });
