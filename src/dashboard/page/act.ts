@@ -67,8 +67,11 @@ export interface ActorDeps {
 export interface Actor {
   /** Carries out action `id` for the subject `data` names. */
   act(id: string, data: Readonly<Record<string, string>>): void;
-  /** Carries out action `id` over `runs`: one dialog listing each, then one request per run that can, in order. */
-  actSeveral(id: string, runs: readonly SeveralRun[]): void;
+  /**
+   * Carries out action `id` over `runs`: one dialog listing each, then one request per run that can, in order. False
+   * when it took nothing: a run request is still out, which a red toast says, or the action has no several form.
+   */
+  actSeveral(id: string, runs: readonly SeveralRun[]): boolean;
   /** Reads the drawn parameters of the actions shown in `place` into the drafts, before a draw. */
   keep(place: 'run' | 'queue', subject?: Subject): void;
   /** Forgets what a run's actions hold: an open dialog for it and the drafts. */
@@ -87,7 +90,7 @@ export interface Actor {
 export function inertActor(): Actor {
   return {
     act: () => {},
-    actSeveral: () => {},
+    actSeveral: () => false,
     keep: () => {},
     forget: () => {},
     dialogFor: () => undefined,
@@ -207,9 +210,18 @@ export function createActor(deps: ActorDeps): Actor {
    * One dialog for several runs: it lists what the server says each does, and its confirm cleans the runs that can, one
    * after the other, each sent once the one before is answered. A selection with none that can opens no dialog.
    */
-  function actSeveral(id: string, runs: readonly SeveralRun[]) {
+  function actSeveral(id: string, runs: readonly SeveralRun[]): boolean {
     const def = actionOf(id, registry);
-    if (def?.several === undefined || runsOut > 0) return;
+    if (def?.several === undefined) return false;
+    if (runsOut > 0) {
+      effects.toast(
+        'bad',
+        severalHead(def, runs.length),
+        'another run action is under way: try again once it is answered',
+      );
+      mark('list', 'main');
+      return false;
+    }
     const index = deps.source().index;
     const goes = runs.filter(({ subject, offers }) => {
       const available = def.available(subject, { run: offers, index });
@@ -220,7 +232,7 @@ export function createActor(deps: ActorDeps): Actor {
       const lines = def.several.dialog(runs, source).lines.map((line) => line.replace(/^skips /, ''));
       effects.toast('bad', severalHead(def, runs.length), lines.join('; '));
       mark('list', 'main');
-      return;
+      return true;
     }
     const view = def.several.dialog(runs, source);
     const requests = goes.flatMap(({ subject, offers }) => {
@@ -242,6 +254,7 @@ export function createActor(deps: ActorDeps): Actor {
     ui.dialog = view;
     host.openDialog(renderDialog(view).value);
     mark('list', 'main');
+    return true;
   }
 
   function act(id: string, data: Readonly<Record<string, string>>) {

@@ -852,3 +852,16 @@ test('cancelling the dialog of a clean of several posts nothing, and an unknown 
   r.actor.actSeveral('stop-run', [{ subject: runOf('R1'), offers: cleanable('a') }]);
   expect([r.dialogs.filter((d) => d !== 'closed').length, r.toasts]).toEqual([1, []]);
 });
+
+test('a clean of several while a run request is out opens no dialog, toasts why and says it took nothing (review R3)', async () => {
+  const r = rig(undefined);
+  expect(r.actor.actSeveral('clean-run', [{ subject: runOf('R1'), offers: cleanable('a') }])).toBe(true);
+  r.actor.confirm();
+  expect(r.posts).toHaveLength(1);
+  expect(r.actor.actSeveral('clean-run', [{ subject: runOf('R2'), offers: cleanable('b') }])).toBe(false);
+  expect([r.actor.dialogFor(), r.posts.length]).toEqual([undefined, 1]);
+  expect(r.toasts).toEqual(['bad clean 1 run: another run action is under way: try again once it is answered']);
+  await r.answer(200, { message: 'cleaned R1' });
+  expect(r.actor.actSeveral('clean-run', [{ subject: runOf('R2'), offers: cleanable('b') }])).toBe(true);
+  expect(r.actor.dialogFor()).toEqual({ kind: 'none' });
+});

@@ -135,8 +135,11 @@ class FakeHost implements PageHost {
   /** The POSTs made, and what the dashboard answers them. */
   posts: { path: string; body: unknown }[] = [];
   postAnswer: { status: number; body: string } = { status: 202, body: '{"file":"x"}' };
+  /** While set, the POSTs wait for it. */
+  postHold: Promise<void> | undefined;
   async post(path: string, body: unknown) {
     this.posts.push({ path, body });
+    if (this.postHold !== undefined) await this.postHold;
     return this.postAnswer;
   }
   /** What the dashboard would answer for a run's actions. */
@@ -1873,6 +1876,33 @@ describe('the list by keyboard (ADW-522)', () => {
     host.advance(100);
     expect([host.dialog, p.ui.underway.selection, p.ui.listSelected]).toEqual([undefined, undefined, []]);
     expect(host.regions.list).not.toContain('checking');
+  });
+
+  test('clean on a selection while a run request is out keeps the marks and toasts why (review R3)', async () => {
+    const p = bootHistory();
+    markFirstTwo();
+    host.click({ action: 'clean-selected' });
+    await Bun.sleep(50);
+    host.advance(100);
+    let release = () => {};
+    host.postHold = new Promise<void>((done) => {
+      release = done;
+    });
+    host.click({ action: 'dialog-confirm' });
+    host.advance(100);
+    expect(host.posts).toEqual([{ path: `${FAKE_2_PATH}/clean`, body: {} }]);
+    host.press('x');
+    host.advance(100);
+    const marked = [...p.ui.listSelected];
+    expect(marked).toHaveLength(1);
+    host.click({ action: 'clean-selected' });
+    await Bun.sleep(50);
+    host.advance(100);
+    expect([host.dialog, p.ui.listSelected, p.ui.underway.selection]).toEqual([undefined, marked, undefined]);
+    expect(toasts()).toEqual(['bad clean 1 run: another run action is under way: try again once it is answered']);
+    expect(host.regions.list).toContain('<span class="lh-sel">1 selected</span>');
+    host.postHold = undefined;
+    release();
   });
 
   test('clean on a selection none of whose runs can be cleaned opens no dialog and toasts the reasons', async () => {

@@ -249,9 +249,9 @@ export function cleanSelected(store: Store) {
   void Promise.all(reads).then((runs) => {
     if (asked !== store.selectionRead || store.stopped) return;
     delete ui.underway.selection;
-    ui.listSelected = [];
+    // A selection the actor took nothing of, as while a run request is out, stays marked for another clean.
+    if (store.actor.actSeveral('clean-run', runs)) ui.listSelected = [];
     store.mark('list');
-    store.actor.actSeveral('clean-run', runs);
   });
 }
 
