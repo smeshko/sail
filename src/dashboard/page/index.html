@@ -7,6 +7,7 @@
     <style>
       :root[data-theme="dark"],
       :root[data-theme="system"] {
+        color-scheme: dark;
         --bg: #0b0b0f;
         --panel: #111117;
         --panel-2: #16161e;
@@ -23,6 +24,7 @@
         --del: #fda4af;
       }
       :root[data-theme="light"] {
+        color-scheme: light;
         --bg: #dee0e9;
         --panel: #f2f3f7;
         --panel-2: #e8e9f0;
@@ -45,6 +47,7 @@
       }
       @media (prefers-color-scheme: light) {
         :root[data-theme="system"] {
+          color-scheme: light;
           --bg: #dee0e9;
           --panel: #f2f3f7;
           --panel-2: #e8e9f0;
@@ -119,6 +122,23 @@
       input:not([type="checkbox"]):not([type="radio"]),
       [role="button"] {
         min-height: 24px;
+      }
+      input:not([type="checkbox"]):not([type="radio"]) {
+        font-family: var(--mono);
+        font-size: 12px;
+        padding: 3px 6px;
+        border: 1px solid var(--line-2);
+        border-radius: 6px;
+        background: var(--inset);
+        color: var(--fg);
+      }
+      input::placeholder {
+        color: var(--fg-4);
+        opacity: 1;
+      }
+      input[type="checkbox"],
+      input[type="radio"] {
+        accent-color: var(--run);
       }
       .r-more,
       .btn.mv {
