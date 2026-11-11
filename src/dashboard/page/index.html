@@ -1339,6 +1339,11 @@
         color: var(--fg-2);
         font-size: 13px;
       }
+      .cmdk-note {
+        padding: 6px 12px 0;
+        color: var(--fg-3);
+        font-size: 13px;
+      }
       .cmdk-err {
         padding: 4px 12px;
         color: var(--del);
@@ -2199,14 +2204,14 @@
       :root[data-inspector="closed"] .resize-right {
         display: none;
       }
-      /* from 1100px the open inspector is a column of the grid */
-      @media (min-width: 1100px) {
+      /* from 1210px, where the sidebar, the list, the centre's floor and the inspector all fit, the open inspector is a column of the grid */
+      @media (min-width: 1210px) {
         :root[data-inspector="open"] .body {
           grid-template-columns: var(--side-w, 180px) 5px minmax(0, var(--list-w, 340px)) minmax(320px, 1fr) 5px var(--ins-w, 360px);
         }
       }
       /* under it the open inspector lies over the right of the centre and takes no column */
-      @media (max-width: 1099px) {
+      @media (max-width: 1209px) {
         .resize-right {
           display: none;
         }
@@ -2230,13 +2235,10 @@
           padding-right: 44px;
         }
       }
-      /* under 800px the page is one column: the list, or the open run or queue with a way back */
-      @media (max-width: 799px) {
+      /* under 900px the sidebar folds behind its button, so the list keeps its width beside the centre's floor */
+      @media (max-width: 899px) {
         .body {
-          grid-template-columns: minmax(0, 1fr);
-        }
-        :root:not([data-detail="open"]) .main {
-          display: none;
+          grid-template-columns: minmax(0, var(--list-w, 340px)) minmax(320px, 1fr);
         }
         .resize-handle {
           display: none;
@@ -2255,11 +2257,20 @@
           background: var(--panel);
           box-shadow: 12px 0 32px rgba(0, 0, 0, 0.35);
         }
-        :root[data-detail="open"] .list {
-          display: none;
-        }
         .sidebar-btn {
           display: inline-flex;
+        }
+      }
+      /* under 800px the page is one column: the list, or the open run or queue with a way back */
+      @media (max-width: 799px) {
+        .body {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        :root:not([data-detail="open"]) .main {
+          display: none;
+        }
+        :root[data-detail="open"] .list {
+          display: none;
         }
         :root[data-detail="open"] .back {
           display: inline-flex;
