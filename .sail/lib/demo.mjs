@@ -30,9 +30,12 @@
 //                                  that column's width in px, each left out when it isn't drawn
 //     steps=<file>                 a JSON list of steps run in order on one page load, each shot written to
 //                                  <name>-<shot>.png and .html: {"click": css}, {"scroll": css, "top": px},
-//                                  {"wait": css} (up to 20s) or {"wait": ms}, and {"shot": name}. The transcript
-//                                  prints each step, and a `scrolled` line per box left scrolled down. A selector
-//                                  that matches nothing exits 1 and names the step; earlier shots stay
+//                                  {"wait": css} (up to 20s) or {"wait": ms}, {"key": key} (with "mod": true for Cmd
+//                                  held: a keydown on the focused element), {"type": css, "text": text} (sets the
+//                                  field's value and fires its input) and {"shot": name}. The transcript prints each
+//                                  step, a `url` line (the page's path and query) under each shot and a `scrolled`
+//                                  line per box left scrolled down. A selector that matches nothing exits 1 and names
+//                                  the step; earlier shots stay
 //     live=<ticket key>            starts `sail <ticket key>` in <dir>/repo, opens the page on that run unless run=
 //                                  names another, and interrupts it once the steps end, leaving it suspended
 // The environment a command gets is built from nothing: no SAIL_CONFIG, SAIL_EVENTS or SAIL_BUN from a step around
@@ -421,7 +424,8 @@ async function writeShot(session, png, html) {
     session,
     `'layout window=' + window.innerWidth + ' page=' + document.documentElement.scrollWidth + ['side', 'list', 'main', 'inspector'].map((c) => { const w = Math.round((document.querySelector('.' + c)?.getBoundingClientRect().width) ?? 0); return w > 0 ? ' ' + c + '=' + w : ''; }).join('')`,
   );
-  return { characters: dom.length + 1, scrolled, layout };
+  const url = await evaluate(session, `'url ' + location.pathname + location.search`);
+  return { characters: dom.length + 1, scrolled, layout, url };
 }
 
 const SHAPES = {
@@ -430,6 +434,12 @@ const SHAPES = {
   wait: (step) =>
     ((typeof step.wait === 'string' && step.wait !== '') || (Number.isFinite(step.wait) && step.wait >= 0)) &&
     Object.keys(step).length === 1,
+  key: (step) =>
+    typeof step.key === 'string' &&
+    step.key !== '' &&
+    (step.mod === undefined || typeof step.mod === 'boolean') &&
+    Object.keys(step).every((field) => field === 'key' || field === 'mod'),
+  type: (step) => typeof step.type === 'string' && typeof step.text === 'string' && Object.keys(step).length === 2,
   shot: (step) => typeof step.shot === 'string' && /^[\w-]+$/.test(step.shot) && Object.keys(step).length === 1,
 };
 
@@ -448,7 +458,7 @@ function readSteps(file) {
       step !== null && typeof step === 'object' ? Object.keys(SHAPES).find((each) => each in step) : undefined;
     if (kind === undefined || !SHAPES[kind](step))
       refuse(
-        `step ${at + 1} of ${file} is ${JSON.stringify(step)}: a step is {"click": css}, {"scroll": css, "top": px}, {"wait": css or ms} or {"shot": name}`,
+        `step ${at + 1} of ${file} is ${JSON.stringify(step)}: a step is {"click": css}, {"scroll": css, "top": px}, {"wait": css or ms}, {"key": key, "mod": true}, {"type": css, "text": text} or {"shot": name}`,
       );
     if (kind === 'shot') {
       if (shots.has(step.shot)) refuse(`step ${at + 1} of ${file} repeats the shot name ${JSON.stringify(step.shot)}`);
@@ -473,6 +483,21 @@ async function runSteps(session, steps, dir, name, out) {
       // run's page, redrawn each second, never settles: it is given CLICK_SECONDS.
       await settle(session, true, CLICK_SECONDS);
       out.push(`${head}: clicked`);
+    } else if ('key' in step) {
+      await evaluate(
+        session,
+        `(() => { const e = document.activeElement ?? document.body; e.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(step.key)}, metaKey: ${step.mod === true}, bubbles: true, cancelable: true })); })()`,
+      );
+      await settle(session, true, CLICK_SECONDS);
+      out.push(`${head}: pressed`);
+    } else if ('type' in step) {
+      const hit = await evaluate(
+        session,
+        `(() => { const e = document.querySelector(${JSON.stringify(step.type)}); if (e === null) return false; e.value = ${JSON.stringify(step.text)}; e.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`,
+      );
+      if (!hit) throw miss();
+      await settle(session, true, CLICK_SECONDS);
+      out.push(`${head}: typed`);
     } else if ('scroll' in step) {
       const top = await evaluate(
         session,
@@ -493,8 +518,8 @@ async function runSteps(session, steps, dir, name, out) {
     } else {
       const png = join(dir, `${name}-${step.shot}.png`);
       const html = join(dir, `${name}-${step.shot}.html`);
-      const { characters, scrolled, layout } = await writeShot(session, png, html);
-      out.push(`${head}: screenshot ${png}`, `  dom ${html}, ${characters} characters`, `  ${layout}`);
+      const { characters, scrolled, layout, url } = await writeShot(session, png, html);
+      out.push(`${head}: screenshot ${png}`, `  dom ${html}, ${characters} characters`, `  ${layout}`, `  ${url}`);
       for (const line of scrolled) out.push(`  scrolled ${line}`);
     }
   }
@@ -600,8 +625,8 @@ async function capture(dir, name, query, stepsFile, steps, live, width) {
       if (steps === undefined) {
         const png = join(dir, `${name}.png`);
         const html = join(dir, `${name}.html`);
-        const { characters, layout } = await writeShot(opened.session, png, html);
-        lines.push(`screenshot ${png}`, `dom ${html}, ${characters} characters`, layout);
+        const { characters, layout, url } = await writeShot(opened.session, png, html);
+        lines.push(`screenshot ${png}`, `dom ${html}, ${characters} characters`, layout, url);
       } else {
         await Promise.race([
           runSteps(opened.session, steps, dir, name, lines),

@@ -251,7 +251,8 @@ const VIEWS_TZ = 0;
  * machine is seeded afresh, and nothing absolute of it is ever rendered, so the views are the same on every machine.
  */
 /**
- * The dense fixture's four views: the sidebar and the Active, History and Queues lists of five repositories and 44 runs.
+ * The dense fixture's six views: the sidebar and the Active, History and Queues lists of five repositories and 44 runs,
+ * and the command menu for a title query and a key query.
  * An unreadable run's problem names the machine's temp folder, which is shown as `<machine>`.
  */
 function renderDenseViews(): Record<string, SafeHtml> {
@@ -265,11 +266,18 @@ function renderDenseViews(): Record<string, SafeHtml> {
       ),
     }));
     const ui: UiState = { ...initialUi(VIEWS_TZ) };
+    // The full command menu with no subject, over the dense index, for a typed query.
+    const menuView = (query: string) => {
+      const state: MenuState = { mode: 'full', query, at: 0, steps: [] };
+      return renderMenu(state, menuRows(state, { index: denseIndex }, denseIndex, VIEWS_NOW));
+    };
     return {
       'dense-sidebar.html': renderSidebar(repos, viewCounts(repos, undefined, attention(denseIndex)), ui),
       'dense-active.html': renderList('active', repos, ui, VIEWS_NOW),
       'dense-history.html': renderList('history', repos, ui, VIEWS_NOW),
       'dense-queues.html': renderList('queues', repos, ui, VIEWS_NOW),
+      'dense-menu-title.html': menuView('retry'),
+      'dense-menu-key.html': menuView('fake-2004'),
     };
   } finally {
     machine.remove();

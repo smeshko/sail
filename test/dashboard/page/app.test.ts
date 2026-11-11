@@ -3642,6 +3642,7 @@ test('an index that turns the open queue to watcher not running redraws main wit
 // The command menu (ADW-520): opened on Cmd+K over the focused subject, filtered, moved and run by key.
 const cmdk = () => host.regions.menu ?? '';
 const menuLabels = () => [...cmdk().matchAll(/<span class="cmdk-label">([^<]*)<\/span>/g)].map(([, label]) => label);
+const menuLeads = () => [...cmdk().matchAll(/<span class="cmdk-key">([^<]*)<\/span>/g)].map(([, lead]) => lead);
 const menuSel = () => cmdk().match(/class="cmdk-row sel"[^>]*><span class="cmdk-label">([^<]*)</)?.[1];
 const menuHead = () => cmdk().match(/<div class="cmdk-subj">([^<]*)<\/div>/)?.[1];
 const cmdK = () => host.press('k', false, undefined, true);
@@ -3743,7 +3744,8 @@ test('typing filters the rows within one flush and lists go-to rows, and the fie
   host.type('menu-query', FAKE_2_ID.slice(0, 8));
   host.advance(100);
   expect(cmdk()).toContain('<div class="cmdk-grp">go to</div>');
-  expect(menuLabels()).toContain(FAKE_2_ID);
+  expect(menuLeads()).toContain(FAKE_2_ID.replace(/-[^-]*$/, ''));
+  expect(cmdk()).not.toContain('cmdk-id');
 });
 
 test('ArrowDown and ArrowUp move the highlight over enabled rows only, and j typed in the menu moves no card cursor', async () => {
@@ -3772,12 +3774,12 @@ test('Enter on a go-to row opens a run, a queue or an item opens the queue, and 
     cmdK();
     host.type('menu-query', query);
     host.advance(100);
-    expect(menuLabels()[0]).toBe(row);
+    expect(menuLeads()[0] ?? menuLabels()[0]).toBe(row);
     host.press('Enter', true);
     host.advance(100);
     expect(cmdk()).toBe('');
   };
-  goTo(FAKE_3_ID.slice(0, 10), FAKE_3_ID);
+  goTo(FAKE_3_ID.slice(0, 10), FAKE_3_ID.replace(/-[^-]*$/, ''));
   expect(page?.store.run?.runId).toBe(FAKE_3_ID);
   expect(focused((page as Page).ui)).toEqual({ kind: 'run', repo: 'beta', runId: FAKE_3_ID });
   goTo('ticket:FAKE-5', 'ticket:FAKE-5');
@@ -3793,6 +3795,36 @@ test('Enter on a go-to row opens a run, a queue or an item opens the queue, and 
   expect(page?.ui.view).toBe('queues');
   expect(page?.ui.listFolded).not.toContain('queues:alpha');
   expect(page?.ui.focus.cursor?.subject).toEqual({ kind: 'repo', repo: 'alpha' });
+});
+
+test('Enter on a go-to row pushes the URL of what it opened, and a key that changes nothing writes none', async () => {
+  await openRunPage(FAKE_2_ID);
+  const enterOn = (query: string) => {
+    cmdK();
+    host.type('menu-query', query);
+    host.advance(100);
+    host.urls = [];
+    host.press('Enter', true);
+    host.advance(100);
+    return host.urls;
+  };
+  expect(enterOn(FAKE_3_ID.slice(0, 10))).toEqual([{ query: `repo=beta&run=${FAKE_3_ID}`, push: true }]);
+  expect(enterOn('ticket:FAKE-5')).toEqual([{ query: `queue=beta%2F${QUEUE_WORKFLOW}`, push: true }]);
+  const repo = enterOn('alph');
+  expect(repo).toHaveLength(1);
+  expect(repo[0]?.query).toContain('view=queues');
+  expect(repo[0]?.push).toBe(true);
+  // Keys that only move the highlight, close the menu or type write nothing.
+  cmdK();
+  host.type('menu-query', 'a');
+  host.advance(100);
+  host.urls = [];
+  host.press('ArrowDown', true);
+  host.press('ArrowUp', true);
+  host.type('menu-query', 'ab');
+  host.press('Escape', true);
+  host.press('Escape', true);
+  expect(host.urls).toEqual([]);
 });
 
 test('Enter on switch theme changes the theme and on toggle inspector the inspector, and Enter on a disabled row does nothing', async () => {

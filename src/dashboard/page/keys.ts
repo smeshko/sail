@@ -4,7 +4,7 @@
 // or folds the group, `.` opens the menu of the run under it, and `x`, in History, marks or unmarks the run under it.
 // Cmd+K or Ctrl+K opens the command menu, or closes it, and any other Cmd or Ctrl chord does nothing. While the command
 // menu is open its keys alone are handled (`menu.ts`): the arrows move its highlight, `Enter` runs its row, and
-// `Escape` goes back one step, then closes it. Otherwise `Escape` shuts, in order, the folded sidebar, the run menu, the
+// `Escape` goes back one step, then closes it; a key that changes what is shown writes the URL, as a click does. Otherwise `Escape` shuts, in order, the folded sidebar, the run menu, the
 // item menu, the drawer and the timeline, then the card selection, then, with no run or queue open, the History
 // selection and, last, the open run or queue, which gives the list the centre. `/` focuses the list's filter field, `1`
 // to `4` open Inbox, Active, Queues and History, `a` opens the Inbox and `i` pins the inspector open or unpins it. In
@@ -172,7 +172,11 @@ export function onKey(store: Store, key: string, inInput: boolean, on?: string, 
     return false;
   }
   // While the menu is open its keys alone are handled, in its field too.
-  if (store.ui.menu !== undefined) return menuKey(store, key);
+  if (store.ui.menu !== undefined) {
+    const handled = menuKey(store, key);
+    syncUrl(store, true);
+    return handled;
+  }
   if (inInput) {
     if (key === 'Escape') store.host.blur();
     return false;

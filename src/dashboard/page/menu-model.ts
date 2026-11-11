@@ -13,7 +13,7 @@ import {
   type Subject,
   subjectName,
 } from './action-registry';
-import { listRepos, queuePanels } from './index-model';
+import { listRepos, queuePanels, workflowOf } from './index-model';
 import type { MenuState, MenuStep } from './ui-state';
 
 export type MenuRun =
@@ -31,6 +31,12 @@ export interface MenuRow {
   hint?: string;
   key?: string;
   why?: string;
+  /** A run's go-to row: its pull request (`PR #12`), else its ticket key, else its run id, as the list's row leads. */
+  lead?: string;
+  /** A run's go-to row: the run's status, drawn as the list's dot. */
+  status?: string;
+  /** A run's go-to row: the run id's part after its last `-`, set only while another listed row reads the same. */
+  id?: string;
   disabled: boolean;
   run: MenuRun;
 }
@@ -66,6 +72,38 @@ export function fuzzy(query: string, text: string): number | undefined {
     at = next;
   }
   return score;
+}
+
+/** How a "go to" candidate matches a query: tier 0 exact, 1 prefix, 2 whole title words, 3 subsequence; lower scores first within a tier. */
+export interface Rank {
+  tier: 0 | 1 | 2 | 3;
+  score: number;
+}
+
+const WORD = /[^\p{L}\p{N}]+/u;
+const wordsOf = (text: string): string[] =>
+  text
+    .toLowerCase()
+    .split(WORD)
+    .filter((word) => word !== '');
+
+/**
+ * How well `query` matches a candidate with the key texts `keys` (ids, keys, names) and the `titles` it reads: the tier
+ * (a key equal to the query, a key it starts, every query word a word of one title, a subsequence of any text) and, within
+ * it, a score where lower is better. Undefined for no match.
+ */
+export function rank(query: string, keys: readonly string[], titles: readonly string[]): Rank | undefined {
+  const needle = query.trim().toLowerCase();
+  const lowered = keys.map((key) => key.toLowerCase());
+  if (lowered.includes(needle)) return { tier: 0, score: 0 };
+  const starts = lowered.filter((key) => key.startsWith(needle)).map((key) => key.length - needle.length);
+  if (starts.length > 0) return { tier: 1, score: Math.min(...starts) };
+  const asked = wordsOf(needle);
+  if (asked.length > 0 && titles.some((title) => asked.every((word) => wordsOf(title).includes(word)))) {
+    return { tier: 2, score: 0 };
+  }
+  const scores = [...keys, ...titles].map((text) => fuzzy(query, text)).filter((score) => score !== undefined);
+  return scores.length === 0 ? undefined : { tier: 3, score: Math.min(...scores) };
 }
 
 /** The `data-*` a click on a row of `subject` carries: what `subjectOf` reads. */
@@ -134,34 +172,57 @@ export function subjectRows(subject: Subject, source: OfferSource): MenuRow[] {
   });
 }
 
-/** The eight best "go to" matches for `query`: runs, queues, queue items and repositories. None for an empty query. */
+/**
+ * The eight best "go to" matches for `query`: runs, queues, queue items and repositories, ranked by `rank` and, when
+ * equal, in the index's order. A query that is a run's ticket key in full (or its pull request) lists only the runs of
+ * that ticket. None for an empty query.
+ */
 export function gotoRows(query: string, index: readonly IndexRepo[], now: number): MenuRow[] {
-  if (query.trim() === '') return [];
-  const found: { score: number; row: MenuRow }[] = [];
-  const add = (hint: string, label: string, texts: string[], subject: Subject) => {
-    const scores = texts.map((text) => fuzzy(query, text)).filter((score) => score !== undefined);
-    if (scores.length === 0) return;
-    found.push({
-      score: Math.min(...scores),
-      row: { group: 'goto', label, hint, disabled: false, run: { goto: subject } },
-    });
+  const needle = query.trim().toLowerCase();
+  if (needle === '') return [];
+  type Found = { rank: Rank; row: MenuRow };
+  const found: Found[] = [];
+  const named: Found[] = [];
+  const add = (
+    hint: string,
+    label: string,
+    keys: string[],
+    titles: string[],
+    subject: Subject,
+    full = false,
+    extra: Partial<MenuRow> = {},
+  ) => {
+    const ranked = rank(query, keys, titles);
+    if (ranked === undefined) return;
+    const entry: Found = {
+      rank: ranked,
+      row: { group: 'goto', label, hint, disabled: false, run: { goto: subject }, ...extra },
+    };
+    found.push(entry);
+    if (full) named.push(entry);
   };
   for (const repo of listRepos(index, now)) {
-    add('repository', repo.name, [repo.name], { kind: 'repo', repo: repo.name });
+    add('repository', repo.name, [repo.name], [], { kind: 'repo', repo: repo.name });
     for (const run of repo.runs) {
-      add('run', run.runId, [run.runId, run.title ?? ''], { kind: 'run', repo: repo.name, runId: run.runId });
+      const prKeys = run.pr === undefined ? [] : [`PR #${run.pr}`, `#${run.pr}`];
+      const ticket = run.ticketKey === undefined ? [] : [run.ticketKey];
+      add(
+        `${repo.name} › ${workflowOf(run)}`,
+        run.title ?? '',
+        [run.runId, ...ticket, ...prKeys],
+        [run.title ?? ''],
+        { kind: 'run', repo: repo.name, runId: run.runId },
+        [...ticket, ...prKeys].some((key) => key.toLowerCase() === needle),
+        { lead: run.pr === undefined ? (run.ticketKey ?? run.runId) : `PR #${run.pr}`, status: run.status },
+      );
     }
   }
   for (const panel of queuePanels(index)) {
     const queue: Subject = { kind: 'workflow', repo: panel.repo, workflow: panel.workflow };
-    add(
-      'queue',
-      `${panel.repo} / ${panel.workflow}`,
-      [panel.repo, panel.workflow, `${panel.repo} ${panel.workflow}`],
-      queue,
-    );
+    const name = `${panel.repo} / ${panel.workflow}`;
+    add('queue', name, [name, panel.repo, panel.workflow, `${panel.repo} ${panel.workflow}`], [], queue);
     for (const item of panel.items) {
-      add('item', item.dedupKey, [item.dedupKey, item.title], {
+      add('item', item.dedupKey, [item.dedupKey, item.dedupKey.replace(/^[a-z-]+:/, '')], [item.title], {
         kind: 'item',
         repo: panel.repo,
         workflow: panel.workflow,
@@ -169,10 +230,18 @@ export function gotoRows(query: string, index: readonly IndexRepo[], now: number
       });
     }
   }
-  return found
-    .sort((a, b) => a.score - b.score)
+  const rows = (named.length > 0 ? named : found)
+    .sort((a, b) => a.rank.tier - b.rank.tier || a.rank.score - b.rank.score)
     .slice(0, 8)
     .map((each) => each.row);
+  // A run's row shows no run id; two rows that would read the same show the random part to tell them apart.
+  const reads = (row: MenuRow) => JSON.stringify([row.lead, row.label, row.hint]);
+  return rows.map((row) => {
+    if (row.lead === undefined || !('goto' in row.run) || row.run.goto.kind !== 'run') return row;
+    const runId = row.run.goto.runId;
+    const same = rows.some((other) => other !== row && reads(other) === reads(row));
+    return same ? { ...row, id: runId.slice(runId.lastIndexOf('-') + 1) } : row;
+  });
 }
 
 /** The queues of the index that offer `id`, with the offer: the repository, the workflow and its availability. */
