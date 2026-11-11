@@ -57,7 +57,7 @@ export interface UiState {
   queueEvents: boolean;
   /** The item whose ⋯ menu is open, by dedup key. */
   itemMenu?: string;
-  /** The open run's ⋯ menu that is open, and where: under its list row, or in the run's header. One at a time. */
+  /** The open run's ⋯ menu that is open, and where: under its list row, or in the run view's view header. One at a time. */
   runMenu?: { runId: string; at: 'row' | 'header' };
   theme: Theme;
   inspector: boolean;

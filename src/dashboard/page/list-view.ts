@@ -63,13 +63,13 @@ export function runMenu(repo: string, run: ListRun, ui: UiState, offers: RunActi
 }
 
 /**
- * The watch or unwatch button each offered, drawn from the registry, for a workflow, or for the whole repository when
- * `workflow` is left out. While a request for it is out, the word under way takes their place.
+ * The repository's watch or unwatch button each offered, drawn from the registry, for all its workflows at once. While a
+ * request for it is out, the word under way takes their place. A queue view draws its workflow's own in its view header.
  */
-export function watchButtons(repo: string, offers: RepoOffers | undefined, ui: UiState, workflow?: string): SafeHtml {
-  const subject: Subject = workflow === undefined ? { kind: 'repo', repo } : { kind: 'workflow', repo, workflow };
+export function watchButtons(repo: string, offers: RepoOffers | undefined, ui: UiState): SafeHtml {
+  const subject: Subject = { kind: 'repo', repo };
   const source: OfferSource = { index: [{ name: repo, queues: [], offers }] };
-  const underway = ui.underway[workflow === undefined ? `watch:${repo}` : `watch:${repo}/${workflow}`];
+  const underway = ui.underway[`watch:${repo}`];
   if (underway !== undefined) return html`<span class="busy">${underway}</span>`;
   return html`${ACTIONS.filter((def) => def.place === 'repo' && def.appliesTo.includes(subject.kind)).map((def) =>
     actionControl(def, subject, ui.act, source, { class: 'wf-act', data: true }),

@@ -219,16 +219,12 @@ function recentEvents(stream: QueueStream | undefined, ui: UiState): SafeHtml {
 }
 
 /**
- * The header's actions, drawn from the registry for the workflow: poll, then whichever of watch or unwatch it offers,
+ * The view header's actions, drawn from the registry for the workflow: poll, then whichever of watch or unwatch it offers,
  * a disabled one with its reason. While a request to watch or unwatch it is out, the word under way takes their place.
  */
 function headerActions(panel: QueuePanel, ui: UiState): SafeHtml {
   const subject: Subject = { kind: 'workflow', repo: panel.repo, workflow: panel.workflow };
-  const source: OfferSource = {
-    index: [
-      { name: panel.repo, queues: [{ workflow: panel.workflow, offers: panel.offers }], offers: panel.repoOffers },
-    ],
-  };
+  const source = panelSource(panel);
   const options = { honourDisabled: true, data: true, wrap: true } as const;
   const underway = ui.underway[`watch:${panel.repo}/${panel.workflow}`];
   const watch =

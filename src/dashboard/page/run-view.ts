@@ -1,8 +1,8 @@
-// The run view: the run's header, its totals against its budget, one stage card per call grouped by loop iteration, a
+// The run view: its view header, its totals against its budget, one stage card per call grouped by loop iteration, a
 // group's cards side by side under a header of their own, the roster stages not called yet, the pull request it opened,
 // and the CLI commands to copy. The cards come from the run model, fed by the run's events. The totals come from the
 // summary in the index when there is one, and from the cards otherwise. The Resume, Restart, Stop or Clean a run offers
-// are drawn in the run's header, by `runHeaderActions`: a button for each the run's status has (Stop while it runs,
+// are drawn in the run view's view header, by `runHeaderActions`: a button for each the run's status has (Stop while it runs,
 // Resume while suspended, Restart and Clean once failed) and the rest behind a ⋯. `runControls` is the one component both
 // that ⋯ menu and the list row's ⋯ menu are drawn with.
 import type { Summary } from '../../events/summary';
@@ -123,7 +123,7 @@ function totals(model: RunModel, summary: Summary | null | undefined, now: numbe
 /** The run actions the menus draw, in the registry's order: every action done to a run. */
 const RUN_ACTIONS = ACTIONS.filter((def) => def.appliesTo.includes('run'));
 
-/** The actions the run's header draws as buttons, by the run's status. Every other offered action is behind its ⋯. */
+/** The actions the run view's view header draws as buttons, by the run's status. Every other offered action is behind its ⋯. */
 const HEADER_BUTTONS: Readonly<Record<string, readonly string[]>> = {
   running: ['stop-run'],
   suspended: ['resume-run'],
@@ -152,7 +152,7 @@ export function runControls(
 }
 
 /**
- * The run header's actions: a button for each of the status's actions the run offers, and a ⋯ for the rest, whose menu
+ * The run view's view header's actions: a button for each of the status's actions the run offers, and a ⋯ for the rest, whose menu
  * opens under it. Nothing while the offers are not read or offer nothing, and nothing while the row's menu is open: it
  * draws every action, so the header's would put a field on the page twice.
  */

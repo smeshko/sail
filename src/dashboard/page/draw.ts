@@ -93,7 +93,7 @@ export function flush(store: Store): void {
     store.detail = detail;
     host.setDetail(detail);
   }
-  // A raise typed and a stage chosen in the open run's header or row menu survive the draw, but not a switch of run:
+  // A raise typed and a stage chosen in the open run's view header or row menu survive the draw, but not a switch of run:
   // read once, before either region is written, so the one-shot flag covers both.
   if (dirty.includes('list') || dirty.includes('main')) store.actor.keep('run');
   for (const region of dirty) {
