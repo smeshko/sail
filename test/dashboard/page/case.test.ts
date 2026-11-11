@@ -72,6 +72,16 @@ describe('the case rule (ADW-548)', () => {
     expect(menu).toContain('placeholder="Raise $"');
   });
 
+  test('a step with its own placeholder reads it in sentence case, as the add ticket step does', () => {
+    const model: MenuModel = {
+      rows: [],
+      step: { label: 'ticket key', field: { type: 'text', placeholder: 'ticket key' }, lines: [], rows: [], start: 0 },
+    };
+    const menu = renderMenu(state, model).value;
+    expect(menu).toContain('<div class="cmdk-step">Ticket key</div>');
+    expect(menu).toContain('placeholder="Ticket key"');
+  });
+
   test('the stylesheet transforms case only in the nine pinned whole-label rules, never a first letter or a word', () => {
     const selectors = transforming(style);
     expect(selectors).toHaveLength(9);

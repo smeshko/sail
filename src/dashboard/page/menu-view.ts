@@ -71,7 +71,7 @@ function field(state: MenuState, model: MenuModel): SafeHtml | '' {
   if (step.field === undefined) return '';
   return html`<input class="cmdk-in" name="menu-query" type="${step.field.type}" value="${state.query}"${
     step.field.min === undefined ? '' : html` min="${step.field.min}"`
-  } step="any" placeholder="${step.field.placeholder ?? sentence(step.label)}" aria-label="${sentence(step.label)}" autocomplete="off" spellcheck="false">`;
+  } step="any" placeholder="${sentence(step.field.placeholder ?? step.label)}" aria-label="${sentence(step.label)}" autocomplete="off" spellcheck="false">`;
 }
 
 export function renderMenu(state: MenuState, model: MenuModel): SafeHtml {
