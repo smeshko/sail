@@ -1,6 +1,6 @@
 // The page's actions, defined once: each thing a person can have done from the page (stop, stop now, suspend and hold,
-// resume, restart, clean, drop, requeue, move, poll, release a usage-limit hold, add, add skipping its checks, watch,
-// unwatch, start a run and its go and start anyway, all clear, dismiss) with its id and label, the subject it applies to, its
+// resume, restart, clean, rebuild, drop, requeue, move, poll, release a usage-limit hold, add, add skipping its checks,
+// watch, unwatch, start a run and its go and start anyway, all clear, dismiss) with its id and label, the subject it applies to, its
 // availability from the server's offers, its parameters, its tier, its request and what its answer means. Pure: it
 // holds no host, no state and no storage, so `act.ts` carries any entry out and `action-view.ts` draws any entry, and an
 // entry added here needs nothing else. An entry may also give the `several` form of its dialog, for the one action that
@@ -88,6 +88,8 @@ export type Param = ParamBase &
         initial?: string | undefined;
       }
     | { type: 'text'; placeholder?: string }
+    /** A checkbox, drawn in the dialog: its value is `on` while ticked, and it starts unticked. */
+    | { type: 'tick' }
   );
 
 /** `instant` is sent at once, `undoable` at once with a way back, `confirmed` after the confirmation dialog. */
@@ -295,7 +297,7 @@ function availability(offer: (Offered & { why?: string | undefined }) | undefine
 
 const NOT_OFFERED: Availability = { offered: false };
 
-function runOffer(key: 'resume' | 'restart' | 'stop' | 'suspend' | 'clean') {
+function runOffer(key: 'resume' | 'restart' | 'stop' | 'suspend' | 'clean' | 'rebuild') {
   return (_: Subject, source: OfferSource): Availability => availability(source.run?.[key]);
 }
 
@@ -726,6 +728,8 @@ export const ACTIONS: readonly ActionDef[] = [
               initial: offer.stage,
               ask: 'dialog',
             },
+            { name: 'only', dom: 'only', label: 'this stage only', type: 'tick', ask: 'dialog' },
+            { name: 'base', dom: 'base', label: 'from the base', type: 'tick', ask: 'dialog' },
           ];
     },
     available: runOffer('restart'),
@@ -735,13 +739,21 @@ export const ACTIONS: readonly ActionDef[] = [
       const chosen =
         offer?.stages.find((each) => each.stage === values.stage) ??
         offer?.stages.find((each) => each.stage === offer.stage);
+      const only = values.only === 'on';
+      const again =
+        chosen === undefined
+          ? []
+          : [only ? `runs ${chosen.stage} alone, then the new run is suspended` : `runs again: ${chosen.runsAgain}`];
       return {
         title: `restart ${runName(subject)}`,
         lines:
           offer === undefined
             ? []
             : [
-                ...(chosen === undefined ? [] : [`runs again: ${chosen.runsAgain}`]),
+                ...again,
+                ...(values.base === 'on'
+                  ? [`starts from ${runName(subject)}'s base, without the commits it made`]
+                  : []),
                 budgetOf(offer),
                 `starts a new run seeded from ${runName(subject)}`,
               ],
@@ -750,7 +762,11 @@ export const ACTIONS: readonly ActionDef[] = [
     },
     request: (subject, values, source) => ({
       path: runPath(subject, '/restart'),
-      body: { stage: values.stage ?? source.run?.restart?.stage },
+      body: {
+        stage: values.stage ?? source.run?.restart?.stage,
+        ...(values.only === 'on' ? { continue: false } : {}),
+        ...(values.base === 'on' ? { fromBase: true } : {}),
+      },
     }),
     answer: (status, body) => {
       if (!ok(status)) return { text: refusal(status, body, 'restart'), refused: true };
@@ -805,6 +821,23 @@ export const ACTIONS: readonly ActionDef[] = [
       if (!ok(status)) return { text: refusal(status, body, 'clean'), refused: true };
       const text = answerField(body, 'message');
       return { effect: 'leave', ...(text === undefined ? {} : { text }) };
+    },
+  },
+  {
+    id: 'rebuild-run',
+    label: () => 'rebuild',
+    appliesTo: ['run'],
+    tier: 'instant',
+    place: 'run',
+    holdsDisabled: true,
+    params: () => [],
+    available: runOffer('rebuild'),
+    underway: 'rebuilding…',
+    request: (subject) => ({ path: runPath(subject, '/rebuild'), body: {} }),
+    answer: (status, body) => {
+      if (!ok(status)) return { text: refusal(status, body, 'rebuild'), refused: true };
+      const text = answerField(body, 'message');
+      return { effect: 'reopen', keepMenu: true, ...(text === undefined ? {} : { text }) };
     },
   },
   queueItemAction('requeue-item', 'requeue', 'instant', '/requeue'),

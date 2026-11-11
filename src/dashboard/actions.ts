@@ -2,7 +2,11 @@
 // one check behind both the actions route and each POST that acts on a run, so a request is judged again as it arrives.
 // Read-only: Clean's offer asks the engine's `checkClean()`, which removes nothing.
 //
-// - A `completed` run offers nothing, and says why. A `running` run offers Resume and Restart, disabled.
+// - A `completed` run offers Restart alone. A `running` run a live process holds offers Resume and Restart,
+//   disabled. A `running` run no live process holds (its process was killed outright, so its STATUS never changed) is
+//   read as a suspended one: the lease decides, as `liveRuns()` has it, not STATUS.
+// - Rebuild is offered, beside what the status offers, for a run whose `summary.json` can't be parsed or is not a
+//   `sail.summary.v1`, and not for one whose `summary.json` links out of the run. It is never disabled.
 // - Stop is offered for a `running` or `suspended` run, and for a dispatched run that has no run directory yet. It is
 //   never disabled: `sail stop` stops a run the watcher dispatched, and its refusals come with the POST. A `completed`
 //   or `failed` run has ended, so it offers none.
@@ -12,9 +16,9 @@
 // - Clean is offered for a `failed` run, beside Restart: enabled with what it removes and where the run directory goes,
 //   or disabled with `sail clean`'s refusal, or with why the clone's ports can't be resolved. It is not held back by
 //   the watcher check below, since the engine's checks refuse a leased branch and a queue item that names the run.
-// - Resume is offered for a `suspended` run. For stop reason `budget_exceeded` it needs a raise: the budget the run
+// - Resume is offered for a `suspended` run, and for a dead `running` one. For stop reason `budget_exceeded` it needs a raise: the budget the run
 //   suspended on (its `run:suspended`), else `usd` when the cost has reached the budget's dollars, else `minutes`.
-// - Restart is offered for a `failed` run, a stopped one included. It is a seeded run, so it is disabled for the runs
+// - Restart is offered for a `failed` run, a stopped one included, and for a `completed` one, with no Clean. It is a seeded run, so it is disabled for the runs
 //   `openSeededRun` refuses, in its words: a pull-request run, a run with no workspace, a run whose intake didn't pass.
 //   Its stages are those with a journaled call other than the intake, in the order they first ran, less the ones the
 //   seed would refuse, each with what runs again: the whole group when its first call ran in one, every step when its
@@ -23,7 +27,7 @@
 // - Either is disabled while its branch is leased by another run, and while a queue item of the run's workflow names the
 //   run and is dispatched, or failed and waiting to retry: the watcher has it.
 import { join } from 'node:path';
-import { defaultLeasesDir, heldLease } from '../adapters/leases';
+import { defaultLeasesDir, heldLease, isAlive, readLease } from '../adapters/leases';
 import { isPlainName } from '../engine/call-dir';
 import { checkClean } from '../engine/clean';
 import { INTAKE_KEY } from '../engine/intake';
@@ -37,7 +41,8 @@ import type { SailEvent } from '../events/types';
 import { queueItemsNaming, startingRun } from '../watch/queue-store';
 import type { RegistryEntry } from '../watch/registry';
 import { clonePorts, type ResolveClonePorts } from './clone-ports';
-import { findRunDir } from './files';
+import { containedFile } from './contained';
+import { findRunDir, readSummary } from './files';
 import { queueViews } from './queues';
 
 export interface Offer {
@@ -79,12 +84,19 @@ export interface CleanOffer extends Offer {
   archive?: string;
 }
 
+export interface RebuildOffer extends Offer {
+  /** Why the run's `summary.json` can't be read: the problem the list shows. */
+  problem: string;
+}
+
 export interface RunActions {
   resume?: ResumeOffer;
   restart?: RestartOffer;
   stop?: StopOffer;
   suspend?: SuspendOffer;
   clean?: CleanOffer;
+  /** Offered for a run whose `summary.json` can't be read, whatever its status. */
+  rebuild?: RebuildOffer;
   /** Why the run offers nothing. */
   why?: string;
 }
@@ -113,16 +125,32 @@ function raiseOf(events: readonly SailEvent[], spentUsd: number, budget: Budget)
   return budget.maxUsd !== undefined && spentUsd >= budget.maxUsd ? 'usd' : 'minutes';
 }
 
+/** The directory the run's branch lease is looked up in. */
+function leasesDirOf(entry: RegistryEntry, header: RunHeader, options: ActionsOptions): string {
+  return (
+    options.leasesDir ??
+    (header.adapters.workspace.use === 'fake'
+      ? join(runsDir(entry.sailDir), 'fake', 'leases')
+      : defaultLeasesDir(options.env))
+  );
+}
+
+/**
+ * Whether a live process runs `runId`: the lease on its branch is its own, not suspended, and its pid is alive. A run
+ * with no branch or repository can't be judged and counts as alive.
+ */
+export function runAlive(entry: RegistryEntry, runId: string, header: RunHeader, options: ActionsOptions): boolean {
+  const { branch, repository } = header;
+  if (branch === undefined || repository === undefined) return true;
+  const lease = readLease(leasesDirOf(entry, header, options), repository.url, branch);
+  return lease !== undefined && lease.runId === runId && !lease.suspended && isAlive(lease.pid);
+}
+
 /** The live lease on the run's branch, or undefined when it has none, or no live process holds it. */
 function liveLease(entry: RegistryEntry, header: RunHeader, options: ActionsOptions) {
   const { branch, repository } = header;
   if (branch === undefined || repository === undefined) return undefined;
-  const dir =
-    options.leasesDir ??
-    (header.adapters.workspace.use === 'fake'
-      ? join(runsDir(entry.sailDir), 'fake', 'leases')
-      : defaultLeasesDir(options.env));
-  return heldLease(dir, repository.url, branch);
+  return heldLease(leasesDirOf(entry, header, options), repository.url, branch);
 }
 
 /** Why another run holds the branch, or a queue item of the watcher has this run; undefined when neither does. */
@@ -218,7 +246,10 @@ async function cleanOf(entry: RegistryEntry, runId: string, options: ActionsOpti
   }
 }
 
-/** What run `runId` of the repository offers: Resume, Restart, Stop and Clean, each enabled or why not. */
+/**
+ * What run `runId` of the repository offers: Resume, Restart, Stop, Clean and Rebuild, each enabled or why not. Rebuild
+ * is never disabled: it comes with the run's summary problem, and `rebuildSummary()` refuses with the POST.
+ */
 export async function runActions(
   entry: RegistryEntry,
   runId: string,
@@ -229,16 +260,27 @@ export async function runActions(
     if (isPlainName(runId) && startingRun(runsDir(entry.sailDir), runId)) return { stop: { enabled: true } };
     return { why: dir.missing };
   }
+  const offers = await statusActions(entry, runId, dir, options);
+  const { problem } = readSummary(dir);
+  if (problem === undefined || containedFile(dir, join(dir, 'summary.json')) === undefined) return offers;
+  return { ...offers, rebuild: { enabled: true, problem } };
+}
+
+async function statusActions(
+  entry: RegistryEntry,
+  runId: string,
+  dir: string,
+  options: ActionsOptions,
+): Promise<RunActions> {
   try {
     const { status, stopReason } = readStatus(dir);
     const header = readRunHeader(dir);
-    if (status === 'completed') return { why: `run ${runId} completed: there is nothing to start again` };
     const events = readEvents(dir);
     const spentUsd = summarize(events)?.totals.usage.costUsd ?? 0;
     const budget = budgetOf(header, events);
-    if (status === 'running') {
+    const dead = `run ${runId} reads running, but no live process holds it: sail resume ${runId} takes it`;
+    if (status === 'running' && runAlive(entry, runId, header, options)) {
       const why = `run ${runId} is running`;
-      const dead = `run ${runId} reads running, but no live process holds it: sail resume ${runId} takes it`;
       return {
         resume: { enabled: false, why, spentUsd, budget },
         restart: { enabled: false, why, stages: [], budget: { ...header.budget } },
@@ -249,6 +291,11 @@ export async function runActions(
     const busy = heldBy(entry, runId, header, options);
     const disable = <T extends Offer>(offer: T): T =>
       busy === undefined ? offer : { ...offer, enabled: false, why: busy };
+    if (status === 'completed') {
+      const { entries } = readJournal(dir);
+      const restart = restartOf(runId, header, entries, events);
+      return { restart: restart.enabled ? disable(restart) : restart };
+    }
     if (status === 'failed') {
       const { entries } = readJournal(dir);
       const restart = restartOf(runId, header, entries, events);
@@ -267,7 +314,11 @@ export async function runActions(
       budget,
       ...(raise === undefined ? {} : { raise }),
     };
-    return { resume: disable(resume), stop: { enabled: true } };
+    return {
+      resume: disable(resume),
+      stop: { enabled: true },
+      ...(status === 'running' ? { suspend: { enabled: false, why: dead } } : {}),
+    };
   } catch (error) {
     return { why: `run ${runId} can't be read: ${messageOf(error)}` };
   }

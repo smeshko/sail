@@ -188,7 +188,7 @@ export function openFile(store: Store, name: string, path: string, onMissing?: (
   store.mark('drawer');
 }
 
-/** The open run's status and its queue items' states: what its actions depend on that the index shows. */
+/** The open run's status, summary problem and its queue items' states: what its actions depend on that the index shows. */
 export function offerSignature(store: Store, open: OpenRun) {
   const repo = store.index?.find((each) => each.name === open.repo);
   const item = repo?.runs.find((each) => each.runId === open.runId);
@@ -197,7 +197,7 @@ export function offerSignature(store: Store, open: OpenRun) {
       .filter((each) => each.runId === open.runId)
       .map((each) => `${view.workflow}:${each.state}:${each.retryAt ?? ''}`),
   );
-  return `${item === undefined ? '' : statusOf(item)}|${queued.join(',')}`;
+  return `${item === undefined ? '' : statusOf(item)}|${queued.join(',')}|${item?.problem ?? ''}`;
 }
 
 /**

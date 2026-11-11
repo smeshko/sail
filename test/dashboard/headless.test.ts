@@ -336,7 +336,8 @@ test('on the real bundle and server, restart from the menu lists the stages and 
   expect((page.text('menu').match(/class="cmdk-row/g) ?? []).length).toBeGreaterThan(1);
   page.press('Enter');
   expect(await until(() => page.text('dialog').includes(`<h2 id="dialog-title">restart ${FAKE_2_ID}</h2>`))).toBe(true);
-  expect(page.text('dialog')).toContain('autofocus>restart</button>');
+  expect(page.text('dialog')).toContain('name="only" autofocus>');
+  expect(page.text('dialog')).toContain('data-action="dialog-confirm">restart</button>');
   expect(await until(() => page.text('menu') === '')).toBe(true);
   expect(page.posted).toEqual([]);
 }, 30_000);

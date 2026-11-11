@@ -157,6 +157,28 @@ test("the restart dialog's runs again line follows the stage chosen, and confirm
   expect([r.effects, r.ui.underway, r.toasts]).toEqual([['open alpha/NEW'], {}, ['ok restart R1: started NEW']]);
 });
 
+test('the restart dialog draws this stage only and from the base unticked, a change redraws its lines, and confirm posts what is ticked', () => {
+  const r = rig(RESTART);
+  r.actor.act('restart-run', {});
+  expect(r.dialogs[0]).toContain('<input type="checkbox" name="only"> this stage only');
+  expect(r.dialogs[0]).toContain('<input type="checkbox" name="base"> from the base');
+  expect(r.dialogs[0]).not.toContain('checked');
+  r.dialogFields.only = 'on';
+  r.dialogFields.base = 'on';
+  r.actor.changed();
+  expect(r.ui.dialog?.lines).toEqual([
+    'runs tests alone, then the new run is suspended',
+    "starts from R1's base, without the commits it made",
+    'budget $10.00',
+    'starts a new run seeded from R1',
+  ]);
+  expect(r.redraws[0]).toContain('<input type="checkbox" name="only" checked> this stage only');
+  r.actor.confirm();
+  expect(r.posts).toEqual([
+    { path: '/api/repos/alpha/runs/R1/restart', body: { stage: 'tests', continue: false, fromBase: true } },
+  ]);
+});
+
 test('a restart confirmed without a change posts the offer stage', () => {
   const r = rig(RESTART);
   r.actor.act('restart-run', {});
