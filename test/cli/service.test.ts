@@ -52,7 +52,14 @@ function recording(reply: (args: string[]) => Reply = () => ({ code: 0 })) {
   return { calls, launchctl };
 }
 function depsOf(launchctl: Launchctl, home: string, platform = 'darwin'): ServiceDeps {
-  return { platform, uid: 501, launchctl, home, sail: ['/bin/bun', '--no-env-file', '/sail/src/cli/main.ts'] };
+  return {
+    platform,
+    uid: 501,
+    launchctl,
+    home,
+    sail: ['/bin/bun', '--no-env-file', '/sail/src/cli/main.ts'],
+    bootstrapRetryMs: 1,
+  };
 }
 const spec = (dir: string) => ({
   label: watcherLabel('demo'),
@@ -121,6 +128,25 @@ test('installAgent boots out, writes the plist and its log folder, then bootstra
   expect(text).toContain('<string>/bin/bun</string>');
   expect(text).toContain('<string>--service</string>');
   expect(existsSync(join(dir, 'machine', 'services'))).toBe(true);
+});
+
+test('a bootstrap that fails while the old agent is still going is tried again, and installs once it takes', async () => {
+  const dir = temp();
+  let bootstraps = 0;
+  const { calls, launchctl } = recording((args) => {
+    if (args[0] !== 'bootstrap') return { code: 0 };
+    bootstraps += 1;
+    return bootstraps < 3 ? { code: 5, stderr: 'Bootstrap failed: 5: Input/output error' } : { code: 0 };
+  });
+  const result = await installAgent(depsOf(launchctl, dir), spec(dir));
+  const plist = plistPath(dir, 'sail.watcher.demo');
+  expect(result).toEqual({ plist, log: spec(dir).log });
+  expect(calls).toEqual([
+    ['bootout', 'gui/501/sail.watcher.demo'],
+    ['bootstrap', 'gui/501', plist],
+    ['bootstrap', 'gui/501', plist],
+    ['bootstrap', 'gui/501', plist],
+  ]);
 });
 
 test('a failing bootstrap is a refusal quoting launchctl stderr', async () => {

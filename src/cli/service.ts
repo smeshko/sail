@@ -110,7 +110,12 @@ export interface ServiceDeps {
   home: string;
   /** The command that starts this sail: the Bun, `--no-env-file` and the path of the bin. */
   sail: readonly string[];
+  /** How long a failed bootstrap waits before it is tried again: 500 ms by default. */
+  bootstrapRetryMs?: number;
 }
+
+/** How many times a bootstrap is tried: launchd may still be ending the agent its bootout replaced. */
+const BOOTSTRAP_TRIES = 20;
 
 /** Why a login service can't be made here: it is launchd's. Undefined on macOS. */
 export function platformRefusal(platform: string): string | undefined {
@@ -135,7 +140,11 @@ const failed = (verb: string, result: LaunchctlResult): Refused => ({
   refused: `launchctl ${verb} failed (exit ${result.code}): ${result.stderr.trim()}`,
 });
 
-/** Replaces the agent: boots out the old one (a failure is no matter), writes the plist, and bootstraps it. */
+/**
+ * Replaces the agent: boots out the old one (a failure is no matter), writes the plist, and bootstraps it. launchd's
+ * bootout can return before the old agent's process has ended, and a bootstrap of the same label fails until it has,
+ * so a failed bootstrap is tried again, up to 20 times half a second apart, before it is a refusal.
+ */
 export async function installAgent(
   deps: ServiceDeps,
   spec: AgentSpec,
@@ -154,7 +163,11 @@ export async function installAgent(
       log: spec.log,
     }),
   );
-  const result = await deps.launchctl(['bootstrap', `gui/${deps.uid}`, plist]);
+  let result = await deps.launchctl(['bootstrap', `gui/${deps.uid}`, plist]);
+  for (let tries = 1; result.code !== 0 && tries < BOOTSTRAP_TRIES; tries += 1) {
+    await Bun.sleep(deps.bootstrapRetryMs ?? 500);
+    result = await deps.launchctl(['bootstrap', `gui/${deps.uid}`, plist]);
+  }
   return result.code === 0 ? { plist, log: spec.log } : failed('bootstrap', result);
 }
 
@@ -199,6 +212,7 @@ export function serviceDeps(
     launchctl: overrides.launchctl ?? systemLaunchctl(env),
     home: overrides.home ?? env.HOME ?? homedir(),
     sail: overrides.sail ?? [process.execPath, '--no-env-file', join(PACKAGE_ROOT, 'src', 'cli', 'main.ts')],
+    ...(overrides.bootstrapRetryMs === undefined ? {} : { bootstrapRetryMs: overrides.bootstrapRetryMs }),
   };
 }
 
