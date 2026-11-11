@@ -198,6 +198,7 @@ export function selectRun(store: Store, repo: string, runId: string) {
   if (store.run?.repo === repo && store.run.runId === runId && store.run.error === undefined) return;
   closeRun(store);
   clearCall(store);
+  store.deselected = false;
   ui.repo = repo;
   ui.runId = runId;
   closeFile(store);

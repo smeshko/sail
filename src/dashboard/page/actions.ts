@@ -10,6 +10,7 @@ import { syncUrl } from './location';
 import { closeMenu, runRow } from './menu';
 import { cleanSelected, closeFile, openedOutputKeys, openFile, readLog, readOutput, selectCard } from './reads';
 import { FILTER_KEY, LIST_KEY, THEME_KEY } from './saved';
+import { selectFirst } from './selection';
 import type { Store } from './store';
 import { closeDetail, reopenQueue, selectRun } from './streams';
 import { dismissToast, toast, undoToast } from './toast';
@@ -56,6 +57,7 @@ export const actions: Record<string, Action> = {
     if (data.queue === undefined) return;
     reopenQueue(store, data.queue);
     store.ui.queue = data.queue;
+    store.deselected = false;
     store.mark('list', 'main', 'inspector', 'status');
   },
   'select-card': (store, data) => selectCard(store, data.key, undefined, true),
@@ -123,6 +125,7 @@ export const actions: Record<string, Action> = {
   'select-view': (store, data) => {
     if (!(VIEWS as readonly string[]).includes(data.view ?? '')) return;
     store.ui.view = data.view as ViewName;
+    store.deselected = false;
     store.ui.listFilter = '';
     delete store.ui.historyStatus;
     delete store.ui.historyWorkflow;
@@ -132,6 +135,7 @@ export const actions: Record<string, Action> = {
     // The filter field gives up what was typed in it, so it reads as empty as the filter now is.
     store.fresh.add('list');
     store.mark('sidebar', 'list', 'main');
+    selectFirst(store);
   },
   'filter-repo': (store, data) => {
     if (data.repo === undefined) return;
@@ -156,7 +160,10 @@ export const actions: Record<string, Action> = {
     store.host.save(LIST_KEY, JSON.stringify(store.ui.listFolded));
     store.mark('list');
   },
-  'close-detail': (store) => closeDetail(store),
+  'close-detail': (store) => {
+    closeDetail(store);
+    store.deselected = true;
+  },
   // What was typed in the list's filter field, which `onInput` delivers under the field's name.
   'list-filter': (store, data) => {
     store.ui.listFilter = data.value ?? '';

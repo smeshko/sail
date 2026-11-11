@@ -1265,3 +1265,18 @@ test('a contextmenu on a row reaches the handler with its data and point, and is
   ]);
   expect(prevented).toBe(1);
 });
+
+test('narrow() asks the window whether it is under 800px, and a window without matchMedia reads as wide', () => {
+  const asked: string[] = [];
+  const media = (matches: boolean) => ({
+    ...fakeWindow().win,
+    matchMedia: (query: string) => {
+      asked.push(query);
+      return { matches };
+    },
+  });
+  expect(browserHost(media(true)).narrow()).toBe(true);
+  expect(browserHost(media(false)).narrow()).toBe(false);
+  expect(asked).toEqual(['(max-width: 799px)', '(max-width: 799px)']);
+  expect(browserHost(fakeWindow().win).narrow()).toBe(false);
+});

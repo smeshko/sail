@@ -132,7 +132,10 @@ test("the real bundle boots headless: both repositories, the golden run's eight 
   expect(page.ids).not.toContain('queues');
   expect(await until(() => page.text('sidebar').includes('<span class="nm">beta</span>'))).toBe(true);
   expect(page.text('sidebar')).toContain('<span class="nm">alpha</span>');
-  expect(page.text('main')).toContain('No run selected');
+  // The page opens on Active with its first row, FAKE-3 (suspended), selected in the list and open in the centre.
+  expect(await until(() => page.text('main').includes('FAKE-3-01M39H4ZW0S46MV303CFX3T4PY'))).toBe(true);
+  expect(page.text('main')).not.toContain('No run selected');
+  expect(page.text('list')).toMatch(/class="run lrow sel"/);
   page.click({ action: 'select-view', view: 'history' });
   expect(await until(() => page.text('list').includes(`data-run="${GOLDEN_RUN_ID}"`))).toBe(true);
   page.click({ action: 'select-run', repo: 'alpha', run: GOLDEN_RUN_ID });
@@ -176,7 +179,7 @@ test("once beta's queue/ is gone, the next index drops its queue row and gives t
   expect(page.text('sidebar')).toContain('<span class="nm">beta</span>');
 }, 30_000);
 
-test('the real bundle opens the view the URL names, and writes the view it is changed to (ADW-522)', async () => {
+test('the real bundle opens the view the URL names, and writes the view it is changed to, with the first row of that view (ADW-522)', async () => {
   m = seedFixtures();
   const started = startDashboard({ registryDir: m.registryDir, port: 0, followPollMs: 20, indexPollMs: 50 });
   if ('refused' in started) throw new Error(started.refused);
@@ -185,7 +188,12 @@ test('the real bundle opens the view the URL names, and writes the view it is ch
   expect(await until(() => page.text('list').includes('<span class="lh-t">History</span>'))).toBe(true);
   page.click({ action: 'select-view', view: 'queues' });
   expect(await until(() => page.text('list').includes('<span class="lh-t">Queues</span>'))).toBe(true);
-  expect(page.history.at(-1)).toEqual({ kind: 'push', data: null, unused: '', url: '?view=queues' });
+  expect(page.history.at(-1)).toEqual({
+    kind: 'push',
+    data: null,
+    unused: '',
+    url: '?queue=beta%2Fticket-to-pr&view=queues',
+  });
 }, 30_000);
 
 test("a beta queue that can't be read is listed in the Queues view with its problem, and its row opens a queue view that shows it", async () => {

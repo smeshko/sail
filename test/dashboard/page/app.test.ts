@@ -233,6 +233,11 @@ class FakeHost implements PageHost {
   setDetail(open: boolean) {
     this.details.push(open);
   }
+  /** Whether the window is under 800px, where no first row is selected: most tests leave it so, and the ones about selecting set it false. */
+  narrowed = true;
+  narrow() {
+    return this.narrowed;
+  }
   /** The filter field's typing handler, the fields focused by name, the blurs, and the regions revealed. */
   private input?: (name: string, value: string) => void;
   focused: string[] = [];
@@ -4740,5 +4745,116 @@ describe('the Inbox view (ADW-527)', () => {
       expect(count()).toBe('2');
       expect(rows()).not.toContain('failed: stage_error');
     });
+  });
+});
+
+describe('a view opens with its first row selected (ADW-537)', () => {
+  beforeEach(() => {
+    host.narrowed = false;
+  });
+  /** The row the list draws selected. */
+  const selectedRow = () => /class="[^"]*\bsel\b[^"]*" data-row="([^"]+)"/.exec(host.regions.list ?? '')?.[1];
+  const pushes = () => host.urls.filter((write) => write.push).length;
+
+  test('a boot with an empty URL opens the first row of Active, draws it selected and writes the URL once, as a replace', () => {
+    page = boot(host);
+    plainIndex();
+    host.advance(100);
+    expect([page.ui.repo, page.ui.runId]).toEqual(['beta', FAKE_3_ID]);
+    expect(selectedRow()).toBe(`run:beta/${FAKE_3_ID}`);
+    expect(host.regions.main).toContain(FAKE_3_ID);
+    expect(host.regions.main).not.toContain('class="empty"');
+    expect(host.urls).toEqual([{ query: `repo=beta&run=${FAKE_3_ID}`, push: false }]);
+  });
+
+  test('each of 1 to 4 and a click on a view open that view first row and push exactly one history entry', () => {
+    page = boot(host);
+    plainIndex();
+    host.advance(100);
+    for (const [key, view] of [
+      ['1', 'inbox'],
+      ['2', 'active'],
+      ['3', 'queues'],
+      ['4', 'history'],
+    ] as const) {
+      const before = pushes();
+      host.press(key);
+      host.advance(100);
+      expect(page.ui.view).toBe(view);
+      expect(pushes()).toBe(before + 1);
+      expect(selectedRow()).toBeDefined();
+      expect(host.regions.main).not.toContain('class="empty"');
+    }
+    expect([page.ui.repo, page.ui.runId]).not.toEqual([undefined, undefined]);
+    host.click({ action: 'select-view', view: 'queues' });
+    host.advance(100);
+    expect(page.ui.queue).toBe('beta/ticket-to-pr');
+    expect(selectedRow()).toBe('queue:beta/ticket-to-pr');
+    host.click({ action: 'select-view', view: 'history' });
+    host.advance(100);
+    expect(page.ui.queue).toBeUndefined();
+    expect(page.ui.runId).toBeDefined();
+  });
+
+  test('a URL that names a listed run opens that run, not the first row', () => {
+    host.startAt = { repo: 'alpha', run: GOLDEN_RUN_ID };
+    page = boot(host);
+    plainIndex();
+    host.advance(100);
+    expect([page.ui.repo, page.ui.runId]).toEqual(['alpha', GOLDEN_RUN_ID]);
+  });
+
+  test('a URL that names a run the index does not list opens none and says so in a toast', () => {
+    host.startAt = { repo: 'alpha', run: 'nope' };
+    page = boot(host);
+    plainIndex();
+    host.advance(100);
+    expect(page.ui.runId).toBeUndefined();
+    expect(toasts().join('\n')).toContain('run nope of alpha is not listed');
+    expect(host.regions.main).toContain('No run selected');
+    expect(selectedRow()).toBeUndefined();
+  });
+
+  test('Escape from the open run shows the empty state with no row selected, and a later index selects nothing', () => {
+    page = boot(host);
+    plainIndex();
+    host.advance(100);
+    expect(page.ui.runId).toBe(FAKE_3_ID);
+    host.press('Escape');
+    host.advance(100);
+    expect(host.regions.main).toContain('class="empty"');
+    expect(host.regions.main).toContain('No run selected');
+    expect(selectedRow()).toBeUndefined();
+    plainIndex();
+    host.advance(100);
+    expect(page.ui.runId).toBeUndefined();
+    expect(selectedRow()).toBeUndefined();
+    expect(host.regions.main).toContain('No run selected');
+  });
+
+  test('Back to an entry that names nothing leaves no row selected, and a later index selects nothing', () => {
+    page = boot(host);
+    plainIndex();
+    host.advance(100);
+    expect(page.ui.runId).toBe(FAKE_3_ID);
+    host.go('');
+    host.advance(100);
+    expect(page.ui.runId).toBeUndefined();
+    expect(selectedRow()).toBeUndefined();
+    plainIndex();
+    host.advance(100);
+    expect(page.ui.runId).toBeUndefined();
+  });
+
+  test('a window under 800px selects no first row, at boot or on a change of view', () => {
+    host.narrowed = true;
+    page = boot(host);
+    plainIndex();
+    host.advance(100);
+    expect(page.ui.runId).toBeUndefined();
+    host.press('4');
+    host.advance(100);
+    expect([page.ui.view, page.ui.runId, page.ui.queue]).toEqual(['history', undefined, undefined]);
+    expect(selectedRow()).toBeUndefined();
   });
 });

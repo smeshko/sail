@@ -93,6 +93,8 @@ export interface PageHost {
   setSidebar(open: boolean): void;
   /** Whether a run or queue is open beside the list: the centre is laid out by it. */
   setDetail(open: boolean): void;
+  /** Whether the window is under 800px: the list and the centre are two screens, and no first row is selected. */
+  narrow(): boolean;
   /** The browser's offset east of UTC, in minutes. */
   offset(): number;
   /** What the page's URL asks it to open first, from `?repo=…&run=…&key=…&tab=…&timeline=1&file=…` or `?queue=…`, each with `&view=…`: empty when it asks nothing. */
@@ -180,6 +182,8 @@ export interface BrowserWindow {
   setTimeout(fn: () => void, ms: number): number;
   clearTimeout(id: number): void;
   Date: { new (): { getTimezoneOffset(): number }; now(): number };
+  /** Optional, so a window without it reads as wide. */
+  matchMedia?(query: string): { matches: boolean };
 }
 
 const isElement = (value: unknown): value is ElementLike =>
@@ -584,6 +588,7 @@ export function browserHost(win: BrowserWindow): PageHost {
     setDetail(open) {
       doc.documentElement.dataset.detail = open ? 'open' : 'closed';
     },
+    narrow: () => win.matchMedia?.('(max-width: 799px)').matches ?? false,
     offset: () => -new win.Date().getTimezoneOffset(),
   };
 }
