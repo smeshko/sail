@@ -340,6 +340,20 @@ test('sail watch --uninstall exits 0, boots the agent out and deletes its plist;
   });
 }, 30_000);
 
+test('sail watch --uninstall <name> exits 3 and leaves the installed agent, since it takes no repository', async () => {
+  await withTempRepo(async (repo) => {
+    const world = repository(repo);
+    const a = agent(repo);
+    await sail(a.deps, repo.dir, world.env, { install: true });
+    a.calls.length = 0;
+    const got = await sail(a.deps, repo.dir, world.env, { uninstall: true }, ['other']);
+    expect(got.code).toBe(EXIT_REFUSED);
+    expect(got.stderr).toBe('sail watch: --uninstall takes no repository: sail watch --uninstall [--all]\n');
+    expect(a.calls).toEqual([]);
+    expect(existsSync(a.plist('sail.watcher.stub'))).toBe(true);
+  });
+}, 30_000);
+
 test('sail watch --uninstall --all boots out every installed watcher agent', async () => {
   await withTempRepo(async (repo) => {
     const world = repository(repo);

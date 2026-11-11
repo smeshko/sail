@@ -68,7 +68,7 @@ export async function serviceCommand(
   const names = [...new Set(args.positionals)];
   const operation = wanted[0];
   if (operation === 'install')
-    return all ? installAll(deps, service, names, io, isAlive) : install(service, names, io, isAlive);
+    return all ? installAll(service, names, io, isAlive) : install(service, names, io, isAlive);
   if (operation === 'uninstall') return uninstall(service, all, names, io);
   return restart(deps, service, all, names, io, isAlive);
 }
@@ -120,7 +120,6 @@ const installedLine = (label: string, result: { plist: string; log: string }): s
 
 /** Installs one agent for each registered repository that declares a watch. */
 async function installAll(
-  _deps: WatchDeps,
   service: ServiceDeps,
   names: string[],
   io: Io,
@@ -192,6 +191,7 @@ async function uninstall(service: ServiceDeps, all: boolean, names: string[], io
     }
     return failed ? EXIT_REFUSED : EXIT_OK;
   }
+  if (names.length > 0) return refuse(`--uninstall takes no repository: ${COMMAND} --uninstall [--all]`);
   const project = await findProject(io, COMMAND, { ports: [] });
   if (typeof project === 'number') return project;
   const { name } = project.config;
