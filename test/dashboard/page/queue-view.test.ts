@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { index } from '../../../src/dashboard/files';
-import { queuePanels, watchState } from '../../../src/dashboard/page/index-model';
+import { type QueuePanel, queuePanels, watchState } from '../../../src/dashboard/page/index-model';
 import { queueEventLine, queueId, renderQueue } from '../../../src/dashboard/page/queue-view';
 import { initialUi } from '../../../src/dashboard/page/ui-state';
 import type { QueueEvent } from '../../../src/events/types';
@@ -15,6 +15,25 @@ beforeEach(() => {
   m = seedFixtures();
 });
 afterEach(() => m.remove());
+
+/**
+ * `panel` with the offers the server gives each of its items by state: drop unless it runs, requeue on a parked item and
+ * on a failed one whose run `ended`, move on a waiting one. For a panel whose items a test has changed.
+ */
+function withOffers(panel: QueuePanel, ended: (key: string) => boolean = () => true): QueuePanel {
+  const on = { enabled: true };
+  const items = Object.fromEntries(
+    panel.items.map((item) => [
+      item.dedupKey,
+      {
+        ...(item.state === 'parked' || (item.state === 'failed' && ended(item.dedupKey)) ? { requeue: on } : {}),
+        ...(item.state === 'dispatched' ? {} : { drop: on }),
+        ...(item.state === 'queued' ? { move: on } : {}),
+      },
+    ]),
+  );
+  return { ...panel, offers: { poll: on, add: on, items } };
+}
 
 const NOW = Date.parse('2026-09-24T11:10:00.000Z');
 const queueEvents = (): QueueEvent[] =>
@@ -96,11 +115,9 @@ test('a folded section draws only its heading and count, without its items, whil
 test('a failed item whose run ended shows its requeue and drop buttons in its open menu, and a queue with no items says it is empty', () => {
   const [panel] = queuePanels(index(m.registryDir));
   if (panel === undefined) throw new Error('beta has no queue');
-  const failed = panel.items.map((item) =>
-    item.state === 'parked' ? { ...item, state: 'failed' as const, runEnded: true } : item,
-  );
+  const failed = panel.items.map((item) => (item.state === 'parked' ? { ...item, state: 'failed' as const } : item));
   const ui = { ...initialUi(0), itemMenu: 'ticket:FAKE-6' };
-  const markup = renderQueue({ ...panel, items: failed }, undefined, ui, NOW).value;
+  const markup = renderQueue(withOffers({ ...panel, items: failed }), undefined, ui, NOW).value;
   expect(markup).toContain('<span class="caret">›</span>failed · 1</button><div class="qbox">');
   expect(markup).toContain('data-action="requeue-item"');
   expect(renderQueue({ ...panel, items: [] }, undefined, initialUi(0), NOW).value).toContain(
@@ -186,7 +203,7 @@ function waiting() {
     copy('FAKE-7'),
     copy('FAKE-8', { moved: true }),
   ];
-  return { ...panel, items, counts: { ...panel.counts, queued: 3 } };
+  return withOffers({ ...panel, items, counts: { ...panel.counts, queued: 3 } });
 }
 
 /** The rows of the waiting box, each as its key and the buttons it has. */
@@ -236,7 +253,20 @@ test("the panel's notice is drawn as a warn chip beside its header, and not when
   const noticed = renderQueue(
     panel,
     undefined,
-    { ...initialUi(0), queueNotice: 'no watcher is running <now>' },
+    {
+      ...initialUi(0),
+      act: {
+        drafts: {},
+        results: {
+          queue: {
+            id: 'poll-queue',
+            subject: { kind: 'workflow', repo: panel.repo, workflow: panel.workflow },
+            text: 'no watcher is running <now>',
+            place: 'queue',
+          },
+        },
+      },
+    },
     NOW,
   ).value;
   expect(plain).not.toContain('no watcher is running');
@@ -331,17 +361,16 @@ function controls(markup: string): string[] {
 test('each state shows the buttons its open menu is given: queued, parked and done drop; failed requeues only when its run ended; a dispatched item has no ⋯', () => {
   const [panel] = queuePanels(index(m.registryDir));
   if (panel === undefined) throw new Error('beta has no queue');
-  const item = (state: 'failed', runEnded: boolean, key: string) => ({
-    ...panel.items[0],
-    ...{ state, dedupKey: key, runEnded },
-  });
+  const item = (state: 'failed', key: string) => ({ ...panel.items[0], ...{ state, dedupKey: key } });
   const items = [
     ...panel.items,
-    item('failed', false, 'ticket:FAKE-8'),
-    item('failed', true, 'ticket:FAKE-9'),
+    item('failed', 'ticket:FAKE-8'),
+    item('failed', 'ticket:FAKE-9'),
   ] as typeof panel.items;
+  // FAKE-8's run is still going, FAKE-9's has ended.
+  const offered = withOffers({ ...panel, items }, (key) => key !== 'ticket:FAKE-8');
   const opened = (key: string) =>
-    controls(renderQueue({ ...panel, items }, undefined, { ...initialUi(0), itemMenu: key }, NOW).value).find((row) =>
+    controls(renderQueue(offered, undefined, { ...initialUi(0), itemMenu: key }, NOW).value).find((row) =>
       row.startsWith(`${key}:`),
     );
   expect(items.map((each) => opened(each.dedupKey)).sort()).toEqual([
@@ -352,7 +381,7 @@ test('each state shows the buttons its open menu is given: queued, parked and do
     'ticket:FAKE-8: drop-item drop',
     'ticket:FAKE-9: requeue-item requeue, drop-item drop',
   ]);
-  const closed = renderQueue({ ...panel, items }, undefined, initialUi(0), NOW).value;
+  const closed = renderQueue(offered, undefined, initialUi(0), NOW).value;
   expect(controls(closed).filter((row) => !row.endsWith(': '))).toEqual([]);
   expect([...closed.matchAll(/data-action="item-menu" data-item="([^"]+)"/g)].map(([, key]) => key).sort()).toEqual([
     'ticket:FAKE-4',
@@ -361,7 +390,7 @@ test('each state shows the buttons its open menu is given: queued, parked and do
     'ticket:FAKE-8',
     'ticket:FAKE-9',
   ]);
-  const markup = renderQueue({ ...panel, items }, undefined, { ...initialUi(0), itemMenu: 'ticket:FAKE-6' }, NOW).value;
+  const markup = renderQueue(offered, undefined, { ...initialUi(0), itemMenu: 'ticket:FAKE-6' }, NOW).value;
   expect(markup).toContain(
     '<span class="qmore"><button class="btn mv more open" data-action="item-menu" data-item="ticket:FAKE-6" aria-label="actions for ticket:FAKE-6" aria-expanded="true" title="actions for ticket:FAKE-6">⋯</button><span class="qmenu">',
   );
@@ -386,7 +415,12 @@ test("a row's controls sit after its title column, at its right: the run link, t
 test('the drop an armed click named reads confirm drop and is armed; the others stay drop', () => {
   const [panel] = queuePanels(index(m.registryDir));
   if (panel === undefined) throw new Error('beta has no queue');
-  const ui = { ...initialUi(0), armedDrop: 'ticket:FAKE-6', itemMenu: 'ticket:FAKE-6' };
+  const subject = { kind: 'item', repo: 'beta', workflow: 'ticket-to-pr', item: 'ticket:FAKE-6' } as const;
+  const ui = {
+    ...initialUi(0),
+    act: { drafts: {}, results: {}, pending: { id: 'drop-item', subject, values: {}, sent: false } },
+    itemMenu: 'ticket:FAKE-6',
+  };
   const markup = renderQueue(panel, undefined, ui, NOW).value;
   expect(controls(markup).filter((row) => row.includes('confirm'))).toEqual([
     'ticket:FAKE-6: requeue-item requeue, drop-item confirm drop',
@@ -417,7 +451,7 @@ test('the header has a poll button for the workflow, and the add form shows only
 test('what was typed in the add field and whether force is ticked survive a draw', () => {
   const [panel] = queuePanels(index(m.registryDir));
   if (panel === undefined) throw new Error('beta has no queue');
-  const ui = { ...initialUi(0), addTicket: 'FAKE-"9"', addForce: true };
+  const ui = { ...initialUi(0), act: { drafts: { 'add-ticket': { ticket: 'FAKE-"9"', force: 'on' } }, results: {} } };
   const markup = renderQueue(panel, { recent: [], watch: 'watched', polls: 'ticket' }, ui, NOW).value;
   expect(markup).toContain('name="add-ticket" placeholder="ticket key" value="FAKE-&quot;9&quot;"');
   expect(markup).toContain('<input type="checkbox" name="add-force" checked> force');

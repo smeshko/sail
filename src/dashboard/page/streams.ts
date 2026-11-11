@@ -166,12 +166,7 @@ export function selectRun(store: Store, repo: string, runId: string) {
   store.run = { repo, runId, model: emptyRun(), ended: false };
   store.offers = undefined;
   delete ui.runMenu;
-  delete ui.armed;
-  delete ui.runNotice;
-  delete ui.raise;
-  delete ui.restartStage;
-  delete ui.stopNow;
-  store.fieldsOwn = false;
+  store.actor.forget('run');
   store.fresh.add('rail');
   openRunSocket(store, store.run);
   readOffers(store);
@@ -268,7 +263,7 @@ export function onIndex(store: Store, text: string, onStart: (asked: Record<stri
   }
   if (store.run !== undefined) followAgain(store, store.run, true);
   if (store.run !== undefined && offerSignature(store, store.run) !== store.offersFor) {
-    delete ui.armed;
+    store.actor.disarm();
     readOffers(store);
   }
   if (ui.queue !== undefined && openQueue(store) === undefined) delete ui.queue;

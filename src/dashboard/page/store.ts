@@ -1,9 +1,10 @@
 // What the page's shell holds, as one object made per `boot()`: the index, the open run and its model, the open queue
-// streams, what was read for the selected call, the person's `UiState`, the armed and pending flags, and the regions
+// streams, what was read for the selected call, the person's `UiState`, the actor that carries its actions out, and the regions
 // waiting to be drawn. Every module of the shell takes the store as its first argument. `mark()` is the one way to ask
 // for a draw: it adds regions to the dirty set and schedules the flush, at most one per `FLUSH_MS`.
 import type { RunActions } from '../actions';
 import type { IndexRepo } from '../files';
+import { type Actor, inertActor } from './act';
 import { attention, identity } from './attention';
 import type { PageHost, Region } from './host';
 import { queuePanels } from './index-model';
@@ -53,12 +54,8 @@ export interface Store {
   offers: RunActions | undefined;
   /** What the open run's status and queue item were when its actions were read. */
   offersFor: string | undefined;
-  /** The stage a Restart was armed with, and whether a start is waiting for its answer. */
-  armedStage: string | undefined;
-  starting: boolean;
-  /** Whether the page's raise field and stage list are the open run's, not those of the run selected before it. */
-  fieldsOwn: boolean;
-  addFieldsOwn: boolean;
+  /** Carries the registry's actions out: `boot()` wires it, with the effects only the shell can perform. */
+  actor: Actor;
   /** The needs-attention identities a person cleared, and the identities of the rows last drawn. */
   cleared: Set<string>;
   drawn: string[];
@@ -114,10 +111,7 @@ export function createStore(host: PageHost): Store {
     doc: undefined,
     offers: undefined,
     offersFor: undefined,
-    armedStage: undefined,
-    starting: false,
-    fieldsOwn: false,
-    addFieldsOwn: true,
+    actor: inertActor(),
     cleared,
     drawn: [],
     cursorPending: false,

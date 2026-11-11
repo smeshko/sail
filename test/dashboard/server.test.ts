@@ -172,10 +172,23 @@ test("a repository's queues: beta's one view, whose queue is its queue.json, and
     const before = treeHash(seeded.root);
     const beta = await get(started, '/api/repos/beta/queues');
     const file = JSON.parse(readFileSync(join(queueDirOf(seeded), 'queue.json'), 'utf8'));
+    const noWatcher = { enabled: false, why: `no watcher is running for 'beta': sail watch ${QUEUE_WORKFLOW} first` };
     expect([beta.status, beta.type, JSON.parse(beta.body)]).toEqual([
       200,
       'application/json;charset=utf-8',
-      [{ workflow: QUEUE_WORKFLOW, queue: file }],
+      [
+        {
+          workflow: QUEUE_WORKFLOW,
+          queue: file,
+          offers: {
+            poll: noWatcher,
+            add: noWatcher,
+            items: Object.fromEntries(
+              file.items.map((item: { dedupKey: string; state: string }) => [item.dedupKey, expect.any(Object)]),
+            ),
+          },
+        },
+      ],
     ]);
     const alpha = await get(started, '/api/repos/alpha/queues');
     expect([alpha.status, JSON.parse(alpha.body)]).toEqual([200, []]);

@@ -10,6 +10,9 @@
 // a completed run, a ⋯ of its own that opens the run and, under the row, a menu of what it offers: Resume, Restart,
 // Stop and Clean.
 import type { RunActions } from '../actions';
+import type { RepoOffers } from '../offers';
+import { ACTIONS, type OfferSource, type Subject } from './action-registry';
+import { actionControl, resultOf } from './action-view';
 import { ago, cost, duration } from './format';
 import { html, type SafeHtml } from './html';
 import { newestFirst, type RailRepo, type RailRun, type RailWorkflow, workflowOf } from './index-model';
@@ -155,18 +158,25 @@ function badge(group: string, queue: NonNullable<RailWorkflow['queue']>, ui: UiS
   }</button>`;
 }
 
-/** A watch or unwatch button for a workflow, or for the whole repository when `workflow` is left out. An armed unwatch asks for its second click. */
-function watchButton(repo: string, op: 'watch' | 'unwatch', ui: UiState, workflow?: string): SafeHtml {
-  const all = workflow === undefined;
-  const armed = op === 'unwatch' && ui.armedWatch === (all ? repo : queueId(repo, workflow));
-  const word = all ? `${op} all` : op;
-  return html`<button class="wf-act${armed ? ' armed' : ''}" data-action="watch-set" data-repo="${repo}" data-op="${op}"${
-    all ? '' : html` data-workflow="${workflow}"`
-  }>${armed ? `${word}? click again` : word}</button>`;
+/** The repository's offers as a source the registry reads them from. */
+const watchSource = (repo: string, offers: RepoOffers | undefined): OfferSource => ({
+  index: [{ name: repo, queues: [], offers }],
+});
+
+/**
+ * The watch or unwatch button each offered, drawn from the registry, for a workflow, or for the whole repository when
+ * `workflow` is left out. An armed unwatch asks for its second click.
+ */
+function watchButtons(repo: string, offers: RepoOffers | undefined, ui: UiState, workflow?: string): SafeHtml {
+  const subject: Subject = workflow === undefined ? { kind: 'repo', repo } : { kind: 'workflow', repo, workflow };
+  const source = watchSource(repo, offers);
+  return html`${ACTIONS.filter((def) => def.place === 'repo' && def.appliesTo.includes(subject.kind)).map((def) =>
+    actionControl(def, subject, ui.act, source, { class: 'wf-act', data: true }),
+  )}`;
 }
 
 function workflowHeader(
-  repo: string,
+  repo: RailRepo,
   workflow: RailWorkflow,
   group: string,
   open: boolean,
@@ -175,47 +185,42 @@ function workflowHeader(
 ): SafeHtml {
   return html`<div class="wf-h"><button class="wf-t${open ? ' open' : ''}" data-action="toggle-group" data-group="${group}" aria-expanded="${open ? 'true' : 'false'}"><span class="caret">›</span><span class="nm">${workflow.name}</span></button>${
     workflow.queue === undefined ? '' : badge(group, workflow.queue, ui, now)
-  }${workflow.toggle === undefined ? '' : watchButton(repo, workflow.toggle, ui, workflow.name)}${counts(workflow.runs)}</div>`;
+  }${watchButtons(repo.name, repo.offers, ui, workflow.name)}${counts(workflow.runs)}</div>`;
 }
 
 function workflowGroup(
-  repo: string,
+  repo: RailRepo,
   workflow: RailWorkflow,
   ui: UiState,
   now: number,
   offers: RunActions | undefined,
 ): SafeHtml {
-  const group = queueId(repo, workflow.name);
+  const group = queueId(repo.name, workflow.name);
   const open = ui.expanded.includes(group);
   return html`<div class="wf">${workflowHeader(repo, workflow, group, open, ui, now)}
-${open ? historyLine(repo, group, workflow.runs, ui, offers) : openRun(repo, workflow, ui, offers)}</div>`;
+${open ? historyLine(repo.name, group, workflow.runs, ui, offers) : openRun(repo.name, workflow, ui, offers)}</div>`;
 }
 
 /** What a folded repository still shows: the open queue's workflow, folding as it would, and the open finished run's row. */
 function repoSelection(repo: RailRepo, ui: UiState, now: number, offers: RunActions | undefined): SafeHtml {
   return html`${repo.workflows.map((workflow) =>
     workflow.queue !== undefined && ui.queue === queueId(repo.name, workflow.name)
-      ? workflowGroup(repo.name, workflow, ui, now, offers)
+      ? workflowGroup(repo, workflow, ui, now, offers)
       : openRun(repo.name, workflow, ui, offers),
   )}`;
 }
 
 function repoGroup(repo: RailRepo, ui: UiState, now: number, offers: RunActions | undefined): SafeHtml {
   const open = ui.expanded.includes(repo.name);
+  const said = resultOf(ui.act, 'repo', { repo: repo.name });
   return html`<div class="lgrp">
 <button class="lgrp-h${open ? ' open' : ''}"${
     repo.remote === null ? '' : html` title="${repo.remote}"`
   } data-action="toggle-group" data-group="${repo.name}" aria-expanded="${open ? 'true' : 'false'}"><span class="caret">›</span><span class="nm">${repo.name}</span>${counts(repo.runs)}</button>
 ${repo.problem === undefined ? '' : html`<div class="lgrp-p">${repo.problem}</div>`}${
-  ui.watchNotice?.repo === repo.name ? html`<div class="lgrp-p">${ui.watchNotice.text}</div>` : ''
-}${
-  open
-    ? html`<div class="lgrp-acts">${watchButton(repo.name, 'watch', ui)}${
-        (repo.watching ?? []).length > 0 ? watchButton(repo.name, 'unwatch', ui) : ''
-      }</div>`
-    : ''
-}
-${open ? repo.workflows.map((workflow) => workflowGroup(repo.name, workflow, ui, now, offers)) : repoSelection(repo, ui, now, offers)}</div>`;
+  said === undefined ? '' : html`<div class="lgrp-p">${said}</div>`
+}${open ? html`<div class="lgrp-acts">${watchButtons(repo.name, repo.offers, ui)}</div>` : ''}
+${open ? repo.workflows.map((workflow) => workflowGroup(repo, workflow, ui, now, offers)) : repoSelection(repo, ui, now, offers)}</div>`;
 }
 
 /**
@@ -229,8 +234,8 @@ export function renderRail(
   offers?: RunActions | undefined,
 ): SafeHtml {
   const runs = repos.reduce((sum, repo) => sum + repo.runs.length, 0);
-  const notice =
-    ui.indexNotice === undefined ? '' : html`<div class="act"><span class="warnchip">${ui.indexNotice}</span></div>`;
+  const left = resultOf(ui.act, 'rail');
+  const notice = left === undefined ? '' : html`<div class="act"><span class="warnchip">${left}</span></div>`;
   return html`${notice}${runningBlock(repos, ui, offers)}${queuedBlock(repos, ui, now)}<div class="rail-h"><span>repositories</span><span class="c">${runs} runs</span></div>
 ${repos.length === 0 ? html`<div class="qempty">no repository is registered yet: run sail watch in one</div>` : ''}${repos.map((repo) => repoGroup(repo, ui, now, offers))}`;
 }

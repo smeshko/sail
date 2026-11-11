@@ -1,10 +1,11 @@
-// What each `data-action` does, as one function of the store apiece, and `dispatch()`, the delegated click's rule: a click
-// on anything but a run action disarms an armed Resume, Restart, Stop or Clean, on anything but a drop disarms an armed
-// drop, and on anything but `watch-set` an armed unwatch; an item's menu and a run's menu shut by the same rule. No
-// action opens a socket: what needs one goes through `streams.ts`, and what posts goes through `requests.ts`.
+// What each view `data-action` does, as one function of the store apiece, and `dispatch()`, the delegated click's rule.
+// An action of the registry (`action-registry.ts`) is carried out by the actor (`act.ts`), which drops any confirmation
+// but its own; a click on anything else drops an armed one. An item's menu and a run's menu shut by the rules below. No
+// action opens a socket: what needs one goes through `streams.ts`, and what posts goes through the actor.
+
+import { actionOf } from './action-registry';
 import { closeFile, openedOutputKeys, openFile, readLog, readOutput, selectCard } from './reads';
-import { endRun, queueOp, startRun, watchSet } from './requests';
-import { FILTER_KEY, RAIL_KEY, saveCleared, storedCleared, THEME_KEY } from './saved';
+import { FILTER_KEY, RAIL_KEY, THEME_KEY } from './saved';
 import type { Store } from './store';
 import { reopenQueue, selectRun } from './streams';
 import { FILTERS, type InspectorTab, TABS, THEMES, type TimelineFilter } from './ui-state';
@@ -37,7 +38,7 @@ export function closeAttention(store: Store) {
 export const actions: Record<string, Action> = {
   'select-run': (store, data) => {
     if (data.repo === undefined || data.run === undefined) return;
-    delete store.ui.indexNotice;
+    store.actor.clearResult('rail');
     leaveQueue(store);
     selectRun(store, data.repo, data.run);
   },
@@ -45,7 +46,7 @@ export const actions: Record<string, Action> = {
     if (data.queue === undefined) return;
     reopenQueue(store, data.queue);
     store.ui.queue = data.queue;
-    delete store.ui.queueNotice;
+    store.actor.clearResult('queue');
     store.mark('rail', 'main');
   },
   'select-card': (store, data) => selectCard(store, data.key, undefined, true),
@@ -119,75 +120,17 @@ export const actions: Record<string, Action> = {
     store.host.save(RAIL_KEY, JSON.stringify(store.ui.expanded));
     store.mark('rail');
   },
-  'move-item': (store, data) => {
-    const { dir, repo, workflow, key, target } = data;
-    if (repo === undefined || workflow === undefined || key === undefined || target === undefined) return;
-    const body = dir === 'up' ? { dedupKey: key, before: target } : { dedupKey: key, after: target };
-    queueOp(store, repo, workflow, 'move', body);
-  },
-  'poll-queue': (store, data) => {
-    if (data.repo === undefined || data.workflow === undefined) return;
-    queueOp(store, data.repo, data.workflow, 'poll', {});
-  },
-  'add-ticket': (store, data) => {
-    const { repo, workflow } = data;
-    if (repo === undefined || workflow === undefined) return;
-    store.ui.addTicket = store.host.value('add-ticket') ?? store.ui.addTicket;
-    const forced = store.host.value('add-force');
-    if (forced !== undefined) store.ui.addForce = forced !== '';
-    const ticketKey = (store.ui.addTicket ?? '').trim();
-    if (ticketKey === '') return;
-    queueOp(
-      store,
-      repo,
-      workflow,
-      'add',
-      store.ui.addForce === true ? { ticketKey, force: true } : { ticketKey },
-      () => {
-        delete store.ui.addTicket;
-        store.addFieldsOwn = false;
-        store.fresh.add('main');
-      },
-    );
-  },
   'item-menu': (store, data) => {
     if (store.ui.itemMenu === data.item || data.item === undefined) delete store.ui.itemMenu;
     else store.ui.itemMenu = data.item;
     store.mark('main');
   },
-  'requeue-item': (store, data) => {
-    if (data.repo === undefined || data.workflow === undefined || data.item === undefined) return;
-    queueOp(store, data.repo, data.workflow, 'requeue', { dedupKey: data.item });
-  },
-  'drop-item': (store, data) => {
-    if (data.repo === undefined || data.workflow === undefined || data.item === undefined) return;
-    if (store.ui.armedDrop !== data.item) {
-      store.ui.armedDrop = data.item;
-      store.mark('main');
-      return;
-    }
-    delete store.ui.armedDrop;
-    queueOp(store, data.repo, data.workflow, 'drop', { dedupKey: data.item });
-  },
-  'watch-set': (store, data) => {
-    const { repo, op, workflow } = data;
-    if (repo === undefined || (op !== 'watch' && op !== 'unwatch')) return;
-    const id = workflow === undefined ? repo : `${repo}/${workflow}`;
-    if (op === 'unwatch' && store.ui.armedWatch !== id) {
-      store.ui.armedWatch = id;
-      store.mark('rail');
-      return;
-    }
-    delete store.ui.armedWatch;
-    watchSet(store, repo, op, workflow);
-  },
-  'resume-run': (store) => startRun(store, 'resume'),
-  'restart-run': (store) => startRun(store, 'restart'),
-  'stop-run': (store) => endRun(store, 'stop'),
-  'clean-run': (store) => endRun(store, 'clean'),
   // Ticking Stop now redraws an armed Stop's confirmation, which names what it will do.
   'stop-now': (store) => {
-    store.ui.stopNow = store.host.value('now') === 'on';
+    store.ui.act.drafts['stop-run'] = {
+      ...store.ui.act.drafts['stop-run'],
+      now: store.host.value('now') === 'on' ? 'on' : '',
+    };
     store.mark('rail');
   },
   // A run's ⋯ opens it and its menu under its row; on the open menu's run, it shuts the menu.
@@ -201,7 +144,7 @@ export const actions: Record<string, Action> = {
       store.run.runId === runId
     ) {
       delete store.ui.runMenu;
-      delete store.ui.armed;
+      store.actor.disarm();
       store.mark('rail');
       return;
     }
@@ -223,11 +166,6 @@ export const actions: Record<string, Action> = {
   },
   'toggle-attention': (store) => {
     store.ui.attention = !store.ui.attention;
-    store.mark('attention');
-  },
-  'clear-attention': (store) => {
-    store.cleared = new Set([...storedCleared(store.host), ...store.cleared, ...store.drawn]);
-    saveCleared(store.host, store.cleared);
     store.mark('attention');
   },
   'toggle-section': (store, data) => {
@@ -257,26 +195,21 @@ export const actions: Record<string, Action> = {
 
 export function dispatch(store: Store, action: string, data: Record<string, string>) {
   const { ui } = store;
-  // A click on anything but a run action disarms it, and on anything but a drop disarms that. An item's menu shuts on
-  // any click but its ⋯, which toggles it, and the drop that arms. A run's menu shuts on any click but a run action
-  // and a run's ⋯, which handles its own.
-  const runAction = ['resume-run', 'restart-run', 'stop-run', 'stop-now', 'clean-run'].includes(action);
-  const shuts =
-    ui.itemMenu !== undefined && action !== 'item-menu' && !(action === 'drop-item' && ui.armedDrop !== data.item);
+  const def = actionOf(action);
+  // A registry action is carried out by the actor, which drops any confirmation but its own. A click on anything else
+  // drops it, and `stop-now` keeps it: ticking the box redraws an armed Stop. An item's menu shuts on any click but its
+  // ⋯, which toggles it, and the confirmed action of an item that arms. A run's menu shuts on any click but a run
+  // action and a run's ⋯, which handles its own.
+  const acts = def !== undefined;
+  const runAction = action === 'stop-now' || (def?.appliesTo.includes('run') ?? false);
+  const arming =
+    def?.appliesTo.includes('item') === true && def.tier === 'confirmed' && !store.actor.armed(action, data);
+  const shuts = ui.itemMenu !== undefined && action !== 'item-menu' && !arming;
   const shutsRun = ui.runMenu !== undefined && !runAction && action !== 'run-menu';
-  const disarms =
-    (ui.armed !== undefined && !runAction) ||
-    (ui.armedDrop !== undefined && action !== 'drop-item') ||
-    shuts ||
-    shutsRun;
-  if (ui.armed !== undefined && !runAction) delete ui.armed;
-  if (ui.armedDrop !== undefined && action !== 'drop-item') delete ui.armedDrop;
-  if (ui.armedWatch !== undefined && action !== 'watch-set') {
-    delete ui.armedWatch;
-    store.mark('rail');
-  }
+  const disarmed = !acts && action !== 'stop-now' && store.actor.disarm();
   if (shuts) delete ui.itemMenu;
   if (shutsRun) delete ui.runMenu;
-  if (disarms) store.mark('main', 'rail');
-  actions[action]?.(store, data);
+  if (disarmed || shuts || shutsRun) store.mark('main', 'rail');
+  if (acts) store.actor.act(action, data);
+  else actions[action]?.(store, data);
 }

@@ -4,7 +4,9 @@
 // summary in the index when there is one, and from the cards otherwise. The Resume, Restart, Stop or Clean a run offers
 // are drawn here too, by `runControls`, but shown in the rail's ⋯ menu for the open run.
 import type { Summary } from '../../events/summary';
-import type { CleanOffer, RestartOffer, ResumeOffer, RunActions, StopOffer } from '../actions';
+import type { RunActions } from '../actions';
+import { ACTIONS, type Subject } from './action-registry';
+import { actionControl, resultOf } from './action-view';
 import { runCommands } from './commands';
 import { cost, duration, percent, tokens } from './format';
 import { html, type SafeHtml, safeHref, text } from './html';
@@ -116,73 +118,12 @@ function totals(model: RunModel, summary: Summary | null | undefined, now: numbe
 </div>`;
 }
 
-/** What a resume has spent against its budget, in the unit a raise is in. */
-function spentOf(offer: ResumeOffer): string {
-  const { budget } = offer;
-  if (offer.raise === 'minutes') {
-    const of = budget.maxMinutes === undefined ? '' : ` of ${budget.maxMinutes} min`;
-    return `spent ${offer.spentMinutes === undefined ? '?' : `${offer.spentMinutes} min`}${of}`;
-  }
-  return `spent ${cost(offer.spentUsd)}${budget.maxUsd === undefined ? '' : ` of ${cost(budget.maxUsd)}`}`;
-}
-
-/** The budget a restart gives the new run. */
-function budgetOf(offer: RestartOffer): string {
-  const { maxUsd, maxMinutes } = offer.budget;
-  if (maxUsd !== undefined) return `budget ${cost(maxUsd)}`;
-  return maxMinutes === undefined ? 'no budget' : `budget ${maxMinutes} min`;
-}
-
-function resumeControl(offer: ResumeOffer, ui: UiState): SafeHtml {
-  if (!offer.enabled) {
-    return html`<span class="act"><button class="btn" disabled>resume</button><span class="act-why">${offer.why}</span></span>`;
-  }
-  const raise =
-    offer.raise === undefined
-      ? ''
-      : html`<label class="lbl">raise ${offer.raise === 'usd' ? '$' : 'min'} <input class="num" type="number" name="raise" min="0.01" step="any" value="${ui.raise ?? ''}"></label>`;
-  const label = ui.armed === 'resume' ? `confirm resume · ${spentOf(offer)}` : 'resume';
-  return html`<span class="act">${raise}<button class="btn${ui.armed === 'resume' ? ' armed' : ''}" data-action="resume-run">${label}</button></span>`;
-}
-
-function restartControl(offer: RestartOffer, ui: UiState): SafeHtml {
-  if (!offer.enabled) {
-    return html`<span class="act"><button class="btn" disabled>restart</button><span class="act-why">${offer.why}</span></span>`;
-  }
-  const chosen = offer.stages.some((each) => each.stage === ui.restartStage) ? ui.restartStage : offer.stage;
-  const label = ui.armed === 'restart' ? `confirm restart from ${chosen} · ${budgetOf(offer)}` : 'restart';
-  return html`<span class="act"><label class="lbl">from <select name="stage">${offer.stages.map(
-    (each) =>
-      html`<option value="${each.stage}" title="${each.runsAgain}"${each.stage === chosen ? ' selected' : ''}>${each.stage}</option>`,
-  )}</select></label><button class="btn${ui.armed === 'restart' ? ' armed' : ''}" data-action="restart-run">${label}</button></span>`;
-}
-
-function stopControl(offer: StopOffer, ui: UiState): SafeHtml {
-  if (!offer.enabled) {
-    return html`<span class="act"><button class="btn" disabled>stop</button><span class="act-why">${offer.why}</span></span>`;
-  }
-  const armed = ui.armed === 'stop';
-  const label = !armed
-    ? 'stop'
-    : ui.stopNow === true
-      ? 'confirm stop now · ends its running call'
-      : 'confirm stop · at its next call boundary';
-  return html`<span class="act"><label class="lbl"><input type="checkbox" name="now" data-action="stop-now"${ui.stopNow === true ? ' checked' : ''}> stop now</label><button class="btn${armed ? ' armed' : ''}" data-action="stop-run">${label}</button></span>`;
-}
-
-function cleanControl(offer: CleanOffer, ui: UiState): SafeHtml {
-  if (!offer.enabled) {
-    return html`<span class="act"><button class="btn" disabled>clean</button><span class="act-why">${offer.why}</span></span>`;
-  }
-  const armed = ui.armed === 'clean';
-  const where = offer.archive === undefined ? '' : ` · run directory -> ${offer.archive}`;
-  const label = armed ? `confirm clean · removes ${offer.removes.join(', ') || 'nothing'}${where}` : 'clean';
-  return html`<span class="act"><button class="btn${armed ? ' armed' : ''}" data-action="clean-run">${label}</button></span>`;
-}
+/** The run actions the rail's ⋯ menu draws, in the registry's order: every action done to a run. */
+const RUN_ACTIONS = ACTIONS.filter((def) => def.appliesTo.includes('run'));
 
 /**
  * What the run offers (Resume, Restart, Stop, Clean), whichever it does, with the notice of the last one: the body of
- * the rail's ⋯ menu for the open run. Undefined when it offers none of them.
+ * the rail's ⋯ menu for the open run, drawn from the registry. Undefined when it offers none of them.
  */
 export function runControls(actions: RunActions | undefined, ui: UiState): SafeHtml | undefined {
   if (
@@ -194,11 +135,12 @@ export function runControls(actions: RunActions | undefined, ui: UiState): SafeH
   ) {
     return undefined;
   }
-  return html`<div class="acts">${actions.resume === undefined ? '' : resumeControl(actions.resume, ui)}${
-    actions.restart === undefined ? '' : restartControl(actions.restart, ui)
-  }${actions.stop === undefined ? '' : stopControl(actions.stop, ui)}${
-    actions.clean === undefined ? '' : cleanControl(actions.clean, ui)
-  }${ui.runNotice === undefined ? '' : html`<span class="warnchip">${ui.runNotice}</span>`}</div>`;
+  const subject: Subject = { kind: 'run', repo: ui.repo ?? '', runId: ui.runId ?? '' };
+  const source = { run: actions, index: [] };
+  const notice = resultOf(ui.act, 'run');
+  return html`<div class="acts">${RUN_ACTIONS.map((def) =>
+    actionControl(def, subject, ui.act, source, { honourDisabled: true, wrap: true }),
+  )}${notice === undefined ? '' : html`<span class="warnchip">${notice}</span>`}</div>`;
 }
 
 /** The run view. `now` is ms since the epoch, for the running cards' durations. */
