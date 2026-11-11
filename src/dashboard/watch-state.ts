@@ -13,15 +13,22 @@ export type WorkflowWatch =
   | { state: 'watched'; named: string; label: string }
   | { state: 'not watched' | 'watcher not running'; why: string };
 
+/** The live watcher of a repository and its watch set in this clone, as `repoWatcher` reads them. */
+export type RepoWatcher = { watcher?: WatcherFields; set: Watched[] };
+
 /** The live watcher of the repository and, when it runs in this clone's `.sail/`, its watch set: read once. */
-export function repoWatcher(entry: RegistryEntry): { watcher?: WatcherFields; set: Watched[] } {
+export function repoWatcher(entry: RegistryEntry): RepoWatcher {
   const watcher = liveWatcher(entry);
   if (watcher === undefined) return { set: [] };
   return { watcher, set: watcher.sailDir === entry.sailDir ? liveSet(entry.sailDir, watcher.pid) : [] };
 }
 
 /** Whether `workflow` is watched by the repository's live watcher in this clone, and when it isn't, why. */
-export function workflowWatch(entry: RegistryEntry, workflow: string, read = repoWatcher(entry)): WorkflowWatch {
+export function workflowWatch(
+  entry: RegistryEntry,
+  workflow: string,
+  read: RepoWatcher = repoWatcher(entry),
+): WorkflowWatch {
   const { watcher, set } = read;
   if (watcher === undefined) {
     return {

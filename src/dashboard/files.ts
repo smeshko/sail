@@ -13,7 +13,7 @@ import { EVENTS_FILE, readEvents } from '../events/consumers/ndjson';
 import type { Summary } from '../events/summary';
 import { type RegistryEntry, type RegistryProblem, readRegistry } from '../watch/registry';
 import { containedFile, inside } from './contained';
-import { type QueueView, queueViews } from './queues';
+import { type OfferedQueue, offeredQueues, type RepoOffers, repoOffers } from './offers';
 import { type QueueWatch, queueWatch, repoWatcher, workflowWatch } from './watch-state';
 
 export { containedFile, inside };
@@ -25,12 +25,14 @@ export type Repo = RegistryEntry & { problem?: string };
 export type RunItem = Omit<RunListing, 'dir'> & { source?: Source; summary: Summary | null };
 
 /** A queue view with its workflow's watch state, from the live watcher, and the reason when it isn't watched. */
-export type IndexQueue = QueueView & { watch: QueueWatch };
+export type IndexQueue = OfferedQueue & { watch: QueueWatch };
 
 /** A repository with its runs and its queues: what the index stream sends. */
 export type IndexRepo = Repo & {
   runs: RunItem[];
   queues: IndexQueue[];
+  /** What the repository offers: its watch set, and each workflow's watch or unwatch. */
+  offers?: RepoOffers;
   /** The live watcher of this repository and the workflows it watches, set only while it runs in this clone. */
   watching?: { pid: number; workflows: string[] };
 };
@@ -150,13 +152,26 @@ export function index(registryDir: string): IndexRepo[] {
         watcher?.sailDir === repo.sailDir
           ? { watching: { pid: watcher.pid, workflows: read.set.map((each) => each.workflow) } }
           : {};
-      const queues = queueViews(repo).map((view) => ({
+      const runs = runItems(repo);
+      const queues = offeredQueues(repo, runs, read).map((view) => ({
         ...view,
         watch: queueWatch(workflowWatch(repo, view.workflow, read)),
       }));
-      return { ...repo, runs: runItems(repo), queues, ...watching };
+      return {
+        ...repo,
+        runs,
+        queues,
+        offers: repoOffers(repo, queues, watching.watching?.workflows ?? []),
+        ...watching,
+      };
     } catch (error) {
-      return { ...repo, runs: [], queues: [], problem: `its runs can't be listed: ${messageOf(error)}` };
+      return {
+        ...repo,
+        runs: [],
+        queues: [],
+        offers: { watch: repoOffers(repo, [], []).watch, workflows: {} },
+        problem: `its runs can't be listed: ${messageOf(error)}`,
+      };
     }
   });
 }

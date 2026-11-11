@@ -24,3 +24,43 @@ test('page modules import at runtime only each other, and the scan sees a runtim
   );
   expect(outside).toEqual([]);
 });
+
+/** The last segments of the paths the page POSTs to. */
+const POST_SEGMENTS = [
+  '/resume',
+  '/restart',
+  '/stop',
+  '/clean',
+  '/watch',
+  '/unwatch',
+  '/move',
+  '/poll',
+  '/add',
+  '/requeue',
+  '/drop',
+];
+
+/** The POST segments a source names as string literals. */
+const namesEndpoints = (source: string) =>
+  POST_SEGMENTS.filter((segment) => ["'", '"', '`'].some((quote) => source.includes(`${quote}${segment}${quote}`)));
+
+/** Whether a source calls the host's POST. */
+const posts = (source: string) => /\bhost\.post\(/.test(source);
+
+test('no page module but the registry names a POST endpoint, and only act.ts posts', () => {
+  // The scans see a planted endpoint and a planted post, so a scan that sees nothing can't pass.
+  expect(namesEndpoints("const path = '/stop';")).toEqual(['/stop']);
+  expect(namesEndpoints('const path = `/watch`; const other = "/drop";')).toEqual(['/watch', '/drop']);
+  expect(namesEndpoints("const label = 'stop';")).toEqual([]);
+  expect(posts('void store.host.post(path, body);')).toBe(true);
+  expect(posts('const post = host.get(path);')).toBe(false);
+  const planted = `${readFileSync(join(PAGE, 'run-view.ts'), 'utf8')}\nconst path = '/clean';`;
+  expect(namesEndpoints(planted)).toEqual(['/clean']);
+
+  const modules = [...new Bun.Glob('*.ts').scanSync({ cwd: PAGE })].sort();
+  const sources = Object.fromEntries(modules.map((module) => [module, readFileSync(join(PAGE, module), 'utf8')]));
+  const naming = modules.filter((module) => namesEndpoints(sources[module] ?? '').length > 0);
+  expect(naming).toEqual(['action-registry.ts']);
+  expect(namesEndpoints(sources['action-registry.ts'] ?? '').sort()).toEqual([...POST_SEGMENTS].sort());
+  expect(modules.filter((module) => posts(sources[module] ?? ''))).toEqual(['act.ts']);
+});

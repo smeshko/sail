@@ -46,11 +46,13 @@ test('two registered clones are listed side by side, each with its run, its stat
   expect(runItems(entryOf(m.alpha))).toEqual([goldenItem()]);
   expect(runItems(entryOf(m.beta))).toEqual([goldenItem()]);
   expect(index(m.registryDir)).toEqual([
-    { ...entryOf(m.alpha), runs: [goldenItem()], queues: [] },
-    { ...entryOf(m.beta), runs: [goldenItem()], queues: [] },
+    { ...entryOf(m.alpha), runs: [goldenItem()], queues: [], offers: WATCH_ONLY },
+    { ...entryOf(m.beta), runs: [goldenItem()], queues: [], offers: WATCH_ONLY },
   ]);
   expect(treeHash(m.root)).toBe(before);
 });
+
+const WATCH_ONLY = { watch: { enabled: true }, workflows: {} };
 
 test('a clone whose .sail/ was deleted is listed with a problem and no runs, beside the one that still has its run', () => {
   rmSync(m.alpha.sailDir, { recursive: true });

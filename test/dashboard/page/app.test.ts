@@ -239,10 +239,27 @@ afterEach(() => {
 
 /** Lets the reads' promises settle. */
 const settle = () => Bun.sleep(0);
+/**
+ * `offers` as the server gives them for `watch`: each enabled while the workflow is watched, else disabled with its
+ * reason, since the server says both from the one live watcher.
+ */
+function offersFor<T>(offers: T, watch: QueueWatch): T {
+  const offer = watch.state === 'watched' ? { enabled: true } : { enabled: false, why: watch.why };
+  const each = (value: unknown): unknown =>
+    value !== null && typeof value === 'object'
+      ? 'enabled' in value
+        ? { ...offer }
+        : Object.fromEntries(Object.entries(value).map(([key, inner]) => [key, each(inner)]))
+      : value;
+  return each(offers) as T;
+}
 /** The index as the server sends it; the queues are watched, as `index()` gives them for a live watcher that watches them, unless `watch` says otherwise. */
 const indexMessage = (watch: QueueWatch = { state: 'watched' }) => ({
   kind: 'index',
-  repos: index(m.registryDir).map((repo) => ({ ...repo, queues: repo.queues.map((queue) => ({ ...queue, watch })) })),
+  repos: index(m.registryDir).map((repo) => ({
+    ...repo,
+    queues: repo.queues.map((queue) => ({ ...queue, watch, offers: offersFor(queue.offers, watch) })),
+  })),
 });
 const replay = (socket: FakeSocket | undefined, dir: string, end = true) => {
   for (const event of readEvents(dir)) host.push(socket, { kind: 'event', event });
@@ -1048,9 +1065,9 @@ test('a tick that changes no markup writes no region and scrolls nothing, and on
   host.renders = [];
   host.scrolls = [];
   // A value typed between two unchanged ticks is still read by the draw whose write is skipped.
-  host.fields.raise = '7';
+  host.fields.now = 'on';
   host.advance(2500);
-  expect([host.renders, host.scrolls, page.ui.raise]).toEqual([[], [], '7']);
+  expect([host.renders, host.scrolls, page.ui.act.drafts['stop-run']?.now]).toEqual([[], [], 'on']);
   host.advance(60_000);
   expect(host.renders).toContain('main');
   expect(host.renders).toContain('rail');
@@ -1385,7 +1402,7 @@ test("a click on a waiting row's down button posts the move to the queue's move 
   expect({
     posts: host.posts,
     refused: refused?.includes('<span class="warnchip">no watcher is running for &#39;beta&#39;</span>'),
-    cleared: [page.ui.queueNotice, host.regions.main?.includes('no watcher is running')],
+    cleared: [page.ui.act.results.queue?.text, host.regions.main?.includes('no watcher is running')],
   }).toEqual({
     posts: [
       {
@@ -1419,6 +1436,12 @@ const buttons = (region: string | undefined) =>
     armed === undefined ? '' : 'armed',
     disabled === undefined ? '' : 'disabled',
   ]);
+
+/** The item whose drop a first click has armed. */
+const armedDrop = () => {
+  const pending = page?.ui.act.pending;
+  return pending?.id === 'drop-item' && pending.subject.kind === 'item' ? pending.subject.item : undefined;
+};
 
 /** Boots the page on `run` of `repo`, its events replayed, its actions read and its ⋯ menu open, and settled. */
 async function openOffering(repo: string, runId: string, dir: string) {
@@ -1461,7 +1484,7 @@ test("a failed run's view offers Restart with its stages and the failed one chos
   await settle();
   host.advance(100);
   expect(host.posts).toEqual([{ path: `${FAKE_2_PATH}/restart`, body: { stage: 'implement' } }]);
-  expect([host.open('run=').map((socket) => socket.query), page?.ui.runId, page?.ui.armed]).toEqual([
+  expect([host.open('run=').map((socket) => socket.query), page?.ui.runId, page?.ui.act.pending]).toEqual([
     [runQuery('alpha', NEW_ID)],
     NEW_ID,
     undefined,
@@ -1554,7 +1577,7 @@ test("a run's ⋯ opens the run and its menu under its row, reading what it offe
   host.click({ action: 'restart-run' });
   host.press('Escape');
   host.advance(100);
-  expect([page?.ui.runId, page?.ui.runMenu, page?.ui.armed]).toEqual([FAKE_2_ID, undefined, undefined]);
+  expect([page?.ui.runId, page?.ui.runMenu, page?.ui.act.pending]).toEqual([FAKE_2_ID, undefined, undefined]);
   host.click({ action: 'run-menu', repo: 'alpha', run: FAKE_2_ID });
   host.click({ action: 'run-menu', repo: 'alpha', run: GOLDEN_RUN_ID });
   await settle();
@@ -1577,7 +1600,7 @@ test('a suspended run over its dollars offers Resume with a raise field and no R
   ]);
   host.click({ action: 'resume-run' });
   host.advance(100);
-  expect([host.posts, page?.ui.armed]).toEqual([[], undefined]);
+  expect([host.posts, page?.ui.act.pending]).toEqual([[], undefined]);
   expect(host.regions.rail).toContain('give the dollars to raise the budget by: at least 0.01');
   host.fields.raise = '5';
   host.click({ action: 'resume-run' });
@@ -1618,7 +1641,7 @@ test("the open run's actions are read again when the index shows its status chan
   await settle();
   host.advance(100);
   expect(host.actionReads).toEqual([`${GOLDEN_PATH}/actions`, `${FAKE_2_PATH}/actions`, `${FAKE_2_PATH}/actions`]);
-  expect(page?.ui.armed).toBeUndefined();
+  expect(page?.ui.act.pending).toBeUndefined();
   expect(host.regions.rail).toContain(`run ${FAKE_2_ID} is running`);
   host.push(host.open('index')[0], indexMessage());
   await settle();
@@ -1630,11 +1653,14 @@ test("a stage chosen and a raise typed on one run don't carry over to the next o
   host.fields = { stage: 'spec', raise: '7' };
   host.click({ action: 'restart-run' });
   host.advance(100);
-  expect(page?.ui.restartStage).toBe('spec');
+  expect(page?.ui.act.drafts['restart-run']?.stage).toBe('spec');
   // The first draw after the switch still finds the fields of the run left behind.
   host.click({ action: 'select-run', repo: 'alpha', run: GOLDEN_RUN_ID });
   host.advance(100);
-  expect([page?.ui.restartStage, page?.ui.raise]).toEqual([undefined, undefined]);
+  expect([page?.ui.act.drafts['restart-run']?.stage, page?.ui.act.drafts['resume-run']?.raise]).toEqual([
+    undefined,
+    undefined,
+  ]);
   host.fields = {};
   host.click({ action: 'run-menu', repo: 'alpha', run: FAKE_2_ID });
   replay(host.open('run=')[0], fake2Dir(m));
@@ -1671,7 +1697,7 @@ test('a poll click posts an empty body to the queue poll route; a 200 shows its 
     host.click({ action: 'poll-queue', ...BETA });
     await settle();
     host.advance(100);
-    notices.push(page?.ui.queueNotice);
+    notices.push(page?.ui.act.results.queue?.text);
   }
   expect(host.posts).toEqual(Array(4).fill({ path: `${QUEUE_PATH}/poll`, body: {} }));
   expect(notices).toEqual([
@@ -1703,7 +1729,7 @@ test('the add form shows once the queue stream has polled tickets; add posts the
   await settle();
   host.advance(100);
   expect(host.posts).toEqual([{ path: `${QUEUE_PATH}/add`, body: { ticketKey: 'FAKE-9', force: true } }]);
-  expect(page?.ui.queueNotice).toBe('sail queue: queued ticket:FAKE-9 Nine');
+  expect(page?.ui.act.results.queue?.text).toBe('sail queue: queued ticket:FAKE-9 Nine');
   expect(host.regions.main).toContain('value=""');
   host.fields['add-force'] = '';
   host.click({ action: 'add-ticket', ...BETA });
@@ -1717,24 +1743,20 @@ test('the first click on drop arms it and posts nothing, the second posts the de
   host.click({ action: 'item-menu', item: row.item });
   host.click({ action: 'drop-item', ...row });
   host.advance(100);
-  expect([host.posts, page?.ui.armedDrop, host.regions.main?.includes('confirm drop')]).toEqual([
-    [],
-    'ticket:FAKE-6',
-    true,
-  ]);
+  expect([host.posts, armedDrop(), host.regions.main?.includes('confirm drop')]).toEqual([[], 'ticket:FAKE-6', true]);
   host.click({ action: 'toggle-queue-events' });
   host.advance(100);
-  expect([host.posts, page?.ui.armedDrop, host.regions.main?.includes('confirm drop')]).toEqual([[], undefined, false]);
+  expect([host.posts, armedDrop(), host.regions.main?.includes('confirm drop')]).toEqual([[], undefined, false]);
   host.click({ action: 'item-menu', item: row.item });
   host.click({ action: 'drop-item', ...row });
   host.click({ action: 'item-menu', item: 'ticket:FAKE-5' });
   host.click({ action: 'drop-item', ...BETA, item: 'ticket:FAKE-5' });
-  expect([host.posts, page?.ui.armedDrop, page?.ui.itemMenu]).toEqual([[], 'ticket:FAKE-5', 'ticket:FAKE-5']);
+  expect([host.posts, armedDrop(), page?.ui.itemMenu]).toEqual([[], 'ticket:FAKE-5', 'ticket:FAKE-5']);
   host.postAnswer = { status: 200, body: JSON.stringify({ message: 'sail queue: ticket:FAKE-5 dropped' }) };
   host.click({ action: 'drop-item', ...BETA, item: 'ticket:FAKE-5' });
   await settle();
   host.advance(100);
-  expect([host.posts, page?.ui.armedDrop, page?.ui.itemMenu, page?.ui.queueNotice]).toEqual([
+  expect([host.posts, armedDrop(), page?.ui.itemMenu, page?.ui.act.results.queue?.text]).toEqual([
     [{ path: `${QUEUE_PATH}/drop`, body: { dedupKey: 'ticket:FAKE-5' } }],
     undefined,
     undefined,
@@ -1760,7 +1782,7 @@ test("an item's ⋯ opens its menu, one at a time; its ⋯ again, Escape, anothe
   host.click({ action: 'drop-item', ...BETA, item: 'ticket:FAKE-6' });
   host.press('Escape');
   host.advance(100);
-  expect([...menus(), page?.ui.armedDrop, page?.ui.queue]).toEqual([undefined, 0, undefined, 'beta/ticket-to-pr']);
+  expect([...menus(), armedDrop(), page?.ui.queue]).toEqual([undefined, 0, undefined, 'beta/ticket-to-pr']);
   host.click({ action: 'item-menu', item: 'ticket:FAKE-6' });
   host.click({ action: 'toggle-queue-events' });
   host.advance(100);
@@ -1773,6 +1795,8 @@ test("an item's ⋯ opens its menu, one at a time; its ⋯ again, Escape, anothe
         ? view
         : {
             ...view,
+            // The server gives an item that runs no drop and no requeue.
+            offers: view.offers && { ...view.offers, items: { ...view.offers.items, 'ticket:FAKE-6': {} } },
             queue: {
               ...view.queue,
               items: view.queue.items.map((item) =>
@@ -1800,6 +1824,11 @@ test('an armed drop is disarmed when its item is drawn dispatched, so it asks ag
           ? view
           : {
               ...view,
+              offers:
+                view.offers &&
+                (state === 'dispatched'
+                  ? { ...view.offers, items: { ...view.offers.items, [row.item]: {} } }
+                  : view.offers),
               queue: {
                 ...view.queue,
                 items: view.queue.items.map((item) =>
@@ -1815,7 +1844,7 @@ test('an armed drop is disarmed when its item is drawn dispatched, so it asks ag
   host.advance(100);
   host.push(host.open('index')[0], withState('parked'));
   host.advance(100);
-  expect([page?.ui.armedDrop, host.regions.main?.includes('confirm drop')]).toEqual([undefined, false]);
+  expect([armedDrop(), host.regions.main?.includes('confirm drop')]).toEqual([undefined, false]);
   host.click({ action: 'drop-item', ...row });
   expect(host.posts).toEqual([]);
 });
@@ -1829,7 +1858,7 @@ test('a requeue click posts at once with the dedup key, and a 409 shows the CLI 
   host.click({ action: 'requeue-item', ...BETA, item: 'ticket:FAKE-6' });
   await settle();
   host.advance(100);
-  expect([host.posts, page?.ui.queueNotice]).toEqual([
+  expect([host.posts, page?.ui.act.results.queue?.text]).toEqual([
     [{ path: `${QUEUE_PATH}/requeue`, body: { dedupKey: 'ticket:FAKE-6' } }],
     'ticket:FAKE-6 is queued: only a parked or failed item is requeued',
   ]);
@@ -1966,7 +1995,7 @@ test('Clean arms with what it removes, posts {} on the second click, and leaves 
   await settle();
   host.advance(100);
   expect(host.posts).toEqual([{ path: `${FAKE_2_PATH}/clean`, body: {} }]);
-  expect([before?.closed, page?.ui.indexNotice]).toEqual([true, cleaned]);
+  expect([before?.closed, page?.ui.act.results.rail?.text]).toEqual([true, cleaned]);
   expect(host.regions.rail).toContain(`<span class="warnchip">${cleaned.replace('->', '-&gt;')}</span>`);
   host.click({ action: 'select-run', repo: 'alpha', run: GOLDEN_RUN_ID });
   host.advance(100);
@@ -2005,6 +2034,12 @@ function bootWatching(workflows?: string[]) {
             ...queue,
             watch: workflows.includes(queue.workflow) ? { state: 'watched' as const } : queue.watch,
           })),
+          // What the server then offers: unwatch for what is watched, and for the whole set while it holds any.
+          offers: {
+            watch: { enabled: true },
+            ...(workflows.length === 0 ? {} : { unwatch: { enabled: true } }),
+            workflows: Object.fromEntries(workflows.map((name) => [name, { unwatch: { enabled: true } }])),
+          },
         }
       : repo,
   );
@@ -2012,16 +2047,34 @@ function bootWatching(workflows?: string[]) {
   host.advance(100);
 }
 const watchClick = (op: string, workflow?: string) =>
-  host.click({ action: 'watch-set', repo: 'beta', op, ...(workflow === undefined ? {} : { workflow }) });
+  host.click({ action: op, repo: 'beta', ...(workflow === undefined ? {} : { workflow }) });
+/** What the last watch or unwatch answered, shown under the repository: its text, with the repository it names. */
+const watchNotice = () => {
+  const result = page?.ui.act.results.repo;
+  return result !== undefined && 'repo' in result.subject
+    ? { repo: result.subject.repo, text: result.text }
+    : undefined;
+};
+/** The unwatch a first click has armed: the repository, or `<repository>/<workflow>`. */
+const armedWatch = () => {
+  const pending = page?.ui.act.pending;
+  if (pending?.id !== 'unwatch' || pending.sent) return undefined;
+  const { subject } = pending;
+  return subject.kind === 'workflow'
+    ? `${subject.repo}/${subject.workflow}`
+    : 'repo' in subject
+      ? subject.repo
+      : undefined;
+};
 
 test('a Watch click posts the workflow to the repository watch route at once, and says it is watching until the answer', async () => {
   bootWatching();
   host.postAnswer = { status: 200, body: JSON.stringify({ message: 'sail watch: it watches ticket-to-pr' }) };
   watchClick('watch', QUEUE_WORKFLOW);
   expect(host.posts).toEqual([{ path: '/api/repos/beta/watch', body: { workflows: [QUEUE_WORKFLOW] } }]);
-  expect(page?.ui.watchNotice).toEqual({ repo: 'beta', text: 'watching…' });
+  expect(watchNotice()).toEqual({ repo: 'beta', text: 'watching…' });
   await settle();
-  expect(page?.ui.watchNotice).toEqual({ repo: 'beta', text: 'sail watch: it watches ticket-to-pr' });
+  expect(watchNotice()).toEqual({ repo: 'beta', text: 'sail watch: it watches ticket-to-pr' });
   host.advance(100);
   expect(host.regions.rail).toContain('<div class="lgrp-p">sail watch: it watches ticket-to-pr</div>');
 });
@@ -2032,18 +2085,18 @@ test('an Unwatch click arms and posts nothing, another action disarms it, and th
   host.click({ action: 'toggle-group', group: `beta/${QUEUE_WORKFLOW}` });
   watchClick('unwatch', QUEUE_WORKFLOW);
   host.advance(100);
-  expect([host.posts, page?.ui.armedWatch]).toEqual([[], `beta/${QUEUE_WORKFLOW}`]);
+  expect([host.posts, armedWatch()]).toEqual([[], `beta/${QUEUE_WORKFLOW}`]);
   expect(host.regions.rail).toContain('unwatch? click again');
   host.click({ action: 'toggle-group', group: 'alpha' });
   host.advance(100);
-  expect(page?.ui.armedWatch).toBeUndefined();
+  expect(armedWatch()).toBeUndefined();
   expect(host.regions.rail).not.toContain('click again');
   watchClick('unwatch', QUEUE_WORKFLOW);
   expect(host.posts).toEqual([]);
   host.postAnswer = { status: 200, body: JSON.stringify({ message: 'sail unwatch: done' }) };
   watchClick('unwatch', QUEUE_WORKFLOW);
   expect(host.posts).toEqual([{ path: '/api/repos/beta/unwatch', body: { workflows: [QUEUE_WORKFLOW] } }]);
-  expect([page?.ui.armedWatch, page?.ui.watchNotice]).toEqual([undefined, { repo: 'beta', text: 'unwatching…' }]);
+  expect([armedWatch(), watchNotice()]).toEqual([undefined, { repo: 'beta', text: 'unwatching…' }]);
 });
 
 test('Watch all posts an empty list at once, and Unwatch all posts one on its second click', async () => {
@@ -2052,7 +2105,7 @@ test('Watch all posts an empty list at once, and Unwatch all posts one on its se
   expect(host.posts).toEqual([{ path: '/api/repos/beta/watch', body: { workflows: [] } }]);
   host.posts.length = 0;
   watchClick('unwatch');
-  expect([host.posts, page?.ui.armedWatch]).toEqual([[], 'beta']);
+  expect([host.posts, armedWatch()]).toEqual([[], 'beta']);
   watchClick('unwatch');
   expect(host.posts).toEqual([{ path: '/api/repos/beta/unwatch', body: { workflows: [] } }]);
   await settle();
@@ -2070,7 +2123,7 @@ test('a 202 shows its waiting line, a 409 the CLI refusal, and no answer says so
     host.postAnswer = answer;
     watchClick('watch');
     await settle();
-    notices.push(page?.ui.watchNotice?.text);
+    notices.push(watchNotice()?.text);
   }
   expect(notices).toEqual([
     'the watcher of beta (pid 7) starts',
@@ -2215,7 +2268,7 @@ test('an index that turns the open queue to watcher not running redraws main wit
   host.click({ action: 'item-menu', item: 'ticket:FAKE-6' });
   host.click({ action: 'drop-item', repo: 'beta', workflow: QUEUE_WORKFLOW, item: 'ticket:FAKE-6' });
   host.advance(100);
-  expect([page.ui.itemMenu, page.ui.armedDrop]).toEqual(['ticket:FAKE-6', 'ticket:FAKE-6']);
+  expect([page.ui.itemMenu, armedDrop()]).toEqual(['ticket:FAKE-6', 'ticket:FAKE-6']);
   host.renders = [];
   const why = "no watcher is running for 'beta': sail watch ticket-to-pr first";
   host.push(host.open('index')[0], indexMessage({ state: 'watcher not running', why }));
@@ -2225,7 +2278,7 @@ test('an index that turns the open queue to watcher not running redraws main wit
     `<button class="btn" disabled title="no watcher is running for &#39;beta&#39;: sail watch ticket-to-pr first">poll</button>`,
   );
   expect(host.regions.main).toContain('<span class="pill p-skip">watcher not running</span>');
-  expect([page.ui.itemMenu, page.ui.armedDrop]).toEqual([undefined, undefined]);
+  expect([page.ui.itemMenu, armedDrop()]).toEqual([undefined, undefined]);
   const posts = host.posts.length;
   host.click({ action: 'poll-queue', repo: 'beta', workflow: QUEUE_WORKFLOW });
   await settle();

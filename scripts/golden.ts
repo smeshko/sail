@@ -278,6 +278,15 @@ export async function renderDashboardViews(outDir: string): Promise<string[]> {
                 },
               },
             ],
+            // The server offers a watch on a workflow it has a queue view for, unreadable or not.
+            ...(repo.offers === undefined
+              ? {}
+              : {
+                  offers: {
+                    ...repo.offers,
+                    workflows: { ...repo.offers.workflows, nightly: { watch: { enabled: true } } },
+                  },
+                }),
           }
         : repo,
     );

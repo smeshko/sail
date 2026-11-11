@@ -10,9 +10,11 @@
 // when its hold ends and why, and its hold's events name it. An item that waits on its ticket's prerequisites names them.
 import type { QueueEvent } from '../../events/types';
 import type { QueueItemState } from '../../watch/queue-store';
+import { ACTIONS, actionOf, type OfferSource, type Subject } from './action-registry';
+import { actionControl, resultOf } from './action-view';
 import { ago, clock } from './format';
 import { html, type SafeHtml, safeHref } from './html';
-import { type PanelItem, QUEUE_STATES, type QueuePanel } from './index-model';
+import { type PanelItem, panelSource, QUEUE_STATES, type QueuePanel } from './index-model';
 import type { UiState } from './ui-state';
 
 /** What the shell has heard on a queue's stream: its last events. */
@@ -64,36 +66,67 @@ export function queueEventLine(event: QueueEvent): string {
   }
 }
 
-function itemButton(panel: QueuePanel, item: PanelItem, action: string, label: string, armed = false): SafeHtml {
-  return html`<button class="btn${armed ? ' armed' : ''}" data-action="${action}" data-repo="${panel.repo}" data-workflow="${panel.workflow}" data-item="${item.dedupKey}" title="${label.replace('confirm ', '')} ${item.dedupKey}">${label}</button>`;
-}
+const itemSubject = (panel: QueuePanel, item: PanelItem): Subject => ({
+  kind: 'item',
+  repo: panel.repo,
+  workflow: panel.workflow,
+  item: item.dedupKey,
+});
+
+/** Whether the queue offers its own action `id`: poll or add. */
+const queueOffered = (panel: QueuePanel, id: string) =>
+  actionOf(id)?.available({ kind: 'workflow', repo: panel.repo, workflow: panel.workflow }, panelSource(panel))
+    .offered === true;
+
+/** Whether the queue offers `id` for `item`. */
+const offered = (panel: QueuePanel, item: PanelItem, id: string) =>
+  actionOf(id)?.available(itemSubject(panel, item), panelSource(panel)).offered === true;
+
+/** Whether the queue offers `item` a drop. */
+export const offeredDrop = (panel: QueuePanel, item: PanelItem) => offered(panel, item, 'drop-item');
+
+/** The registry's actions a row's ⋯ menu holds, in order: those done to an item that the row supplies no value for. */
+const menuActions = (subject: Subject, source: OfferSource) =>
+  ACTIONS.filter(
+    (def) => def.appliesTo.includes('item') && def.params(subject, source).every((param) => param.given === undefined),
+  );
+
+/** Whether the queue offers the item anything its ⋯ menu holds: requeue or drop. */
+export const hasItemActions = (panel: QueuePanel, item: PanelItem) => {
+  const subject = itemSubject(panel, item);
+  const source = panelSource(panel);
+  return menuActions(subject, source).some((def) => def.available(subject, source).offered);
+};
 
 /**
- * A row's ⋯ and, once opened, its menu: requeue on a parked item, or a failed one whose run has ended; drop on any item
- * that isn't running. A running item has neither, so it has no ⋯.
+ * A row's ⋯ and, once opened, its menu, drawn from the registry by what the queue offers: requeue on a parked item, or a
+ * failed one whose run has ended; drop on any item that isn't running, which needs a second click. A running item
+ * offers neither, so it has no ⋯.
  */
 function itemMenu(panel: QueuePanel, item: PanelItem, ui: UiState, why: string | undefined): SafeHtml | '' {
-  if (item.state === 'dispatched') return '';
+  if (!hasItemActions(panel, item)) return '';
   if (why !== undefined) {
     return html`<span class="qmore"><button class="btn mv more" disabled aria-label="actions for ${item.dedupKey}" title="${why}">⋯</button></span>`;
   }
   const open = ui.itemMenu === item.dedupKey;
   const toggle = html`<button class="btn mv more${open ? ' open' : ''}" data-action="item-menu" data-item="${item.dedupKey}" aria-label="actions for ${item.dedupKey}" aria-expanded="${open ? 'true' : 'false'}" title="actions for ${item.dedupKey}">⋯</button>`;
   if (!open) return html`<span class="qmore">${toggle}</span>`;
-  const requeue =
-    item.state === 'parked' || (item.state === 'failed' && item.runEnded)
-      ? itemButton(panel, item, 'requeue-item', 'requeue')
-      : '';
-  const armed = ui.armedDrop === item.dedupKey;
-  return html`<span class="qmore">${toggle}<span class="qmenu">${requeue}${itemButton(panel, item, 'drop-item', armed ? 'confirm drop' : 'drop', armed)}</span></span>`;
+  const subject = itemSubject(panel, item);
+  const source = panelSource(panel);
+  const buttons = menuActions(subject, source).map((def) => {
+    const title = `${def.label(subject)} ${item.dedupKey}`;
+    return actionControl(def, subject, ui.act, source, { data: true, title });
+  });
+  return html`<span class="qmore">${toggle}<span class="qmenu">${buttons}</span></span>`;
 }
 
 /** The field to add a ticket by its key, with Force, as typed so far. */
 function addForm(panel: QueuePanel, ui: UiState, why: string | undefined): SafeHtml {
+  const typed = ui.act.drafts['add-ticket'];
   if (why !== undefined) {
-    return html`<div class="qadd"><input class="txt" type="text" name="add-ticket" placeholder="ticket key" value="${ui.addTicket ?? ''}" disabled title="${why}"><label class="lbl"><input type="checkbox" name="add-force"${ui.addForce === true ? ' checked' : ''} disabled title="${why}"> force</label><button class="btn" disabled title="${why}">add</button></div>`;
+    return html`<div class="qadd"><input class="txt" type="text" name="add-ticket" placeholder="ticket key" value="${typed?.ticket ?? ''}" disabled title="${why}"><label class="lbl"><input type="checkbox" name="add-force"${typed?.force === 'on' ? ' checked' : ''} disabled title="${why}"> force</label><button class="btn" disabled title="${why}">add</button></div>`;
   }
-  return html`<div class="qadd"><input class="txt" type="text" name="add-ticket" placeholder="ticket key" value="${ui.addTicket ?? ''}"><label class="lbl"><input type="checkbox" name="add-force"${ui.addForce === true ? ' checked' : ''}> force</label><button class="btn" data-action="add-ticket" data-repo="${panel.repo}" data-workflow="${panel.workflow}" title="add the ticket to the queue">add</button></div>`;
+  return html`<div class="qadd"><input class="txt" type="text" name="add-ticket" placeholder="ticket key" value="${typed?.ticket ?? ''}"><label class="lbl"><input type="checkbox" name="add-force"${typed?.force === 'on' ? ' checked' : ''}> force</label><button class="btn" data-action="add-ticket" data-repo="${panel.repo}" data-workflow="${panel.workflow}" title="add the ticket to the queue">add</button></div>`;
 }
 
 /** A waiting row's ▲ or ▼: `target` is the waiting neighbour the item moves before or after. */
@@ -111,7 +144,7 @@ function moveButton(
 }
 
 function moveButtons(panel: QueuePanel, item: PanelItem, why: string | undefined): SafeHtml | '' {
-  if (item.state !== 'queued') return '';
+  if (!offered(panel, item, 'move-item')) return '';
   const waiting = panel.items.filter((each) => each.state === 'queued');
   const at = waiting.indexOf(item);
   const above = waiting[at - 1];
@@ -170,6 +203,7 @@ function panelView(panel: QueuePanel, stream: QueueStream | undefined, ui: UiSta
   const polling = panel.queue?.polling;
   const paused = polling?.paused;
   const held = panel.queue?.held;
+  const notice = resultOf(ui.act, 'queue', { repo: panel.repo, workflow: panel.workflow });
   return html`<section class="qpanel">
 <div class="srcbar"><span class="h${why === undefined ? '' : ' held'}"></span><span class="nm">${panel.repo} / ${panel.workflow}</span><span class="pill ${why === undefined ? 'p-pass' : 'p-skip'}">${state}</span>${
     polling === undefined
@@ -179,12 +213,14 @@ function panelView(panel: QueuePanel, stream: QueueStream | undefined, ui: UiSta
     held === undefined
       ? ''
       : html`<span class="warnchip">held${held.until === undefined ? '' : html` until ${clock(held.until, ui.tz)}`}: ${held.reason}</span>`
-  }${ui.queueNotice === undefined ? '' : html`<span class="warnchip">${ui.queueNotice}</span>`}${
-    why === undefined
-      ? html`<button class="btn" data-action="poll-queue" data-repo="${panel.repo}" data-workflow="${panel.workflow}" title="poll now">poll</button>`
-      : html`<span class="act"><button class="btn" disabled title="${why}">poll</button><span class="act-why">${why}</span></span>`
+  }${notice === undefined ? '' : html`<span class="warnchip">${notice}</span>`}${
+    !queueOffered(panel, 'poll-queue')
+      ? ''
+      : why === undefined
+        ? html`<button class="btn" data-action="poll-queue" data-repo="${panel.repo}" data-workflow="${panel.workflow}" title="poll now">poll</button>`
+        : html`<span class="act"><button class="btn" disabled title="${why}">poll</button><span class="act-why">${why}</span></span>`
   }</div>
-${stream?.polls === 'ticket' ? addForm(panel, ui, why) : ''}
+${stream?.polls === 'ticket' && queueOffered(panel, 'add-ticket') ? addForm(panel, ui, why) : ''}
 ${panel.problem === undefined ? '' : html`<div class="code bad">${panel.problem}</div>`}
 ${stream?.error === undefined ? '' : html`<div class="code bad">${stream.error}</div>`}
 <div class="statebar">${QUEUE_STATES.map((state) => html`<span class="sf"><i class="d ${state}"></i>${LABELS[state]} <span class="n">${panel.counts[state]}</span></span>`)}</div>

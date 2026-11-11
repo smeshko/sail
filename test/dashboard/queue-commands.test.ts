@@ -271,6 +271,17 @@ test('an add to a workflow that polls pull requests is refused with the sail que
   expect(w.inbox()).toEqual([]);
 });
 
+test("a poll with no live watcher is 409 with the why the queue's offer carries", async () => {
+  world({ watcher: false });
+  const server = start();
+  const queues = (await (
+    await fetch(`http://127.0.0.1:${server.port}/api/repos/beta/queues`, { headers: HEADER })
+  ).json()) as { offers: { poll: { enabled: boolean; why: string } } }[];
+  const response = await post(server, path('poll'), {});
+  expect(queues[0]?.offers.poll.enabled).toBe(false);
+  expect(await answer(response)).toEqual([409, { error: queues[0]?.offers.poll.why }]);
+});
+
 test.each([
   ['poll', {}],
   ['add', { ticketKey: 'FAKE-1' }],

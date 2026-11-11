@@ -115,31 +115,19 @@ test("queuePanels gives beta's queue with its counts and its items by state, and
     ['ticket:FAKE-6', 'parked', false],
     ['ticket:FAKE-4', 'done', false],
   ]);
-  expect(panel?.items.map((item) => [item.dedupKey, item.runEnded])).toEqual([
-    ['ticket:FAKE-3', false],
-    ['ticket:FAKE-5', true],
-    ['ticket:FAKE-6', true],
-    ['ticket:FAKE-4', true],
-  ]);
   rmSync(join(m.beta.clone, '.sail-runs', 'queue'), { recursive: true });
   expect(queuePanels(index(m.registryDir))).toEqual([]);
 });
 
-test('an item has runEnded when it has no run, its run is not listed, or its run is listed and neither running nor suspended', () => {
-  const repos = index(m.registryDir);
-  const beta = repos.find((repo) => repo.name === 'beta');
-  const dispatched = beta?.queues[0]?.queue?.items.find((item) => item.state === 'dispatched');
-  const run = beta?.runs.find((each) => each.runId === dispatched?.runId);
-  if (beta === undefined || run === undefined) throw new Error('beta has no dispatched run');
-  const ended = (status: string) => {
-    const changed = { ...run, status: { ...(run.status as object), status } } as typeof run;
-    const panel = queuePanels([{ ...beta, runs: [changed] }])[0];
-    return panel?.items.find((item) => item.state === 'dispatched')?.runEnded;
-  };
-  expect(['running', 'suspended', 'completed', 'failed'].map(ended)).toEqual([false, false, true, true]);
-  expect(queuePanels([{ ...beta, runs: [] }])[0]?.items.find((item) => item.state === 'dispatched')?.runEnded).toBe(
-    true,
+test("a panel carries its queue's offers, each item's offers keyed by its dedup key", () => {
+  const beta = index(m.registryDir).find((repo) => repo.name === 'beta');
+  const panel = queuePanels(index(m.registryDir))[0];
+  expect(panel?.offers).toEqual(beta?.queues[0]?.offers);
+  expect(Object.keys(panel?.offers?.items ?? {}).sort()).toEqual(
+    (panel?.items ?? []).map((item) => item.dedupKey).sort(),
   );
+  const bare = queuePanels([{ ...beta, queues: [{ workflow: 'ticket-to-pr' }] } as typeof beta & object])[0];
+  expect(bare?.offers).toBeUndefined();
 });
 
 test('pollKind is the kind of the last queue:polled event, and undefined with none', () => {
@@ -220,38 +208,36 @@ function betaRail(watching?: { pid: number; workflows: string[] }, watch?: Queue
   return beta;
 }
 
-const togglesOf = (repo: ReturnType<typeof betaRail>) =>
-  repo.workflows.map((workflow) => [workflow.name, workflow.watch?.state, workflow.toggle]);
+const watchesOf = (repo: ReturnType<typeof betaRail>) =>
+  repo.workflows.map((workflow) => [workflow.name, workflow.watch?.state]);
 
 const WHY = "no watcher is running for 'beta': sail watch ticket-to-pr first";
 
-test('with no live watcher a workflow with a queue reads watcher not running and offers watch, one with runs alone has no state, and the repository has no watch set', () => {
+test('with no live watcher a workflow with a queue reads watcher not running, and one with runs alone has no state', () => {
   const beta = betaRail();
-  expect(togglesOf(beta)).toEqual([
-    ['review', undefined, undefined],
-    [QUEUE_WORKFLOW, 'watcher not running', 'watch'],
+  expect(watchesOf(beta)).toEqual([
+    ['review', undefined],
+    [QUEUE_WORKFLOW, 'watcher not running'],
   ]);
   expect(beta.workflows.find((workflow) => workflow.name === QUEUE_WORKFLOW)?.watch).toEqual({
     state: 'watcher not running',
     why: WHY,
   });
-  expect(beta.watching).toBeUndefined();
 });
 
-test("a queue view's watch is its workflow's and its panel's, and the toggle follows it: unwatch while watched, watch for not watched", () => {
+test("a queue view's watch is its workflow's and its panel's: watched, or not watched with its reason", () => {
   const live = { pid: 1, workflows: [QUEUE_WORKFLOW] };
-  expect(togglesOf(betaRail(live, { state: 'watched' }))).toEqual([
-    ['review', undefined, undefined],
-    [QUEUE_WORKFLOW, 'watched', 'unwatch'],
+  expect(watchesOf(betaRail(live, { state: 'watched' }))).toEqual([
+    ['review', undefined],
+    [QUEUE_WORKFLOW, 'watched'],
   ]);
   const not = { state: 'not watched' as const, why: 'it does not watch' };
   const beta = betaRail({ pid: 1, workflows: [] }, not);
-  expect(togglesOf(beta)).toEqual([
-    ['review', undefined, undefined],
-    [QUEUE_WORKFLOW, 'not watched', 'watch'],
+  expect(watchesOf(beta)).toEqual([
+    ['review', undefined],
+    [QUEUE_WORKFLOW, 'not watched'],
   ]);
   expect(beta.workflows.find((workflow) => workflow.name === QUEUE_WORKFLOW)?.watch).toEqual(not);
-  expect(beta.watching).toEqual([]);
   const repos = index(m.registryDir).map((repo) => ({
     ...repo,
     queues: repo.queues.map((queue) => ({ ...queue, watch: not })),
@@ -259,12 +245,23 @@ test("a queue view's watch is its workflow's and its panel's, and the toggle fol
   expect(queuePanels(repos).map((panel) => panel.watch)).toEqual([not]);
 });
 
-test('a workflow in the watch set with no queue view is listed too, reads watched and offers unwatch', () => {
+test("a repository's rail entry carries the offers its index entry has, and a workflow's watch button comes from them alone", () => {
+  const entry = index(m.registryDir).find((repo) => repo.name === 'beta');
+  const beta = betaRail();
+  expect(beta.offers).toEqual(entry?.offers);
+  expect(beta.offers?.workflows).toEqual({ [QUEUE_WORKFLOW]: { watch: { enabled: true } } });
+  expect(beta.workflows.map((workflow) => workflow.name)).toEqual(['review', QUEUE_WORKFLOW]);
+  expect(Object.keys(beta.workflows[0] ?? {}).sort()).toEqual(['name', 'runs']);
+  const { offers: _, ...without } = entry as NonNullable<typeof entry>;
+  expect(railRepos([without], NOW)[0]?.offers).toBeUndefined();
+});
+
+test('a workflow in the watch set with no queue view is listed too, with no runs, and reads watched', () => {
   const beta = betaRail({ pid: 1, workflows: ['review', 'ghost', QUEUE_WORKFLOW] }, { state: 'watched' });
-  expect(togglesOf(beta)).toEqual([
-    ['ghost', 'watched', 'unwatch'],
-    ['review', 'watched', 'unwatch'],
-    [QUEUE_WORKFLOW, 'watched', 'unwatch'],
+  expect(watchesOf(beta)).toEqual([
+    ['ghost', 'watched'],
+    ['review', 'watched'],
+    [QUEUE_WORKFLOW, 'watched'],
   ]);
   expect(beta.workflows.find((workflow) => workflow.name === 'ghost')?.runs).toEqual([]);
 });
