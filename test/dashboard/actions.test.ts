@@ -108,10 +108,18 @@ test('a failed ticket run offers Restart with its stages in the order they ran, 
   });
 });
 
-test('a completed run offers neither, and says it completed', async () => {
-  expect(await actions('beta', FAKE_4_ID)).toEqual({
-    why: `run ${FAKE_4_ID} completed: there is nothing to start again`,
-  });
+test('a completed run offers Restart with its stages, the last journaled call as its default, and nothing else', async () => {
+  // The default is the stage of the call that ended `failed` (the golden run's tests), else the last journaled call's.
+  for (const [clone, id, stage] of [
+    ['beta', FAKE_4_ID, 'style'],
+    ['alpha', GOLDEN_RUN_ID, 'tests'],
+  ] as const) {
+    const offers = await actions(clone, id);
+    expect(Object.keys(offers)).toEqual(['restart']);
+    expect(offers.restart?.enabled).toBe(true);
+    expect(offers.restart?.stages.length).toBeGreaterThan(0);
+    expect(offers.restart?.stage).toBe(stage);
+  }
 });
 
 const FAKE_2_BUDGET = { maxUsd: 25, maxMinutes: 90 };

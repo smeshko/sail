@@ -2,7 +2,7 @@
 // one check behind both the actions route and each POST that acts on a run, so a request is judged again as it arrives.
 // Read-only: Clean's offer asks the engine's `checkClean()`, which removes nothing.
 //
-// - A `completed` run offers nothing, and says why. A `running` run a live process holds offers Resume and Restart,
+// - A `completed` run offers Restart alone. A `running` run a live process holds offers Resume and Restart,
 //   disabled. A `running` run no live process holds (its process was killed outright, so its STATUS never changed) is
 //   read as a suspended one: the lease decides, as `liveRuns()` has it, not STATUS.
 // - Stop is offered for a `running` or `suspended` run, and for a dispatched run that has no run directory yet. It is
@@ -13,7 +13,7 @@
 //   the watcher check below, since the engine's checks refuse a leased branch and a queue item that names the run.
 // - Resume is offered for a `suspended` run, and for a dead `running` one. For stop reason `budget_exceeded` it needs a raise: the budget the run
 //   suspended on (its `run:suspended`), else `usd` when the cost has reached the budget's dollars, else `minutes`.
-// - Restart is offered for a `failed` run, a stopped one included. It is a seeded run, so it is disabled for the runs
+// - Restart is offered for a `failed` run, a stopped one included, and for a `completed` one, with no Clean. It is a seeded run, so it is disabled for the runs
 //   `openSeededRun` refuses, in its words: a pull-request run, a run with no workspace, a run whose intake didn't pass.
 //   Its stages are those with a journaled call other than the intake, in the order they first ran, less the ones the
 //   seed would refuse, each with what runs again: the whole group when its first call ran in one, every step when its
@@ -241,7 +241,6 @@ export async function runActions(
   try {
     const { status, stopReason } = readStatus(dir);
     const header = readRunHeader(dir);
-    if (status === 'completed') return { why: `run ${runId} completed: there is nothing to start again` };
     const events = readEvents(dir);
     const spentUsd = summarize(events)?.totals.usage.costUsd ?? 0;
     const budget = budgetOf(header, events);
@@ -256,6 +255,11 @@ export async function runActions(
     const busy = heldBy(entry, runId, header, options);
     const disable = <T extends Offer>(offer: T): T =>
       busy === undefined ? offer : { ...offer, enabled: false, why: busy };
+    if (status === 'completed') {
+      const { entries } = readJournal(dir);
+      const restart = restartOf(runId, header, entries, events);
+      return { restart: restart.enabled ? disable(restart) : restart };
+    }
     if (status === 'failed') {
       const { entries } = readJournal(dir);
       const restart = restartOf(runId, header, entries, events);

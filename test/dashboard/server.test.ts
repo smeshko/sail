@@ -696,6 +696,19 @@ test('a POST to restart a failed run starts `sail run --from-run` under a minted
   expect(dashboardLogs(m.alpha)).toEqual([`${runId}.log`]);
 });
 
+test('a POST to restart a completed run starts a seeded run', async () => {
+  m = seedFixtures();
+  const stub = stubSail(
+    `id=$(echo "$*" | sed 's/.*--run-id //')\nmkdir -p ".sail-runs/$id"\necho '{}' > ".sail-runs/$id/run.json"\nprintf 'running\\n' > ".sail-runs/$id/STATUS"\nsleep 1`,
+  );
+  const server = startWith(stub.cli);
+  const response = await post(server, `/api/repos/alpha/runs/${GOLDEN_RUN_ID}/restart`, startedBy('{"stage":"tests"}'));
+  const { runId } = (await response.json()) as { runId: string };
+  expect(response.status).toBe(202);
+  expect(isRunIdOf('FAKE-1', runId)).toBe(true);
+  expect(stub.argv()).toEqual([`run --from-run ${GOLDEN_RUN_ID} --stage tests --continue --run-id ${runId}`]);
+});
+
 test('a restart whose sail exits after run.json and before STATUS is 409 with the last line it printed', async () => {
   m = seedFixtures();
   const stub = stubSail(

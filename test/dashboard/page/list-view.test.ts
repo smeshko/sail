@@ -139,10 +139,13 @@ test("a row's menu is drawn inside its row", () => {
   expect(row).not.toContain('</div><div class="r-menu">');
 });
 
-test('a completed run has no ⋯', () => {
-  expect(draw('history')).toContain('data-run="b-done"');
-  expect(draw('history')).not.toContain('data-action="run-menu" data-repo="beta"');
+test('a completed run has a ⋯, and its open menu draws restart', () => {
+  expect(draw('history')).toContain('data-action="run-menu" data-repo="beta" data-run="b-done"');
   expect(draw('history')).toContain('data-action="run-menu" data-repo="alpha" data-run="a-fail"');
+  const markup = draw('history', { repo: 'beta', runId: 'b-done', runMenu: { runId: 'b-done', at: 'row' as const } }, {
+    restart: { enabled: true, stages: [{ stage: 'spec', runsAgain: 'spec#1 and everything after it' }], stage: 'spec' },
+  } as never);
+  expect(markup).toContain('data-action="restart-run"');
 });
 
 test('History lists failed then done and Queues one row per queue under its repository, with Watch all on each header row', () => {
