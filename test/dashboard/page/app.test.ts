@@ -1878,6 +1878,35 @@ describe('the list by keyboard (ADW-522)', () => {
     expect(host.regions.list).not.toContain('checking');
   });
 
+  test('a read of the offers is dropped when x or a filter changes the shown selection meanwhile, and the marks stay (review R4)', async () => {
+    const p = bootHistory();
+    const cleanWhile = async (change: () => void) => {
+      let release = () => {};
+      host.actionsHold = new Promise<void>((done) => {
+        release = done;
+      });
+      host.click({ action: 'clean-selected' });
+      host.advance(100);
+      change();
+      host.advance(100);
+      release();
+      host.actionsHold = undefined;
+      await Bun.sleep(50);
+      host.advance(100);
+    };
+    markFirstTwo();
+    await cleanWhile(() => host.press('x'));
+    expect([host.dialog, p.ui.underway.selection, p.ui.listSelected.length]).toEqual([undefined, undefined, 1]);
+    expect(host.regions.list).not.toContain('checking');
+    expect(host.regions.list).toContain('<span class="lh-sel">1 selected</span>');
+    host.press('x');
+    await cleanWhile(() => host.type('list-status', 'failed'));
+    expect([host.dialog, p.ui.underway.selection, p.ui.listSelected.length]).toEqual([undefined, undefined, 2]);
+    expect(host.regions.list).toContain('<span class="lh-sel">1 selected</span>');
+    await cleanWhile(() => host.type('list-filter', 'fake-2'));
+    expect(dialogTitle()).toBe('clean 1 run');
+  });
+
   test('clean on a selection while a run request is out keeps the marks and toasts why (review R3)', async () => {
     const p = bootHistory();
     markFirstTwo();

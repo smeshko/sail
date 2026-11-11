@@ -221,14 +221,16 @@ export function readOffers(store: Store) {
 /**
  * Clean over the selection: reads the actions of each selected run the list shows, together, while the head says
  * `checking n runs…`, then hands what they offer to the actor, which asks once. A read that a later one or a change of
- * the selection outran is dropped.
+ * the selection outran, a filter that changed which selected rows show included, is dropped and keeps the marks.
  */
 export function cleanSelected(store: Store) {
   const { ui, host } = store;
-  const rows = selectedRows(
-    shownGroups(ui.view, listRepos(store.index ?? [], host.now()), ui, host.now()),
-    ui.listSelected,
-  );
+  /** The selected rows the list shows now, in order. */
+  const shown = () =>
+    selectedRows(shownGroups(ui.view, listRepos(store.index ?? [], host.now()), ui, host.now()), ui.listSelected);
+  const idsOf = (each: readonly { id: string }[]) => each.map((row) => row.id).join('\n');
+  const rows = shown();
+  const ids = idsOf(rows);
   if (rows.length === 0) return;
   const asked = ++store.selectionRead;
   ui.underway.selection = `checking ${rows.length} ${rows.length === 1 ? 'run' : 'runs'}…`;
@@ -249,6 +251,8 @@ export function cleanSelected(store: Store) {
   void Promise.all(reads).then((runs) => {
     if (asked !== store.selectionRead || store.stopped) return;
     delete ui.underway.selection;
+    // A mark, an unmark or a filter that changed the shown selection meanwhile outran the read: it asks nothing.
+    if (idsOf(shown()) !== ids) return store.mark('list');
     // A selection the actor took nothing of, as while a run request is out, stays marked for another clean.
     if (store.actor.actSeveral('clean-run', runs)) ui.listSelected = [];
     store.mark('list');
