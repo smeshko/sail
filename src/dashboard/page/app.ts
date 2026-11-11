@@ -91,6 +91,8 @@ export function boot(host: PageHost): Page {
   host.onKey((key, inInput, on) => onKey(store, key, inInput, on));
   host.onInput((name, value) => {
     if (name === 'list-filter') dispatch(store, 'list-filter', { value });
+    if (name === 'list-status') dispatch(store, 'filter-status', { value });
+    if (name === 'list-workflow') dispatch(store, 'filter-workflow', { value });
   });
   host.onNavigate((asked) => {
     // Before the first index the entry's view is shown and its query is what the index opens; after it, what the entry

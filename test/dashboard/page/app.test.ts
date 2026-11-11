@@ -1693,6 +1693,36 @@ describe('the list by keyboard (ADW-522)', () => {
     expect(host.regions.list).toContain('<span class="c">3</span>');
   });
 
+  test("choosing a status narrows the list and the cursor, leaves the sidebar's count, and a change of view empties it", () => {
+    const p = bootHistory();
+    const sidebar = host.regions.sidebar;
+    host.type('list-status', 'failed');
+    host.advance(100);
+    expect(p.ui.historyStatus).toBe('failed');
+    expect(host.regions.list).toContain('<span class="c">1 of 3</span>');
+    expect(host.regions.list).toContain(`data-run="${FAKE_2_ID}"`);
+    expect(host.regions.list).not.toContain(`data-run="${GOLDEN_RUN_ID}"`);
+    expect(host.regions.sidebar).toBe(sidebar);
+    for (let i = 0; i < 9; i++) host.press('j');
+    expect(p.ui.listCursor).toBe(`run:alpha/${FAKE_2_ID}`);
+    host.type('list-filter', 'zzz');
+    host.advance(100);
+    expect(host.regions.list).toContain('nothing matches');
+    host.type('list-filter', '');
+    host.type('list-workflow', 'no-such-workflow');
+    host.advance(100);
+    expect(host.regions.list).toContain('nothing matches');
+    host.type('list-workflow', '');
+    host.type('list-status', 'bogus');
+    host.advance(100);
+    expect(p.ui.historyStatus).toBe('failed');
+    host.press('1');
+    host.press('3');
+    host.advance(100);
+    expect([p.ui.historyStatus, p.ui.historyWorkflow]).toEqual([undefined, undefined]);
+    expect(host.regions.list).toContain('<span class="c">3</span>');
+  });
+
   test('Escape in the filter field blurs it and changes nothing else; any other key typed there changes only the filter', () => {
     const p = bootHistory();
     host.press('j');

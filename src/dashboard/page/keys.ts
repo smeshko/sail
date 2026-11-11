@@ -7,7 +7,7 @@
 // toggle the inspector and needs attention. A key typed in an input does nothing but, for Escape, take the focus off.
 import { actions, closeAttention, step } from './actions';
 import { listRepos } from './index-model';
-import { entries, filterRows, groupsOf, type ListRow, VIEWS } from './list-model';
+import { entries, type ListRow, shownGroups, VIEWS } from './list-model';
 import { syncUrl } from './location';
 import { closeFile, selectCard } from './reads';
 import type { Store } from './store';
@@ -18,10 +18,7 @@ export const MOVES: Record<string, number> = { j: 1, ArrowDown: 1, ArrowRight: 1
 /** What the list shows now: its groups under the repository filter and the filter field. */
 function shown(store: Store) {
   const { ui, host } = store;
-  return filterRows(
-    groupsOf(ui.view, listRepos(store.index ?? [], host.now()), ui.repoFilter, { now: host.now(), tz: ui.tz }),
-    ui.listFilter,
-  );
+  return shownGroups(ui.view, listRepos(store.index ?? [], host.now()), ui, host.now());
 }
 
 /** The row with `id` in what the list shows. */

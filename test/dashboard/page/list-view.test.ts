@@ -289,3 +289,27 @@ test('each run status draws its own pill colour in its row (review R11)', () => 
     'p-skip',
   ]);
 });
+
+test("History's head holds a status and a workflow control and the count reads n of m; Active and Queues hold neither", () => {
+  const history = draw('history');
+  expect(history).toContain(
+    '<select class="list-s" name="list-status" aria-label="filter by status"><option value="" selected>any status</option><option value="failed">failed</option><option value="completed">done</option></select>',
+  );
+  expect(history).toContain(
+    '<select class="list-s" name="list-workflow" aria-label="filter by workflow"><option value="" selected>any workflow</option><option value="flow">flow</option></select>',
+  );
+  expect(history).toContain('<span class="lh-t">History</span><span class="c">2</span>');
+  const failed = draw('history', { historyStatus: 'failed' });
+  expect(failed).toContain('<option value="failed" selected>failed</option>');
+  expect(failed).toContain('<span class="c">1 of 2</span>');
+  expect(failed).not.toContain('data-row="run:beta/b-done"');
+  const wf = draw('history', { historyWorkflow: 'flow' });
+  expect(wf).toContain('<option value="flow" selected>flow</option>');
+  expect(wf).toContain('<span class="c">2 of 2</span>');
+  const gone = draw('history', { historyWorkflow: 'old' });
+  expect(gone).toContain('<option value="old" selected>old</option>');
+  expect(gone).toContain('nothing matches');
+  expect(gone).toContain('<span class="c">0 of 2</span>');
+  expect(draw('active')).not.toContain('<select');
+  expect(draw('queues')).not.toContain('<select');
+});

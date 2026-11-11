@@ -47,6 +47,9 @@ export interface UiState {
   view: ViewName;
   repoFilter?: string;
   listFilter: string;
+  /** History's status and workflow filters, from the list head's two controls; `completed` is `done`. */
+  historyStatus?: 'failed' | 'completed';
+  historyWorkflow?: string;
   listCursor?: string;
   listFolded: string[];
   /** Whether the needs attention pane is open. */

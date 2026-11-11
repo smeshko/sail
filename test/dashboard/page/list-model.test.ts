@@ -4,11 +4,14 @@ import type { ListRepo, ListRun } from '../../../src/dashboard/page/index-model'
 import {
   activeGroups,
   entries,
+  filterHistory,
   filterRows,
   groupsOf,
   historyGroups,
+  historyWorkflows,
   queueGroups,
   repoDot,
+  shownGroups,
   VIEWS,
   viewCounts,
   waitsOnPerson,
@@ -180,4 +183,53 @@ test('entries lists group ids and visible row ids in order, leaving out the rows
     'run:alpha/a-run1',
     'run:beta/b-run2',
   ]);
+});
+
+const mixed = [
+  repo('alpha', [
+    run('a1', 'failed', '2026-10-01T09:00:00Z', { workflow: 'ticket-to-pr@3' }),
+    run('a2', 'completed', '2026-10-01T08:00:00Z', { workflow: 'ticket-to-pr@3' }),
+    run('a3', 'completed', '2026-09-30T08:00:00Z', { workflow: 'review@1' }),
+  ]),
+  repo('beta', [run('b1', 'failed', '2026-09-29T08:00:00Z', { workflow: 'review@1' })]),
+];
+
+test('filterHistory keeps the rows of a status and of a workflow and drops a day left empty', () => {
+  const groups = historyGroups(mixed, CLOCK);
+  expect(ids(filterHistory(groups, { status: 'failed' }))).toEqual([
+    ['Today', ['run:alpha/a1']],
+    ['2026-09-29', ['run:beta/b1']],
+  ]);
+  expect(ids(filterHistory(groups, { workflow: 'ticket-to-pr' }))).toEqual([
+    ['Today', ['run:alpha/a1', 'run:alpha/a2']],
+  ]);
+  expect(ids(filterHistory(groups, { status: 'completed', workflow: 'review' }))).toEqual([
+    ['Yesterday', ['run:alpha/a3']],
+  ]);
+  expect(ids(filterHistory(groups, {}))).toEqual(ids(groups));
+});
+
+test('historyWorkflows lists the distinct workflows of the finished runs, sorted, under the repository filter', () => {
+  const live = repo('gamma', [run('g1', 'running', '2026-10-01T09:00:00Z', { workflow: 'zzz@1' })]);
+  expect(historyWorkflows([...mixed, live])).toEqual(['review', 'ticket-to-pr']);
+  expect(historyWorkflows(mixed, 'beta')).toEqual(['review']);
+});
+
+test('shownGroups combines the repository, status, workflow and text filters in History only', () => {
+  const filters = { listFilter: '', tz: 0 };
+  const flat = (groups: ReturnType<typeof shownGroups>) => groups.flatMap((g) => g.rows.map((r) => r.id));
+  expect(flat(shownGroups('history', mixed, { ...filters, historyStatus: 'failed' }, CLOCK.now))).toEqual([
+    'run:alpha/a1',
+    'run:beta/b1',
+  ]);
+  expect(
+    flat(shownGroups('history', mixed, { ...filters, historyStatus: 'failed', historyWorkflow: 'review' }, CLOCK.now)),
+  ).toEqual(['run:beta/b1']);
+  expect(
+    flat(shownGroups('history', mixed, { ...filters, historyStatus: 'failed', repoFilter: 'alpha' }, CLOCK.now)),
+  ).toEqual(['run:alpha/a1']);
+  expect(
+    flat(shownGroups('history', mixed, { ...filters, listFilter: 'a3', historyStatus: 'failed' }, CLOCK.now)),
+  ).toEqual([]);
+  expect(flat(shownGroups('active', mixed, { ...filters, historyStatus: 'failed' }, CLOCK.now))).toEqual([]);
 });

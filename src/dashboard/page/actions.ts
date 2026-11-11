@@ -4,7 +4,8 @@
 // action opens a socket: what needs one goes through `streams.ts`, and what posts goes through the actor.
 
 import { actionOf } from './action-registry';
-import { VIEWS, type ViewName } from './list-model';
+import { listRepos } from './index-model';
+import { historyWorkflows, VIEWS, type ViewName } from './list-model';
 import { syncUrl } from './location';
 import { closeFile, openedOutputKeys, openFile, readLog, readOutput, selectCard } from './reads';
 import { FILTER_KEY, LIST_KEY, THEME_KEY } from './saved';
@@ -117,6 +118,8 @@ export const actions: Record<string, Action> = {
     if (!(VIEWS as readonly string[]).includes(data.view ?? '')) return;
     store.ui.view = data.view as ViewName;
     store.ui.listFilter = '';
+    delete store.ui.historyStatus;
+    delete store.ui.historyWorkflow;
     delete store.ui.listCursor;
     // The filter field gives up what was typed in it, so it reads as empty as the filter now is.
     store.fresh.add('list');
@@ -126,6 +129,15 @@ export const actions: Record<string, Action> = {
     if (data.repo === undefined) return;
     if (store.ui.repoFilter === data.repo) delete store.ui.repoFilter;
     else store.ui.repoFilter = data.repo;
+    // A workflow the narrowed repository has no finished run of is dropped, and the controls take the markup's values.
+    const { historyWorkflow } = store.ui;
+    if (
+      historyWorkflow !== undefined &&
+      !historyWorkflows(listRepos(store.index ?? [], store.host.now()), store.ui.repoFilter).includes(historyWorkflow)
+    ) {
+      delete store.ui.historyWorkflow;
+    }
+    store.fresh.add('list');
     store.mark('sidebar', 'list');
   },
   'toggle-list-group': (store, data) => {
@@ -140,6 +152,18 @@ export const actions: Record<string, Action> = {
   // What was typed in the list's filter field, which `onInput` delivers under the field's name.
   'list-filter': (store, data) => {
     store.ui.listFilter = data.value ?? '';
+    store.mark('list');
+  },
+  // What was chosen in History's status and workflow controls; a value that is no status is ignored.
+  'filter-status': (store, data) => {
+    if (data.value === 'failed' || data.value === 'completed') store.ui.historyStatus = data.value;
+    else if (data.value === '') delete store.ui.historyStatus;
+    else return;
+    store.mark('list');
+  },
+  'filter-workflow': (store, data) => {
+    if (data.value === undefined || data.value === '') delete store.ui.historyWorkflow;
+    else store.ui.historyWorkflow = data.value;
     store.mark('list');
   },
   'item-menu': (store, data) => {

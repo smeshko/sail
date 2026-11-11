@@ -1,5 +1,6 @@
 // The list: the one component every view draws its rows on, in the centre. A head names the view with its count, which
-// reads `n of m` while the filter field narrows it, and carries the field itself. Under it,
+// reads `n of m` while the filter field narrows it, and carries the field itself; History's head also carries a status and a
+// workflow control, which narrow it the same way. Under it,
 // folding groups: Active's `waiting on you` and `running`, History's days, and in Queues one per
 // repository. A run's row is a `div` holding two sibling buttons: its own, which opens the run and shows on one line
 // its status, id, title, repository › workflow, stalled mark, duration, cost and stop reason, with a problem wrapping
@@ -17,12 +18,13 @@ import { ago, cost, duration } from './format';
 import { html, type SafeHtml } from './html';
 import { type ListRepo, type ListRun, workflowOf } from './index-model';
 import {
-  filterRows,
   groupsOf,
+  historyWorkflows,
   type ListGroup,
   type ListRow,
   type QueueRow,
   type RunRow,
+  shownGroups,
   type ViewName,
 } from './list-model';
 import { queueId } from './queue-view';
@@ -147,6 +149,17 @@ const EMPTY: Record<ViewName, string> = {
   history: 'no finished run',
 };
 
+const option = (value: string, label: string, chosen: boolean) =>
+  html`<option value="${value}"${chosen ? html` selected` : ''}>${label}</option>`;
+
+/** History's two controls: status and workflow. The workflow chosen stays an option when no run has it now. */
+function historyControls(repos: readonly ListRepo[], ui: UiState): SafeHtml {
+  const workflows = historyWorkflows(repos, ui.repoFilter);
+  const chosen = ui.historyWorkflow;
+  if (chosen !== undefined && !workflows.includes(chosen)) workflows.push(chosen);
+  return html`<select class="list-s" name="list-status" aria-label="filter by status">${option('', 'any status', ui.historyStatus === undefined)}${option('failed', 'failed', ui.historyStatus === 'failed')}${option('completed', 'done', ui.historyStatus === 'completed')}</select><select class="list-s" name="list-workflow" aria-label="filter by workflow">${option('', 'any workflow', chosen === undefined)}${workflows.map((name) => option(name, name, name === chosen))}</select>`;
+}
+
 const total = (groups: readonly ListGroup[]) => groups.reduce((sum, group) => sum + group.rows.length, 0);
 
 /**
@@ -161,10 +174,12 @@ export function renderList(
   offers?: RunActions | undefined,
 ): SafeHtml {
   const all = groupsOf(view, repos, ui.repoFilter, { now, tz: ui.tz });
-  const shown = filterRows(all, ui.listFilter);
-  const narrowed = ui.listFilter.trim() !== '';
+  const shown = shownGroups(view, repos, ui, now);
+  const narrowed =
+    ui.listFilter.trim() !== '' ||
+    (view === 'history' && (ui.historyStatus !== undefined || ui.historyWorkflow !== undefined));
   const count = narrowed ? `${total(shown)} of ${total(all)}` : String(total(all));
-  const head = html`<div class="list-h"><span class="lh-t">${VIEW_LABELS[view]}</span><span class="c">${count}</span><input class="list-f" name="list-filter" type="search" value="${ui.listFilter}" placeholder="filter (/)" aria-label="filter the list" autocomplete="off" spellcheck="false"></div>`;
+  const head = html`<div class="list-h"><span class="lh-t">${VIEW_LABELS[view]}</span><span class="c">${count}</span><input class="list-f" name="list-filter" type="search" value="${ui.listFilter}" placeholder="filter (/)" aria-label="filter the list" autocomplete="off" spellcheck="false">${view === 'history' ? historyControls(repos, ui) : ''}</div>`;
   const empty =
     repos.length === 0
       ? 'no repository is registered yet: run sail watch in one'

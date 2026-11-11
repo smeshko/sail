@@ -164,6 +164,56 @@ export function filterRows(groups: readonly ListGroup[], text: string): ListGrou
   });
 }
 
+export interface HistoryFilter {
+  status?: 'failed' | 'completed' | undefined;
+  workflow?: string | undefined;
+}
+
+/** The History rows of a status and of a workflow (`name@3` counts as `name`). A group left empty goes. */
+export function filterHistory(groups: readonly ListGroup[], filter: HistoryFilter): ListGroup[] {
+  const { status, workflow } = filter;
+  if (status === undefined && workflow === undefined) return [...groups];
+  return groups.flatMap((group) => {
+    const rows = group.rows.filter(
+      (row) =>
+        row.kind === 'run' &&
+        (status === undefined || row.run.status === status) &&
+        (workflow === undefined || workflowOf(row.run) === workflow),
+    );
+    return rows.length === 0 ? [] : [{ ...group, rows }];
+  });
+}
+
+/** The distinct workflows of the finished runs under the repository filter, sorted. */
+export function historyWorkflows(repos: readonly ListRepo[], repoFilter?: string): string[] {
+  const kept = repoFilter === undefined ? repos : repos.filter((repo) => repo.name === repoFilter);
+  const names = kept.flatMap((repo) => repo.runs.filter(isFinished).map(workflowOf));
+  return [...new Set(names)].sort();
+}
+
+export interface ListFilters {
+  repoFilter?: string | undefined;
+  listFilter: string;
+  historyStatus?: 'failed' | 'completed' | undefined;
+  historyWorkflow?: string | undefined;
+  tz: number;
+}
+
+/** What the list shows: the view's groups under the repository filter, then History's status and workflow, then the text. */
+export function shownGroups(
+  view: ViewName,
+  repos: readonly ListRepo[],
+  filters: ListFilters,
+  now: number,
+): ListGroup[] {
+  const groups = groupsOf(view, repos, filters.repoFilter, { now, tz: filters.tz });
+  const narrowed =
+    view === 'history'
+      ? filterHistory(groups, { status: filters.historyStatus, workflow: filters.historyWorkflow })
+      : groups;
+  return filterRows(narrowed, filters.listFilter);
+}
+
 /** What each view lists under the repository filter: the sidebar's counts. */
 export function viewCounts(repos: readonly ListRepo[], repoFilter?: string): Record<ViewName, number> {
   const count = (view: ViewName) =>
