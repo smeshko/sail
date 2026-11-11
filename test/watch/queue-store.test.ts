@@ -1296,6 +1296,55 @@ test('waiting records the open prerequisites on the item and emits queue:waiting
   expect(queueEventIssues(queueDir(runs, 'ticket-to-pr'))).toEqual([]);
 });
 
+test('waiting on a failed item queues it again, clears its reason and retryAt, keeps its attempts and waitingOn, and emits queue:waiting though the list is unchanged', () => {
+  const runs = runsDir();
+  const store = open(runs);
+  store.add([ticket('FAKE-2')]);
+  const waitingEvents = () =>
+    queueEvents(queueDir(runs, 'ticket-to-pr'))
+      .filter((event) => event.type === 'queue:waiting')
+      .map(({ seq, ts, ...event }) => event);
+  store.waiting('ticket:FAKE-2', ['FAKE-1']);
+  store.failed('ticket:FAKE-2', 'ticketSource.get: down (unavailable)');
+  expect(store.snapshot().items[0]).toMatchObject({ state: 'failed', waitingOn: ['FAKE-1'] });
+  store.waiting('ticket:FAKE-2', ['FAKE-1']);
+  const item = store.snapshot().items[0];
+  expect(item).toMatchObject({ state: 'queued', attempts: 0, waitingOn: ['FAKE-1'] });
+  expect(item?.reason).toBeUndefined();
+  expect(item?.retryAt).toBeUndefined();
+  expect(waitingEvents()).toEqual([
+    { type: 'queue:waiting', workflow: 'ticket-to-pr', dedupKey: 'ticket:FAKE-2', on: ['FAKE-1'] },
+    { type: 'queue:waiting', workflow: 'ticket-to-pr', dedupKey: 'ticket:FAKE-2', on: ['FAKE-1'] },
+  ]);
+  store.waiting('ticket:FAKE-2', ['FAKE-1']);
+  expect(waitingEvents()).toHaveLength(2);
+  expect(queueEventIssues(queueDir(runs, 'ticket-to-pr'))).toEqual([]);
+});
+
+test('waiting on a failed item that had attempts keeps its attempt count', () => {
+  const store = open(runsDir());
+  store.add([ticket('FAKE-2')]);
+  store.dispatched('ticket:FAKE-2', 'run-1');
+  store.failed('ticket:FAKE-2', 'stage_error');
+  store.waiting('ticket:FAKE-2', ['FAKE-1']);
+  expect(store.snapshot().items[0]).toMatchObject({ state: 'queued', attempts: 1, waitingOn: ['FAKE-1'] });
+});
+
+test('waiting with an empty list leaves a failed item failed, with its reason and retryAt, and emits nothing', () => {
+  const runs = runsDir();
+  const store = open(runs);
+  store.add([ticket('FAKE-2')]);
+  store.waiting('ticket:FAKE-2', ['FAKE-1']);
+  store.failed('ticket:FAKE-2', 'ticketSource.get: down (unavailable)');
+  const before = store.snapshot().items[0];
+  store.waiting('ticket:FAKE-2', []);
+  const item = store.snapshot().items[0];
+  expect(item?.waitingOn).toBeUndefined();
+  expect(item).toMatchObject({ state: 'failed', reason: before?.reason, retryAt: before?.retryAt });
+  expect(before?.retryAt).toBeDefined();
+  expect(queueEvents(queueDir(runs, 'ticket-to-pr')).filter((event) => event.type === 'queue:waiting')).toHaveLength(1);
+});
+
 test('dispatching a waiting item clears waitingOn, and a requeue does too', () => {
   const store = open(runsDir());
   store.add([ticket('FAKE-2')]);
