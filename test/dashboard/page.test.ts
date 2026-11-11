@@ -27,9 +27,14 @@ test('the page builds into one document with exactly one script, inline, holding
   expect(script).toContain('X-Sail-Dashboard');
   expect(script).not.toMatch(/^\s*(import|export)\s/m);
   expect([script.includes('</script'), script.includes('<!--')]).toEqual([false, false]);
-  for (const region of ['sidebar', 'list', 'attention', 'main', 'inspector', 'status']) {
+  for (const region of ['sidebar', 'list', 'main', 'inspector', 'status']) {
     expect(html).toContain(`id="${region}"`);
   }
+  expect([html.includes('id="attention"'), html.includes('att-pane'), html.includes('⚑ needs attention')]).toEqual([
+    false,
+    false,
+    false,
+  ]);
 });
 
 test('the page has a modal dialog labelled by its title', async () => {

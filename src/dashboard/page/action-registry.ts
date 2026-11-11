@@ -1,5 +1,6 @@
 // The page's actions, defined once: each thing a person can have done from the page (stop, stop now, resume, restart,
-// clean, drop, requeue, move, poll, release a usage-limit hold, add, add skipping its checks, watch, unwatch, all clear) with its id and label, the subject it applies to, its
+// clean, drop, requeue, move, poll, release a usage-limit hold, add, add skipping its checks, watch, unwatch, all clear,
+// dismiss) with its id and label, the subject it applies to, its
 // availability from the server's offers, its parameters, its tier, its request and what its answer means. Pure: it
 // holds no host, no state and no storage, so `act.ts` carries any entry out and `action-view.ts` draws any entry, and an
 // entry added here needs nothing else. This is the only page module that names a POST endpoint.
@@ -101,8 +102,13 @@ export interface OfferedRepo {
   queues: readonly {
     workflow: string;
     offers?: OfferedQueue['offers'] | undefined;
-    /** The queue's items, for what a dialog says of one. */
-    queue?: { items?: readonly { dedupKey: string; state: string; attempts: number }[] } | undefined;
+    /** The queue's items, for what a dialog says of one, and its hold, for the harness key a release names. */
+    queue?:
+      | {
+          items?: readonly { dedupKey: string; state: string; attempts: number }[];
+          held?: { harnessKey?: string | undefined } | undefined;
+        }
+      | undefined;
   }[];
   offers?: RepoOffers | undefined;
 }
@@ -156,6 +162,8 @@ export interface ActionDef {
   answer?(status: number, body: string, subject: Subject): ActResult;
   /** The name of the effect a local action has the shell perform. */
   run?: string;
+  /** The rows the action is more than one: each its own label, with the `data-*` a click on it gives. */
+  variants?(subject: Subject, source: OfferSource): { label: string; data: Record<string, string> }[];
 }
 
 /** Why a request of kind `what` (a move, a resume, a restart) was refused: the `error` its answer carries, else its status. */
@@ -559,6 +567,18 @@ export const ACTIONS: readonly ActionDef[] = [
       { name: 'target', dom: 'target', type: 'text', given: 'data' },
     ],
     available: itemOffer('move'),
+    variants: (subject, source) => {
+      if (subject.kind !== 'item') return [];
+      const waiting = (queueOf(subject, source)?.queue?.items ?? []).filter((each) => each.state === 'queued');
+      const at = waiting.findIndex((each) => each.dedupKey === subject.item);
+      if (at < 0) return [];
+      const above = waiting[at - 1];
+      const below = waiting[at + 1];
+      return [
+        ...(above === undefined ? [] : [{ label: 'move up', data: { dir: 'up', target: above.dedupKey } }]),
+        ...(below === undefined ? [] : [{ label: 'move down', data: { dir: 'down', target: below.dedupKey } }]),
+      ];
+    },
     request: (subject, values) => ({
       path: queuePath(subject, '/move'),
       body:
@@ -591,6 +611,11 @@ export const ACTIONS: readonly ActionDef[] = [
     // The hold is the machine's, not the watcher's: a release needs no watcher, so no offer gates it.
     params: () => [{ name: 'harness', dom: 'harness', type: 'text', given: 'data' }],
     available: () => ({ offered: true, enabled: true }),
+    // A row only for a queue held on a usage limit, carrying the hold's harness key.
+    variants: (subject, source) => {
+      const harness = queueOf(subject, source)?.queue?.held?.harnessKey;
+      return harness === undefined ? [] : [{ label: 'release', data: { harness } }];
+    },
     underway: 'releasing…',
     dialog: (_subject, values) => ({
       title: `release the usage-limit hold on ${values.harness ?? ''}`,
@@ -657,6 +682,16 @@ export const ACTIONS: readonly ActionDef[] = [
     params: () => [],
     available: () => ({ offered: true, enabled: true }),
     run: 'clear-attention',
+  },
+  {
+    id: 'dismiss-attention',
+    label: () => 'dismiss',
+    appliesTo: ['none'],
+    tier: 'undoable',
+    place: 'list',
+    params: () => [],
+    available: () => ({ offered: true, enabled: true }),
+    run: 'dismiss-attention',
   },
 ];
 

@@ -30,6 +30,8 @@ interface Rig {
   open: { repo: string; runId: string } | undefined;
   stopped: boolean;
   run: RunActions | undefined;
+  /** The offers of runs that are not the open one, by run id, as the shell reads them. */
+  others: Record<string, RunActions>;
   registry: ActionDef[];
 }
 
@@ -50,6 +52,7 @@ function rig(run?: RunActions, index: IndexRepo[] = []): Rig {
     open: { repo: 'alpha', runId: 'R1' } as Rig['open'],
     stopped: false,
     run,
+    others: {} as Record<string, RunActions>,
     registry: [...ACTIONS],
   };
   const actor = createActor({
@@ -68,7 +71,10 @@ function rig(run?: RunActions, index: IndexRepo[] = []): Rig {
       redrawDialog: (html) => state.redraws.push(html),
     },
     ui: state.ui,
-    source: () => ({ run: state.run, index }),
+    source: (subject) => ({
+      run: subject?.kind === 'run' && subject.runId !== state.open?.runId ? state.others[subject.runId] : state.run,
+      index,
+    }),
     openRun: () => state.open,
     effects: {
       reopen: (repo, runId, keepMenu) => state.effects.push(`reopen ${repo}/${runId}${keepMenu ? ' keep' : ''}`),
@@ -83,6 +89,10 @@ function rig(run?: RunActions, index: IndexRepo[] = []): Rig {
         'clear-attention': () => {
           state.effects.push('cleared');
           return { text: '3 hidden', undo: () => state.effects.push('uncleared') };
+        },
+        'dismiss-attention': (data) => {
+          state.effects.push(`dismissed ${data.item}`);
+          return { text: `${data.item} hidden`, undo: () => state.effects.push('undismissed') };
         },
       },
     },
@@ -151,6 +161,15 @@ test('a restart confirmed without a change posts the offer stage', () => {
   r.actor.act('restart-run', {});
   r.actor.confirm();
   expect(r.posts).toEqual([{ path: '/api/repos/alpha/runs/R1/restart', body: { stage: 'tests' } }]);
+});
+
+test('a stage the command menu has asked is not asked again: the dialog draws no field and confirm posts it', () => {
+  const r = rig(RESTART);
+  r.actor.act('restart-run', {}, { stage: 'spec' });
+  expect(r.ui.dialog?.lines).toEqual(['runs again: s', 'budget $10.00', 'starts a new run seeded from R1']);
+  expect(r.dialogs[0]).not.toContain('<select');
+  r.actor.confirm();
+  expect(r.posts).toEqual([{ path: '/api/repos/alpha/runs/R1/restart', body: { stage: 'spec' } }]);
 });
 
 const NEEDS_RAISE = 'give the dollars to raise the budget by: at least 0.01';
@@ -333,6 +352,7 @@ test('the same action on another run opens its own dialog, and a dialog for a ru
   const r = rig(RESTART);
   r.actor.act('stop-run', {});
   r.actor.cancel();
+  r.others.R2 = { stop: on } as unknown as RunActions;
   r.actor.act('stop-run', { repo: 'alpha', run: 'R2' });
   expect(r.actor.dialogFor()).toEqual({ kind: 'run', repo: 'alpha', runId: 'R2' });
   r.actor.forget('run');
@@ -433,6 +453,14 @@ test('a local action performs its effect and posts nothing, and its toast carrie
   expect([r.effects, r.posts, r.toasts]).toEqual([['cleared'], [], ['ok all clear: 3 hidden (undo)']]);
   r.undos[0]?.();
   expect(r.effects).toEqual(['cleared', 'uncleared']);
+});
+
+test('a local effect receives the data of the click that ran it', () => {
+  const r = rig();
+  r.actor.act('dismiss-attention', { item: 'the-row' });
+  expect([r.effects, r.posts, r.toasts]).toEqual([['dismissed the-row'], [], ['ok dismiss: the-row hidden (undo)']]);
+  r.undos[0]?.();
+  expect(r.effects).toEqual(['dismissed the-row', 'undismissed']);
 });
 
 test('an index of no offers is the source an action has none to read', () => {
@@ -773,4 +801,44 @@ test('the inert actor, the store holds until the shell wires the real one, does 
   expect(actor.keep('run')).toBeUndefined();
   expect(actor.forget('run')).toBeUndefined();
   expect([actor.dialogFor(), actor.confirm(), actor.cancel()]).toEqual([undefined, undefined, undefined]);
+});
+
+test('values given with the act are read before the page fields', async () => {
+  const r = rig(RESTART);
+  r.fields.raise = '9';
+  r.actor.act('resume-run', {}, { raise: '2' });
+  expect(r.ui.dialog?.lines).toEqual(['spent $1.00 of $2.00', 'raises the budget by $2.00']);
+  r.actor.confirm();
+  expect(r.posts).toEqual([{ path: '/api/repos/alpha/runs/R1/resume', body: { raise: { usd: 2 } } }]);
+});
+
+test('a run that is not open is acted on with its own offers', () => {
+  const r = rig(RESTART);
+  const other = { repo: 'alpha', run: 'R2' };
+  r.actor.act('clean-run', other);
+  expect([r.ui.dialog, r.dialogs]).toEqual([undefined, []]);
+  r.others.R2 = { clean: { ...on, removes: ['b'], archive: '/y' } } as unknown as RunActions;
+  r.actor.act('clean-run', other);
+  expect(r.ui.dialog).toEqual({ title: 'clean R2', lines: ['removes b', 'run directory → /y'], verb: 'clean' });
+  r.actor.confirm();
+  expect(r.posts).toEqual([{ path: '/api/repos/alpha/runs/R2/clean', body: {} }]);
+});
+
+test('a Restart or Resume of a run that is not open opens the run it started or resumed, and a stop or clean of one leaves the open run', async () => {
+  const r = rig(RESTART);
+  r.others.R2 = RESTART;
+  const other = { repo: 'alpha', run: 'R2' };
+  r.actor.act('restart-run', other);
+  r.actor.confirm();
+  await r.answer(200, { runId: 'R3' });
+  r.actor.act('resume-run', other, { raise: '2' });
+  r.actor.confirm();
+  await r.answer(200, {});
+  r.actor.act('stop-run', other);
+  r.actor.confirm();
+  await r.answer(200, { message: 'stopped' });
+  r.actor.act('clean-run', other);
+  r.actor.confirm();
+  await r.answer(200, {});
+  expect(r.effects).toEqual(['open alpha/R3', 'open alpha/R2']);
 });

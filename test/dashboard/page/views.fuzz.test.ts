@@ -7,7 +7,6 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { index } from '../../../src/dashboard/files';
 import { attention } from '../../../src/dashboard/page/attention';
-import { renderAttention } from '../../../src/dashboard/page/attention-view';
 import { listRepos, queuePanels } from '../../../src/dashboard/page/index-model';
 import { renderInspector } from '../../../src/dashboard/page/inspector-view';
 import { viewCounts } from '../../../src/dashboard/page/list-model';
@@ -186,8 +185,8 @@ test('the list, the sidebar, needs attention and the queue view keep their struc
     return [
       renderList('active', listRepos(input, NOW), ui, NOW).value,
       renderList('queues', listRepos(input, NOW), ui, NOW).value,
-      renderSidebar(listRepos(input, NOW), viewCounts(listRepos(input, NOW)), 2, ui).value,
-      renderAttention(attention(input), true).value,
+      renderSidebar(listRepos(input, NOW), viewCounts(listRepos(input, NOW), undefined, attention(input)), ui).value,
+      renderList('inbox', listRepos(input, NOW), ui, NOW, undefined, attention(input)).value,
       ...queuePanels(input).map((panel) => renderQueue(panel, stream, ui, NOW).value),
     ];
   };
@@ -198,11 +197,7 @@ test('the list, the sidebar, needs attention and the queue view keep their struc
       events.map((event) => poison(event, new Set(['title', 'reason', 'message', 'dedupKey', 'label']), payload)),
     );
     for (const [i, view] of benign.entries())
-      await same(
-        view,
-        hostile[i] ?? '',
-        `${['active', 'queues-list', 'sidebar', 'attention'][i] ?? 'queues'}: ${payload}`,
-      );
+      await same(view, hostile[i] ?? '', `${['active', 'queues-list', 'sidebar', 'inbox'][i] ?? 'queues'}: ${payload}`);
   }
 });
 

@@ -13,16 +13,18 @@ const repo = (name: string, extra: Partial<ListRepo> = {}): ListRepo => ({
   ...extra,
 });
 const repos = [repo('alpha', { watching: ['w'] }), repo('beta'), repo('<i>gamma</i>', { problem: 'broken clone' })];
-const counts = { active: 8, queues: 2, history: 36 };
-const draw = (fields = {}) => renderSidebar(repos, counts, 5, { ...initialUi(0), ...fields }).value;
+const counts = { inbox: 5, active: 8, queues: 2, history: 36 };
+const draw = (fields = {}) => renderSidebar(repos, counts, { ...initialUi(0), ...fields }).value;
 
 test('the sidebar draws Inbox, Active, Queues and History with their counts', () => {
   const entries = [...draw().matchAll(/<span class="nm">(\w+)<\/span><span class="c">(\d+)<\/span><\/button>/g)].map(
     ([, name, n]) => `${name} ${n}`,
   );
   expect(entries.slice(0, 4)).toEqual(['Inbox 5', 'Active 8', 'Queues 2', 'History 36']);
-  expect(draw()).toContain('data-action="toggle-attention"');
-  expect(draw()).toContain('data-action="select-view" data-view="queues"');
+  expect(draw()).not.toContain('toggle-attention');
+  const views = [...draw().matchAll(/data-action="select-view" data-view="(\w+)"/g)].map(([, view]) => view);
+  expect(views).toEqual(['inbox', 'active', 'queues', 'history']);
+  expect(draw()).toMatch(/data-view="inbox"[^>]*><span class="nm">Inbox<\/span><span class="c">5<\/span>/);
 });
 
 test('the open view is marked current and an unopened one is not', () => {
