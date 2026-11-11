@@ -1,10 +1,13 @@
 // What a key does on the page. With a run or queue open, `j`, `k` and the arrows move the card cursor within the cards,
 // `Enter` opens the card under it and `]` and `[` step to the next and previous card; with none open, they move the
 // list's cursor over its entries (group headers and the rows of the groups not folded), `Enter` opens the row under it
-// or folds the group, and `.` opens the menu of the run under it. `Escape` shuts, in order, the run menu, the item menu,
-// needs attention, the drawer and the timeline, then the selection and, last, the open run or queue, which gives the
-// list the centre. `/` focuses the list's filter field, `1`, `2` and `3` open Active, Queues and History, and `i` and `a`
-// toggle the inspector and needs attention. A key typed in an input does nothing but, for Escape, take the focus off.
+// or folds the group, and `.` opens the menu of the run under it. Cmd+K or Ctrl+K opens the command menu, or closes it,
+// and any other Cmd or Ctrl chord does nothing. While the command menu is open its keys alone are handled (`menu.ts`):
+// the arrows move its highlight, `Enter` runs its row, and `Escape` goes back one step, then closes it. Otherwise
+// `Escape` shuts, in order, the run menu, the item menu, needs attention, the drawer and the timeline, then the
+// selection and, last, the open run or queue, which gives the list the centre. `/` focuses the list's filter field, `1`,
+// `2` and `3` open Active, Queues and History, and `i` and `a` toggle the inspector and needs attention. A key typed in
+// an input does nothing but, for Escape, take the focus off.
 import { actions, closeAttention, step } from './actions';
 import { setFocus } from './focus';
 import { listRepos } from './index-model';
