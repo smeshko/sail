@@ -3774,11 +3774,7 @@ test('ArrowDown and ArrowUp move the highlight over enabled rows only, and j typ
   expect(menuSel()).toBe('clean');
   host.press('ArrowDown', true);
   host.advance(100);
-  expect(menuSel()).toBe('clean all failed');
-  host.press('ArrowDown', true);
-  host.advance(100);
-  expect(menuSel()).toBe('all clear');
-  host.press('ArrowUp', true);
+  expect(menuSel()).toBe('Inbox');
   host.press('ArrowUp', true);
   host.press('ArrowUp', true);
   host.advance(100);
@@ -3815,6 +3811,18 @@ test('Enter on a go-to row opens a run, a queue or an item opens the queue, and 
   expect(page?.ui.view).toBe('queues');
   expect(page?.ui.listFolded).not.toContain('queues:alpha');
   expect(page?.ui.focus.cursor?.subject).toEqual({ kind: 'repo', repo: 'alpha' });
+});
+
+test('Enter on a view’s go-to row opens the view, and typing queue puts the Queues view first', async () => {
+  await openRunPage(FAKE_2_ID);
+  cmdK();
+  host.type('menu-query', 'queue');
+  host.advance(100);
+  expect(menuSel()).toBe('Queues');
+  host.press('Enter', true);
+  host.advance(100);
+  expect(cmdk()).toBe('');
+  expect(page?.ui.view).toBe('queues');
 });
 
 test('Enter on a go-to row pushes the URL of what it opened, and a key that changes nothing writes none', async () => {
@@ -4742,7 +4750,7 @@ test('the highlight stays on the row a person moved to when an index tick remove
   bootIndexed();
   cmdK();
   host.advance(100);
-  for (let i = 0; i < 6; i++) host.press('ArrowDown', true);
+  for (let i = 0; i < 10; i++) host.press('ArrowDown', true);
   host.advance(100);
   expect(menuSel()).toBe('switch theme');
   const message = indexMessage();

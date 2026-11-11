@@ -128,6 +128,10 @@ test('with no subject there is no head and no subject row, and the general rows 
   const model = menuRows(state(), source(), index, NOW);
   expect(model.head).toBeUndefined();
   expect(labels(model.rows)).toEqual([
+    'Inbox',
+    'Active',
+    'Queues',
+    'History',
     'all clear',
     'dismiss',
     'add a ticket…',
@@ -135,7 +139,7 @@ test('with no subject there is no head and no subject row, and the general rows 
     'switch theme',
     'toggle inspector',
   ]);
-  expect(model.rows.every((row) => row.group === 'general')).toBe(true);
+  expect(model.rows.map((row) => row.group)).toEqual([...Array(4).fill('goto'), ...Array(6).fill('general')]);
 });
 
 test('the head names the subject by its kind', () => {
@@ -168,7 +172,6 @@ test('a query lists go-to rows for a run id, a run title, a queue, an item key, 
   expect(goto('FAKE-5')).toEqual([['item', 'ticket:FAKE-5']]);
   expect(goto('widget')).toEqual([['item', 'ticket:FAKE-5']]);
   expect(goto('alph')).toEqual([['repository', 'alpha']]);
-  expect(gotoRows('', index, NOW)).toEqual([]);
   expect(gotoRows('zzzz', index, NOW)).toEqual([]);
 });
 
@@ -192,8 +195,6 @@ test("a run's go-to row reads its key, title, status and repository › workflow
     summary: { totals: { usage: {} } },
   };
   const bare = { runId: 'BARE-1', summary: { totals: { usage: {} } } };
-  const rows = gotoRows('', runsIndex([run, pr, bare]), NOW);
-  expect(rows).toEqual([]);
   const one = gotoRows('fake-1', runsIndex([run]), NOW)[0];
   expect(one).toMatchObject({
     lead: 'FAKE-1',
@@ -468,4 +469,60 @@ test('clean all failed is a general row while a repository offers it, and is lef
     run: { act: 'clean-failed', subject: { kind: 'none' }, data: {} },
   });
   expect(labels(generalRows({ index: [] }))).not.toContain('clean all failed');
+});
+
+test('an empty query lists the four views with their keys, and a view opens by its own word', () => {
+  expect(gotoRows('', index, NOW).map((row) => [row.label, row.hint, row.key, row.run])).toEqual([
+    ['Inbox', 'view', '1', { show: 'inbox' }],
+    ['Active', 'view', '2', { show: 'active' }],
+    ['Queues', 'view', '3', { show: 'queues' }],
+    ['History', 'view', '4', { show: 'history' }],
+  ]);
+  expect(gotoRows('hist', index, NOW).map((row) => row.label)).toEqual(['History']);
+  expect(gotoRows('inbox', index, NOW)[0]?.run).toEqual({ show: 'inbox' });
+  // Two letters of a view's word are too few, and a view is no subsequence match.
+  expect(gotoRows('hi', index, NOW).map((row) => row.hint)).not.toContain('view');
+  expect(gotoRows('hsty', index, NOW).map((row) => row.hint)).not.toContain('view');
+});
+
+test("a kind's own word lists the kind: queue the Queues view then every queue, repo every repository", () => {
+  const hints = (query: string) => gotoRows(query, index, NOW).map((row) => [row.hint, row.label]);
+  expect(hints('queue')).toEqual([
+    ['view', 'Queues'],
+    ['queue', 'beta / ticket-to-pr'],
+  ]);
+  expect(hints('queues')).toEqual(hints('queue'));
+  expect(hints('repo')).toEqual([
+    ['repository', 'alpha'],
+    ['repository', 'beta'],
+  ]);
+  // A word typed in part still finds the kind from its third letter, and no sooner.
+  expect(hints('que').map(([hint]) => hint)).toEqual(['view', 'queue']);
+  expect(hints('qu').map(([hint]) => hint)).not.toContain('view');
+});
+
+test('a run that ended comes after every other row, and is left out when it matches only as a subsequence', () => {
+  const withStatus = (runId: string, key: string, title: string, status: string) => ({
+    ...ticketRun(runId, key, title),
+    status: { status },
+  });
+  const runs = [
+    withStatus('DONE-1', 'ZZ-1', 'Refactor the queue store', 'completed'),
+    withStatus('FAIL-1', 'ZZ-2', 'Queue store loses a write', 'failed'),
+    withStatus('LIVE-1', 'ZZ-3', 'Speed up the queue store', 'running'),
+    withStatus('HELD-1', 'ZZ-4', 'Queue store on disk', 'suspended'),
+  ];
+  const all = runIds(gotoRows('queue store', runsIndex(runs), NOW));
+  expect([all.slice(0, 2).sort(), all.slice(2).sort()]).toEqual([
+    ['HELD-1', 'LIVE-1'],
+    ['DONE-1', 'FAIL-1'],
+  ]);
+  // A subsequence of a title finds the live runs, and no run that ended.
+  expect(runIds(gotoRows('qstore', runsIndex(runs), NOW)).sort()).toEqual(['HELD-1', 'LIVE-1']);
+  // Its ticket key in full still lists a run that ended.
+  expect(runIds(gotoRows('zz-1', runsIndex(runs), NOW))).toEqual(['DONE-1']);
+  // A queue and its item come before a finished run that matches as well.
+  const mixed = JSON.parse(JSON.stringify(index)) as IndexRepo[];
+  (mixed[0] as unknown as { runs: unknown[] }).runs = [withStatus('DONE-2', 'ZZ-9', 'Add a widget', 'completed')];
+  expect(gotoRows('widget', mixed, NOW).map((row) => row.hint)).toEqual(['item', 'alpha › unknown']);
 });
