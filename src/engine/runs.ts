@@ -1,11 +1,13 @@
 // The runs in `.sail-runs/`: every one listed, and one found by its id or a prefix of it. A run is a directory holding
 // `run.json`, so what `sail stage run` writes there is never one. Unlike resume's `findRun()`, nothing here refuses a
 // run for how it ended: these are for viewing. `liveRuns()` is the exception: it names the runs of one workflow that are
-// alive, which the cap on a workflow's concurrent runs counts.
+// alive, which the cap on a workflow's concurrent runs counts. `slotRuns()` names everything the cap counts: the live runs
+// and the held ones, which keep their slot while a person has them held.
 import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { WorkspacePort } from '../ports/workspace';
 import { isPlainName } from './call-dir';
+import { isHeld } from './control';
 import { type Opening, RUNS_DIR, type RunStatus, readOpening, readStatus, runsDir } from './run-dir';
 import { RUN_HEADER_FILE, readRunHeader } from './run-header';
 
@@ -122,6 +124,35 @@ export async function liveRuns(
     if (lease?.runId === runId && !lease.suspended && options.isAlive(lease.pid)) live.push(runId);
   }
   return live;
+}
+
+/**
+ * The ids of the runs of `workflow` in `runs` that carry a `HOLD` and have not ended, sorted. A run held while its process
+ * is gone counts, and a `HOLD` left on a run that has ended counts for nothing.
+ */
+export function heldRuns(runs: string, workflow: string): string[] {
+  if (!existsSync(runs)) return [];
+  return readdirSync(runs, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && isPlainName(entry.name))
+    .map((entry) => entry.name)
+    .sort()
+    .filter((runId) => {
+      const dir = join(runs, runId);
+      return isHeld(dir) && liveCandidate(dir)?.workflow === workflow;
+    });
+}
+
+/**
+ * What the cap on `workflow`'s concurrent runs counts: its live runs, and its held runs that are not live, so a run that
+ * is held and still suspending is counted once. A `PortError` from reading a lease propagates.
+ */
+export async function slotRuns(
+  runs: string,
+  workflow: string,
+  options: { workspace: Pick<WorkspacePort, 'holder'>; isAlive: (pid: number) => boolean },
+): Promise<{ live: string[]; held: string[] }> {
+  const live = await liveRuns(runs, workflow, options);
+  return { live, held: heldRuns(runs, workflow).filter((runId) => !live.includes(runId)) };
 }
 
 /** The workflow, branch and remote of the run in `dir`, from its header or its `OPENING`, unless it has ended. */

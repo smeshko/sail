@@ -65,7 +65,7 @@ Moving a designated ticket to In Progress through TicketSource, and commenting o
 _Avoid_: lock, reserve, take
 
 **Forced run**:
-A run started with `--force` on a ticket that is not designated, not in a pick-up state, whose workflow's live runs fill its `maxConcurrentRuns`, or any of these. Its run header lists the checks `--force` overrode: `designation`, `state` and `cap`.
+A run started with `--force` on a ticket that is not designated, not in a pick-up state, whose workflow's live and held runs fill its `maxConcurrentRuns`, or any of these. Its run header lists the checks `--force` overrode: `designation`, `state` and `cap`.
 _Avoid_: bypass, skip, unsafe run
 
 **Brief**:
@@ -295,7 +295,7 @@ The hold a run's process takes against the machine's sleep, from its start or re
 _Avoid_: wake lock, caffeinate, sleep assertion
 
 **Suspended**:
-The status of a run that has exited with nothing running and a resume expected, for example because the run budget was exceeded, it hit the provider's usage limit, a step of it ended on a provider that was unavailable, a script step of it was ended by a signal sail didn't send (SIGTERM, SIGKILL, SIGHUP or SIGINT), it crashed on an exception inside sail, it was interrupted by Ctrl-C or SIGTERM, or a person suspended it with `sail stop --suspend` or the dashboard's Suspend and hold. It keeps its workspace and its branch lease.
+The status of a run that has exited with nothing running and a resume expected, for example because the run budget was exceeded, it hit the provider's usage limit, a step of it ended on a provider that was unavailable, a script step of it was ended by a signal sail didn't send (SIGTERM, SIGKILL, SIGHUP or SIGINT), it crashed on an exception inside sail, it was interrupted by Ctrl-C or SIGTERM, or a person suspended it with `sail stop --suspend` or the dashboard's Suspend and hold. It keeps its workspace and its branch lease, and takes no slot of its workflow's cap unless it is a held run.
 _Avoid_: paused, waiting, blocked, pending
 
 **Control file**:
@@ -307,7 +307,7 @@ _Avoid_: signal file, kill file, flag
 _Avoid_: pending control, mailbox
 
 **Held run**:
-A run a person marked with `sail stop --suspend`, or the dashboard's Suspend and hold: a `HOLD` file in its run directory. The watcher never resumes it, whatever made it resumable (`interrupted`, `crashed`, a dead process, `usage_limit`, `port_unavailable`), though it still adopts one a live process holds. A live run is suspended `interrupted` as well, and a run nothing runs keeps its status. `sail resume`, and the dashboard's Resume, remove the hold once they take the run.
+A run a person marked with `sail stop --suspend`, or the dashboard's Suspend and hold: a `HOLD` file in its run directory. The watcher never resumes it, whatever made it resumable (`interrupted`, `crashed`, a dead process, `usage_limit`, `port_unavailable`), though it still adopts one a live process holds. A live run is suspended `interrupted` as well, and a run nothing runs keeps its status. `sail resume`, and the dashboard's Resume, remove the hold once they take the run. A held run fills a slot of its workflow's `maxConcurrentRuns`, whoever started it, until it is resumed, stopped or cleaned, so the watcher dispatches nothing in its place and a start by hand is refused unless forced; `sail queue ls` names it.
 _Avoid_: paused run, frozen run
 
 **Resume**:
@@ -654,7 +654,7 @@ A request to the live watcher, a JSON file dropped in `.sail-runs/watcher/comman
 _Avoid_: message, signal, IPC
 
 **Dispatch**:
-The watcher taking the next queued source and starting an ordinary run, only while the workflow's live runs in the clone, those started by hand included, are under its maximum of concurrent runs and after re-checking the source is still eligible. A source whose branch a live run's lease holds waits, using no slot. A ticket with an open prerequisite waits too, using no slot and counting no attempt, and the next tick re-checks it fresh; the queue names what it waits on and says so once per change. An item a failed ticket read left failed is queued again, and says so again, once its ticket reads with a prerequisite still open. For a ticket, the dispatched run's intake claims the ticket, as a run started by hand does. A ticket claimed by the workflow's own run that then failed or was stopped stays eligible, so its retry and its requeue run again, and that run starts with `--force`.
+The watcher taking the next queued source and starting an ordinary run, only while the workflow's live runs in the clone, those started by hand included, and its held runs are under its maximum of concurrent runs and after re-checking the source is still eligible. A source whose branch a live run's lease holds waits, using no slot. A ticket with an open prerequisite waits too, using no slot and counting no attempt, and the next tick re-checks it fresh; the queue names what it waits on and says so once per change. An item a failed ticket read left failed is queued again, and says so again, once its ticket reads with a prerequisite still open. For a ticket, the dispatched run's intake claims the ticket, as a run started by hand does. A ticket claimed by the workflow's own run that then failed or was stopped stays eligible, so its retry and its requeue run again, and that run starts with `--force`.
 _Avoid_: pickup, schedule, spawn
 
 **Dashboard**:

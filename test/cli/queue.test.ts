@@ -8,10 +8,13 @@ import { queueCommand } from '../../src/cli/commands/queue';
 import { type WatchDeps, watchCommand } from '../../src/cli/commands/watch';
 import { EXIT_OK, EXIT_REFUSED } from '../../src/cli/exit-codes';
 import type { Io } from '../../src/cli/index';
+import { writeStatus } from '../../src/engine/run-dir';
 import { commandsDir } from '../../src/watch/inbox';
 import { queueDir } from '../../src/watch/queue-store';
 import { readEntry } from '../../src/watch/registry';
+import { fakeAdapters } from '../helpers/adapters';
 import { fakeTimers } from '../helpers/fake-timers';
+import { writeLiveRun } from '../helpers/live-run';
 import { writePrWorkflow } from '../helpers/pr-workflow';
 import { queueEvents } from '../helpers/queue';
 import { fakeInterrupts, runCaptured } from '../helpers/run-captured';
@@ -584,5 +587,74 @@ test('sail queue ls a prints priority <name> for an item with one other than non
       'queued ticket:FAKE-1 Add a greeting · priority urgent, forced, moved',
       `dispatched ticket:FAKE-2 Add a farewell · run ${RUN}, 1 attempt`,
     ]);
+  });
+});
+
+// A held run keeps its workflow's slot (ADW-530), and ls names it.
+
+const HELD_A = 'FAKE-4-01M3BWNZM08Q4T6V2XRJ5KWD01';
+const HELD_B = 'FAKE-5-01M3BWNZM08Q4T6V2XRJ5KWD02';
+const FIRST = `a: label sail-a, last polled ${START}, paused: key expired`;
+
+/** A run of `workflow` in `repo`, suspended, and held unless `hold` is false. */
+async function suspendedRun(repo: TempRepo, runId: string, workflow = 'a', hold = true) {
+  const adapters = await fakeAdapters(repo.dir);
+  const run = await writeLiveRun(repo.dir, { workflow, ticketKey: runId.slice(0, 6), runId, adapters });
+  await (hold ? run.hold() : run.suspend());
+  return run;
+}
+
+test('sail queue ls a names the held run that fills a slot of a, by its id, on its first line', async () => {
+  await withTempRepo(async (repo) => {
+    const { env } = repository(repo, []);
+    writeQueue(join(repo.dir, '.sail-runs'));
+    const held = await suspendedRun(repo, HELD_A);
+    try {
+      const listed = await runCaptured(['queue', 'ls', 'a'], repo.dir, { env });
+      expect({ code: listed.code, first: listed.stdout.split('\n')[0] }).toEqual({
+        code: EXIT_OK,
+        first: `${FIRST}, 1 slot filled by held run ${HELD_A}`,
+      });
+    } finally {
+      await held.release();
+    }
+  });
+});
+
+test('sail queue ls a names two held runs in id order, after the dispatch hold', async () => {
+  await withTempRepo(async (repo) => {
+    const { env } = repository(repo, []);
+    const path = writeQueue(join(repo.dir, '.sail-runs'));
+    const queue = JSON.parse(readFileSync(path, 'utf8'));
+    const hold = { until: '2026-10-28T14:20:00.000Z', runId: RUN, reason: 'spec#1 hit the usage limit', at: START };
+    writeFileSync(path, `${JSON.stringify({ ...queue, held: hold })}\n`);
+    const second = await suspendedRun(repo, HELD_B);
+    const first = await suspendedRun(repo, HELD_A);
+    try {
+      const listed = await runCaptured(['queue', 'ls', 'a'], repo.dir, { env });
+      expect(listed.stdout.split('\n')[0]).toBe(
+        `${FIRST}, dispatch held until 2026-10-28T14:20:00.000Z, 2 slots filled by held runs ${HELD_A}, ${HELD_B}`,
+      );
+    } finally {
+      await first.release();
+      await second.release();
+    }
+  });
+});
+
+test('sail queue ls a adds nothing for a suspended run with no hold, a held run of another workflow or a held run that failed', async () => {
+  await withTempRepo(async (repo) => {
+    const { env } = repository(repo, []);
+    writeQueue(join(repo.dir, '.sail-runs'));
+    const unheld = await suspendedRun(repo, HELD_A, 'a', false);
+    const other = await suspendedRun(repo, HELD_B, 'b');
+    const failed = await suspendedRun(repo, 'FAKE-6-01M3BWNZM08Q4T6V2XRJ5KWD03');
+    writeStatus(failed.runDir, 'failed', 'stopped');
+    try {
+      const listed = await runCaptured(['queue', 'ls', 'a'], repo.dir, { env });
+      expect(listed.stdout.split('\n')[0]).toBe(FIRST);
+    } finally {
+      for (const run of [unheld, other, failed]) await run.release();
+    }
   });
 });

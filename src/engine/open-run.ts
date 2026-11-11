@@ -104,7 +104,7 @@ import {
   writeRunHeader,
 } from './run-header';
 import { isRunIdOf, newRunId } from './run-id';
-import { liveRuns } from './runs';
+import { slotRuns } from './runs';
 import { findSailDir } from './sail-dir';
 import { formatIssue } from './schemas';
 import { type ResolvedSource, resolveSource } from './source';
@@ -496,8 +496,9 @@ export function conventionPaths(config: ProjectConfig, header: Pick<RunHeader, '
 }
 
 /**
- * The cap on a watched workflow's live runs in this clone, whoever started them. A full one refuses the start, or with
- * `force` lets it through and says it overrode the cap. A dispatched start, which the watcher counted, and a workflow with
+ * The cap on a watched workflow's live and held runs in this clone, whoever started them: a held run fills a slot until
+ * it is resumed, stopped or cleaned. A full one refuses the start, or with `force` lets it through and says it overrode
+ * the cap. A dispatched start, which the watcher counted, and a workflow with
  * no `maxConcurrentRuns` are never held. A run making its workspace is counted by its `OPENING`, but two starts that
  * count at once can both pass; the watcher then counts both.
  */
@@ -511,17 +512,22 @@ async function checkCap(options: {
   const { loaded, runs, workspace, force, dispatched } = options;
   const cap = loaded.workflow.maxConcurrentRuns;
   if (dispatched || cap === undefined) return { forced: false };
-  let live: string[];
+  let slots: { live: string[]; held: string[] };
   try {
-    live = await liveRuns(runs, loaded.name, { workspace, isAlive });
+    slots = await slotRuns(runs, loaded.name, { workspace, isAlive });
   } catch (error) {
     return { refused: `the branch leases could not be read: ${portRefusal(error)}` };
   }
-  if (live.length < cap) return { forced: false };
+  const { live, held } = slots;
+  if (live.length + held.length < cap) return { forced: false };
   if (force) return { forced: true };
-  const count = `${live.length} live ${live.length === 1 ? 'run' : 'runs'}`;
+  const counts = [
+    ...(live.length > 0 || held.length === 0 ? [`${live.length} live ${live.length === 1 ? 'run' : 'runs'}`] : []),
+    ...(held.length > 0 ? [`${held.length} held ${held.length === 1 ? 'run' : 'runs'}`] : []),
+  ];
+  const ids = [...live, ...held.map((runId) => `${runId} (held)`)];
   return {
-    refused: `workflow '${loaded.name}' has ${count}, its maxConcurrentRuns of ${cap}: ${live.join(', ')}; --force starts it anyway`,
+    refused: `workflow '${loaded.name}' has ${counts.join(' and ')}, its maxConcurrentRuns of ${cap}: ${ids.join(', ')}; --force starts it anyway`,
   };
 }
 

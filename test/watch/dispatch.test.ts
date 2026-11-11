@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { createFakeTicketSource } from '../../src/adapters/fake/ticket-source';
 import { branchFor } from '../../src/engine/branch';
-import { handOffFile, requestStop } from '../../src/engine/control';
+import { handOffFile, holdRun, releaseHold as releaseRunHold, requestStop } from '../../src/engine/control';
 import { writeStatus } from '../../src/engine/run-dir';
 import { claimComment } from '../../src/engine/source';
 import { readEvents } from '../../src/events/consumers/ndjson';
@@ -1491,6 +1491,182 @@ test('a suspended manual run, and a live run of another workflow, take no slot',
       await suspended.release();
       await other.release();
     }
+  });
+});
+
+// A held run (`sail stop --suspend`) keeps its slot (ADW-530), whoever started it.
+
+/** Ends the dispatched run of `ticketKey` `suspended interrupted` and holds it, with a run header the count can read. */
+async function holdDispatched(w: World, repo: TempRepo, ticketKey: string) {
+  await w.spawner.end(ticketKey, { status: 'suspended', stopReason: 'interrupted' });
+  const held = await manualRun(w, repo, 'a', w.spawner.run(ticketKey).runId);
+  await held.hold();
+  return held;
+}
+
+test('with a cap of 1, a held dispatched run fills its slot: ticks start and resume nothing', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 2, 1);
+    const dispatcher = w.dispatcher();
+    await dispatcher.tick();
+    const held = await holdDispatched(w, repo, 'FAKE-1');
+    try {
+      await dispatcher.tick();
+      await dispatcher.tick();
+      expect({ spawned: spawnedKeys(w.spawner), resumes: w.spawner.resumes }).toEqual({
+        spawned: ['FAKE-1'],
+        resumes: [],
+      });
+      expect(states(w.store)).toEqual(['FAKE-1 dispatched 1', 'FAKE-2 queued 0']);
+    } finally {
+      await held.release();
+    }
+  });
+});
+
+test('once the held run is resumed nothing starts, and when it completes the next tick dispatches the queued item', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 2, 1);
+    const dispatcher = w.dispatcher();
+    await dispatcher.tick();
+    const held = await holdDispatched(w, repo, 'FAKE-1');
+    await held.release();
+    // The resume's own process, which the dispatcher adopts, ends with the run.
+    const process_ = Bun.spawn(['sleep', '30']);
+    const runId = w.spawner.run('FAKE-1').runId;
+    const resumed = await writeLiveRun(repo.dir, {
+      workflow: 'a',
+      ticketKey: 'FAKE-9',
+      runId,
+      adapters: w.adapters,
+      pid: process_.pid,
+    });
+    try {
+      releaseRunHold(resumed.runDir);
+      await dispatcher.tick();
+      expect({ spawned: spawnedKeys(w.spawner), resumes: w.spawner.resumes }).toEqual({
+        spawned: ['FAKE-1'],
+        resumes: [],
+      });
+      writeStatus(resumed.runDir, 'completed');
+      await resumed.release();
+    } finally {
+      process_.kill();
+      await process_.exited;
+    }
+    await dispatcher.tick();
+    expect(spawnedKeys(w.spawner)).toEqual(['FAKE-1', 'FAKE-2']);
+  });
+});
+
+test('a held manual run fills a cap of 1, and leaves a cap of 2 one slot', async () => {
+  await withTempRepo(async (repo) => {
+    const one = await world(repo, 2, 1);
+    const held = await manualRun(one, repo);
+    try {
+      await held.hold();
+      await one.dispatcher().tick();
+      expect(spawnedKeys(one.spawner)).toEqual([]);
+    } finally {
+      await held.release();
+    }
+  });
+  await withTempRepo(async (repo) => {
+    const two = await world(repo, 3, 2);
+    const held = await manualRun(two, repo);
+    try {
+      await held.hold();
+      await two.dispatcher().tick();
+      expect(spawnedKeys(two.spawner)).toEqual(['FAKE-1']);
+    } finally {
+      await held.release();
+    }
+  });
+});
+
+test('a held dispatched run that is then stopped frees its slot: its item is parked and the next is dispatched', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 2, 1);
+    const dispatcher = w.dispatcher();
+    await dispatcher.tick();
+    const held = await holdDispatched(w, repo, 'FAKE-1');
+    try {
+      await dispatcher.tick();
+      expect(spawnedKeys(w.spawner)).toEqual(['FAKE-1']);
+      writeStatus(held.runDir, 'failed', 'stopped');
+      await dispatcher.tick();
+      expect(spawnedKeys(w.spawner)).toEqual(['FAKE-1', 'FAKE-2']);
+      expect(states(w.store)).toEqual(['FAKE-1 parked 1', 'FAKE-2 dispatched 1']);
+    } finally {
+      await held.release();
+    }
+  });
+});
+
+test('a run that is held and still alive fills one slot, not two', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 3, 2);
+    const alive = await manualRun(w, repo);
+    try {
+      holdRun(alive.runDir);
+      await w.dispatcher().tick();
+      expect(spawnedKeys(w.spawner)).toEqual(['FAKE-1']);
+    } finally {
+      await alive.release();
+    }
+  });
+});
+
+test('a dispatched run held while its process is still alive fills one slot, not two: a cap of 2 still dispatches one item (review R1)', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 3, 2);
+    const dispatcher = w.dispatcher();
+    await dispatcher.tick();
+    expect(spawnedKeys(w.spawner)).toEqual(['FAKE-1', 'FAKE-2']);
+    // FAKE-1's process lives on while its run is suspended and held, as one shutting down after `sail stop --suspend`.
+    const held = await manualRun(w, repo, 'a', w.spawner.run('FAKE-1').runId);
+    try {
+      await held.hold();
+      await w.spawner.end('FAKE-2');
+      await dispatcher.tick();
+      expect(spawnedKeys(w.spawner)).toEqual(['FAKE-1', 'FAKE-2', 'FAKE-3']);
+    } finally {
+      await held.release();
+    }
+  });
+});
+
+test('a dispatched run suspended with no hold is resumed at a cap of 2 beside a held run, and waits at a cap of 1', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 1, 2);
+    const dispatcher = w.dispatcher();
+    await dispatcher.tick();
+    await w.spawner.end('FAKE-1', { status: 'suspended', stopReason: 'interrupted' });
+    const held = await manualRun(w, repo);
+    try {
+      await held.hold();
+      await dispatcher.tick();
+      expect(w.spawner.resumes.map((each) => each.runId)).toEqual([w.spawner.run('FAKE-1').runId]);
+    } finally {
+      await held.release();
+    }
+  });
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 1, 1);
+    const dispatcher = w.dispatcher();
+    await dispatcher.tick();
+    await w.spawner.end('FAKE-1', { status: 'suspended', stopReason: 'interrupted' });
+    const held = await manualRun(w, repo);
+    try {
+      await held.hold();
+      await dispatcher.tick();
+      expect(w.spawner.resumes).toEqual([]);
+    } finally {
+      await held.release();
+    }
+    writeStatus(held.runDir, 'completed');
+    await dispatcher.tick();
+    expect(w.spawner.resumes.map((each) => each.runId)).toEqual([w.spawner.run('FAKE-1').runId]);
   });
 });
 

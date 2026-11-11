@@ -6,6 +6,7 @@ import { chmodSync, existsSync, readdirSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { basename, join, relative } from 'node:path';
 import { EXIT_FAILED, EXIT_OK, EXIT_REFUSED, EXIT_SUSPENDED, type ExitCode } from '../../src/cli/exit-codes';
+import { holdRun } from '../../src/engine/control';
 import { readJournal } from '../../src/engine/journal';
 import { recordingKeepAwake } from '../../src/engine/keep-awake';
 import { readStatus } from '../../src/engine/run-dir';
@@ -872,5 +873,61 @@ test('sail resume of a watched workflow opens while its live runs fill the cap, 
     } finally {
       await live.release();
     }
+  });
+}, 60_000);
+
+test('sail resume of a watched workflow opens while a held run fills the cap, and runs to its end', async () => {
+  await withTempRepo(async (repo) => {
+    await withTempRepo(async (from) => {
+      const sail = writeStub(from.dir, { sleepAt: 'implement#2' });
+      writeWatched(sail, 'capped', { label: 'sail', cap: 1 });
+      const interrupts = fakeInterrupts();
+      const running = runCaptured(['FAKE-1', '--workflow', 'capped'], from.dir, interrupts);
+      const { end } = await interruptWhenAsleep(from.dir, running, interrupts.interrupt);
+      expect({ code: end.code, stderr: end.stderr }).toEqual({ code: EXIT_SUSPENDED, stderr: '' });
+      copyRun(from.dir, repo.dir);
+    });
+    const runId = runIdIn(repo.dir);
+    const live = await writeLiveRun(repo.dir, {
+      workflow: 'capped',
+      ticketKey: 'FAKE-2',
+      runId: 'ZZ-live-01M3BWNZM08Q4T6V2XRJ5KWD3A',
+      adapters: await fakeAdapters(repo.dir),
+    });
+    try {
+      await live.hold();
+      const { code, stderr } = await runCaptured(['resume', runId], repo.dir);
+      expect({ code, stderr, status: readStatus(join(repo.dir, '.sail-runs', runId)) }).toEqual({
+        code: EXIT_OK,
+        stderr: '',
+        status: { status: 'completed' },
+      });
+    } finally {
+      await live.release();
+    }
+  });
+}, 60_000);
+
+test('sail resume of the held run itself opens, runs to its end and leaves no hold', async () => {
+  await withTempRepo(async (repo) => {
+    await withTempRepo(async (from) => {
+      const sail = writeStub(from.dir, { sleepAt: 'implement#2' });
+      writeWatched(sail, 'capped', { label: 'sail', cap: 1 });
+      const interrupts = fakeInterrupts();
+      const running = runCaptured(['FAKE-1', '--workflow', 'capped'], from.dir, interrupts);
+      const { end } = await interruptWhenAsleep(from.dir, running, interrupts.interrupt);
+      expect({ code: end.code, stderr: end.stderr }).toEqual({ code: EXIT_SUSPENDED, stderr: '' });
+      copyRun(from.dir, repo.dir);
+    });
+    const runId = runIdIn(repo.dir);
+    const dir = join(repo.dir, '.sail-runs', runId);
+    holdRun(dir);
+    const { code, stderr } = await runCaptured(['resume', runId], repo.dir);
+    expect({ code, stderr, status: readStatus(dir), held: existsSync(join(dir, 'HOLD')) }).toEqual({
+      code: EXIT_OK,
+      stderr: '',
+      status: { status: 'completed' },
+      held: false,
+    });
   });
 }, 60_000);
