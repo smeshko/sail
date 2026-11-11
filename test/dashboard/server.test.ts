@@ -1496,5 +1496,7 @@ test('the 405 for another method names a rebuild among what a POST may do', asyn
   const server = startWith(stubSail('exit 0').cli);
   const response = await fetch(`http://127.0.0.1:${server.port}${REBUILD}`, { method: 'PUT', headers: HEADER });
   expect(response.status).toBe(405);
-  expect(((await response.json()) as { error: string }).error).toContain('a clean, a rebuild, a watch');
+  expect(((await response.json()) as { error: string }).error).toContain(
+    'a clean, a rebuild, a clean of every failed run, a watch',
+  );
 });
