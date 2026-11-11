@@ -415,3 +415,14 @@ describe('the page reads at phone width (ADW-549)', () => {
     expect(narrow.indexOf(`${shows} {`)).toBeGreaterThan(-1);
   });
 });
+
+test('under 800px the inspector and the open sidebar end where the body row does, above a status bar of any height (ADW-549)', () => {
+  const narrow = mediaBlock('max-width: 799px');
+  expect(inBlock(narrow, '.body')).toContain('position: relative;');
+  for (const overlay of ['.inspector', ':root[data-sidebar="open"] .side']) {
+    const rule = inBlock(narrow, overlay);
+    expect(rule).toContain('position: absolute;');
+    expect(rule).toContain('top: 0;');
+    expect(rule).toContain('bottom: 0;');
+  }
+});
