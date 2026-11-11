@@ -666,7 +666,7 @@ The dashboard's navigation column, 180px wide and never growing with activity: I
 _Avoid_: rail, nav, menu
 
 **List**:
-The one component every dashboard view draws its rows on, in the centre: folding groups, one line per row, a keyboard cursor and a filter field. A clicked row opens its run or queue beside it. History's head carries two more controls, a status and a workflow, and the count of the Selection.
+The one component every dashboard view draws its rows on: a column of fixed width (340px from 800px up) beside the centre, whether or not a row is open, so opening or closing one moves nothing. Folding groups, one line per row in one narrow form, a keyboard cursor and a filter field. A clicked row opens its run or queue in the centre. History's head carries two more controls, a status and a workflow, and the count of the Selection.
 _Avoid_: table, grid, feed
 
 **Selection**:

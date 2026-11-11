@@ -187,20 +187,28 @@ const inBlock = (block: string, selector: string): string =>
     .map(([, , body]) => body)
     .join('\n');
 
-test('the sidebar is 180px wide by default, and the list beside a run is 340px (ADW-522)', () => {
-  expect(declarationsOf('.body')).toContain('var(--side-w, 180px) 5px minmax(0, 1fr)');
-  expect(declarationsOf(':root[data-detail="open"] .body')).toContain(
+test('the sidebar is 180px wide by default, and the list is always 340px with the centre at least 320px (ADW-537)', () => {
+  expect(declarationsOf('.body')).toContain(
     'var(--side-w, 180px) 5px minmax(0, var(--list-w, 340px)) minmax(320px, 1fr)',
   );
-  expect(declarationsOf(':root:not([data-detail="open"]) .main')).toContain('display: none');
+  expect(declarationsOf('.list')).toContain('border-right: 1px solid var(--line)');
+});
+
+test('no rule outside the under-800px block sizes a column or hides the centre by data-detail (ADW-537)', () => {
+  const narrow = mediaBlock('max-width: 799px');
+  const outside = style.replace(narrow, '');
+  expect(outside).not.toContain('data-detail');
+  expect(inBlock(narrow, ':root:not([data-detail="open"]) .main')).toContain('display: none');
+  expect(declarationsOf('.main')).not.toContain('display: none');
 });
 
 test('the inspector has a grid track only from 1100px, and under it is a fixed panel no wider than the window (ADW-528)', () => {
   expect(declarationsOf('.body')).not.toContain('--ins-w');
-  expect(declarationsOf(':root[data-detail="open"] .body')).not.toContain('--ins-w');
   const wide = mediaBlock('min-width: 1100px');
   expect(inBlock(wide, ':root[data-inspector="open"] .body')).toContain('5px var(--ins-w, 360px);');
-  expect(inBlock(wide, ':root[data-detail="open"][data-inspector="open"] .body')).toContain('5px var(--ins-w, 360px);');
+  expect(inBlock(wide, ':root[data-inspector="open"] .body')).toContain(
+    'minmax(0, var(--list-w, 340px)) minmax(320px, 1fr) 5px var(--ins-w, 360px);',
+  );
   const narrow = mediaBlock('max-width: 1099px');
   expect(inBlock(narrow, '.inspector')).toContain('position: fixed');
   expect(inBlock(narrow, '.inspector')).toContain('width: min(var(--ins-w, 360px), 100vw)');
@@ -221,11 +229,6 @@ test('under 1100px the inspector carries a close button over its head, and from 
   expect(inBlock(narrow, '.ins-close')).toContain('position: absolute');
 });
 
-test('beside the list the run view keeps 320px and the list gives way first (ADW-528)', () => {
-  const grid = declarationsOf(':root[data-detail="open"] .body');
-  expect(grid).toContain('minmax(0, var(--list-w, 340px)) minmax(320px, 1fr)');
-});
-
 test('under 800px the page is one column: the sidebar folds, the list hides behind an open detail, and the back button shows (ADW-528)', () => {
   expect(html).toMatch(/<header class="top">\s*<button[^>]*data-action="toggle-sidebar"/);
   const main = /<main class="main">([\s\S]*?)<\/main>/.exec(html)?.[1] ?? '';
@@ -235,7 +238,6 @@ test('under 800px the page is one column: the sidebar folds, the list hides behi
   expect(declarationsOf('.back')).toContain('display: none');
   const narrow = mediaBlock('max-width: 799px');
   expect(inBlock(narrow, '.body')).toContain('grid-template-columns: minmax(0, 1fr)');
-  expect(inBlock(narrow, ':root[data-detail="open"] .body')).toContain('grid-template-columns: minmax(0, 1fr)');
   expect(inBlock(narrow, '.side')).toContain('display: none');
   expect(inBlock(narrow, ':root[data-sidebar="open"] .side')).toContain('display: block');
   expect(inBlock(narrow, ':root[data-detail="open"] .list')).toContain('display: none');
@@ -263,14 +265,12 @@ test('a counter in the sidebar shrinks before its name does (ADW-522)', () => {
 test("the list hides horizontal overflow, and a row's facts shrink before its title (ADW-522)", () => {
   expect(declarationsOf('.list')).toContain('overflow-x: hidden');
   expect(declarationsOf('.r-title')).toContain('flex: 1 1 0');
-  expect(declarationsOf('.r-wf')).toContain('flex: 0 4 auto');
+  expect(declarationsOf('.r-el')).toContain('flex: 0 4 auto');
   expect(declarationsOf('.r-line')).toContain('white-space: nowrap');
   expect(declarationsOf('.r-open')).toContain('min-width: 0');
 });
 
-test("beside the run view a row gives up its workflow and cost, and an armed action's label wraps inside its menu (ADW-522)", () => {
-  expect(declarationsOf(':root[data-detail="open"] .r-wf')).toContain('display: none');
-  expect(declarationsOf(':root[data-detail="open"] .r-cost')).toContain('display: none');
+test("an armed action's label wraps inside its menu (ADW-522)", () => {
   expect(declarationsOf('.r-menu .act button')).toContain('white-space: normal');
   expect(declarationsOf('.r-menu')).toContain('overflow-wrap: anywhere');
   expect(declarationsOf('.wf-act')).toContain('white-space: normal');
