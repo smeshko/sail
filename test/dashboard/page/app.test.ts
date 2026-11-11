@@ -5365,15 +5365,15 @@ describe('start a run (ADW-524)', () => {
     expect(run).toContain('FAKE-3');
     typeIn('start a run');
     enter();
-    expect([stepLabel(), menuHead()]).toEqual(['repository', run]);
+    expect([stepLabel(), menuHead()]).toEqual(['Repository', run]);
     enter();
-    expect([stepLabel(), menuHead()]).toEqual(['workflow', 'alpha']);
+    expect([stepLabel(), menuHead()]).toEqual(['Workflow', 'alpha']);
     enter();
-    expect([stepLabel(), menuHead()]).toEqual(['ticket key or pull request', 'alpha']);
+    expect([stepLabel(), menuHead()]).toEqual(['Ticket key or pull request', 'alpha']);
     host.press('Escape', true);
     host.press('Escape', true);
     host.advance(100);
-    expect([stepLabel(), menuHead()]).toEqual(['repository', run]);
+    expect([stepLabel(), menuHead()]).toEqual(['Repository', run]);
   });
 
   test('a refused start is a red toast with a start anyway button, the menu then lists it, and its dialog names the check it overrides', async () => {
