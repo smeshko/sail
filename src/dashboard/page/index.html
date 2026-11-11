@@ -161,18 +161,12 @@
       }
       .body {
         display: grid;
-        grid-template-columns: var(--side-w, 180px) 5px 1fr 5px var(--ins-w, 360px);
+        grid-template-columns: var(--side-w, 180px) 5px minmax(0, 1fr);
         overflow: hidden;
       }
-      :root[data-inspector="closed"] .body {
-        grid-template-columns: var(--side-w, 180px) 5px 1fr;
-      }
-      /* a run or queue open beside the list: the list keeps --list-w and the run view takes the rest */
+      /* a run or queue open beside the list: the run view keeps 320px and the list gives way first */
       :root[data-detail="open"] .body {
-        grid-template-columns: var(--side-w, 180px) 5px var(--list-w, 340px) 1fr 5px var(--ins-w, 360px);
-      }
-      :root[data-detail="open"][data-inspector="closed"] .body {
-        grid-template-columns: var(--side-w, 180px) 5px var(--list-w, 340px) 1fr;
+        grid-template-columns: var(--side-w, 180px) 5px minmax(0, var(--list-w, 340px)) minmax(320px, 1fr);
       }
       .resize-handle {
         cursor: col-resize;
@@ -1867,6 +1861,30 @@
       :root[data-inspector="closed"] .inspector,
       :root[data-inspector="closed"] .resize-right {
         display: none;
+      }
+      /* from 1100px the open inspector is a column of the grid */
+      @media (min-width: 1100px) {
+        :root[data-inspector="open"] .body {
+          grid-template-columns: var(--side-w, 180px) 5px minmax(0, 1fr) 5px var(--ins-w, 360px);
+        }
+        :root[data-detail="open"][data-inspector="open"] .body {
+          grid-template-columns: var(--side-w, 180px) 5px minmax(0, var(--list-w, 340px)) minmax(320px, 1fr) 5px var(--ins-w, 360px);
+        }
+      }
+      /* under it the open inspector lies over the right of the centre and takes no column */
+      @media (max-width: 1099px) {
+        .resize-right {
+          display: none;
+        }
+        .inspector {
+          position: fixed;
+          top: 46px;
+          right: 0;
+          bottom: 26px;
+          width: min(var(--ins-w, 360px), 100vw);
+          z-index: 15;
+          box-shadow: -12px 0 32px rgba(0, 0, 0, 0.35);
+        }
       }
     </style>
   </head>

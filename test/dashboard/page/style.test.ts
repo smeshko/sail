@@ -158,15 +158,59 @@ const declarationsOf = (selector: string): string =>
     .map(([, body]) => body)
     .join('\n');
 
+/** The body of the `@media` block whose query is `query`, up to its balanced closing brace. */
+const mediaBlock = (query: string): string => {
+  const open = style.indexOf(`@media (${query}) {`);
+  if (open < 0) return '';
+  const start = style.indexOf('{', open) + 1;
+  let depth = 1;
+  let at = start;
+  while (depth > 0 && at < style.length) {
+    if (style[at] === '{') depth++;
+    else if (style[at] === '}') depth--;
+    at++;
+  }
+  return style.slice(start, at - 1);
+};
+/** The declarations of the rules inside `block` that have `selector` among theirs, joined. */
+const inBlock = (block: string, selector: string): string =>
+  [...block.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+    .filter(([, selectors]) =>
+      (selectors as string)
+        .split(',')
+        .map((each) => each.trim())
+        .includes(selector),
+    )
+    .map(([, , body]) => body)
+    .join('\n');
+
 test('the sidebar is 180px wide by default, and the list beside a run is 340px (ADW-522)', () => {
-  expect(declarationsOf('.body')).toContain('var(--side-w, 180px) 5px 1fr 5px var(--ins-w, 360px)');
+  expect(declarationsOf('.body')).toContain('var(--side-w, 180px) 5px minmax(0, 1fr)');
   expect(declarationsOf(':root[data-detail="open"] .body')).toContain(
-    'var(--side-w, 180px) 5px var(--list-w, 340px) 1fr 5px var(--ins-w, 360px)',
-  );
-  expect(declarationsOf(':root[data-detail="open"][data-inspector="closed"] .body')).toContain(
-    'var(--side-w, 180px) 5px var(--list-w, 340px) 1fr;',
+    'var(--side-w, 180px) 5px minmax(0, var(--list-w, 340px)) minmax(320px, 1fr)',
   );
   expect(declarationsOf(':root:not([data-detail="open"]) .main')).toContain('display: none');
+});
+
+test('the inspector has a grid track only from 1100px, and under it is a fixed panel no wider than the window (ADW-528)', () => {
+  expect(declarationsOf('.body')).not.toContain('--ins-w');
+  expect(declarationsOf(':root[data-detail="open"] .body')).not.toContain('--ins-w');
+  const wide = mediaBlock('min-width: 1100px');
+  expect(inBlock(wide, ':root[data-inspector="open"] .body')).toContain('5px var(--ins-w, 360px);');
+  expect(inBlock(wide, ':root[data-detail="open"][data-inspector="open"] .body')).toContain('5px var(--ins-w, 360px);');
+  const narrow = mediaBlock('max-width: 1099px');
+  expect(inBlock(narrow, '.inspector')).toContain('position: fixed');
+  expect(inBlock(narrow, '.inspector')).toContain('width: min(var(--ins-w, 360px), 100vw)');
+  expect(inBlock(narrow, '.resize-right')).toContain('display: none');
+  expect([...style.matchAll(/@media \(((?:min|max)-width[^)]*)\)/g)].map((m) => m[1])).toEqual([
+    'min-width: 1100px',
+    'max-width: 1099px',
+  ]);
+});
+
+test('beside the list the run view keeps 320px and the list gives way first (ADW-528)', () => {
+  const grid = declarationsOf(':root[data-detail="open"] .body');
+  expect(grid).toContain('minmax(0, var(--list-w, 340px)) minmax(320px, 1fr)');
 });
 
 test('no sidebar or problem rule keeps its text on one line, so labels wrap rather than clip (ADW-522)', () => {
