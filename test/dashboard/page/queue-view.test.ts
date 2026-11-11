@@ -432,21 +432,24 @@ test('the header has a poll button for the workflow, and the add form shows only
   for (const markup of [draw('ticket'), draw('pr'), draw()]) expect(markup).toContain(poll);
   const form = draw('ticket');
   expect(form).toContain('<input class="txt" type="text" name="add-ticket" placeholder="ticket key"');
-  expect(form).toContain('<label class="lbl"><input type="checkbox" name="add-force"> force</label>');
+  expect(form).not.toContain('type="checkbox"');
   expect(form).toContain('<button class="btn" data-action="add-ticket" data-repo="beta" data-workflow="ticket-to-pr"');
+  expect(form).toContain(
+    '<button class="btn" data-action="add-ticket-force" data-repo="beta" data-workflow="ticket-to-pr" title="add the ticket without checking its label or state">add, skipping its checks</button>',
+  );
   for (const markup of [draw('pr'), draw()]) {
     expect(markup).not.toContain('add-ticket');
     expect(markup).not.toContain('add-force');
   }
 });
 
-test('what was typed in the add field and whether force is ticked survive a draw', () => {
+test('what was typed in the add field survives a draw, with no force box drawn', () => {
   const [panel] = watchedPanels();
   if (panel === undefined) throw new Error('beta has no queue');
-  const ui = { ...initialUi(0), act: { drafts: { 'add-ticket': { ticket: 'FAKE-"9"', force: 'on' } }, results: {} } };
+  const ui = { ...initialUi(0), act: { drafts: { 'add-ticket': { ticket: 'FAKE-"9"' } }, results: {} } };
   const markup = renderQueue(panel, { recent: [], polls: 'ticket' }, ui, NOW).value;
   expect(markup).toContain('name="add-ticket" placeholder="ticket key" value="FAKE-&quot;9&quot;"');
-  expect(markup).toContain('<input type="checkbox" name="add-force" checked> force');
+  expect(markup).not.toContain('add-force');
 });
 
 test('a queue section, the recent events fold and an item ⋯ say whether they are open, and the item buttons are named (ADW-508)', () => {

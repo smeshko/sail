@@ -42,6 +42,7 @@ test('the committed dashboard views are what the fixtures render now', async () 
     'run-fake-2.html',
     'list-menu-fake-2.html',
     'dialog-clean.html',
+    'dialog-restart.html',
     'run-fake-3.html',
     'list-menu-fake-3.html',
     'run-review.html',
@@ -73,4 +74,10 @@ test('a view changed by one byte is named as stale, and so is one missing', asyn
     `queue.html is missing: ${REGENERATE}`,
     `sidebar.html is stale: ${REGENERATE}`,
   ]);
+});
+
+test('no golden view holds a checkbox', () => {
+  const files = filesIn(COMMITTED);
+  expect(files.length).toBeGreaterThan(20);
+  expect(files.filter((file) => readFileSync(join(COMMITTED, file), 'utf8').includes('type="checkbox"'))).toEqual([]);
 });
