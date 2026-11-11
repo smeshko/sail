@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-theme="dark" data-inspector="open">
+<html lang="en" data-theme="dark" data-inspector="open" data-detail="closed">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -67,6 +67,9 @@
         }
       }
       :root {
+        --row-h: 28px;
+        --group-h: 28px;
+        --list-head-h: 40px;
         --ok: #34d399;
         --warn: #f5a623;
         --err: #f43f5e;
@@ -105,8 +108,6 @@
         outline-offset: 1px;
       }
       .r-open:focus-visible,
-      .lgrp-h:focus-visible,
-      .wf-t:focus-visible,
       .q-row:focus-visible,
       .qsec:focus-visible,
       .qrecent-h:focus-visible,
@@ -134,8 +135,6 @@
         min-height: 24px;
       }
       .wf-act,
-      .qbadge,
-      .hist-t,
       .r-more {
         display: inline-flex;
         align-items: center;
@@ -154,7 +153,7 @@
         }
       }
 
-      /* the shell: top bar, rail, centre, inspector and status bar */
+      /* the shell: top bar, sidebar, list, run view, inspector and status bar */
       .shell {
         display: grid;
         grid-template-rows: 46px 1fr 26px;
@@ -162,11 +161,18 @@
       }
       .body {
         display: grid;
-        grid-template-columns: var(--rail-w, 260px) 5px 1fr 5px var(--ins-w, 360px);
+        grid-template-columns: var(--side-w, 180px) 5px 1fr 5px var(--ins-w, 360px);
         overflow: hidden;
       }
       :root[data-inspector="closed"] .body {
-        grid-template-columns: var(--rail-w, 260px) 5px 1fr;
+        grid-template-columns: var(--side-w, 180px) 5px 1fr;
+      }
+      /* a run or queue open beside the list: the list keeps --list-w and the run view takes the rest */
+      :root[data-detail="open"] .body {
+        grid-template-columns: var(--side-w, 180px) 5px var(--list-w, 340px) 1fr 5px var(--ins-w, 360px);
+      }
+      :root[data-detail="open"][data-inspector="closed"] .body {
+        grid-template-columns: var(--side-w, 180px) 5px var(--list-w, 340px) 1fr;
       }
       .resize-handle {
         cursor: col-resize;
@@ -322,17 +328,7 @@
         padding: 2px 8px;
         line-height: 1.4;
       }
-
-      /* the rail */
-      .rail {
-        background: var(--panel);
-        border-right: 1px solid var(--line);
-        overflow-y: auto;
-        display: flex;
-        flex-direction: column;
-        min-width: 0;
-      }
-      .rail-h {
+      .pane-h {
         display: flex;
         align-items: center;
         gap: 7px;
@@ -343,109 +339,14 @@
         text-transform: uppercase;
         color: var(--fg-3);
       }
-      .rail-h .c {
+      .pane-h .c {
         margin-left: auto;
         color: var(--fg-4);
       }
-      .lgrp {
-        border-bottom: 1px solid var(--line);
-      }
-      .lgrp-h {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        width: 100%;
-        padding: 8px 12px;
-        font-size: 12.5px;
-        font-weight: 600;
-        color: var(--fg-2);
-      }
-      .lgrp-p {
-        padding: 0 12px 6px 34px;
-        font-family: var(--mono);
-        font-size: 10.5px;
-        color: var(--fg-4);
-        overflow-wrap: anywhere;
-      }
-      .lgrp-p,
-      .r-problem {
-        color: var(--del);
-      }
-      .run {
-        display: flex;
-        align-items: flex-start;
-        gap: 8px;
-        width: 100%;
-        padding: 6px 12px 6px 34px;
-        font-family: var(--mono);
-        font-size: 11.5px;
-        color: var(--fg-2);
-        border-left: 2px solid transparent;
-      }
-      .r-open {
-        flex: 1 1 auto;
-        min-width: 0;
-        display: flex;
-        align-items: flex-start;
-        gap: 8px;
-        text-align: left;
-        font: inherit;
-        color: inherit;
-      }
-      .hist-run .r-open {
-        align-items: center;
-      }
-      .run:hover {
-        background: var(--hover);
-      }
-      .run.sel {
-        background: var(--panel-2);
-        border-left-color: var(--run);
-        color: var(--fg);
-      }
-      .run .st {
-        width: 6px;
-        height: 6px;
-        margin-top: 5px;
-        border-radius: 50%;
-        flex: 0 0 auto;
-      }
-      .r-main,
-      .r-title,
-      .r-sub,
-      .r-problem {
-        display: block;
-        min-width: 0;
-      }
-      .r-title {
-        font-family: var(--sans);
-        font-size: 12px;
-        color: var(--fg-2);
-        overflow-wrap: anywhere;
-      }
-      .r-sub {
-        color: var(--fg-4);
-        font-size: 10.5px;
-      }
-      .stalled {
-        color: var(--warn);
-      }
-      .why {
-        color: var(--del);
-      }
-      .lgrp-h .caret,
-      .wf-t .caret {
-        font-size: 11px;
-        color: var(--fg-4);
-      }
-      .lgrp-h .caret,
-      .wf-t .caret,
       .qsec .caret,
       .qrecent-h .caret {
         transition: transform 0.12s;
       }
-      .lgrp-h.open .caret,
-      .wf-t.open .caret,
       .qsec.open .caret,
       .qrecent-h.open .caret {
         transform: rotate(90deg);
@@ -516,67 +417,179 @@
         font-size: 10.5px;
         color: var(--err);
       }
-
-      /* the rail's workflows, inside a repository, and a watched workflow's queue badge */
-      .lgrp-h:hover,
-      .wf-h:hover {
+      /* the sidebar: navigation that never grows with activity */
+      .side {
+        background: var(--panel);
+        border-right: 1px solid var(--line);
+        overflow-y: auto;
+        overflow-x: hidden;
+        min-width: 0;
+      }
+      .side-views,
+      .side-repos {
+        display: flex;
+        flex-direction: column;
+      }
+      .side-h {
+        padding: 11px 12px 6px;
+        font-family: var(--mono);
+        font-size: 10px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--fg-3);
+      }
+      .side-ent,
+      .side-repo {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        width: 100%;
+        min-height: var(--row-h);
+        padding: 5px 12px;
+        font-size: 12.5px;
+        color: var(--fg-2);
+        text-align: left;
+        border-left: 2px solid transparent;
+      }
+      .side-ent:hover,
+      .side-repo:hover {
         background: var(--hover);
       }
-      .wf-h {
-        display: flex;
-        align-items: center;
-        gap: 7px;
-        width: 100%;
-        padding: 0 12px 0 22px;
-        font-family: var(--mono);
-        font-size: 11.5px;
-        color: var(--fg-2);
+      .side-ent.on,
+      .side-repo.on {
+        background: var(--panel-2);
+        border-left-color: var(--run);
+        color: var(--fg);
       }
-      .wf-t {
-        display: flex;
-        align-items: center;
-        gap: 7px;
+      .side-ent .nm,
+      .side-repo .nm {
         flex: 1 1 auto;
         min-width: 0;
-        padding: 7px 0;
-        color: inherit;
-        text-align: left;
+        overflow-wrap: anywhere;
       }
-      .wf-h .nm {
-        font-weight: 600;
-        color: var(--fg);
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-      .lgrp-h .nm {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-      .lgrp-h .counts,
-      .wf-h .counts {
+      .side-ent .c {
+        flex: 0 100 auto;
+        min-width: 0;
         margin-left: auto;
-        display: flex;
-        gap: 6px;
+        overflow: hidden;
         font-family: var(--mono);
         font-size: 10.5px;
-        font-weight: 400;
         color: var(--fg-4);
       }
-      .lgrp-h .counts .r,
-      .wf-h .counts .r {
-        color: var(--run);
+      .dot {
+        flex: 0 0 auto;
+        width: 8px;
+        height: 8px;
+        margin-top: 5px;
+        border-radius: 50%;
       }
-      .lgrp-h .counts .f,
-      .wf-h .counts .f {
-        color: var(--err);
+      .dot-watching {
+        background: var(--ok);
       }
-      .lgrp-acts {
+      .dot-idle {
+        background: var(--fg-4);
+      }
+      .dot-broken {
+        background: var(--err);
+      }
+
+      /* the list: one row per entry, at fixed heights, in folding groups */
+      .list {
+        min-width: 0;
+        overflow-y: auto;
+        overflow-x: hidden;
+      }
+      :root[data-detail="open"] .list {
+        border-right: 1px solid var(--line);
+      }
+      .list-h {
         display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 8px;
+        min-height: var(--list-head-h);
+        padding: 6px 12px;
+        border-bottom: 1px solid var(--line);
+      }
+      .lh-t {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--fg);
+      }
+      .list-h .c,
+      .lgh .c {
+        font-family: var(--mono);
+        font-size: 10.5px;
+        color: var(--fg-4);
+      }
+      .list-f {
+        flex: 1 1 100px;
+        min-width: 0;
+        margin-left: auto;
+        padding: 2px 8px;
+        font-family: var(--mono);
+        font-size: 11.5px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: var(--panel-2);
+        color: var(--fg-2);
+      }
+      .lgrp {
+        border-bottom: 1px solid var(--line);
+      }
+      .lgrp-row {
+        display: flex;
+        align-items: center;
         flex-wrap: wrap;
         gap: 6px;
-        padding: 0 12px 4px 34px;
+        padding-right: 12px;
+      }
+      .lgh {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        min-height: var(--group-h);
+        padding: 4px 12px;
+        font-family: var(--mono);
+        font-size: 10.5px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--fg-3);
+        text-align: left;
+      }
+      .lgrp-row .lgh {
+        flex: 1 1 auto;
+        width: auto;
+      }
+      .lgh:hover,
+      .lgrp-row:hover {
+        background: var(--hover);
+      }
+      .lgh .nm {
+        min-width: 0;
+        overflow-wrap: anywhere;
+      }
+      .lgh .lcaret {
+        font-size: 11px;
+        color: var(--fg-4);
+        transition: transform 0.12s;
+      }
+      .lgh.open .lcaret {
+        transform: rotate(90deg);
+      }
+      .lgh.cur,
+      .lgrp-row.cur,
+      .lrow.cur,
+      .q-row.cur {
+        box-shadow: inset 2px 0 0 var(--focus);
+      }
+      .lgrp-p {
+        padding: 0 12px 6px 34px;
+        font-family: var(--mono);
+        font-size: 10.5px;
+        color: var(--del);
+        overflow-wrap: anywhere;
       }
       .wf-act {
         flex: 0 0 auto;
@@ -587,6 +600,8 @@
         border: 1px solid var(--line);
         background: var(--panel-2);
         color: var(--fg-3);
+        white-space: normal;
+        text-align: left;
       }
       .wf-act:hover {
         border-color: var(--line-2);
@@ -608,71 +623,100 @@
       .qadd .txt[disabled] {
         opacity: 0.5;
       }
-      .qbadge {
-        flex: 0 0 auto;
-        padding: 0 5px;
-        font-family: var(--mono);
-        font-size: 10px;
-        border-radius: 4px;
-        border: 1px solid var(--line);
-      }
-      .qbadge.warn {
-        color: var(--warn);
-        border-color: var(--warn);
-      }
-      .qbadge.bad {
-        color: var(--del);
-        border-color: var(--del);
-      }
-      .qbadge.idle {
-        color: var(--fg-4);
-        visibility: hidden;
-      }
-      .wf-h:hover .qbadge.idle,
-      .wf-h:focus-within .qbadge.idle,
-      .qbadge.idle.sel {
-        visibility: visible;
-      }
-      .qbadge.sel {
-        background: var(--panel-2);
-      }
-      .hist {
+      .run {
         display: flex;
-        gap: 12px;
-        padding: 2px 12px 4px 34px;
+        align-items: flex-start;
+        gap: 6px;
+        width: 100%;
+        min-height: var(--row-h);
+        padding: 0 12px 0 10px;
         font-family: var(--mono);
-        font-size: 10.5px;
-      }
-      .hist-t {
-        color: var(--fg-4);
-      }
-      .hist-t:hover,
-      .hist-t.open {
+        font-size: 11.5px;
         color: var(--fg-2);
+        border-left: 2px solid transparent;
       }
-      .hist-run {
-        align-items: center;
-        padding-top: 3px;
-        padding-bottom: 3px;
+      .run:hover {
+        background: var(--hover);
       }
-      .hist-run .st {
-        margin-top: 0;
+      .run.sel {
+        background: var(--panel-2);
+        border-left-color: var(--run);
+        color: var(--fg);
       }
-      .hist-run .r-title {
+      .r-open {
         flex: 1 1 auto;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        min-width: 0;
+        min-height: var(--row-h);
+        text-align: left;
+        font: inherit;
+        color: inherit;
+      }
+      .r-line {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+        min-height: var(--row-h);
+        white-space: nowrap;
+      }
+      .r-line > * {
+        min-width: 0;
+      }
+      .run .st {
+        flex: 0 0 auto;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+      }
+      .r-id {
+        flex: 0 1 auto;
         overflow: hidden;
         text-overflow: ellipsis;
-        white-space: nowrap;
-        overflow-wrap: normal;
       }
-      .r-el {
-        margin-left: auto;
-        flex: 0 0 auto;
-        color: var(--fg-4);
+      .r-title {
+        flex: 1 1 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        font-family: var(--sans);
+        font-size: 12px;
+        color: var(--fg-2);
+      }
+      .r-wf,
+      .r-el,
+      .r-cost,
+      .run .why,
+      .run .stalled {
+        flex: 0 4 auto;
+        overflow: hidden;
+        text-overflow: ellipsis;
         font-size: 10.5px;
+        color: var(--fg-4);
+      }
+      .run .stalled {
+        color: var(--warn);
+      }
+      .run .why {
+        color: var(--del);
+      }
+      .r-problem {
+        display: block;
+        padding: 0 0 5px 14px;
+        font-size: 10.5px;
+        color: var(--del);
+        overflow-wrap: anywhere;
+        white-space: normal;
+      }
+      /* beside the run view, the row gives up its workflow and cost */
+      :root[data-detail="open"] .r-wf,
+      :root[data-detail="open"] .r-cost {
+        display: none;
       }
       .r-more {
         flex: 0 0 auto;
+        align-self: center;
         opacity: 0;
         padding: 0 6px;
         border: 1px solid var(--line);
@@ -691,9 +735,6 @@
         .r-more {
           opacity: 1;
         }
-        .qbadge.idle {
-          visibility: visible;
-        }
       }
       .r-more:hover,
       .r-more.open {
@@ -701,12 +742,13 @@
         color: var(--fg);
       }
       .r-menu {
-        margin: 2px 10px 8px 34px;
+        margin: 2px 10px 8px 14px;
         padding: 8px;
         border: 1px solid var(--line-2);
         border-radius: 8px;
         background: var(--panel);
         box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+        overflow-wrap: anywhere;
       }
       .r-menu .acts {
         flex-direction: column;
@@ -716,7 +758,13 @@
       .r-menu .act {
         flex-wrap: wrap;
       }
+      .r-menu .act button,
+      .r-menu .btn {
+        white-space: normal;
+        text-align: left;
+      }
       .r-menu select {
+        max-width: 100%;
         font-family: var(--mono);
         font-size: 12px;
         padding: 3px 6px;
@@ -725,14 +773,27 @@
         background: var(--panel-2);
         color: var(--fg-2);
       }
-      .hist-run .r-id {
-        flex: 0 0 auto;
-        white-space: nowrap;
-      }
       .r-menu .act-why,
       .r-menu .warnchip {
         overflow-wrap: anywhere;
         white-space: normal;
+      }
+      .q-row {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        width: 100%;
+        min-height: var(--row-h);
+        padding: 4px 12px;
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--fg-3);
+        border-left: 2px solid transparent;
+      }
+      .q-row .nm {
+        min-width: 0;
+        overflow-wrap: anywhere;
+        text-align: left;
       }
       .q-row .qd {
         width: 7px;
@@ -740,38 +801,6 @@
         border-radius: 50%;
         border: 1.5px solid var(--warn);
         flex: 0 0 auto;
-      }
-      .live-run {
-        padding-left: 12px;
-      }
-      .live-run .st {
-        margin-top: 0;
-      }
-      .r-line {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        min-width: 0;
-        white-space: nowrap;
-      }
-      .r-line .r-id {
-        flex: 0 0 auto;
-      }
-      .r-line .r-title {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        overflow-wrap: normal;
-      }
-      .q-row {
-        display: flex;
-        align-items: center;
-        gap: 7px;
-        width: 100%;
-        padding: 5px 12px;
-        font-family: var(--mono);
-        font-size: 10.5px;
-        color: var(--fg-3);
-        border-left: 2px solid transparent;
       }
       .q-row:hover {
         background: var(--hover);
@@ -831,14 +860,14 @@
         border-radius: 10px;
         box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
       }
-      .att-pane .rail-h {
+      .att-pane .pane-h {
         position: sticky;
         top: 0;
         background: var(--panel);
         padding-bottom: 8px;
         border-bottom: 1px solid var(--line);
       }
-      .att-pane .rail-h .att-clear {
+      .att-pane .pane-h .att-clear {
         text-transform: none;
         letter-spacing: 0;
         padding: 2px 8px;
@@ -902,6 +931,9 @@
         flex-direction: column;
         overflow-y: auto;
         min-width: 0;
+      }
+      :root:not([data-detail="open"]) .main {
+        display: none;
       }
       .d-h {
         display: flex;
@@ -1765,7 +1797,6 @@
       .mini-b {
         padding: 8px 11px;
       }
-
       .status {
         display: flex;
         align-items: center;
@@ -1799,10 +1830,13 @@
         <button class="btn" type="button" data-action="toggle-inspector" aria-label="toggle inspector" title="inspector (i)">⇥</button>
       </header>
       <div class="body" id="body">
-        <nav class="rail">
-          <div id="rail"></div>
+        <nav class="side">
+          <div id="sidebar"></div>
         </nav>
         <div class="resize-handle" data-resize="left"></div>
+        <section class="list">
+          <div id="list"></div>
+        </section>
         <main class="main">
           <div id="main"></div>
         </main>

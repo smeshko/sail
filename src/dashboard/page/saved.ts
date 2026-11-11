@@ -1,12 +1,12 @@
-// What the page keeps in the browser's storage between visits: the theme, the rail's opened groups, the kinds of entry
+// What the page keeps in the browser's storage between visits: the theme, the list's folded groups, the kinds of entry
 // the timeline hides, and the needs-attention items a person cleared. Each read falls back when what is stored isn't
 // valid, and a write is left to the host, which ignores storage that throws.
 import type { PageHost } from './host';
 import { FILTERS, THEMES, type Theme, type TimelineFilter } from './ui-state';
 
 export const THEME_KEY = 'sail-dashboard-theme';
-/** The `localStorage` key the rail's opened repositories and workflows are kept under, as a JSON list. */
-export const RAIL_KEY = 'sail-dashboard-rail-expanded';
+/** The `localStorage` key the list's folded groups are kept under, as a JSON list of group ids. */
+export const LIST_KEY = 'sail-dashboard-list-folded';
 /** Where the kinds of entry the timeline hides are saved, comma-separated. */
 export const FILTER_KEY = 'sail-dashboard-timeline-hidden';
 /** Where the identities of the needs-attention items a person cleared are kept, as a JSON list of strings. */
@@ -23,10 +23,10 @@ export function savedHidden(host: PageHost): TimelineFilter[] {
   return FILTERS.filter((kind) => (host.load(FILTER_KEY) ?? '').split(',').includes(kind));
 }
 
-/** The rail's saved opened groups: a list of names, else none. */
-export function savedExpanded(host: PageHost): string[] {
+/** The list's saved folded groups: a list of ids, else none. */
+export function savedFolded(host: PageHost): string[] {
   try {
-    const stored: unknown = JSON.parse(host.load(RAIL_KEY) ?? '[]');
+    const stored: unknown = JSON.parse(host.load(LIST_KEY) ?? '[]');
     return Array.isArray(stored) && stored.every((name) => typeof name === 'string') ? (stored as string[]) : [];
   } catch {
     return [];

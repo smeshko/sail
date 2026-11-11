@@ -142,7 +142,7 @@ export function createActor(deps: ActorDeps): Actor {
     void host.post(undo.path, undo.body).then(({ status, body }) => {
       if (deps.stopped()) return;
       say(reverser, subject, status, reverser.answer?.(status, body, subject) ?? {});
-      mark('rail', 'main');
+      mark('list', 'main');
     });
   }
 
@@ -175,14 +175,14 @@ export function createActor(deps: ActorDeps): Actor {
       }
     }
     say(def, subject, status, answer, undo === undefined ? undefined : () => reverse(subject, undo));
-    mark('rail', 'main');
-    if (effect === 'leave') mark('inspector', 'status');
+    mark('list', 'main');
+    if (effect === 'leave') mark('sidebar', 'inspector', 'status');
   }
 
   function send(def: ActionDef, subject: Subject, request: { path: string; body: unknown }, undo: Undo | undefined) {
     if (subject.kind === 'run') runsOut++;
     if (def.underway !== undefined) ui.underway[underwayId(def, subject)] = def.underway;
-    mark('rail', 'main');
+    mark('list', 'main');
     void host.post(request.path, request.body).then(({ status, body }) => finish(def, subject, status, body, undo));
   }
 
@@ -206,7 +206,7 @@ export function createActor(deps: ActorDeps): Actor {
     if (request === undefined) return;
     if ('invalid' in request) {
       effects.toast('bad', headOf(def, subject), request.invalid);
-      mark('rail', 'main');
+      mark('list', 'main');
       return;
     }
     const undo = def.undo?.(subject, source);
@@ -216,7 +216,7 @@ export function createActor(deps: ActorDeps): Actor {
       ui.dialog = view;
       host.openDialog(renderDialog(view).value);
       // What was typed for its parameters is kept in the drafts, and drawn again.
-      mark('rail', 'main');
+      mark('list', 'main');
       return;
     }
     send(def, subject, request, undo);

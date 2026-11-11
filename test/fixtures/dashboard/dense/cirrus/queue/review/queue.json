@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "workflow": "review",
+  "updatedAt": "2026-10-01T11:55:00.000Z",
+  "polling": {
+    "label": "sail",
+    "failures": 0,
+    "lastPolledAt": "2026-10-01T11:55:00.000Z"
+  },
+  "items": [
+    {
+      "dedupKey": "ticket:FAKE-3001",
+      "source": {
+        "kind": "ticket",
+        "ticketKey": "FAKE-3001"
+      },
+      "title": "Show the stop reason beside a failed run",
+      "url": "fake://tickets/FAKE-3001",
+      "state": "dispatched",
+      "attempts": 1,
+      "addedAt": "2026-10-01T10:50:00.000Z",
+      "runId": "FAKE-3001-01M7D020DENSE0000000000000"
+    },
+    {
+      "dedupKey": "ticket:FAKE-3901",
+      "source": {
+        "kind": "ticket",
+        "ticketKey": "FAKE-3901"
+      },
+      "title": "Keep the changelog in step with the releases",
+      "url": "fake://tickets/FAKE-3901",
+      "state": "done",
+      "attempts": 1,
+      "addedAt": "2026-10-01T10:50:00.000Z",
+      "finishedAt": "2026-10-01T10:58:00.000Z"
+    }
+  ]
+}

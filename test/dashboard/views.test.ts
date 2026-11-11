@@ -30,18 +30,20 @@ function stale(rendered: string, stored: string): string[] {
 test('the committed dashboard views are what the fixtures render now', async () => {
   const fresh = join(temp, 'fresh');
   expect(await renderDashboardViews(fresh)).toEqual([
-    'rail.html',
-    'rail-repos.html',
-    'rail-queue-problem.html',
+    'sidebar.html',
+    'list-active.html',
+    'list-history.html',
+    'list-queues.html',
+    'list-queues-problem.html',
     'attention.html',
     'queue.html',
     'queue-watched.html',
     'run-golden.html',
     'run-fake-2.html',
-    'rail-menu-fake-2.html',
+    'list-menu-fake-2.html',
     'dialog-clean.html',
     'run-fake-3.html',
-    'rail-menu-fake-3.html',
+    'list-menu-fake-3.html',
     'run-review.html',
     'toasts.html',
     'inspector-fake-2-implement-1-permissions.html',
@@ -51,6 +53,10 @@ test('the committed dashboard views are what the fixtures render now', async () 
     'inspector-golden-publish-1-log.html',
     'timeline-golden-publish-1.html',
     'timeline-claude-code-implement-1.html',
+    'dense-sidebar.html',
+    'dense-active.html',
+    'dense-history.html',
+    'dense-queues.html',
   ]);
   expect(stale(fresh, COMMITTED)).toEqual([]);
 });
@@ -60,8 +66,11 @@ test('a view changed by one byte is named as stale, and so is one missing', asyn
   await renderDashboardViews(fresh);
   const changed = join(temp, 'changed');
   cpSync(COMMITTED, changed, { recursive: true });
-  const rail = readFileSync(join(changed, 'rail.html'), 'utf8');
-  writeFileSync(join(changed, 'rail.html'), rail.replace('alpha', 'alphA'));
+  const sidebar = readFileSync(join(changed, 'sidebar.html'), 'utf8');
+  writeFileSync(join(changed, 'sidebar.html'), sidebar.replace('alpha', 'alphA'));
   rmSync(join(changed, 'queue.html'));
-  expect(stale(fresh, changed)).toEqual([`queue.html is missing: ${REGENERATE}`, `rail.html is stale: ${REGENERATE}`]);
+  expect(stale(fresh, changed)).toEqual([
+    `queue.html is missing: ${REGENERATE}`,
+    `sidebar.html is stale: ${REGENERATE}`,
+  ]);
 });

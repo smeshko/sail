@@ -4,7 +4,7 @@
 // members the page uses, since the project's TypeScript has no DOM library.
 
 /** The page's regions, each an element id in `index.html`. */
-export const REGIONS = ['rail', 'attention', 'main', 'inspector', 'status', 'drawer', 'toasts'] as const;
+export const REGIONS = ['sidebar', 'list', 'attention', 'main', 'inspector', 'status', 'drawer', 'toasts'] as const;
 export type Region = (typeof REGIONS)[number];
 
 export interface Connection {
@@ -28,8 +28,19 @@ export interface PageHost {
   /** Scrolls what holds `region` to its end. */
   scrollToEnd(region: Region): void;
   onAction(handler: (action: string, data: Record<string, string>) => void): void;
-  /** `on` is the `data-action` of the element the key landed on. */
-  onKey(handler: (key: string, inInput: boolean, on?: string) => void): void;
+  /**
+   * `handler` is told each key, whether it was typed in an input, and `on`, the `data-action` of the element the key
+   * landed on; answering true suppresses the key's default, as typing it would.
+   */
+  onKey(handler: (key: string, inInput: boolean, on?: string) => boolean): void;
+  /** `handler` is told the value of a named field each time it is typed into. */
+  onInput(handler: (name: string, value: string) => void): void;
+  /** Focuses the field named `name`, in whichever region draws it. */
+  focus(name: string): void;
+  /** Takes the focus off the focused element. */
+  blur(): void;
+  /** Scrolls the `.cur` element of `region` into view, as little as it takes. */
+  reveal(region: Region): void;
   /**
    * Opens the confirmation dialog with `html`, modal, and remembers what had the focus. A close the browser makes
    * itself reaches the action handler as `dialog-cancel`.
@@ -55,10 +66,14 @@ export interface PageHost {
   /** Copies to the clipboard: false when it can't. */
   copy(text: string): Promise<boolean>;
   setTheme(theme: string): void;
+  /** Sets the URL's parameter `name` to `value`, keeping the others, without a history entry. */
+  setParam(name: string, value: string): void;
   setInspector(open: boolean): void;
+  /** Whether a run or queue is open beside the list: the centre is laid out by it. */
+  setDetail(open: boolean): void;
   /** The browser's offset east of UTC, in minutes. */
   offset(): number;
-  /** What the page's URL asks it to open first, from `?repo=…&run=…&key=…&tab=…`: empty when it asks nothing. */
+  /** What the page's URL asks it to open first, from `?repo=…&run=…&key=…&tab=…&view=…`: empty when it asks nothing. */
   start(): Record<string, string>;
 }
 
@@ -86,6 +101,8 @@ export interface ElementLike {
   onclose?: (() => void) | null;
   contains?(other: ElementLike): boolean;
   focus?(options?: { preventScroll?: boolean }): void;
+  blur?(): void;
+  scrollIntoView?(options?: { block?: string }): void;
   getAttribute?(name: string): string | null;
   querySelectorAll?(selectors: string): ArrayLike<ElementLike>;
   querySelector?(selectors: string): ElementLike | null;
@@ -114,7 +131,8 @@ export interface BrowserWindow {
     documentElement: { dataset: Record<string, string | undefined> };
     activeElement?: ElementLike | null;
   };
-  location: { host: string; search: string };
+  location: { host: string; pathname: string; search: string };
+  history: { replaceState(state: unknown, title: string, url: string): void };
   fetch(
     url: string,
     init: { headers: Record<string, string>; method?: string; body?: string },
@@ -189,7 +207,7 @@ const INPUTS = new Set(['INPUT', 'TEXTAREA', 'SELECT']);
 
 /** How wide each resizable column may be, and its CSS variable. */
 const COLUMNS: Record<string, { variable: string; min: number; max: number; start: number; sign: number }> = {
-  left: { variable: '--rail-w', min: 160, max: 480, start: 260, sign: 1 },
+  left: { variable: '--side-w', min: 140, max: 480, start: 180, sign: 1 },
   right: { variable: '--ins-w', min: 240, max: 640, start: 360, sign: -1 },
 };
 
@@ -347,6 +365,27 @@ export function browserHost(win: BrowserWindow): PageHost {
         if (element !== undefined) fire(element);
       });
     },
+    onInput(handler) {
+      doc.addEventListener('input', (event) => {
+        const target = isElement(event.target) ? event.target : undefined;
+        if (target?.name !== undefined && target.name !== '') handler(target.name, target.value ?? '');
+      });
+    },
+    focus(name) {
+      for (const region of REGIONS) {
+        const field = doc.getElementById(region)?.querySelector?.(`[name="${name}"]`);
+        if (field !== null && field !== undefined) {
+          field.focus?.();
+          return;
+        }
+      }
+    },
+    blur() {
+      doc.activeElement?.blur?.();
+    },
+    reveal(region) {
+      doc.getElementById(region)?.querySelector?.('.cur')?.scrollIntoView?.({ block: 'nearest' });
+    },
     onKey(handler) {
       doc.addEventListener('keydown', (event) => {
         const target = isElement(event.target) ? event.target : undefined;
@@ -361,7 +400,11 @@ export function browserHost(win: BrowserWindow): PageHost {
             return;
           }
         }
-        handler(event.key ?? '', tag !== undefined && INPUTS.has(tag), actionOf(event.target)?.dataset.action);
+        if (
+          handler(event.key ?? '', tag !== undefined && INPUTS.has(tag), actionOf(event.target)?.dataset.action) ===
+          true
+        )
+          event.preventDefault?.();
       });
     },
     async get(path) {
@@ -434,8 +477,16 @@ export function browserHost(win: BrowserWindow): PageHost {
       doc.documentElement.dataset.theme = theme;
     },
     start: () => Object.fromEntries(new URLSearchParams(win.location.search)),
+    setParam(name, value) {
+      const params = new URLSearchParams(win.location.search);
+      params.set(name, value);
+      win.history.replaceState(null, '', `${win.location.pathname}?${params}`);
+    },
     setInspector(open) {
       doc.documentElement.dataset.inspector = open ? 'open' : 'closed';
+    },
+    setDetail(open) {
+      doc.documentElement.dataset.detail = open ? 'open' : 'closed';
     },
     offset: () => -new win.Date().getTimezoneOffset(),
   };

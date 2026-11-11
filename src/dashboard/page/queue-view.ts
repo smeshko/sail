@@ -1,22 +1,24 @@
-// The queue view: one watched workflow's queue, opened from its row in the rail and drawn in the centre in place of the
+// The queue view: one watched workflow's queue, opened from its row in the list and drawn in the centre in place of the
 // run, with its polling, a box of items for each state that has any, running first, each folding from its heading, and
 // its recent events from the queue's own stream, folded until the person opens them, and the error that stream sent.
-// The controls ask the watcher and change nothing themselves: the header's poll button, a field to add a ticket (for a
+// The controls ask the watcher and change nothing themselves: the header's poll button and its workflow's Watch or Unwatch, a field to add a ticket (for a
 // workflow that polls tickets), and, at a row's right, ▲ and ▼ on a waiting item to move it before or after its waiting
 // neighbour, and a ⋯ on any item but a running one, which opens its menu: requeue, on a parked item or a failed one
 // whose run has ended, and drop, which opens the confirmation dialog. One menu is open at a time. The answer to any of
 // them, a refusal or that the watcher has not taken it yet, is a toast, and while a request is out the header or the
 // item's row reads the word under way. While the workflow isn't watched, or its watcher isn't running, which the index
 // says from the live watcher, every one of those controls is drawn disabled and the server's reason shows beside the
-// poll button. An item whose run the rail lists opens it. A waiting item shows its priority. A held item shows
+// poll button. An item whose run the list shows opens it. A waiting item shows its priority. A held item shows
 // when its hold ends and why, and its hold's events name it. An item that waits on its ticket's prerequisites names them.
 import type { QueueEvent } from '../../events/types';
 import type { QueueItemState } from '../../watch/queue-store';
+import type { RepoOffers } from '../offers';
 import { ACTIONS, actionOf, type OfferSource, type Subject } from './action-registry';
 import { actionControl } from './action-view';
 import { ago, clock } from './format';
 import { html, type SafeHtml, safeHref } from './html';
 import { type PanelItem, panelSource, QUEUE_STATES, type QueuePanel } from './index-model';
+import { watchButtons } from './list-view';
 import type { UiState } from './ui-state';
 
 /** What the shell has heard on a queue's stream: its last events. */
@@ -200,7 +202,13 @@ function recentEvents(stream: QueueStream | undefined, ui: UiState): SafeHtml {
   )}</div>`;
 }
 
-function panelView(panel: QueuePanel, stream: QueueStream | undefined, ui: UiState, now: number): SafeHtml {
+function panelView(
+  panel: QueuePanel,
+  stream: QueueStream | undefined,
+  ui: UiState,
+  now: number,
+  repoOffers: RepoOffers | undefined,
+): SafeHtml {
   const { state } = panel.watch;
   const why = panel.watch.state === 'watched' ? undefined : panel.watch.why;
   const polling = panel.queue?.polling;
@@ -226,7 +234,7 @@ function panelView(panel: QueuePanel, stream: QueueStream | undefined, ui: UiSta
       : why === undefined
         ? html`<button class="btn" data-action="poll-queue" data-repo="${panel.repo}" data-workflow="${panel.workflow}" title="poll now">poll</button>`
         : html`<span class="act"><button class="btn" disabled title="${why}">poll</button><span class="act-why">${why}</span></span>`
-  }</div>
+  }${watchButtons(panel.repo, repoOffers, ui, panel.workflow)}</div>
 ${stream?.polls === 'ticket' && queueOffered(panel, 'add-ticket') ? addForm(panel, ui, why) : ''}
 ${panel.problem === undefined ? '' : html`<div class="code bad">${panel.problem}</div>`}
 ${stream?.error === undefined ? '' : html`<div class="code bad">${stream.error}</div>`}
@@ -249,7 +257,13 @@ ${recentEvents(stream, ui)}
 }
 
 /** The queue view of `panel`, under a header naming its workflow and repository. */
-export function renderQueue(panel: QueuePanel, stream: QueueStream | undefined, ui: UiState, now: number): SafeHtml {
+export function renderQueue(
+  panel: QueuePanel,
+  stream: QueueStream | undefined,
+  ui: UiState,
+  now: number,
+  repoOffers?: RepoOffers | undefined,
+): SafeHtml {
   return html`<div class="d-h"><span class="d-title">${panel.workflow} queue</span><span class="d-agent">${panel.repo}</span></div>
-${panelView(panel, stream, ui, now)}`;
+${panelView(panel, stream, ui, now, repoOffers)}`;
 }

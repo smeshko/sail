@@ -24,7 +24,7 @@ import type { UiState } from './ui-state';
 
 export { TICK_MS } from './draw';
 export { LOG_REFRESH_MS } from './reads';
-export { CLEARED_KEY, FILTER_KEY, RAIL_KEY, THEME_KEY } from './saved';
+export { CLEARED_KEY, FILTER_KEY, LIST_KEY, THEME_KEY } from './saved';
 export { FLUSH_MS } from './store';
 export { RECENT_EVENTS, RECONNECT_MS } from './streams';
 
@@ -80,6 +80,9 @@ export function boot(host: PageHost): Page {
   startDraw(store);
   host.onAction((action, data) => dispatch(store, action, data));
   host.onKey((key, inInput, on) => onKey(store, key, inInput, on));
+  host.onInput((name, value) => {
+    if (name === 'list-filter') dispatch(store, 'list-filter', { value });
+  });
   openIndex(store, (asked) => actions.open?.(store, asked));
   store.mark(...REGIONS);
 

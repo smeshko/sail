@@ -472,6 +472,29 @@ test('a queue section, the recent events fold and an item ⋯ say whether they a
   expect(moves).toContain('aria-label="move down, after ticket:FAKE-7"');
 });
 
+test("the queue view's header carries the watch or unwatch the repository offers its workflow, never armed, the word under way while its request is out, and none when nothing is offered (ADW-522)", () => {
+  const panel = waiting();
+  const stream = { recent: [], polls: 'ticket' as const };
+  const header = (markup: string) => markup.match(/<div class="srcbar">.*?<\/div>/s)?.[0] ?? '';
+  const offering = (op: 'watch' | 'unwatch') => ({
+    watch: { enabled: true },
+    workflows: { [QUEUE_WORKFLOW]: { [op]: { enabled: true } } },
+  });
+  expect(header(renderQueue(panel, stream, initialUi(0), NOW).value)).not.toContain('wf-act');
+  expect(header(renderQueue(panel, stream, initialUi(0), NOW, offering('watch')).value)).toContain(
+    `<button class="wf-act" data-action="watch" data-repo="beta" data-workflow="${QUEUE_WORKFLOW}">watch</button></div>`,
+  );
+  const unwatch = header(renderQueue(panel, stream, initialUi(0), NOW, offering('unwatch')).value);
+  expect(unwatch).toContain(
+    `<button class="wf-act" data-action="unwatch" data-repo="beta" data-workflow="${QUEUE_WORKFLOW}">unwatch</button>`,
+  );
+  expect(unwatch).not.toContain('armed');
+  const underway = { ...initialUi(0), underway: { [`watch:beta/${QUEUE_WORKFLOW}`]: 'unwatching…' } };
+  expect(header(renderQueue(panel, stream, underway, NOW, offering('unwatch')).value)).toContain(
+    '<span class="busy">unwatching…</span>',
+  );
+});
+
 const WHY = 'no watcher is running <x>';
 const ACTIONS = ['poll-queue', 'add-ticket', 'move-item', 'item-menu', 'requeue-item', 'drop-item'];
 

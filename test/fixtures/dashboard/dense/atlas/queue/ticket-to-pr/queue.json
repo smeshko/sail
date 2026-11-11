@@ -1,0 +1,64 @@
+{
+  "version": 1,
+  "workflow": "ticket-to-pr",
+  "updatedAt": "2026-10-01T11:55:00.000Z",
+  "polling": {
+    "label": "sail",
+    "failures": 0,
+    "lastPolledAt": "2026-10-01T11:55:00.000Z"
+  },
+  "items": [
+    {
+      "dedupKey": "ticket:FAKE-1201",
+      "source": {
+        "kind": "ticket",
+        "ticketKey": "FAKE-1201"
+      },
+      "title": "Add a --json flag to every listing command",
+      "url": "fake://tickets/FAKE-1201",
+      "state": "queued",
+      "attempts": 0,
+      "addedAt": "2026-10-01T10:50:00.000Z",
+      "priority": "high"
+    },
+    {
+      "dedupKey": "ticket:FAKE-1202",
+      "source": {
+        "kind": "ticket",
+        "ticketKey": "FAKE-1202"
+      },
+      "title": "Fix the off-by-one in the pagination of the run list",
+      "url": "fake://tickets/FAKE-1202",
+      "state": "queued",
+      "attempts": 0,
+      "addedAt": "2026-10-01T10:50:00.000Z",
+      "priority": "high"
+    },
+    {
+      "dedupKey": "ticket:FAKE-1001",
+      "source": {
+        "kind": "ticket",
+        "ticketKey": "FAKE-1001"
+      },
+      "title": "Retry the fetch helper on a 503",
+      "url": "fake://tickets/FAKE-1001",
+      "state": "dispatched",
+      "attempts": 1,
+      "addedAt": "2026-10-01T10:50:00.000Z",
+      "runId": "FAKE-1001-01M7D000DENSE0000000000000"
+    },
+    {
+      "dedupKey": "ticket:FAKE-1901",
+      "source": {
+        "kind": "ticket",
+        "ticketKey": "FAKE-1901"
+      },
+      "title": "Keep the changelog in step with the releases",
+      "url": "fake://tickets/FAKE-1901",
+      "state": "done",
+      "attempts": 1,
+      "addedAt": "2026-10-01T10:50:00.000Z",
+      "finishedAt": "2026-10-01T10:58:00.000Z"
+    }
+  ]
+}
