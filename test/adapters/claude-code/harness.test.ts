@@ -11,6 +11,7 @@ import {
   INTERRUPT_GRACE_MS,
   type QueryFunction,
   sessionOptions,
+  whereYouWork,
 } from '../../../src/adapters/claude-code/harness';
 import { SUBMIT_CONTRACT, submissionEnvelope } from '../../../src/adapters/claude-code/submission';
 import { BUILTIN_TOOLS } from '../../../src/adapters/claude-code/tool-call';
@@ -1123,4 +1124,31 @@ describe('onRaw: the provider messages, handed on for a recording', () => {
     const { result } = await play(stream());
     expect(summary(result)).toEqual(SPEC);
   });
+});
+
+/** `req` with the scratch folder the engine's preamble names: `<cwd>/../tmp`, made. */
+function withScratch(req: HarnessRequest): HarnessRequest {
+  const tmp = join(req.cwd, '..', 'tmp');
+  mkdirSync(tmp, { recursive: true });
+  return { ...req, env: { ...req.env, TMPDIR: tmp, TMP: tmp, TEMP: tmp } };
+}
+
+test("the request's TMPDIR is an additionalDirectory after the two stage directories, and a request with none keeps the two", () => {
+  const req = request();
+  const scratched = withScratch(req);
+  const stage = [req.env.STAGE_IN ?? '', req.env.STAGE_OUT ?? ''];
+  expect([sessionOptions(scratched, {}).additionalDirectories, sessionOptions(req, {}).additionalDirectories]).toEqual([
+    [...stage, join(req.cwd, '..', 'tmp')],
+    stage,
+  ]);
+});
+
+test('whereYouWork lists a line for each of $TMPDIR, $TMP and $TEMP of the request', () => {
+  const req = withScratch(request());
+  const text = whereYouWork(req, true);
+  const lines = ['TMPDIR', 'TMP', 'TEMP'].map((name) =>
+    text.split('\n').filter((line) => line.startsWith(`- \`$${name}\`: `)),
+  );
+  expect(lines.map((found) => found.length)).toEqual([1, 1, 1]);
+  expect(lines[0]?.[0]).toContain(req.env.TMPDIR ?? '<none>');
 });

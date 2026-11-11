@@ -130,7 +130,7 @@ export function sessionOptions(
   env: Env,
   onDenied?: (toolUseId: string, denial: Denial) => void,
 ): Options & { abortController: AbortController } {
-  const stageDirs = [request.env.STAGE_IN, request.env.STAGE_OUT].filter(
+  const stageDirs = [request.env.STAGE_IN, request.env.STAGE_OUT, request.env.TMPDIR].filter(
     (dir): dir is string => dir !== undefined && dir !== '',
   );
   const gate = createGate({
@@ -140,6 +140,8 @@ export function sessionOptions(
       worktree: request.cwd,
       stageOut: request.env.STAGE_OUT ?? '',
       stageIn: request.env.STAGE_IN ?? '',
+      // The try's scratch folder: no region when the request names none.
+      ...(request.env.TMPDIR ? { scratch: request.env.TMPDIR } : {}),
       env: request.env,
     },
     ...(onDenied === undefined ? {} : { onDenied }),
