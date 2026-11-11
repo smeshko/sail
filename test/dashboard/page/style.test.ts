@@ -280,7 +280,7 @@ test('the inspector has a grid track only from 1210px, and under it is a fixed p
 });
 
 test('the inspector carries a close button over its head at every width, docked or over the centre (ADW-528, ADW-543, ADW-544)', () => {
-  const aside = /<aside class="inspector">([\s\S]*?)<\/aside>/.exec(html)?.[1] ?? '';
+  const aside = /<aside class="inspector"[^>]*>([\s\S]*?)<\/aside>/.exec(html)?.[1] ?? '';
   expect(aside).toMatch(/<button[^>]*class="btn ins-close"[^>]*data-action="close-inspector"/);
   expect(declarationsOf('.ins-close')).not.toContain('display: none');
   expect(declarationsOf('.ins-close')).toContain('display: inline-flex');
@@ -407,4 +407,48 @@ test('a tickbox takes its accent from a theme variable (ADW-506)', () => {
 test("the run header's ⋯ menu wraps a reason the nowrap row around it would keep on one line (ADW-548)", () => {
   expect(declarationsOf('.h-menu')).toContain('white-space: normal');
   expect(declarationsOf('.h-menu')).toContain('overflow-wrap: anywhere');
+});
+
+test("the resize handles are focusable separators that start at their column's width, minimum and maximum (ADW-547)", () => {
+  const handles = [...html.matchAll(/<div class="resize-handle[^"]*"[^>]*>/g)].map(([tag]) => tag);
+  expect(handles).toHaveLength(2);
+  const attrs = (tag: string) => Object.fromEntries([...tag.matchAll(/ ([\w-]+)="([^"]*)"/g)].map((m) => [m[1], m[2]]));
+  expect(attrs(handles[0] as string)).toMatchObject({
+    id: 'resize-left',
+    'data-resize': 'left',
+    role: 'separator',
+    'aria-orientation': 'vertical',
+    tabindex: '0',
+    'aria-label': 'sidebar width',
+    'aria-valuenow': '180',
+    'aria-valuemin': '140',
+    'aria-valuemax': '480',
+  });
+  expect(attrs(handles[1] as string)).toMatchObject({
+    id: 'resize-right',
+    'data-resize': 'right',
+    role: 'separator',
+    'aria-orientation': 'vertical',
+    tabindex: '0',
+    'aria-label': 'inspector width',
+    'aria-valuenow': '360',
+    'aria-valuemin': '240',
+    'aria-valuemax': '640',
+  });
+  expect(declarationsOf('.resize-handle:focus-visible')).toContain('background: var(--line-2)');
+});
+
+test('a handle whose column is not in the grid is display: none, so out of the tab order (ADW-547)', () => {
+  expect(style).toMatch(
+    /:root\[data-inspector="closed"\] \.inspector,\s*:root\[data-inspector="closed"\] \.resize-right\s*\{\s*display: none;/,
+  );
+  expect(inBlock(mediaBlock('max-width: 1209px'), '.resize-right')).toContain('display: none');
+  expect(inBlock(mediaBlock('max-width: 899px'), '.resize-handle')).toContain('display: none');
+});
+
+test('the sidebar, the list, the inspector and the file drawer each carry a label (ADW-547)', () => {
+  expect(html).toContain('<nav class="side" aria-label="sidebar">');
+  expect(html).toContain('<section class="list" aria-label="list">');
+  expect(html).toContain('<aside class="inspector" aria-label="inspector">');
+  expect(html).toContain('<aside class="drawer" id="drawer" aria-label="file">');
 });

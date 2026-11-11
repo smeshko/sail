@@ -333,6 +333,7 @@ class FakeHost implements PageHost {
   urls: { query: string; push: boolean }[] = [];
   setUrl(query: string, push: boolean) {
     this.urls.push({ query, push });
+    return true;
   }
 
   /** Moves the clock on by `ms`, running every timer that falls due, in order. */
@@ -3916,7 +3917,7 @@ test('typing filters the rows within one flush and lists go-to rows, and the fie
   expect(before.length).toBeGreaterThan(1);
   host.type('menu-query', FAKE_2_ID.slice(0, 8));
   host.advance(100);
-  expect(cmdk()).toContain('<div class="cmdk-grp">Go to</div>');
+  expect(cmdk()).toContain('<div class="cmdk-grp" id="cmdk-grp-goto" role="presentation">Go to</div>');
   expect(menuLeads()).toContain(FAKE_2_ID.replace(/-[^-]*$/, ''));
   expect(cmdk()).not.toContain('cmdk-id');
 });
@@ -4958,7 +4959,7 @@ describe('audit 2: overlays behave (ADW-542)', () => {
       host.advance(100);
     }
     expect(host.revealedOpen.filter((region) => region === 'menu')).toHaveLength(11);
-    expect(cmdk()).toContain('<div class="cmdk-rows" data-scroll="menu-rows">');
+    expect(cmdk()).toContain('<div class="cmdk-rows" id="cmdk-rows" data-scroll="menu-rows" role="listbox"');
   });
 
   test('N20: Tab stays in the shortcut sheet, and the bare a opens no view', () => {
@@ -5548,16 +5549,16 @@ describe('a filter that drops the open row selects the first row left (ADW-537)'
     expect([open.ui.repo, open.ui.runId]).toEqual(['beta', FAKE_4]);
     expect(host.regions.list).toContain(`data-row="run:beta/${FAKE_4}"`);
     expect(pushes()).toBe(before);
-    expect(host.urls.at(-1)).toEqual({ query: `repo=beta&run=${FAKE_4}&view=history`, push: false });
+    expect(host.urls.at(-1)).toEqual({ query: `repo=beta&run=${FAKE_4}&view=history&q=FAKE-4`, push: false });
   });
 
-  test('a text filter that keeps the open run leaves it open and writes nothing', () => {
+  test('a text filter that keeps the open run leaves it open and replaces the entry with the text (ADW-546)', () => {
     const open = onHistory();
     const writes = host.urls.length;
     host.type('list-filter', 'FAKE-1');
     host.advance(100);
     expect(open.ui.runId).toBe(FAKE_1);
-    expect(host.urls.length).toBe(writes);
+    expect(host.urls.slice(writes)).toEqual([{ query: `repo=alpha&run=${FAKE_1}&view=history&q=FAKE-1`, push: false }]);
   });
 
   test('a filter that hides every row shows the empty state, and widening it opens the first row', () => {
@@ -5573,7 +5574,7 @@ describe('a filter that drops the open row selects the first row left (ADW-537)'
     expect(pushes()).toBe(before);
   });
 
-  test("History's status control and the sidebar's repository filter do the same", () => {
+  test("History's status control and the sidebar's repository filter do the same, a push for each choice (ADW-546)", () => {
     const open = onHistory();
     const before = pushes();
     host.type('list-status', 'failed');
@@ -5583,7 +5584,7 @@ describe('a filter that drops the open row selects the first row left (ADW-537)'
     host.click({ action: 'filter-repo', repo: 'beta' });
     host.advance(100);
     expect([open.ui.repo, open.ui.runId]).toEqual(['beta', FAKE_4]);
-    expect(pushes()).toBe(before);
+    expect(pushes()).toBe(before + 3);
   });
 
   test("History's workflow control opens the first row of the workflow when the open run is of another", () => {
@@ -6147,5 +6148,141 @@ describe('a key for every action, and the shortcut sheet (ADW-523)', () => {
     expect(page.store.cleared.size).toBeGreaterThan(before);
     press('z');
     expect(page.store.cleared.size).toBe(before);
+  });
+});
+
+describe("the list's filters are in the URL (ADW-546)", () => {
+  const FAKE_1 = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N';
+  const FAKE_4 = 'FAKE-4-01M348XP801GH3GKJT2MNM2NR9';
+  const rows = () => [...(host.regions.list ?? '').matchAll(/data-row="run:([^"]+)"/g)].map(([, row]) => row ?? '');
+  const boots = (startAt: Record<string, string>) => {
+    host.narrowed = false;
+    host.startAt = startAt;
+    page = boot(host);
+    plainIndex();
+    host.advance(100);
+    return page;
+  };
+
+  test('booted with the filters in the URL, the list is narrowed by them and the field and controls show them (ADW-546)', () => {
+    const open = boots({ view: 'history', in: 'alpha', q: 'fake-2', status: 'failed' });
+    expect([open.ui.view, open.ui.repoFilter, open.ui.listFilter, open.ui.historyStatus]).toEqual([
+      'history',
+      'alpha',
+      'fake-2',
+      'failed',
+    ]);
+    expect(host.regions.list).toContain('value="fake-2"');
+    expect(rows()).toEqual([`alpha/${FAKE_2_ID}`]);
+    expect(open.ui.runId).toBe(FAKE_2_ID);
+    expect(host.freshes).toContain('list');
+  });
+
+  test('a run the URL names opens though the restored filters hide its row (ADW-546)', () => {
+    const open = boots({ repo: 'beta', run: FAKE_4, view: 'history', in: 'alpha' });
+    expect([open.ui.repo, open.ui.runId]).toEqual(['beta', FAKE_4]);
+    expect(rows().some((row) => row.startsWith('beta/'))).toBe(false);
+  });
+
+  test('a repository or workflow the index does not list is dropped from the URL with a replace and no toast (ADW-546)', () => {
+    const open = boots({ view: 'history', in: 'gone', workflow: 'no-such' });
+    expect([open.ui.repoFilter, open.ui.historyWorkflow]).toEqual([undefined, undefined]);
+    const last = host.urls.at(-1);
+    expect(last?.push).toBe(false);
+    expect(last?.query).not.toContain('in=');
+    expect(last?.query).not.toContain('workflow=');
+    expect(last?.query).toContain('view=history');
+    expect(toasts()).toEqual([]);
+  });
+
+  test('Back and Forward restore the filters of their entry (ADW-546)', () => {
+    const open = boots({ view: 'history' });
+    host.go('view=history&status=failed');
+    host.advance(100);
+    expect(open.ui.historyStatus).toBe('failed');
+    expect(rows()).toEqual([`alpha/${FAKE_2_ID}`]);
+    host.go('view=history&in=beta&q=fake');
+    expect([open.ui.historyStatus, open.ui.repoFilter, open.ui.listFilter]).toEqual([undefined, 'beta', 'fake']);
+    host.go('view=history');
+    expect([open.ui.repoFilter, open.ui.listFilter]).toEqual([undefined, '']);
+    host.go('view=active&status=failed');
+    expect(open.ui.historyStatus).toBeUndefined();
+  });
+
+  test('a Back between two entries that differ only in the call leaves the field alone (ADW-546)', () => {
+    const open = boots({ repo: 'alpha', run: FAKE_1, view: 'history', q: 'fake' });
+    host.freshes.length = 0;
+    host.go(`repo=alpha&run=${FAKE_1}&view=history&q=fake&key=implement%231`);
+    expect(open.ui.listFilter).toBe('fake');
+    expect(host.freshes).not.toContain('list');
+  });
+
+  test('text typed before the first index is kept and written with it (ADW-546)', () => {
+    host.narrowed = false;
+    page = boot(host);
+    host.type('list-filter', 'FAKE-4');
+    plainIndex();
+    host.advance(100);
+    expect(page.ui.listFilter).toBe('FAKE-4');
+    expect(host.urls[0]?.query).toContain('q=FAKE-4');
+  });
+
+  const pushesNow = () => host.urls.filter((write) => write.push).length;
+  const onHistory = () => {
+    const open = boots({ view: 'history' });
+    expect(open.ui.runId).toBe(FAKE_1);
+    return open;
+  };
+
+  test('typing in the filter replaces the history entry and pushes none (ADW-546)', () => {
+    const open = onHistory();
+    const before = pushesNow();
+    for (const text of ['F', 'FA', 'FAKE-1']) host.type('list-filter', text);
+    host.advance(100);
+    expect(pushesNow()).toBe(before);
+    expect(open.ui.runId).toBe(FAKE_1);
+    expect(host.urls.at(-1)).toEqual({ query: `repo=alpha&run=${FAKE_1}&view=history&q=FAKE-1`, push: false });
+  });
+
+  test('a chosen repository, status or workflow pushes one entry, and Back restores the entry before (ADW-546)', () => {
+    const open = onHistory();
+    const before = host.urls.length;
+    host.type('list-status', 'failed');
+    host.advance(100);
+    expect(host.urls.slice(before)).toEqual([
+      { query: `repo=alpha&run=${FAKE_2_ID}&view=history&status=failed`, push: true },
+    ]);
+    host.go(`repo=alpha&run=${FAKE_1}&view=history`);
+    host.advance(100);
+    expect([open.ui.historyStatus, open.ui.runId]).toEqual([undefined, FAKE_1]);
+    const mark = host.urls.length;
+    host.click({ action: 'filter-repo', repo: 'beta' });
+    host.advance(100);
+    expect(host.urls.slice(mark).map((write) => write.push)).toEqual([true]);
+    expect(host.urls.at(-1)?.query).toContain('in=beta');
+    const next = host.urls.length;
+    host.type('list-workflow', 'ticket-to-pr');
+    host.advance(100);
+    expect(host.urls.slice(next).map((write) => write.push)).toEqual([true]);
+    expect(host.urls.at(-1)?.query).toContain('workflow=ticket-to-pr');
+  });
+
+  test("History's status failed keeps an open failed run (ADW-546)", () => {
+    const open = boots({ repo: 'alpha', run: FAKE_2_ID, view: 'history' });
+    const sockets = host.open('run=').length;
+    host.type('list-status', 'failed');
+    host.advance(100);
+    expect(open.ui.runId).toBe(FAKE_2_ID);
+    expect(host.open('run=').length).toBe(sockets);
+    expect(host.urls.at(-1)).toEqual({ query: `repo=alpha&run=${FAKE_2_ID}&view=history&status=failed`, push: true });
+  });
+
+  test("a text filter that still lists the open queue's row keeps the queue open (ADW-546)", () => {
+    const open = boots({ view: 'queues' });
+    const queue = open.ui.queue;
+    expect(queue).toBeDefined();
+    host.type('list-filter', 'ticket');
+    host.advance(100);
+    expect(open.ui.queue).toBe(queue);
   });
 });
