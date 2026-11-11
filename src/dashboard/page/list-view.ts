@@ -23,6 +23,7 @@ import { type AttentionItem, identity } from './attention';
 import { ago, clock, duration } from './format';
 import { html, type SafeHtml } from './html';
 import type { ListRepo, ListRun } from './index-model';
+import { withKey } from './keymap';
 import {
   type AttentionRow,
   attentionSubject,
@@ -188,7 +189,7 @@ function attentionRow(row: AttentionRow, ui: UiState): SafeHtml {
       : queue !== undefined
         ? html`<button class="r-open" data-action="select-queue" data-queue="${queue}">${body}</button>`
         : html`<div class="r-open">${body}</div>`;
-  return html`<div class="lrow in-row in-${item.kind}${sel ? ' sel' : ''}${cur(row.id, ui)}" data-row="${row.id}"${subjectAttrs(attentionSubject(row))}>${open}<button class="r-dismiss" type="button" data-action="dismiss-attention" data-item="${identity(item)}" aria-label="dismiss" title="dismiss (e)">✕</button></div>`;
+  return html`<div class="lrow in-row in-${item.kind}${sel ? ' sel' : ''}${cur(row.id, ui)}" data-row="${row.id}"${subjectAttrs(attentionSubject(row))}>${open}<button class="r-dismiss" type="button" data-action="dismiss-attention" data-item="${identity(item)}" aria-label="dismiss" title="${withKey('dismiss', actionOf('dismiss-attention')?.key)}">✕</button></div>`;
 }
 
 const rowOf = (
@@ -287,7 +288,7 @@ export function renderList(
   const count = narrowed ? `${total(shown)} of ${total(all)}` : String(total(all));
   const clear =
     view === 'inbox' && total(shown) > 0
-      ? html`<button class="btn" type="button" data-action="clear-attention" title="dismiss all (Shift+E)">all clear</button>`
+      ? html`<button class="btn" type="button" data-action="clear-attention" title="${withKey('dismiss all', actionOf('clear-attention')?.key)}">all clear</button>`
       : '';
   const head = html`<div class="list-h"><span class="lh-t">${VIEW_LABELS[view]}</span><span class="c">${count}</span>${clear}<input class="list-f" name="list-filter" type="search" value="${ui.listFilter}" placeholder="filter (/)" aria-label="filter the list" autocomplete="off" spellcheck="false">${view === 'history' ? historyControls(repos, ui) : ''}${view === 'history' ? cleanFailed(repos, ui) : ''}${view === 'history' ? selectionHead(selectedRows(shown, ui.listSelected).length, ui.underway.selection) : ''}</div>`;
   const empty =

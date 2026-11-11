@@ -229,6 +229,11 @@ class FakeHost implements PageHost {
   save(key: string, value: string) {
     this.storage.set(key, value);
   }
+  /** The links opened in a new tab, in order. */
+  links: string[] = [];
+  openLink(url: string) {
+    this.links.push(url);
+  }
   /** Whether the clipboard takes a copy. */
   copyTakes = true;
   async copy(text: string) {
@@ -2513,7 +2518,7 @@ const FAKE_3_PATH = `/api/repos/beta/runs/${FAKE_3_ID}`;
 const buttons = (region: string | undefined) =>
   [
     ...(region ?? '').matchAll(
-      /<button class="btn"( disabled)? ?(?:data-action="(\w+-run(?:-now)?)")?>([^<]*)<\/button>/g,
+      /<button class="btn"( disabled)? ?(?:data-action="(\w+-run(?:-now)?)")?(?: title="[^"]*")?>([^<]*)<\/button>/g,
     ),
   ].map(([, disabled, action, label]) => [label, action, disabled === undefined ? '' : 'disabled']);
 
@@ -2684,7 +2689,7 @@ test("a run's ⋯ opens the run and its menu under its row, reading what it offe
     1,
   ]);
   expect(host.regions.list).toContain(
-    '<div class="r-menu"><div class="acts"><span class="act"><button class="btn" data-action="restart-run">restart</button></span></div></div>',
+    '<div class="r-menu"><div class="acts"><span class="act"><button class="btn" data-action="restart-run" title="restart (⇧R)">restart</button><kbd>⇧R</kbd></span></div></div>',
   );
 });
 
@@ -3196,13 +3201,13 @@ test("the header's ⋯ opens a menu of the actions it has no button for; its ⋯
   settleQueue();
   await openRun('beta', FAKE_3_ID, m.beta.runDir);
   const more = { action: 'run-menu', repo: 'beta', run: FAKE_3_ID, at: 'header' };
-  expect(host.regions.main).toContain('data-action="resume-run">resume</button>');
+  expect(host.regions.main).toContain('data-action="resume-run" title="resume (R)">resume</button>');
   expect(host.regions.main).not.toContain('class="h-menu"');
   host.click(more);
   host.advance(100);
   expect(page?.ui.runMenu).toEqual({ runId: FAKE_3_ID, at: 'header' });
   expect(host.regions.main).toContain('<div class="h-menu">');
-  expect(host.regions.main).toContain('data-action="stop-run">stop</button>');
+  expect(host.regions.main).toContain('data-action="stop-run" title="stop (S)">stop</button><kbd>S</kbd>');
   expect(host.regions.list).not.toContain('class="r-menu"');
   host.click(more);
   host.advance(100);
@@ -3471,7 +3476,7 @@ describe('all clear', () => {
   test('one click empties the list and the count, shows nothing needs attention, posts nothing and leaves the failed run in the list', () => {
     bootOpen();
     expect(badge()).toBe('3');
-    expect(listed()).toContain('data-action="clear-attention" title="dismiss all (Shift+E)">all clear</button>');
+    expect(listed()).toContain('data-action="clear-attention" title="dismiss all (⇧E)">all clear</button>');
     host.click({ action: 'clear-attention' });
     host.advance(100);
     expect(badge()).toBe('0');
@@ -4950,7 +4955,7 @@ describe('the Inbox view (ADW-527)', () => {
       expect(count()).toBe('3');
     });
 
-    test('e and E do nothing outside the Inbox, and e does nothing in an input', () => {
+    test('e and E dismiss nothing outside the Inbox, where a toast says where they work, and e does nothing in an input (ADW-523)', () => {
       inbox();
       host.press('2');
       host.press('e');
@@ -4963,7 +4968,10 @@ describe('the Inbox view (ADW-527)', () => {
       host.press('e', true);
       host.press('E', true);
       host.advance(100);
-      expect([count(), toasts()]).toEqual(['3', []]);
+      expect([count(), toasts()]).toEqual([
+        '3',
+        ['bad dismiss (E): works in the Inbox', 'bad all clear (⇧E): works in the Inbox'],
+      ]);
     });
 
     test('e with no row under the cursor and no open run does nothing and draws no toast', () => {
@@ -5594,5 +5602,260 @@ describe('the keyed pane: w gives the keys to the list or the open run beside it
     expect(host.sidebars.at(-1)).toBe(true);
     host.advance(100);
     expect(host.keyPanes.at(-1)).toBe('none');
+  });
+});
+
+describe('a key for every action, and the shortcut sheet (ADW-523)', () => {
+  const sheet = () => host.regions.menu ?? '';
+  /** Lets go of every source of the focus, as a page with nothing hovered, under the cursor or open has. */
+  const unfocus = () => {
+    if (page !== undefined) page.store.ui.focus = { seq: page.store.ui.focus.seq };
+  };
+  const press = (key: string, inInput = false, mod = false) => {
+    const handled = host.press(key, inInput, undefined, mod);
+    host.advance(100);
+    return handled;
+  };
+
+  test('? opens the sheet in the command menu’s place, grouped, with the boxed keys; ?, Escape and a click outside close it, and meanwhile no other key does anything', () => {
+    bootIndexed();
+    press('?');
+    expect(sheet()).toContain('<div class="cmdk keys" role="dialog" aria-label="keyboard shortcuts" tabindex="-1">');
+    expect([...sheet().matchAll(/<div class="cmdk-grp">([^<]*)<\/div>/g)].map(([, group]) => group)).toEqual([
+      'Global',
+      'List',
+      'Run',
+      'Queue item',
+      'Inbox',
+    ]);
+    expect(sheet()).toContain(
+      '<span class="keys-t">stop now</span><span class="keys-ks"><span class="keys-k"><kbd>⇧S</kbd>',
+    );
+    expect(sheet()).toContain('<kbd>G</kbd><span class="keys-then">then</span><kbd>Q</kbd>');
+    expect(sheet()).toContain(
+      '<span class="keys-t">move up</span><span class="keys-ks"><span class="keys-k"><kbd>⌥↑</kbd>',
+    );
+    expect(host.menuFocuses).toBe(1);
+    const view = page?.ui.view;
+    press('3');
+    press('/');
+    expect([page?.ui.view, host.focused]).toEqual([view, []]);
+    press('?');
+    expect(sheet()).toBe('');
+    press('?');
+    press('Escape');
+    expect(sheet()).toBe('');
+    press('?');
+    host.click({ action: 'close-sheet' });
+    host.advance(100);
+    expect(sheet()).toBe('');
+  });
+
+  test('Cmd+K from the sheet closes it and opens the command menu, whose rows show their keys', async () => {
+    settleQueue();
+    bootIndexed();
+    press('?');
+    host.point('hover', FAKE_3_ROW);
+    expect(press('k', false, true)).toBe(true);
+    await settle();
+    host.advance(100);
+    expect(page?.ui.sheet).toBe(false);
+    expect(cmdk()).toContain('<span class="cmdk-label">stop</span><kbd>S</kbd>');
+    expect(cmdk()).toContain('<span class="cmdk-label">stop now</span><kbd>⇧S</kbd>');
+    expect(cmdk()).toContain('<span class="cmdk-label">resume</span><kbd>R</kbd>');
+  });
+
+  test('on a suspended run r opens Resume’s dialog asking the raise, as its button does, and Escape cancels it with nothing posted', async () => {
+    settleQueue();
+    await openRun('beta', FAKE_3_ID, m.beta.runDir);
+    expect(press('r')).toBe(true);
+    expect(dialogTitle()).toBe(`resume ${FAKE_3_ID}`);
+    expect(host.dialog).toContain('name="raise"');
+    press('Escape');
+    expect([host.dialog, host.posts]).toEqual([undefined, []]);
+  });
+
+  test('on a running run s opens Stop’s dialog and Shift+S Stop now’s; Escape cancels each with nothing posted, and Enter confirms', async () => {
+    holdLive();
+    await openRun('beta', FAKE_3_ID, m.beta.runDir);
+    press('s');
+    expect(dialogTitle()).toBe(`stop ${FAKE_3_ID}`);
+    press('Escape');
+    press('S');
+    expect(dialogTitle()).toBe(`stop ${FAKE_3_ID} now`);
+    press('Escape');
+    expect([host.dialog, host.posts]).toEqual([undefined, []]);
+    press('s');
+    press('Enter');
+    expect(host.posts).toEqual([{ path: `${FAKE_3_PATH}/stop`, body: { now: false } }]);
+  });
+
+  test('on a failed run Shift+R opens Restart’s dialog and Backspace Clean’s; Backspace in a field does nothing', async () => {
+    await openRun('alpha', FAKE_2_ID, fake2Dir(m));
+    press('R');
+    expect(dialogTitle()).toBe(`restart ${FAKE_2_ID}`);
+    press('Escape');
+    expect(press('Backspace', true)).toBe(false);
+    expect(host.dialog).toBeUndefined();
+    expect(press('Backspace')).toBe(true);
+    expect(dialogTitle()).toBe(`clean ${FAKE_2_ID}`);
+    press('Escape');
+    expect(host.posts).toEqual([]);
+  });
+
+  test('a key whose action is unavailable says why in a red toast and posts nothing: not offered, or nothing it applies to', async () => {
+    await openRun('alpha', FAKE_2_ID, fake2Dir(m));
+    press('s');
+    expect(toasts()).toEqual([`bad stop ${FAKE_2_ID}: not offered`]);
+    press('Escape');
+    press('Escape');
+    expect(page?.store.run).toBeUndefined();
+    host.point('hover', undefined);
+    unfocus();
+    press('r');
+    expect(toasts().at(-1)).toBe(
+      "bad resume or requeue (R): resume needs a run: open one, or put the list's cursor on one; requeue needs a queue item: point at one, or open its ⋯",
+    );
+    press('p');
+    expect(toasts().at(-1)).toBe("bad poll (P): needs a queue: open one, or put the list's cursor on one");
+    expect(host.posts).toEqual([]);
+  });
+
+  test('a disabled action’s key toasts its reason', async () => {
+    await openRun('beta', FAKE_3_ID, m.beta.runDir);
+    press('r');
+    expect(host.dialog).toBeUndefined();
+    expect(toasts().at(-1)).toMatch(new RegExp(`^bad resume ${FAKE_3_ID}: .+`));
+  });
+
+  test('the key of a run that is not open reads its offers first, then opens its dialog', async () => {
+    settleQueue();
+    bootIndexed();
+    host.point('hover', FAKE_3_ROW);
+    press('s');
+    expect(host.dialog).toBeUndefined();
+    await settle();
+    host.advance(100);
+    expect(dialogTitle()).toBe(`stop ${FAKE_3_ID}`);
+    press('Escape');
+    expect(host.posts).toEqual([]);
+  });
+
+  test('a run whose offers cannot be read says so', async () => {
+    settleQueue();
+    bootIndexed();
+    host.point('hover', { subject: 'run', repo: 'nowhere', run: 'gone-1' });
+    press('s');
+    await settle();
+    host.advance(100);
+    expect(toasts().at(-1)).toBe("bad stop gone-1: its actions can't be read");
+  });
+
+  test('on a queue item: r requeues, Backspace opens the drop dialog, Alt+Down and Alt+Up move it; on the queue p polls and c asks the ticket in the command menu', async () => {
+    twoWaiting();
+    openBetaQueue();
+    host.point('hover', ITEM_6);
+    press('r');
+    expect(host.posts).toEqual([{ path: `${QUEUE_PATH}/requeue`, body: { dedupKey: 'ticket:FAKE-6' } }]);
+    press('Backspace');
+    expect(dialogTitle()).toBe('drop ticket:FAKE-6');
+    press('Escape');
+    host.point('hover', ITEM_ROW);
+    press('Alt+ArrowDown');
+    host.point('hover', { ...ITEM_ROW, item: 'ticket:FAKE-7' });
+    press('Alt+ArrowUp');
+    expect(host.posts.slice(1)).toEqual([
+      { path: `${QUEUE_PATH}/move`, body: { dedupKey: 'ticket:FAKE-5', after: 'ticket:FAKE-7' } },
+      { path: `${QUEUE_PATH}/move`, body: { dedupKey: 'ticket:FAKE-7', before: 'ticket:FAKE-5' } },
+    ]);
+    press('Alt+ArrowDown');
+    expect(toasts().at(-1)).toBe('bad move down ticket:FAKE-7: ticket:FAKE-7 has no move down');
+    host.point('hover', WORKFLOW_ROW);
+    press('p');
+    expect(host.posts.at(-1)).toEqual({ path: `${QUEUE_PATH}/poll`, body: {} });
+    press('c');
+    expect(stepLabel()).toBe('ticket key');
+    expect(cmdk()).toContain(`beta / ${QUEUE_WORKFLOW}`);
+  });
+
+  test('an open item menu makes its item the subject', () => {
+    openBetaQueue();
+    host.click({ action: 'item-menu', item: 'ticket:FAKE-6' });
+    press('r');
+    expect(host.posts).toEqual([{ path: `${QUEUE_PATH}/requeue`, body: { dedupKey: 'ticket:FAKE-6' } }]);
+  });
+
+  test('g then i, a, q or h opens Inbox, Active, Queues and History beside 1 to 4; g then another key is that key', () => {
+    bootIndexed();
+    const views: string[] = [];
+    for (const key of ['i', 'a', 'q', 'h']) {
+      press('g');
+      press(key);
+      views.push(page?.ui.view ?? '');
+    }
+    expect(views).toEqual(['inbox', 'active', 'queues', 'history']);
+    expect(page?.ui.pinned).toBe(false);
+    press('g');
+    press('i');
+    press('g');
+    press('2');
+    expect([page?.ui.view, page?.ui.pinned, page?.ui.chord]).toEqual(['active', false, undefined]);
+  });
+
+  test('Cmd+. copies the focused subject’s id, and nothing in a field or with nothing focused', async () => {
+    await openRun('beta', FAKE_3_ID, m.beta.runDir);
+    expect(press('.', false, true)).toBe(true);
+    await settle();
+    expect(host.copied).toEqual([FAKE_3_ID]);
+    expect(press('.', true, true)).toBe(false);
+    unfocus();
+    press('Escape');
+    press('Escape');
+    unfocus();
+    press('.', false, true);
+    expect(host.copied).toEqual([FAKE_3_ID]);
+    expect(toasts().at(-1)).toBe('bad copy: nothing is focused to copy');
+  });
+
+  test('o opens the open run’s pull request, else says it has none; l and f open its call’s log and files', async () => {
+    const events = join(m.alpha.runDir, 'events.ndjson');
+    writeFileSync(
+      events,
+      readFileSync(events, 'utf8').replaceAll('fake://codehost/fixture/pull/5', 'https://code.test/pull/5'),
+    );
+    await openRun('alpha', GOLDEN_RUN_ID, m.alpha.runDir);
+    press('o');
+    expect(host.links).toEqual(['https://code.test/pull/5']);
+    press('l');
+    expect([page?.ui.tab, page?.ui.key]).toEqual(['log', page?.store.run?.model.cards[0]?.key]);
+    press('f');
+    expect(page?.ui.tab).toBe('files');
+    page?.stop();
+    host = new FakeHost(m);
+    await openRun('beta', FAKE_3_ID, m.beta.runDir);
+    press('o');
+    expect(toasts().at(-1)).toBe(`bad open ${FAKE_3_ID}: it has no pull request or ticket link`);
+    press('Escape');
+    press('Escape');
+    press('o');
+    press('l');
+    expect(toasts().slice(-2)).toEqual([
+      'bad open: open needs an open run',
+      'bad log: log needs an open run with a call',
+    ]);
+  });
+
+  test('z undoes what the newest toast with an Undo did, and says so when none has one', () => {
+    page = boot(host);
+    firstIndex();
+    host.click({ action: 'select-view', view: 'inbox' });
+    host.advance(100);
+    press('z');
+    expect(toasts().at(-1)).toBe('bad undo: no toast has an undo');
+    const before = page.store.cleared.size;
+    press('E');
+    expect(page.store.cleared.size).toBeGreaterThan(before);
+    press('z');
+    expect(page.store.cleared.size).toBe(before);
   });
 });

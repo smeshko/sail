@@ -230,12 +230,12 @@ test('Resume shows one button reading resume and no raise field, and shows a dis
     runControls(offers, { ...initialUi(0), ...ui })?.value ?? '';
   const idle = view(act({ 'resume-run': { raise: '5' } }), { resume });
   expect(idle).toBe(
-    '<div class="acts"><span class="act"><button class="btn" data-action="resume-run">resume</button></span></div>',
+    '<div class="acts"><span class="act"><button class="btn" data-action="resume-run" title="resume (R)">resume</button><kbd>R</kbd></span></div>',
   );
   expect(idle).not.toContain('restart');
   expect(idle).not.toContain('armed');
   expect(view(act(), { resume: { ...resume, enabled: false, why: 'run is running' } })).toContain(
-    '<span class="act"><button class="btn" disabled>resume</button><span class="act-why">run is running</span></span>',
+    '<span class="act"><button class="btn" disabled>resume</button><span class="act-why">run is running</span><kbd>R</kbd></span>',
   );
   expect(runControls(undefined, initialUi(0))).toBeUndefined();
   expect(runControls({ why: 'run completed' }, initialUi(0))).toBeUndefined();
@@ -253,7 +253,7 @@ test('Restart is one button and no stage choice, since the dialog asks the stage
   };
   const view = (ui: Partial<ReturnType<typeof initialUi>>, offer = restart) =>
     runControls({ restart: offer }, { ...initialUi(0), ...ui })?.value;
-  expect(view({})).toContain('<button class="btn" data-action="restart-run">restart</button>');
+  expect(view({})).toContain('<button class="btn" data-action="restart-run" title="restart (⇧R)">restart</button>');
   expect(view(act({ 'restart-run': { stage: 'spec' } }))).not.toContain('<select');
   expect(view({})).not.toContain('name="stage"');
   expect(view({}, { ...restart, budget: {} })).toContain('restart</button>');
@@ -264,10 +264,11 @@ test('Restart is one button and no stage choice, since the dialog asks the stage
 
 test('Suspend and hold is drawn after stop and stop now when offered, and not when it is not', () => {
   const view = (offers: Parameters<typeof runControls>[0]) => runControls(offers, initialUi(0))?.value ?? '';
-  const names = (markup: string) => [...markup.matchAll(/data-action="([a-z-]+)">/g)].map((each) => each[1]);
+  const names = (markup: string) =>
+    [...markup.matchAll(/data-action="([a-z-]+)"(?: title="[^"]*")?>/g)].map((each) => each[1]);
   expect(names(view({ stop: STOP, suspend: { enabled: true } }))).toEqual(['stop-run', 'stop-run-now', 'suspend-run']);
   expect(view({ stop: STOP, suspend: { enabled: true } })).toContain(
-    'data-action="stop-run-now">stop now</button></span><span class="act"><button class="btn" data-action="suspend-run">suspend and hold</button>',
+    'data-action="stop-run-now" title="stop now (⇧S)">stop now</button><kbd>⇧S</kbd></span><span class="act"><button class="btn" data-action="suspend-run">suspend and hold</button>',
   );
   expect(view({ stop: STOP })).not.toContain('suspend-run');
 });
@@ -276,7 +277,7 @@ test('Stop shows two buttons, stop and stop now, and no box, and a disabled one 
   const view = (ui: Partial<ReturnType<typeof initialUi>>, stop: StopOffer = { enabled: true }) =>
     runControls({ stop }, { ...initialUi(0), ...ui })?.value;
   expect(view({})).toContain(
-    '<span class="act"><button class="btn" data-action="stop-run">stop</button></span><span class="act"><button class="btn" data-action="stop-run-now">stop now</button></span>',
+    '<span class="act"><button class="btn" data-action="stop-run" title="stop (S)">stop</button><kbd>S</kbd></span><span class="act"><button class="btn" data-action="stop-run-now" title="stop now (⇧S)">stop now</button><kbd>⇧S</kbd></span>',
   );
   expect(view({})).not.toContain('type="checkbox"');
   expect(view({}, { enabled: false, why: 'run is not running' })).toContain(
@@ -295,7 +296,7 @@ test('Clean sits beside Restart, reads clean whatever it removes, and a disabled
     runControls({ restart, clean: offer }, { ...initialUi(0), ...ui })?.value;
   const idle = view({});
   expect(idle).toContain(
-    'data-action="restart-run">restart</button></span><span class="act"><button class="btn" data-action="clean-run">clean</button></span>',
+    'data-action="restart-run" title="restart (⇧R)">restart</button><kbd>⇧R</kbd></span><span class="act"><button class="btn" data-action="clean-run" title="clean (⌫)">clean</button><kbd>⌫</kbd></span>',
   );
   expect(idle).not.toContain('armed');
   expect(idle).not.toContain('confirm');
@@ -338,7 +339,7 @@ test("a running run's header holds stop, and its disabled resume and restart onl
   };
   const running = runningModel();
   const closed = header(running, offers);
-  expect(closed).toContain('<button class="btn" data-action="stop-run">stop</button>');
+  expect(closed).toContain('<button class="btn" data-action="stop-run" title="stop (S)">stop</button>');
   expect(closed).toContain(MORE);
   expect(closed).not.toContain('resume');
   const open = header(running, offers, { runMenu: { runId: running.runId ?? '', at: 'header' } });
@@ -358,20 +359,20 @@ test("a suspended run's header holds resume as a button and stop in the ⋯ menu
   const model = foldRun(readEvents(FAKE_3));
   const offers = { resume: RESUME_OFFER, stop: STOP };
   const closed = header(model, offers);
-  expect(closed).toContain('data-action="resume-run">resume</button>');
+  expect(closed).toContain('data-action="resume-run" title="resume (R)">resume</button>');
   expect(closed).not.toContain('stop-run');
   expect(closed).toContain(MORE);
   const open = header(model, offers, { runMenu: { runId: model.runId ?? '', at: 'header' } });
   expect(open).toContain(
-    '<div class="h-menu"><div class="acts"><span class="act"><button class="btn" data-action="stop-run">stop</button>',
+    '<div class="h-menu"><div class="acts"><span class="act"><button class="btn" data-action="stop-run" title="stop (S)">stop</button>',
   );
-  expect(open).toContain('data-action="stop-run-now">stop now</button>');
+  expect(open).toContain('data-action="stop-run-now" title="stop now (⇧S)">stop now</button>');
 });
 
 test("a failed run's header holds restart and clean, and no ⋯", () => {
   const markup = header(foldRun(readEvents(FAKE_2)), { restart: RESTART, clean: CLEAN });
-  expect(markup).toContain('data-action="restart-run">restart</button>');
-  expect(markup).toContain('data-action="clean-run">clean</button>');
+  expect(markup).toContain('data-action="restart-run" title="restart (⇧R)">restart</button>');
+  expect(markup).toContain('data-action="clean-run" title="clean (⌫)">clean</button>');
   expect(markup).not.toContain(MORE);
 });
 

@@ -394,10 +394,10 @@ test('each state shows the buttons its open menu is given: queued, parked and do
     '<span class="qmore"><button class="btn mv more open" data-action="item-menu" data-item="ticket:FAKE-6" aria-label="actions for ticket:FAKE-6" aria-expanded="true" title="actions for ticket:FAKE-6">⋯</button><span class="qmenu">',
   );
   expect(markup).toContain(
-    '<button class="btn" data-action="drop-item" data-repo="beta" data-workflow="ticket-to-pr" data-item="ticket:FAKE-6" title="drop ticket:FAKE-6">drop</button>',
+    '<button class="btn" data-action="drop-item" data-repo="beta" data-workflow="ticket-to-pr" data-item="ticket:FAKE-6" title="drop ticket:FAKE-6 (⌫)">drop</button>',
   );
   expect(markup).toContain(
-    '<button class="btn" data-action="requeue-item" data-repo="beta" data-workflow="ticket-to-pr" data-item="ticket:FAKE-6" title="requeue ticket:FAKE-6">requeue</button>',
+    '<button class="btn" data-action="requeue-item" data-repo="beta" data-workflow="ticket-to-pr" data-item="ticket:FAKE-6" title="requeue ticket:FAKE-6 (R)">requeue</button>',
   );
 });
 
@@ -429,7 +429,7 @@ test('the header has a poll button for the workflow, and the add form shows only
   const draw = (polls?: 'ticket' | 'pr') =>
     renderQueue(withOffers(panel), { recent: [], ...(polls === undefined ? {} : { polls }) }, initialUi(0), NOW).value;
   const poll =
-    '<button class="btn" data-action="poll-queue" data-repo="beta" data-workflow="ticket-to-pr" title="poll now">poll</button>';
+    '<button class="btn" data-action="poll-queue" data-repo="beta" data-workflow="ticket-to-pr" title="poll now (P)">poll</button>';
   for (const markup of [draw('ticket'), draw('pr'), draw()]) expect(markup).toContain(poll);
   const form = draw('ticket');
   expect(form).toContain('<input class="txt" type="text" name="add-ticket" placeholder="ticket key"');
@@ -471,7 +471,8 @@ test('a queue section, the recent events fold and an item ⋯ say whether they a
   const moves = renderQueue(waiting(), undefined, initialUi(0), NOW).value;
   const labels = [...moves.matchAll(/data-action="move-item"[^>]*aria-label="([^"]+)" title="([^"]+)"/g)];
   expect(labels.length).toBeGreaterThan(0);
-  for (const [, label, title] of labels) expect(label).toBe(title as string);
+  // The tooltip is the label with the key that moves it: Alt+Up or Alt+Down (ADW-523).
+  for (const [, label, title] of labels) expect(title).toBe(`${label} (${label?.startsWith('move up') ? '⌥↑' : '⌥↓'})`);
   expect(labels).toHaveLength(4);
   expect(moves).toContain('aria-label="move up, before ticket:FAKE-5"');
   expect(moves).toContain('aria-label="move down, after ticket:FAKE-7"');
@@ -483,7 +484,7 @@ const ON = { enabled: true };
 test("a queue's header draws poll and unwatch for a watched workflow, and no watch", () => {
   const header = headerOf(renderQueue(waiting(), { recent: [], polls: 'ticket' }, initialUi(0), NOW).value);
   expect(header).toContain(
-    '<button class="btn" data-action="poll-queue" data-repo="beta" data-workflow="ticket-to-pr" title="poll now">poll</button>',
+    '<button class="btn" data-action="poll-queue" data-repo="beta" data-workflow="ticket-to-pr" title="poll now (P)">poll</button>',
   );
   expect(header).toContain(
     `<button class="btn" data-action="unwatch" data-repo="beta" data-workflow="${QUEUE_WORKFLOW}">unwatch</button>`,

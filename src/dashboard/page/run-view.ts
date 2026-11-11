@@ -150,7 +150,7 @@ export function runControls(
   const source: OfferSource = { run: actions, index: [] };
   if (!defs.some((def) => def.available(subject, source).offered)) return undefined;
   return html`<div class="acts">${defs.map((def) =>
-    actionControl(def, subject, ui.act, source, { honourDisabled: true, wrap: true }),
+    actionControl(def, subject, ui.act, source, { honourDisabled: true, wrap: true, kbd: true }),
   )}</div>`;
 }
 

@@ -2,12 +2,15 @@
 // server's offers. Pure: it returns markup and reads `act`, and has no handler of its own, since the button's
 // `data-action` is the action's id and the delegated click carries it out (`act.ts`).
 //
+// - A button whose action has a key says it in its tooltip (`stop (S)`), and in a menu (`kbd`) also as the boxed key
+//   after it.
 // - Not offered, nothing is drawn.
 // - An offer that is disabled is drawn disabled, with its `why`, only where the caller asks (`honourDisabled`): the run
 //   menu does, the queue view draws its own disabled controls with the reason, and the watch set draws enabled, with
 //   the server's refusal coming with the POST.
 import type { ActionDef, OfferSource, Param, Subject, Values } from './action-registry';
 import { html, type SafeHtml } from './html';
+import { keyLabel, withKey } from './keymap';
 import type { ActState } from './ui-state';
 
 export interface ControlOptions {
@@ -23,6 +26,8 @@ export interface ControlOptions {
   attrs?: Readonly<Record<string, string>>;
   /** Wrap the parameters and the button in a `span.act`. */
   wrap?: boolean;
+  /** Draw the action's key after its button, boxed: a menu's row has the room. */
+  kbd?: boolean;
 }
 
 /** A row's ` data-subject` and the `data-*` that name its subject, for the focus to read from the row under the pointer. */
@@ -81,12 +86,14 @@ export function actionControl(
 ): SafeHtml | '' {
   const available = def.available(subject, source);
   if (!available.offered) return '';
-  const wrap = (inner: SafeHtml) => (options.wrap === true ? html`<span class="act">${inner}</span>` : inner);
+  const key = options.kbd === true && def.key !== undefined ? html`<kbd>${keyLabel(def.key)}</kbd>` : '';
+  const wrap = (inner: SafeHtml) => (options.wrap === true ? html`<span class="act">${inner}${key}</span>` : inner);
   if (!available.enabled && options.honourDisabled === true) {
     return wrap(
       html`<button class="btn" disabled>${def.label(subject)}</button><span class="act-why">${available.why}</span>`,
     );
   }
+  const title = withKey(options.title ?? def.label(subject), def.key);
   const values = act.drafts[def.id] ?? {};
   const label = def.label(subject);
   const params = def
@@ -96,6 +103,6 @@ export function actionControl(
   return wrap(
     html`${params}<button class="${options.class ?? 'btn'}" data-action="${def.id}"${
       options.data === true ? dataOf(subject) : ''
-    }${Object.entries(options.attrs ?? {}).map(([name, value]) => html` data-${name}="${value}"`)}${options.title === undefined ? '' : html` title="${options.title}"`}>${label}</button>`,
+    }${Object.entries(options.attrs ?? {}).map(([name, value]) => html` data-${name}="${value}"`)}${options.title === undefined && def.key === undefined ? '' : html` title="${title}"`}>${label}</button>`,
   );
 }

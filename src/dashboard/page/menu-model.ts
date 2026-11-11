@@ -161,17 +161,19 @@ export function subjectRows(subject: Subject, source: OfferSource): MenuRow[] {
     if (def.run !== undefined || !def.appliesTo.includes(subject.kind)) return [];
     const available = def.available(subject, source);
     if (!available.offered) return [];
-    const row = (label: string, extra: Record<string, string>): MenuRow => ({
+    const row = (label: string, extra: Record<string, string>, key = def.key): MenuRow => ({
       group: 'subject',
       label,
-      ...(def.key === undefined ? {} : { key: def.key }),
+      ...(key === undefined ? {} : { key }),
       ...(available.enabled || available.why === undefined ? {} : { why: available.why }),
       disabled: !available.enabled,
       run: { act: def.id, subject, data: { ...subjectData(subject), ...extra } },
     });
     return def.variants === undefined
       ? [row(def.label(subject), {})]
-      : def.variants(subject, source).map((variant) => row(variant.label, variant.data));
+      : def
+          .variants(subject, source)
+          .map((variant) => row(variant.label, variant.data, def.variantKeys?.[variant.label]));
   });
 }
 

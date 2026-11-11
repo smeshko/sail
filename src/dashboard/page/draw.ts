@@ -8,6 +8,7 @@ import { REGIONS, type Region } from './host';
 import { html } from './html';
 import { listRepos, statusOf } from './index-model';
 import { renderInspector } from './inspector-view';
+import { renderSheet } from './keys-view';
 import { filterRows, groupsOf, viewCounts } from './list-model';
 import { renderList } from './list-view';
 import { highlighted, modelOf } from './menu';
@@ -120,7 +121,8 @@ export function regions(store: Store): Record<Region, () => string> {
     drawer: () => renderDrawer(ui, store.doc).value,
     menu: () => {
       const { menu } = ui;
-      if (menu === undefined) return '';
+      // The shortcut sheet is drawn in the menu's place while no menu is open.
+      if (menu === undefined) return ui.sheet ? renderSheet().value : '';
       const model = modelOf(store, menu);
       return renderMenu({ ...menu, at: highlighted(model, menu.at, menu.row) }, model).value;
     },

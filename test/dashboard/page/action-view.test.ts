@@ -70,11 +70,11 @@ test("a button carries its subject's data, its class and its title when asked", 
     ] as unknown as OfferSource['index'],
   };
   expect(actionControl(drop, item, idle, source, { data: true, title: 'drop ticket:FAKE-5' }).toString()).toBe(
-    '<button class="btn" data-action="drop-item" data-repo="a&quot;" data-workflow="wf" data-item="ticket:FAKE-5" title="drop ticket:FAKE-5">drop</button>',
+    '<button class="btn" data-action="drop-item" data-repo="a&quot;" data-workflow="wf" data-item="ticket:FAKE-5" title="drop ticket:FAKE-5 (⌫)">drop</button>',
   );
   // A confirmed action's button is never armed: its dialog confirms it.
   expect(actionControl(drop, item, idle, source, { class: 'wf-act' }).toString()).toBe(
-    '<button class="wf-act" data-action="drop-item">drop</button>',
+    '<button class="wf-act" data-action="drop-item" title="drop (⌫)">drop</button>',
   );
 });
 
@@ -98,7 +98,7 @@ test('a choice is drawn as a select with the draft chosen, else the initial one,
     },
   } as unknown as OfferSource;
   expect(actionControl(stop, RUN, idle, source).toString()).toBe(
-    '<button class="btn" data-action="stop-run">stop</button>',
+    '<button class="btn" data-action="stop-run" title="stop (S)">stop</button>',
   );
   const stage = restart.params(RUN, source)[0];
   if (stage === undefined) throw new Error('no stage');
@@ -161,10 +161,10 @@ test('a parameter asked in the dialog is not drawn beside its button', () => {
     },
   } as unknown as OfferSource;
   expect(actionControl(restart, RUN, idle, source).toString()).toBe(
-    '<button class="btn" data-action="restart-run">restart</button>',
+    '<button class="btn" data-action="restart-run" title="restart (⇧R)">restart</button>',
   );
   expect(actionControl(resume, RUN, idle, source).toString()).toBe(
-    '<button class="btn" data-action="resume-run">resume</button>',
+    '<button class="btn" data-action="resume-run" title="resume (R)">resume</button>',
   );
 });
 

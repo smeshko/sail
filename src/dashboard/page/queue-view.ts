@@ -20,6 +20,7 @@ import { actionControl, subjectAttrs } from './action-view';
 import { ago, clock } from './format';
 import { html, type SafeHtml, safeHref } from './html';
 import { type PanelItem, panelSource, QUEUE_STATES, type QueuePanel } from './index-model';
+import { withKey } from './keymap';
 import type { UiState } from './ui-state';
 
 /** What the shell has heard on a queue's stream: its last events. */
@@ -160,7 +161,7 @@ function moveButton(
   if (why !== undefined) {
     return html`<button class="btn mv" disabled aria-label="move ${dir === 'up' ? 'up, before' : 'down, after'} ${target.dedupKey}" title="${why}">${dir === 'up' ? '▲' : '▼'}</button>`;
   }
-  return html`<button class="btn mv" data-action="move-item" data-dir="${dir}" data-repo="${panel.repo}" data-workflow="${panel.workflow}" data-key="${item.dedupKey}" data-target="${target.dedupKey}" aria-label="move ${dir === 'up' ? 'up, before' : 'down, after'} ${target.dedupKey}" title="move ${dir === 'up' ? 'up, before' : 'down, after'} ${target.dedupKey}">${dir === 'up' ? '▲' : '▼'}</button>`;
+  return html`<button class="btn mv" data-action="move-item" data-dir="${dir}" data-repo="${panel.repo}" data-workflow="${panel.workflow}" data-key="${item.dedupKey}" data-target="${target.dedupKey}" aria-label="move ${dir === 'up' ? 'up, before' : 'down, after'} ${target.dedupKey}" title="${withKey(`move ${dir === 'up' ? 'up, before' : 'down, after'} ${target.dedupKey}`, actionOf('move-item')?.variantKeys?.[`move ${dir}`])}">${dir === 'up' ? '▲' : '▼'}</button>`;
 }
 
 function moveButtons(panel: QueuePanel, item: PanelItem, why: string | undefined): SafeHtml | '' {

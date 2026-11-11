@@ -501,11 +501,17 @@ test("render writes a region by id, keys say whether they were typed in an input
   fake.fire('keydown', { key: 'e', shiftKey: true, target: div });
   fake.fire('keydown', { key: 'E', shiftKey: true, target: div });
   fake.fire('keydown', { key: 'ArrowDown', shiftKey: true, target: div });
+  // Alt with the up or down arrow is the page's, which moves a queue item (ADW-523); with any other key, the browser's.
+  fake.fire('keydown', { key: 'ArrowUp', altKey: true, target: div });
+  fake.fire('keydown', { key: 'ArrowDown', altKey: true, target: div });
+  fake.fire('keydown', { key: 'ArrowLeft', altKey: true, target: div });
   expect(keys).toEqual([
     ['e', false],
     ['E', false],
     ['E', false],
     ['ArrowDown', false],
+    ['Alt+ArrowUp', false],
+    ['Alt+ArrowDown', false],
   ]);
   expect(chords).toEqual(['e', 'e']);
   host.setTheme('light');
@@ -725,6 +731,14 @@ test("value() of a checkbox is 'on' while it is ticked and empty while it is not
   expect(host.value('now')).toBe('on');
   host.render('main', '<input type="checkbox" name="add-force" value="on">');
   expect(host.value('add-force')).toBe('');
+});
+
+test('openLink opens the URL in a new tab with no opener or referrer, and a window that cannot open does nothing', () => {
+  const fake = fakeWindow();
+  const opened: string[][] = [];
+  browserHost({ ...fake.win, open: (...args: string[]) => opened.push(args) }).openLink('https://code.test/pull/5');
+  expect(opened).toEqual([['https://code.test/pull/5', '_blank', 'noopener,noreferrer']]);
+  expect(() => browserHost(fake.win).openLink('https://code.test/pull/5')).not.toThrow();
 });
 
 describe('Enter and Space on a focused control', () => {

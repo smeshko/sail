@@ -34,7 +34,7 @@ test('the full menu draws the head, a field, one row per row with the highlight,
   expect(markup).toContain('<div class="cmdk-subj">run R1</div>');
   expect(markup).toContain('<input class="cmdk-in" name="menu-query" type="text" value=""');
   expect(markup).toContain(
-    '<button class="cmdk-row sel" type="button" data-action="menu-run" data-row="1"><span class="cmdk-label">clean</span><kbd>c</kbd><svg class="cmdk-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4"/></svg></button>',
+    '<button class="cmdk-row sel" type="button" data-action="menu-run" data-row="1"><span class="cmdk-label">clean</span><kbd>C</kbd><svg class="cmdk-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4"/></svg></button>',
   );
   expect(markup).toContain(
     '<div class="cmdk-grp">go to</div><button class="cmdk-row" type="button" data-action="menu-run" data-row="2"><span class="cmdk-label">R1</span><span class="cmdk-hint">run</span>',

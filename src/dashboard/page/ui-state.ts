@@ -131,6 +131,10 @@ export interface UiState {
   copied?: { text: string; ok: boolean };
   /** The command menu, while it is open. */
   menu?: MenuState;
+  /** Whether the shortcut sheet, which `?` opens, is open. */
+  sheet: boolean;
+  /** The first key of a sequence typed, while the next is awaited: `g`. */
+  chord?: string;
   /** The subject each source of the focus holds. */
   focus: FocusState;
   /** What a subject reads while a request for it is out, by the id `underwayId()` gives: `stopping…`. */
@@ -158,6 +162,7 @@ export function initialUi(tz: number): UiState {
     tz,
     act: { drafts: {} },
     toasts: [],
+    sheet: false,
     underway: {},
     focus: { seq: 0 },
   };
