@@ -468,6 +468,22 @@ test("render writes a region by id, keys say whether they were typed in an input
     ['j', false],
     ['j', true],
   ]);
+  // A key held with Cmd, Ctrl or Alt is the browser's; a letter's case is Shift's, never Caps Lock's (review R5).
+  keys.length = 0;
+  const div = element({ tagName: 'DIV' });
+  fake.fire('keydown', { key: 'e', metaKey: true, target: div });
+  fake.fire('keydown', { key: 'e', ctrlKey: true, target: div });
+  fake.fire('keydown', { key: 'e', altKey: true, target: div });
+  fake.fire('keydown', { key: 'E', shiftKey: false, target: div });
+  fake.fire('keydown', { key: 'e', shiftKey: true, target: div });
+  fake.fire('keydown', { key: 'E', shiftKey: true, target: div });
+  fake.fire('keydown', { key: 'ArrowDown', shiftKey: true, target: div });
+  expect(keys).toEqual([
+    ['e', false],
+    ['E', false],
+    ['E', false],
+    ['ArrowDown', false],
+  ]);
   host.setTheme('light');
   host.setInspector(false);
   expect(fake.root.dataset).toEqual({ theme: 'light', inspector: 'closed' });
