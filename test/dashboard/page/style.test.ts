@@ -209,6 +209,15 @@ test('the inspector has a grid track only from 1100px, and under it is a fixed p
   ]);
 });
 
+test('under 1100px the inspector carries a close button over its head, and from 1100px it is hidden (review R2) (ADW-528)', () => {
+  const aside = /<aside class="inspector">([\s\S]*?)<\/aside>/.exec(html)?.[1] ?? '';
+  expect(aside).toMatch(/<button[^>]*class="btn ins-close"[^>]*data-action="close-inspector"/);
+  expect(declarationsOf('.ins-close')).toContain('display: none');
+  const narrow = mediaBlock('max-width: 1099px');
+  expect(inBlock(narrow, '.ins-close')).toContain('display: inline-flex');
+  expect(inBlock(narrow, '.ins-close')).toContain('position: absolute');
+});
+
 test('beside the list the run view keeps 320px and the list gives way first (ADW-528)', () => {
   const grid = declarationsOf(':root[data-detail="open"] .body');
   expect(grid).toContain('minmax(0, var(--list-w, 340px)) minmax(320px, 1fr)');

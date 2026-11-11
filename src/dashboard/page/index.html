@@ -198,7 +198,8 @@
         background: linear-gradient(135deg, #4c8dff, #34d399);
       }
       .nav-btn,
-      .back {
+      .back,
+      .ins-close {
         display: none;
       }
       .spacer {
@@ -1889,6 +1890,16 @@
           z-index: 15;
           box-shadow: -12px 0 32px rgba(0, 0, 0, 0.35);
         }
+        .ins-close {
+          display: inline-flex;
+          position: absolute;
+          top: 7px;
+          right: 8px;
+          z-index: 1;
+        }
+        .inspector .ins-h {
+          padding-right: 44px;
+        }
       }
       /* under 800px the page is one column: the list, or the open run or queue with a way back */
       @media (max-width: 799px) {
@@ -1959,6 +1970,7 @@
         </main>
         <div class="resize-handle resize-right" data-resize="right"></div>
         <aside class="inspector">
+          <button class="btn ins-close" type="button" data-action="close-inspector" aria-label="close inspector" title="close the inspector (Esc)">✕</button>
           <div class="inspector-b" id="inspector"></div>
         </aside>
       </div>

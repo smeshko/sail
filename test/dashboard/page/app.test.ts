@@ -1007,6 +1007,19 @@ test('a view or repository chosen in the open sidebar over an open run closes th
   expect(host.regions.main).not.toContain('no run selected');
 });
 
+test("the inspector's close button unpins it and deselects its card, so a pointer closes it (review R2) (ADW-528)", () => {
+  page = boot(host);
+  firstIndex();
+  replay(host.open('run=')[0], GOLDEN());
+  host.click({ action: 'select-card', key: 'implement#1' });
+  host.click({ action: 'toggle-inspector' });
+  host.advance(100);
+  expect(host.inspector).toEqual([true, true]);
+  host.click({ action: 'close-inspector' });
+  host.advance(100);
+  expect([host.inspector, page.ui.key, page.ui.pinned]).toEqual([[false, false], undefined, false]);
+});
+
 test('a copy that took draws one ok toast reading what it copied, and 4,000 ms on it is gone', async () => {
   page = boot(host);
   host.click({ action: 'copy', text: 'sail show X' });

@@ -196,6 +196,13 @@ export const actions: Record<string, Action> = {
     store.ui.pinned = !store.ui.pinned;
     store.mark('inspector');
   },
+  // The inspector's own close button, for a pointer under 1100px where it lies over the centre: it unpins it and
+  // deselects its card, as `i` and Esc do.
+  'close-inspector': (store) => {
+    store.ui.pinned = false;
+    if (store.ui.key !== undefined) selectCard(store, undefined);
+    store.mark('inspector');
+  },
   'toggle-nav': (store) => {
     store.ui.nav = !store.ui.nav;
     store.host.setNav(store.ui.nav);
