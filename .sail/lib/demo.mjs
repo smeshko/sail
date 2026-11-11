@@ -23,8 +23,11 @@
 //                                  Each selection is a word of its own, not a query: a command gate reads a quoted
 //                                  `&` as a background job. Chrome is found where it installs, or named by
 //                                  SAIL_DEMO_CHROME
-//     width=<px>                   the window's width, a whole number from 800 to 2560 (1440 when left out); the
-//                                  height is 900, and the page is not told it
+//     width=<px>                   the window's width, a whole number from 320 to 2560 (1440 when left out); the
+//                                  height is 900, and the viewport is forced to both, since Chrome may not make a
+//                                  window that narrow. Each shot prints a line `layout window=<innerWidth>
+//                                  page=<scrollWidth>`, then ` side=`, ` list=`, ` main=` and ` inspector=` with
+//                                  that column's width in px, each left out when it isn't drawn
 //     steps=<file>                 a JSON list of steps run in order on one page load, each shot written to
 //                                  <name>-<shot>.png and .html: {"click": css}, {"scroll": css, "top": px},
 //                                  {"wait": css} (up to 20s) or {"wait": ms}, and {"shot": name}. The transcript
@@ -388,6 +391,13 @@ async function openPage(browser, profile, page, lenient, width) {
     if (target === undefined) throw new Error('Chrome opened no page');
     session = await devtools(target.webSocketDebuggerUrl);
     await session.send('Page.enable');
+    // Chrome may clamp a window this narrow: the viewport is forced to what was asked.
+    await session.send('Emulation.setDeviceMetricsOverride', {
+      width,
+      height: 900,
+      deviceScaleFactor: 1,
+      mobile: false,
+    });
     await session.send('Page.navigate', { url: page });
     await settle(session, lenient);
   } catch (error) {
@@ -407,7 +417,11 @@ async function writeShot(session, png, html) {
     session,
     `[...document.querySelectorAll('[data-scroll]')].filter((e) => e.scrollTop > 0).map((e) => e.getAttribute('data-scroll') + ' ' + Math.round(e.scrollTop))`,
   );
-  return { characters: dom.length + 1, scrolled };
+  const layout = await evaluate(
+    session,
+    `'layout window=' + window.innerWidth + ' page=' + document.documentElement.scrollWidth + ['side', 'list', 'main', 'inspector'].map((c) => { const w = Math.round((document.querySelector('.' + c)?.getBoundingClientRect().width) ?? 0); return w > 0 ? ' ' + c + '=' + w : ''; }).join('')`,
+  );
+  return { characters: dom.length + 1, scrolled, layout };
 }
 
 const SHAPES = {
@@ -479,8 +493,8 @@ async function runSteps(session, steps, dir, name, out) {
     } else {
       const png = join(dir, `${name}-${step.shot}.png`);
       const html = join(dir, `${name}-${step.shot}.html`);
-      const { characters, scrolled } = await writeShot(session, png, html);
-      out.push(`${head}: screenshot ${png}`, `  dom ${html}, ${characters} characters`);
+      const { characters, scrolled, layout } = await writeShot(session, png, html);
+      out.push(`${head}: screenshot ${png}`, `  dom ${html}, ${characters} characters`, `  ${layout}`);
       for (const line of scrolled) out.push(`  scrolled ${line}`);
     }
   }
@@ -586,8 +600,8 @@ async function capture(dir, name, query, stepsFile, steps, live, width) {
       if (steps === undefined) {
         const png = join(dir, `${name}.png`);
         const html = join(dir, `${name}.html`);
-        const { characters } = await writeShot(opened.session, png, html);
-        lines.push(`screenshot ${png}`, `dom ${html}, ${characters} characters`);
+        const { characters, layout } = await writeShot(opened.session, png, html);
+        lines.push(`screenshot ${png}`, `dom ${html}, ${characters} characters`, layout);
       } else {
         await Promise.race([
           runSteps(opened.session, steps, dir, name, lines),
@@ -656,8 +670,8 @@ if (command === 'new') {
     const [, field, value] = /^(repo|run|key|tab|width|steps|live)=(.+)$/.exec(pick) ?? [];
     if (field === undefined) refuse(`${pick} picks nothing: repo=, run=, key=, tab=, width=, steps= or live=`);
     if (field === 'width') {
-      if (!/^\d+$/.test(value) || Number(value) < 800 || Number(value) > 2560)
-        refuse(`width= takes a whole number of pixels from 800 to 2560, not ${value}`);
+      if (!/^\d+$/.test(value) || Number(value) < 320 || Number(value) > 2560)
+        refuse(`width= takes a whole number of pixels from 320 to 2560, not ${value}`);
       width = Number(value);
     } else if (field === 'steps') stepsFile = resolve(value);
     else if (field === 'live') {

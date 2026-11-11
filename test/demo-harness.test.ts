@@ -207,6 +207,43 @@ async function seededDemo(repo: { dir: string; env: Record<string, string> }) {
 }
 
 test.skipIf(chrome === undefined)(
+  'dashboard width=390 draws a 390px viewport and prints a layout line per shot (ADW-528)',
+  async () => {
+    await withTempRepo(async (repo) => {
+      const dir = await seededDemo(repo);
+      const single = await demo(
+        repo.env,
+        'dashboard',
+        dir,
+        'narrow',
+        'repo=fixture',
+        `run=${RECORDED_RUN}`,
+        'width=390',
+      );
+      expect(single.code).toBe(0);
+      expect(single.stdout).toMatch(/^layout window=390 page=\d+/m);
+      const steps = join(repo.dir, 'steps.json');
+      await Bun.write(steps, JSON.stringify([{ wait: '[data-action="select-card"]' }, { shot: 'a' }, { shot: 'b' }]));
+      const two = await demo(
+        repo.env,
+        'dashboard',
+        dir,
+        'two',
+        'repo=fixture',
+        `run=${RECORDED_RUN}`,
+        'width=390',
+        `steps=${steps}`,
+      );
+      expect(two.code).toBe(0);
+      const layouts = two.stdout.split('\n').filter((line) => line.trim().startsWith('layout '));
+      expect(layouts).toHaveLength(2);
+      expect(layouts.every((line) => /layout window=390 page=390\b/.test(line))).toBe(true);
+    });
+  },
+  120_000,
+);
+
+test.skipIf(chrome === undefined)(
   "dashboard runs a steps file's clicks, scroll and shots on one load",
   async () => {
     await withTempRepo(async (repo) => {
@@ -517,25 +554,25 @@ test('dashboard width=1280 starts Chrome with a 1280-wide window, 1440 without, 
   });
 }, 60_000);
 
-test('dashboard refuses a width that is no whole number from 800 to 2560 before Chrome starts', async () => {
+test('dashboard refuses a width that is no whole number from 320 to 2560 before Chrome starts', async () => {
   await withTempRepo(async (repo) => {
     const dir = join(repo.dir, 'demo');
     const env = { ...repo.env, SAIL_DEMO_CHROME: await recordingChrome(repo.dir) };
     expect((await demo(env, 'new', dir)).code).toBe(0);
     const refused = [];
-    for (const width of ['abc', '1280.5', '799', '2561', '-1']) {
+    for (const width of ['abc', '1280.5', '319', '2561', '-1']) {
       const { code, stderr } = await demo(env, 'dashboard', dir, 'x', `width=${width}`);
       refused.push([width, code, stderr.includes('width')]);
     }
     expect(refused).toEqual([
       ['abc', 2, true],
       ['1280.5', 2, true],
-      ['799', 2, true],
+      ['319', 2, true],
       ['2561', 2, true],
       ['-1', 2, true],
     ]);
     expect(existsSync(join(repo.dir, 'chrome-args.txt'))).toBe(false);
-    for (const width of ['800', '2560']) {
+    for (const width of ['320', '2560']) {
       await demo(env, 'dashboard', dir, 'edge', `width=${width}`);
       expect(readFileSync(join(repo.dir, 'chrome-args.txt'), 'utf8')).toContain(`--window-size=${width},900`);
     }
