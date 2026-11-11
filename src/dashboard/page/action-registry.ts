@@ -101,8 +101,13 @@ export interface OfferedRepo {
   queues: readonly {
     workflow: string;
     offers?: OfferedQueue['offers'] | undefined;
-    /** The queue's items, for what a dialog says of one. */
-    queue?: { items?: readonly { dedupKey: string; state: string; attempts: number }[] } | undefined;
+    /** The queue's items, for what a dialog says of one, and its hold, for the harness key a release names. */
+    queue?:
+      | {
+          items?: readonly { dedupKey: string; state: string; attempts: number }[];
+          held?: { harnessKey?: string | undefined } | undefined;
+        }
+      | undefined;
   }[];
   offers?: RepoOffers | undefined;
 }
@@ -605,6 +610,11 @@ export const ACTIONS: readonly ActionDef[] = [
     // The hold is the machine's, not the watcher's: a release needs no watcher, so no offer gates it.
     params: () => [{ name: 'harness', dom: 'harness', type: 'text', given: 'data' }],
     available: () => ({ offered: true, enabled: true }),
+    // A row only for a queue held on a usage limit, carrying the hold's harness key.
+    variants: (subject, source) => {
+      const harness = queueOf(subject, source)?.queue?.held?.harnessKey;
+      return harness === undefined ? [] : [{ label: 'release', data: { harness } }];
+    },
     underway: 'releasing…',
     dialog: (_subject, values) => ({
       title: `release the usage-limit hold on ${values.harness ?? ''}`,

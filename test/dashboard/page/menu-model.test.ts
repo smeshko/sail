@@ -240,3 +240,22 @@ test('while a step is open the menu is its rows under the subject head, and noth
   expect(labels(model.rows)).toEqual(['spec', 'tests']);
   expect(model.step?.label).toBe('from');
 });
+
+test('a workflow offers release only while its queue is held on a harness key, and the row carries that key', () => {
+  expect(labels(subjectRows(QUEUE, source())).includes('release')).toBe(false);
+  const held = structuredClone(index) as unknown as {
+    queues: { queue: { held?: { harnessKey?: string } } }[];
+  }[];
+  const queue = held[1]?.queues[0]?.queue;
+  if (queue === undefined) throw new Error('no queue');
+  queue.held = {};
+  expect(labels(subjectRows(QUEUE, { index: held as unknown as IndexRepo[] })).includes('release')).toBe(false);
+  queue.held = { harnessKey: 'claude-code' };
+  const release = subjectRows(QUEUE, { index: held as unknown as IndexRepo[] }).find((row) => row.label === 'release');
+  expect(release?.run).toEqual({
+    act: 'release-hold',
+    subject: QUEUE,
+    data: { repo: 'beta', workflow: 'ticket-to-pr', harness: 'claude-code' },
+  });
+  expect(release?.disabled).toBe(false);
+});
