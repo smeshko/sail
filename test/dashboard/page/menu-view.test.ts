@@ -54,9 +54,9 @@ test('the full menu draws the head, a field, one row per row with the highlight,
     '<button class="cmdk-row sel" type="button" data-action="menu-run" data-row="1"><span class="cmdk-label">clean</span><kbd>C</kbd><svg class="cmdk-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4"/></svg></button>',
   );
   expect(markup).toContain(
-    '<div class="cmdk-grp">go to</div><button class="cmdk-row" type="button" data-action="menu-run" data-row="2"><span class="cmdk-label">R1</span><span class="cmdk-hint">run</span>',
+    '<div class="cmdk-grp">Go to</div><button class="cmdk-row" type="button" data-action="menu-run" data-row="2"><span class="cmdk-label">R1</span><span class="cmdk-hint">run</span>',
   );
-  expect(markup).toContain('<div class="cmdk-grp">general</div>');
+  expect(markup).toContain('<div class="cmdk-grp">General</div>');
   expect(markup).toContain('<button class="cmdk-back" type="button" data-action="menu-close"');
   expect(markup.match(/class="cmdk-row[ "]/g)).toHaveLength(4);
   // The rows scroll in their own box, after the chip and the field, which stay (ADW-542).
@@ -110,7 +110,7 @@ test('a typed step draws its label, its lines and a field of its type; a choice 
     rows: [],
     step: { label: 'raise $', field: { type: 'number', min: 0.01 }, lines: ['spent $1.00'], rows: [], start: 0 },
   }).value;
-  expect(typed).toContain('<div class="cmdk-step">raise $</div><div class="cmdk-line">spent $1.00</div>');
+  expect(typed).toContain('<div class="cmdk-step">Raise $</div><div class="cmdk-line">spent $1.00</div>');
   expect(typed).toContain('type="number"');
   expect(typed).toContain('min="0.01"');
   expect(typed).toContain('<div class="cmdk-err">give the dollars</div>');

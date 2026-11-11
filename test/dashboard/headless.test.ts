@@ -346,7 +346,7 @@ test('on the real bundle and server, restart from the menu lists the stages and 
   expect(await until(() => page.text('menu').includes('<span class="cmdk-label">restart</span>'))).toBe(true);
   page.type('menu-query', 'restart');
   page.press('Enter');
-  expect(await until(() => page.text('menu').includes('<div class="cmdk-step">from</div>'))).toBe(true);
+  expect(await until(() => page.text('menu').includes('<div class="cmdk-step">From</div>'))).toBe(true);
   expect((page.text('menu').match(/class="cmdk-row/g) ?? []).length).toBeGreaterThan(1);
   page.press('Enter');
   expect(await until(() => page.text('dialog').includes('<h2 id="dialog-title">restart FAKE-2</h2>'))).toBe(true);

@@ -118,7 +118,7 @@ function totals(model: RunModel, summary: Summary | null | undefined, now: numbe
   const used = final?.totals.budget?.usedPct;
   const settled = model.cards.filter((entry) => entry.state === 'settled').length;
   return html`<div class="stats totals">
-<div class="stat"><b>${duration(ms)}</b><span>${maxMinutes === undefined ? 'duration' : `of ${maxMinutes}m`}</span></div>
+<div class="stat"><b>${duration(ms)}</b><span>${maxMinutes === undefined ? 'duration' : `of ${maxMinutes} min`}</span></div>
 <div class="stat"><b>${cost(spent)}</b><span>${maxUsd === undefined ? 'cost' : `of ${cost(maxUsd)} (${used === undefined ? percent(spent, maxUsd) : `${used}%`})`}</span></div>
 <div class="stat"><b>${settled}/${model.cards.length}</b><span>calls settled</span></div>
 </div>`;

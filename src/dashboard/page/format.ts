@@ -86,3 +86,6 @@ export function dayOf(iso: string | undefined, offsetMinutes: number): string | 
   const at = typeof iso === 'string' ? Date.parse(iso) : Number.NaN;
   return Number.isNaN(at) ? undefined : dayOfMs(at, offsetMinutes);
 }
+
+/** `text` with its first letter upper-cased: the case of a heading built from an action's words. */
+export const sentence = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1);

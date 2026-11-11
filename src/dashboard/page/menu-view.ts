@@ -3,6 +3,8 @@
 // A run's go-to row leads with the list's status dot, its ticket key or pull request and, to tell two alike apart, the random part of its run id.
 // The context menu is the subject's rows at the pointer with no field. The back button behind the menu closes it. The
 // rows scroll in a box of their own under the chip and the field, which stay.
+
+import { sentence } from './format';
 import { html, raw, type SafeHtml } from './html';
 import { keyLabel } from './keymap';
 import type { MenuModel, MenuRow } from './menu-model';
@@ -91,7 +93,7 @@ function field(state: MenuState, model: MenuModel): SafeHtml | '' {
   if (step.field === undefined) return '';
   return html`<input class="cmdk-in" name="menu-query" type="${step.field.type}" value="${state.query}"${
     step.field.min === undefined ? '' : html` min="${step.field.min}"`
-  } step="any" placeholder="${step.field.placeholder ?? step.label}" aria-label="${step.label}" autocomplete="off" spellcheck="false">`;
+  } step="any" placeholder="${step.field.placeholder ?? sentence(step.label)}" aria-label="${sentence(step.label)}" autocomplete="off" spellcheck="false">`;
 }
 
 export function renderMenu(state: MenuState, model: MenuModel): SafeHtml {
@@ -103,12 +105,12 @@ export function renderMenu(state: MenuState, model: MenuModel): SafeHtml {
   const rows = model.rows.map((item, place) => {
     const heading = item.group !== last && HEADINGS[item.group] !== undefined;
     last = item.group;
-    return html`${heading ? html`<div class="cmdk-grp">${HEADINGS[item.group]}</div>` : ''}${row(item, place, state)}`;
+    return html`${heading ? html`<div class="cmdk-grp">${sentence(HEADINGS[item.group] ?? '')}</div>` : ''}${row(item, place, state)}`;
   });
   // The chip, the step and the field stay put: the rows scroll on their own, keeping their place across a redraw.
   return html`<button class="cmdk-back" type="button" data-action="menu-close" aria-label="close the command menu" tabindex="-1"></button><div class="cmdk${state.mode === 'context' ? ' ctx' : ''}" role="dialog" aria-modal="true" aria-label="command menu" tabindex="-1"${style}>${
     model.head === undefined ? '' : html`<div class="cmdk-subj">${model.head}</div>`
-  }${model.why === undefined ? '' : html`<div class="cmdk-note">${model.why}</div>`}${model.step === undefined ? '' : html`<div class="cmdk-step">${model.step.label}</div>${model.step.lines.map((line) => html`<div class="cmdk-line">${line}</div>`)}`}${field(state, model)}${
+  }${model.why === undefined ? '' : html`<div class="cmdk-note">${model.why}</div>`}${model.step === undefined ? '' : html`<div class="cmdk-step">${sentence(model.step.label)}</div>${model.step.lines.map((line) => html`<div class="cmdk-line">${line}</div>`)}`}${field(state, model)}${
     state.error === undefined ? '' : html`<div class="cmdk-err">${state.error}</div>`
   }<div class="cmdk-rows" data-scroll="menu-rows">${rows}</div></div>`;
 }
