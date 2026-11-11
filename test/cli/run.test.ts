@@ -88,7 +88,7 @@ test('a command that throws exits 4 and names the error', async () => {
 // `sail <ticket>` (D1): the first argument that names no command is the ticket a run starts from.
 
 const TICKET_USAGE =
-  'sail <ticket> [--workflow <name>] [--force] [--ignore-prerequisites] [--until <stage>] [-q|-v|-vv]';
+  'sail <ticket> [--workflow <name>] [--force] [--ignore-prerequisites] [--until <stage>] [--run-id <id>] [-q|-v|-vv]';
 
 test('the usage lists sail <ticket> first among the commands, and says what --force and --until do, each on a line of its own', async () => {
   const { stdout } = await runCaptured(['--help']);

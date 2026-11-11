@@ -27,3 +27,18 @@ test('toast text is escaped', () => {
 test('an empty stack draws nothing', () => {
   expect(renderToasts([]).value).toBe('');
 });
+
+test('a toast whose button has a label draws that label in place of undo, a refusal included', () => {
+  const out = renderToasts([
+    {
+      id: 3,
+      kind: 'bad',
+      head: 'start a run… fixture',
+      text: 'sail FAKE-3: x',
+      undo: true,
+      undoLabel: 'start anyway (--force)',
+    },
+  ]).value;
+  expect(out).toContain('<button class="btn" data-action="undo-toast" data-toast="3">start anyway (--force)</button>');
+  expect(out).not.toContain('>undo<');
+});

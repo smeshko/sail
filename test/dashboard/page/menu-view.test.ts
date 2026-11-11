@@ -122,11 +122,14 @@ test('a row leads with the icon of what it runs, and an arrow when it has none o
     'trash',
     'arrow',
   ]);
+  expect(['restart-run', 'start-run-go'].map(act)).toEqual(['restart', 'run']);
   expect(iconOf({ goto: { kind: 'run', repo: 'a', runId: 'r' } })).toBe('run');
   expect(iconOf({ goto: none })).toBe('arrow');
   expect(['toggle-theme', 'toggle-inspector', 'x'].map((view) => iconOf({ view }))).toEqual(['sun', 'panel', 'arrow']);
   expect(iconOf({ pollAll: true })).toBe('refresh');
   expect(iconOf({ pick: 'add-ticket' })).toBe('plus');
+  expect(iconOf({ pick: 'start-run', of: 'repo' })).toBe('run');
+  expect(iconOf({ repo: 'a' })).toBe('folder');
   expect(iconOf({ queue: { repo: 'a', workflow: 'w' } })).toBe('list');
   expect(iconOf({ value: 'spec' })).toBe('arrow');
 });

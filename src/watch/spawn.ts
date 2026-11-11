@@ -129,3 +129,13 @@ export function lastLine(path: string, from = 0): string | undefined {
     .findLast((each) => each !== '');
   return line?.slice(0, LINE_MAX);
 }
+
+/** The longest text `logText()` gives. */
+const TEXT_MAX = 8000;
+
+/** The text of the log at `path` after byte `from`, trimmed and cut to 8000 characters, or undefined when there is none. */
+export function logText(path: string, from = 0): string | undefined {
+  if (!existsSync(path)) return undefined;
+  const text = readFileSync(path).subarray(from).toString('utf8').trim();
+  return text === '' ? undefined : text.slice(0, TEXT_MAX);
+}

@@ -6,12 +6,26 @@
 import type { Store } from './store';
 import { addToast, removeToast, TOAST_MS, UNDO_MS } from './toasts';
 
-/** Puts a toast on the stack. `undo`, when given, is what its Undo button does. */
-export function toast(store: Store, kind: 'ok' | 'bad', head: string, text: string, undo?: () => void): void {
+/** Puts a toast on the stack. `undo`, when given, is what its button does: Undo, or `label`. */
+export function toast(
+  store: Store,
+  kind: 'ok' | 'bad',
+  head: string,
+  text: string,
+  undo?: () => void,
+  label?: string,
+): void {
   const { ui, host } = store;
   const id = ++store.toastSeq;
   const before = ui.toasts;
-  ui.toasts = addToast(before, { id, kind, head, text, ...(undo === undefined ? {} : { undo: true }) });
+  ui.toasts = addToast(before, {
+    id,
+    kind,
+    head,
+    text,
+    ...(undo === undefined ? {} : { undo: true }),
+    ...(label === undefined ? {} : { undoLabel: label }),
+  });
   // A refusal that replaced an equal one leaves that one's Undo and timer behind: drop whatever of a removed toast stayed.
   for (const old of before) if (!ui.toasts.some((each) => each.id === old.id)) forget(store, old.id);
   if (undo !== undefined) store.undos.set(id, undo);

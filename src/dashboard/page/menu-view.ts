@@ -45,6 +45,7 @@ const BY_ACTION: [string, string][] = [
   ['poll', 'refresh'],
   ['release', 'unlock'],
   ['add', 'plus'],
+  ['start', 'run'],
   ['unwatch', 'eyeOff'],
   ['watch', 'eye'],
 ];
@@ -56,7 +57,8 @@ export function iconOf(run: MenuRow['run']): string {
   if ('goto' in run) return BY_KIND[run.goto.kind] ?? 'arrow';
   if ('view' in run) return run.view === 'toggle-theme' ? 'sun' : run.view === 'toggle-inspector' ? 'panel' : 'arrow';
   if ('pollAll' in run) return 'refresh';
-  if ('pick' in run) return 'plus';
+  if ('pick' in run) return BY_ACTION.find(([word]) => run.pick.includes(word))?.[1] ?? 'plus';
+  if ('repo' in run) return 'folder';
   return 'queue' in run ? 'list' : 'arrow';
 }
 

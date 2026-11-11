@@ -1405,3 +1405,65 @@ test('sail FAKE-1 --force at its workflow full cap runs, and run.json lists cap'
     }
   });
 });
+
+// `--run-id <id>`: a start that names its run, so a caller can tell the run before it exists. It stays `via: 'cli'`.
+const NAMED = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N';
+
+test('sail FAKE-1 --run-id <id> starts the run under that id, via cli', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const { code, runs, header } = await started(repo.dir, ['FAKE-1', '--until', 'spec', '--run-id', NAMED]);
+    expect({ code, runs, source: header.source }).toEqual({
+      code: EXIT_SUSPENDED,
+      runs: [NAMED],
+      source: { kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: [] },
+    });
+  });
+});
+
+test('sail FAKE-1 --run-id of another ticket exits 3 in one line, with no run directory', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const other = 'FAKE-9-01M3BWNZM08Q4T6V2XRJ5KWD3N';
+    const refused = await runCaptured(['FAKE-1', '--run-id', other], repo.dir);
+    expect({ code: refused.code, stderr: refused.stderr, runs: runIds(repo.dir) }).toEqual({
+      code: EXIT_REFUSED,
+      stderr: `sail FAKE-1: --run-id takes the id of a new run of FAKE-1, FAKE-1-<26 Crockford characters>: '${other}' is not one\n`,
+      runs: [],
+    });
+  });
+});
+
+test('a second start under the id of an existing run exits 3', async () => {
+  await withTempRepo(async (repo) => {
+    await withTempRepo(async (from) => {
+      writeStub(from.dir);
+      const first = await runCaptured(['FAKE-1', '--until', 'spec', '--run-id', NAMED], from.dir);
+      expect(first.code).toBe(EXIT_SUSPENDED);
+      copyRun(from.dir, repo.dir);
+    });
+    const again = await runCaptured(['FAKE-1', '--force', '--until', 'spec', '--run-id', NAMED], repo.dir);
+    expect({ code: again.code, stderr: again.stderr, runs: runIds(repo.dir) }).toEqual({
+      code: EXIT_REFUSED,
+      stderr: `sail FAKE-1: --run-id names run ${NAMED}, which already exists in .sail-runs: a start makes a new run\n`,
+      runs: [NAMED],
+    });
+  });
+});
+
+test.each([
+  ['--dry-run', "--run-id and --dry-run can't be combined"],
+  ['--dispatch', "--run-id and --dispatch can't be combined"],
+])('sail FAKE-1 --run-id with %s exits 3 in one line, with no run directory', async (flag, message) => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const sha = committed(repo);
+    const extra = flag === '--dispatch' ? [flag, NAMED] : [flag];
+    const refused = await runCaptured(['FAKE-1', '--run-id', NAMED, ...extra], repo.dir);
+    expect({ code: refused.code, stderr: refused.stderr, runs: runIds(repo.dir) }).toEqual({
+      code: EXIT_REFUSED,
+      stderr: `sail FAKE-1: ${message}${flag === '--dispatch' ? ` (in the .sail/ committed at ${sha.slice(0, 7)})` : ''}\n`,
+      runs: [],
+    });
+  });
+});

@@ -1,6 +1,7 @@
-// The page's actions, defined once: each thing a person can have done from the page (stop, stop now, suspend and hold, resume, restart,
-// clean, clean every failed run, rebuild, drop, requeue, move, poll, release a usage-limit hold, add, add skipping its checks, watch, unwatch, all clear,
-// dismiss) with its id and label, the subject it applies to, its
+// The page's actions, defined once: each thing a person can have done from the page (stop, stop now, suspend and hold,
+// resume, restart, clean, clean every failed run, rebuild, drop, requeue, move, poll, release a usage-limit hold, add,
+// add skipping its checks, watch, unwatch, start a run and its go and start anyway, all clear, dismiss) with its id and
+// label, the subject it applies to, its
 // availability from the server's offers, its parameters, its tier, its request and what its answer means. Pure: it
 // holds no host, no state and no storage, so `act.ts` carries any entry out and `action-view.ts` draws any entry, and an
 // entry added here needs nothing else. An entry may also give the `several` form of its dialog, for the one action that
@@ -116,10 +117,26 @@ export interface OfferedRepo {
   offers?: RepoOffers | undefined;
 }
 
+/**
+ * A start the CLI refused with a check a flag overrides, kept so the command menu can offer to start it anyway: the
+ * repository, what was asked and the flag that would override the refusal.
+ */
+export interface RefusedStart {
+  repo: string;
+  workflow?: string | undefined;
+  source: string;
+  until?: string | undefined;
+  force?: boolean | undefined;
+  ignorePrerequisites?: boolean | undefined;
+  override: 'force' | 'ignore-prerequisites';
+}
+
 export interface OfferSource {
   /** What the open run offers. */
   run?: RunActions | undefined;
   index: readonly OfferedRepo[];
+  /** The start the last refusal left to start anyway. */
+  start?: RefusedStart | undefined;
 }
 
 type Offered = { enabled: boolean; why?: string };
@@ -132,10 +149,18 @@ export type ActResult = {
   keepMenu?: true;
   /** The request was refused: its text is sail's refusal. */
   refused?: true;
+  /** No toast: the answer is carried on by `next`. */
+  quiet?: true;
+  /** The action to carry out next, with its `data-*`: the check's answer goes on to the start's dialog. */
+  next?: { action: string; data: Record<string, string> };
+  /** The refused start to remember for start anyway, or `'forget'` to drop the one remembered. */
+  start?: RefusedStart | 'forget';
+  /** A button the toast carries, in place of Undo: what it is called and the action it carries out. */
+  button?: { label: string; action: string; data: Record<string, string> };
   /** The runs the answer says no longer exist: the page leaves the open run when it is one. */
   gone?: { repo: string; runId: string }[];
 };
-export type Effect = 'reopen' | 'leave' | 'took' | { open: string };
+export type Effect = 'reopen' | 'leave' | 'took' | { open: string; repo?: string };
 
 /** A run of a selection with what the server says it offers, undefined when that could not be read. */
 export interface SeveralRun {
@@ -196,7 +221,7 @@ export interface ActionDef {
     values: Values,
     source: OfferSource,
   ): { path: string; body: unknown } | { invalid: string } | undefined;
-  answer?(status: number, body: string, subject: Subject): ActResult;
+  answer?(status: number, body: string, subject: Subject, values?: Values): ActResult;
   /** The form of the action over several runs: the one dialog that lists what each does. */
   several?: {
     dialog(runs: readonly SeveralRun[], source: OfferSource): DialogView;
@@ -341,6 +366,157 @@ const queuePath = (subject: Subject, op: string) =>
     ? `/api/repos/${enc(subject.repo)}/queues/${enc(subject.workflow)}${op}`
     : '';
 const itemKey = (subject: Subject) => (subject.kind === 'item' ? subject.item : '');
+
+/** The repository a subject is in, else the one a click's data named. */
+const repoOf = (subject: Subject, values: Values | undefined): string =>
+  'repo' in subject ? subject.repo : (values?.repo ?? '');
+
+/** The `data-*` a start carries: what a check, a go or a start anyway reads back. */
+function startData(start: Omit<RefusedStart, 'override'>): Record<string, string> {
+  return {
+    repo: start.repo,
+    source: start.source,
+    ...(start.workflow === undefined ? {} : { workflow: start.workflow }),
+    ...(start.until === undefined ? {} : { until: start.until }),
+    ...(start.force === true ? { force: 'true' } : {}),
+    ...(start.ignorePrerequisites === true ? { ignorePrerequisites: 'true' } : {}),
+  };
+}
+
+/** The body of a check or a start from the values: what `StartBody` takes, with the stage left out when empty. */
+function startBody(values: Values): Record<string, unknown> {
+  const until = (values.until ?? '').trim();
+  return {
+    source: (values.source ?? '').trim(),
+    ...(values.workflow === undefined || values.workflow === '' ? {} : { workflow: values.workflow }),
+    ...(until === '' ? {} : { until }),
+    ...(values.force === 'true' ? { force: true } : {}),
+    ...(values.ignorePrerequisites === 'true' ? { ignorePrerequisites: true } : {}),
+  };
+}
+
+const FLAGS = {
+  force: { label: '--force', action: 'start-run-force' },
+  'ignore-prerequisites': { label: '--ignore-prerequisites', action: 'start-run-ignore-prerequisites' },
+} as const;
+
+/** What a refused check or start is: sail's words, the start to remember and, with an override, the button to start anyway. */
+function startRefusal(status: number, body: string, repo: string): ActResult {
+  const text = refusal(status, body, 'start');
+  let parsed: { start?: Record<string, unknown>; override?: unknown } = {};
+  try {
+    parsed = JSON.parse(body) as typeof parsed;
+  } catch {
+    // An answer that isn't JSON has no start to remember.
+  }
+  const { override } = parsed;
+  const asked = parsed.start;
+  if (status !== 409 || asked === undefined || typeof asked.source !== 'string') return { text, refused: true };
+  if (override !== 'force' && override !== 'ignore-prerequisites') {
+    return { text, refused: true, start: 'forget' };
+  }
+  const start: RefusedStart = {
+    repo,
+    source: asked.source,
+    ...(typeof asked.workflow === 'string' ? { workflow: asked.workflow } : {}),
+    ...(typeof asked.until === 'string' ? { until: asked.until } : {}),
+    ...(asked.force === true ? { force: true } : {}),
+    ...(asked.ignorePrerequisites === true ? { ignorePrerequisites: true } : {}),
+    override,
+  };
+  const flag = FLAGS[override];
+  return {
+    text,
+    refused: true,
+    start,
+    button: {
+      label: `start anyway (${flag.label})`,
+      action: flag.action,
+      data: startData({ ...start, [override === 'force' ? 'force' : 'ignorePrerequisites']: true }),
+    },
+  };
+}
+
+/** What a check's answer is: a pass goes on to the start's dialog, a refusal is startRefusal(), a 202 says it is still under way. */
+function checkAnswer(status: number, body: string, subject: Subject, values: Values | undefined): ActResult {
+  const repo = repoOf(subject, values);
+  if (status === 202) {
+    const waiting = answerField(body, 'waiting');
+    return waiting === undefined ? {} : { text: waiting };
+  }
+  if (status !== 200) return startRefusal(status, body, repo);
+  let parsed: { roster?: unknown; key?: unknown; forced?: unknown; start?: Record<string, unknown> };
+  try {
+    parsed = JSON.parse(body) as typeof parsed;
+  } catch {
+    return startRefusal(0, body, repo);
+  }
+  const { start, roster, key } = parsed;
+  if (
+    start === undefined ||
+    typeof start.source !== 'string' ||
+    typeof roster !== 'string' ||
+    typeof key !== 'string'
+  ) {
+    return { text: refusal(500, body, 'check'), refused: true };
+  }
+  const forced = Array.isArray(parsed.forced) ? parsed.forced.filter((each) => typeof each === 'string') : [];
+  return {
+    quiet: true,
+    next: {
+      action: 'start-run-go',
+      data: {
+        ...startData({
+          repo,
+          source: start.source,
+          ...(typeof start.workflow === 'string' ? { workflow: start.workflow } : {}),
+          ...(typeof start.until === 'string' ? { until: start.until } : {}),
+          ...(start.force === true ? { force: true } : {}),
+          ...(start.ignorePrerequisites === true ? { ignorePrerequisites: true } : {}),
+        }),
+        key,
+        roster,
+        ...(forced.length === 0 ? {} : { forced: forced.join(',') }),
+      },
+    },
+  };
+}
+
+const startOffer = (subject: Subject, source: OfferSource) =>
+  subject.kind === 'repo' || subject.kind === 'workflow'
+    ? source.index.find((repo) => repo.name === subject.repo)?.offers?.start
+    : undefined;
+
+/** The path of a start's check or of the start itself, in the repository `subject` or `values` names. */
+const startPath = (subject: Subject, values: Values | undefined, op: '/starts' | '/starts/check') =>
+  `/api/repos/${enc(repoOf(subject, values))}${op}`;
+
+/** Start anyway: the refused start given a flag, offered while the last refusal's override is that flag. */
+function startAnywayAction(override: 'force' | 'ignore-prerequisites'): ActionDef {
+  const flag = FLAGS[override];
+  const given = (name: string): Param => ({ name, dom: `start-${name}`, type: 'text', given: 'data' });
+  return {
+    id: flag.action,
+    label: () => `start anyway (${flag.label})`,
+    appliesTo: ['none'],
+    tier: 'instant',
+    place: 'list',
+    underway: 'checking…',
+    params: () => ['repo', 'source', 'workflow', 'until', 'force', 'ignorePrerequisites'].map(given),
+    available: (_, source) => (source.start?.override === override ? { offered: true, enabled: true } : NOT_OFFERED),
+    variants: (_, source) => {
+      const start = source.start;
+      if (start === undefined || start.override !== override) return [];
+      const flagged = { ...start, [override === 'force' ? 'force' : 'ignorePrerequisites']: true };
+      return [{ label: `start ${start.source} anyway (${flag.label})`, data: startData(flagged) }];
+    },
+    request: (subject, values) => ({
+      path: startPath(subject, values, '/starts/check'),
+      body: startBody(values),
+    }),
+    answer: checkAnswer,
+  };
+}
 
 const ok = (status: number) => status >= 200 && status < 300;
 
@@ -940,6 +1116,91 @@ export const ACTIONS: readonly ActionDef[] = [
   },
   watchAction('watch', '/watch'),
   watchAction('unwatch', '/unwatch'),
+  {
+    id: 'start-run',
+    label: () => 'start a run…',
+    appliesTo: ['workflow', 'repo'],
+    tier: 'instant',
+    holdsDisabled: true,
+    // Its parameters are asked in the command menu, and no view draws them.
+    place: 'list',
+    underway: 'checking…',
+    params: (subject, source) => {
+      const offer = startOffer(subject, source);
+      return [
+        ...(subject.kind === 'workflow'
+          ? []
+          : [
+              {
+                name: 'workflow',
+                dom: 'start-workflow',
+                label: 'workflow',
+                type: 'choice' as const,
+                options: (offer?.workflows ?? []).map((value) => ({ value })),
+                initial: offer?.defaultWorkflow,
+              },
+            ]),
+        { name: 'source', dom: 'start-source', label: 'ticket key or pull request', type: 'text' as const },
+        { name: 'until', dom: 'start-until', label: 'stop after', type: 'text' as const },
+      ];
+    },
+    available: (subject, source) => availability(startOffer(subject, source)),
+    request: (subject, values) => {
+      if ((values.source ?? '').trim() === '') {
+        return { invalid: 'give a ticket key or a pull request, such as ADW-1 or #12' };
+      }
+      const workflow = subject.kind === 'workflow' ? subject.workflow : values.workflow;
+      return {
+        path: startPath(subject, values, '/starts/check'),
+        body: startBody({ ...values, ...(workflow === undefined ? {} : { workflow }) }),
+      };
+    },
+    answer: checkAnswer,
+  },
+  {
+    id: 'start-run-go',
+    label: () => 'start a run…',
+    appliesTo: ['none'],
+    tier: 'confirmed',
+    place: 'list',
+    params: () =>
+      ['repo', 'source', 'workflow', 'until', 'force', 'ignorePrerequisites', 'key', 'roster', 'forced'].map(
+        (name): Param => ({ name, dom: `start-${name}`, type: 'text', given: 'data' }),
+      ),
+    available: () => ({ offered: true, enabled: true }),
+    // A row of no menu: the check's answer carries it out, with the roster the dialog shows.
+    variants: () => [],
+    dialog: (_subject, values) => {
+      const anyway = values.force === 'true' || values.ignorePrerequisites === 'true';
+      const workflow = values.workflow ?? /^([^@\s]+)@/.exec(values.roster ?? '')?.[1] ?? '';
+      const forced = (values.forced ?? '').split(',').filter((each) => each !== '');
+      return {
+        title: anyway ? `start ${values.source} anyway` : `start a run of ${workflow} on ${values.source}`,
+        lines: [
+          ...(values.force === 'true' && forced.length > 0 ? [`overrides: ${forced.join(', ')} (--force)`] : []),
+          ...(values.ignorePrerequisites === 'true'
+            ? ['overrides: its open prerequisites (--ignore-prerequisites)']
+            : []),
+          ...((values.until ?? '') === '' ? [] : [`stops after ${values.until}`]),
+        ],
+        text: values.roster ?? '',
+        verb: 'start',
+      };
+    },
+    request: (subject, values) => ({
+      path: startPath(subject, values, '/starts'),
+      body: { ...startBody(values), key: values.key },
+    }),
+    underway: 'starting…',
+    answer: (status, body, subject, values) => {
+      if (status !== 202) return startRefusal(status, body, repoOf(subject, values));
+      const runId = answerField(body, 'runId');
+      if (runId === undefined) return {};
+      return { effect: { open: runId, repo: repoOf(subject, values) }, text: `started ${runId}`, start: 'forget' };
+    },
+  },
+  startAnywayAction('force'),
+  startAnywayAction('ignore-prerequisites'),
   {
     id: 'clear-attention',
     label: () => 'all clear',

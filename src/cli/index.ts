@@ -41,9 +41,10 @@ export interface Io {
 const USAGE = `sail: a software factory. A ticket goes in and a pull request comes out.
 
 Usage:
-  sail <ticket> [--workflow <name>] [--force] [--ignore-prerequisites] [--until <stage>] [-q|-v|-vv]
+  sail <ticket> [--workflow <name>] [--force] [--ignore-prerequisites] [--until <stage>] [--run-id <id>] [-q|-v|-vv]
                                                              Start a run from a ticket: its key, or its URL
-  sail '#<pr>' [--workflow <name>] [--force] [-q|-v|-vv]     Start a run from a pull request: #12, 12, or its URL
+  sail '#<pr>' [--workflow <name>] [--force] [--run-id <id>] [-q|-v|-vv]
+                                                             Start a run from a pull request: #12, 12, or its URL
   sail init                                                  Write .sail/ here: a config and the editor's setup, no workflow
   sail check [--list]                                        Type-check .sail/ and list its workflows and stages
   sail login codex [--device]                                Log in to a ChatGPT subscription for pi's openai-codex models
@@ -105,7 +106,7 @@ Resuming a run:
 A seeded run:
   --continue  Runs the rest of the workflow after the stage, not just the stage
   --from-base Starts the workspace at the source run's base, not from the commits it made
-  --run-id    Names the new run, ready to be told before it exists: <ticket key>-<26 Crockford characters>, of no existing run
+  --run-id    Names the new run (also of sail <ticket>), ready to be told before it exists: <ticket key>-<26 Crockford characters>, of no existing run
 
 Output of a run and a resume:
   -q, --quiet    Only the run's start, its errors and the final block
@@ -315,6 +316,8 @@ const TICKET: CommandSpec = {
     record: { type: 'string' },
     // The watcher's: the run id it minted for the run it dispatches. Not in USAGE.
     dispatch: { type: 'string' },
+    // Names the run: a caller that wants to find it, as the dashboard does.
+    'run-id': { type: 'string' },
     // The watcher's too: the head sha the pull request it dispatches was queued at. Not in USAGE.
     'head-sha': { type: 'string' },
     ...VERBOSITY_OPTIONS,

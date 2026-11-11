@@ -275,12 +275,14 @@ test('the usage lists sail run --from-run and what --continue and --from-base do
   const { stdout } = await runCaptured(['--help']);
   const commands = stdout.split('\n').filter((line) => line.startsWith('  sail '));
   expect(commands[0]).toBe(
-    '  sail <ticket> [--workflow <name>] [--force] [--ignore-prerequisites] [--until <stage>] [-q|-v|-vv]',
+    '  sail <ticket> [--workflow <name>] [--force] [--ignore-prerequisites] [--until <stage>] [--run-id <id>] [-q|-v|-vv]',
   );
   expect(stdout).toMatch(
     /^ {2}sail run --from-run <run> --stage <stage> \[--continue\] \[--from-base\] \[--run-id <id>\]\n {2,}Rerun one stage on another run's earlier calls: a seeded run$/m,
   );
-  expect(stdout).toMatch(/^ {2}--run-id {4}Names the new run, ready to be told before it exists: /m);
+  expect(stdout).toMatch(
+    /^ {2}--run-id {4}Names the new run \(also of sail <ticket>\), ready to be told before it exists: /m,
+  );
   expect(stdout).toMatch(
     /^A seeded run:\n {2}--continue {2,}Runs the rest of the workflow after the stage, not just the stage\n {2}--from-base Starts the workspace at the source run's base, not from the commits it made$/m,
   );

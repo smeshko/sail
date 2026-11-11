@@ -226,6 +226,8 @@ export interface OpenRunOptions {
   adapters: ResolvedAdapters;
   /** A start the watcher dispatched: the run takes the id it minted, and its source is recorded `via: 'watch'`. */
   dispatch?: { runId: string };
+  /** `--run-id`: the run's id, named by the caller before it exists. The start stays `via: 'cli'` with every check. */
+  runId?: string;
   /**
    * The head sha a pull request must still be at: the one the watcher queued it at. A pull request whose head has moved
    * since is refused. Only a pull request takes it.
@@ -287,16 +289,22 @@ function intakeProblem(loaded: LoadedWorkflow, sailDir: string, ref: string, kin
 }
 
 /**
- * Why a dispatch can't take `runId`: it isn't an id of a run of `ticketKey`, `pr-<number>` for a pull request, or that
- * run's directory exists.
+ * Why `flag` can't give a run `runId`: it isn't an id of a run of `ticketKey`, `pr-<number>` for a pull request, or that
+ * run's directory exists. `starts` closes the line: what the flag's start makes.
  */
-function dispatchProblem(sailDir: string, ticketKey: string, runId: string): string | undefined {
+function runIdProblem(
+  sailDir: string,
+  ticketKey: string,
+  runId: string,
+  flag: string,
+  starts: string,
+): string | undefined {
   if (!isRunIdOf(ticketKey, runId)) {
-    return `--dispatch takes the id of a new run of ${ticketKey}, ${ticketKey}-<26 Crockford characters>: '${runId}' is not one`;
+    return `${flag} takes the id of a new run of ${ticketKey}, ${ticketKey}-<26 Crockford characters>: '${runId}' is not one`;
   }
   const runs = runsDir(sailDir);
   if (existsSync(join(runs, runId))) {
-    return `--dispatch names run ${runId}, which already exists in ${relative(dirname(sailDir), runs)}: a dispatch starts a new run`;
+    return `${flag} names run ${runId}, which already exists in ${relative(dirname(sailDir), runs)}: ${starts}`;
   }
   return undefined;
 }
@@ -597,9 +605,13 @@ export async function preflightRun(options: OpenRunOptions): Promise<Preflight |
     return header;
   };
   const runIdOf = (key: string): string | { refused: string } => {
-    if (dispatch === undefined) return newRunId(key, now.getTime(), options.random);
-    const refused = dispatchProblem(homeDir, key, dispatch.runId);
-    return refused === undefined ? dispatch.runId : { refused };
+    const named = dispatch === undefined ? options.runId : dispatch.runId;
+    if (named === undefined) return newRunId(key, now.getTime(), options.random);
+    const refused =
+      dispatch === undefined
+        ? runIdProblem(homeDir, key, named, '--run-id', 'a start makes a new run')
+        : runIdProblem(homeDir, key, named, '--dispatch', 'a dispatch starts a new run');
+    return refused === undefined ? named : { refused };
   };
 
   if (!('refused' in ref) && ref.kind === 'pr') {
