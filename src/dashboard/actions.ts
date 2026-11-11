@@ -6,6 +6,8 @@
 // - Stop is offered for a `running` or `suspended` run, and for a dispatched run that has no run directory yet. It is
 //   never disabled: `sail stop` stops a run the watcher dispatched, and its refusals come with the POST. A `completed`
 //   or `failed` run has ended, so it offers none.
+// - Suspend is offered for a `running` run only, never disabled: its refusals come with the POST. A starting run has
+//   nothing to hold.
 // - Clean is offered for a `failed` run, beside Restart: enabled with what it removes and where the run directory goes,
 //   or disabled with `sail clean`'s refusal, or with why the clone's ports can't be resolved. It is not held back by
 //   the watcher check below, since the engine's checks refuse a leased branch and a queue item that names the run.
@@ -67,6 +69,8 @@ export interface RestartOffer extends Offer {
 
 export interface StopOffer extends Offer {}
 
+export interface SuspendOffer extends Offer {}
+
 export interface CleanOffer extends Offer {
   /** What a clean would remove, in order. */
   removes: string[];
@@ -78,6 +82,7 @@ export interface RunActions {
   resume?: ResumeOffer;
   restart?: RestartOffer;
   stop?: StopOffer;
+  suspend?: SuspendOffer;
   clean?: CleanOffer;
   /** Why the run offers nothing. */
   why?: string;
@@ -232,6 +237,7 @@ export async function runActions(
         resume: { enabled: false, why, spentUsd, budget },
         restart: { enabled: false, why, stages: [], budget: { ...header.budget } },
         stop: { enabled: true },
+        suspend: { enabled: true },
       };
     }
     const busy = heldBy(entry, runId, header, options);

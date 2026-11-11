@@ -15,9 +15,10 @@
 //    run offers (src/dashboard/actions.ts), then starts `sail resume <run>` or `sail run --from-run <run> --stage …`
 //    itself, detached in the clone, its output in `.sail-runs/dashboard/<run id>.log`, as a typed command would: it
 //    needs no watcher and skips the watcher's cap. It answers 202 once the run has started, or 409 with the line the
-//    start was refused with. The last two are `…/runs/<run>/stop` (body `{ now }`) and `…/clean` (`{}`): each calls the
+//    start was refused with. The last two are `…/runs/<run>/stop` (body `{ now, suspend? }`) and `…/clean` (`{}`): each calls the
 //    engine function `sail stop` or `sail clean` calls (src/engine/stop.ts, src/engine/clean.ts) in this process,
-//    with the clone's Workspace port, and is refused in the same words, 409. A stop answers 202 `{ message }`, since a
+//    with the clone's Workspace port, and is refused in the same words, 409. A `suspend` holds the run as `sail stop
+//    --suspend` does, and with `now` is a 400. A stop answers 202 `{ message }`, since a
 //    running run ends later, and a clean 200 `{ message, removed, archived }`; a clean whose removal failed is 409
 //    with the failures, and its run directory stays. The watch set is changed at `/api/repos/<repo>/watch` and
 //    `…/unwatch` (body `{ workflows: string[] }`, none meaning all): each runs `sail watch` or `sail unwatch` in the
@@ -136,7 +137,7 @@ const WATCH_PATH = /^\/api\/repos\/[^/]+\/(watch|unwatch)$/;
 
 const WatchBody = z.strictObject({ workflows: z.array(z.string().min(1)) });
 
-const StopBody = z.strictObject({ now: z.boolean() });
+const StopBody = z.strictObject({ now: z.boolean(), suspend: z.boolean().optional() });
 const CleanBody = z.strictObject({});
 
 const ResumeBody = z.strictObject({
@@ -557,13 +558,16 @@ async function clonesOf(options: DashboardOptions, segments: string[]) {
 
 /**
  * Stops a run as `sail stop` does: the engine's `stopRun()` in this process. A run still starting, which has no
- * run.json yet, is stopped through its hand-off file. Answers 202 `{ message }`, or 409 with the engine's refusal.
+ * run.json yet, is stopped through its hand-off file. With `suspend` the run is held, not failed; `now` with `suspend`
+ * is a 400. Answers 202 `{ message }`, or 409 with the engine's refusal.
  */
 async function stopRoute(starts: Starts, segments: string[], request: Request): Promise<Response> {
   const { options, underway } = starts;
   const [, , , , runId = ''] = segments;
   const parsed = await bodyOf(request, StopBody, 'a stop');
   if (parsed instanceof Response) return parsed;
+  if (parsed.body.now && parsed.body.suspend === true)
+    return error(400, "not a stop: now and suspend can't both be set");
   const found = await clonesOf(options, segments);
   if (found instanceof Response) return found;
   const { entry, ports, env } = found;
@@ -577,6 +581,7 @@ async function stopRoute(starts: Starts, segments: string[], request: Request): 
       runId,
       adapters: ports.adapters,
       now: parsed.body.now,
+      suspend: parsed.body.suspend === true,
       secrets: credentialValues(env),
       starting: (id) => startingRun(runs, id),
     });
