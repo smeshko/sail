@@ -31,8 +31,6 @@ export function regions(store: Store): Record<Region, () => string> {
     },
     list: () => {
       if (store.index === undefined) return html`<div class="qempty">connecting…</div>`.value;
-      // A raise typed and a stage chosen in the open run's menu survive the draw, but not a switch of run.
-      store.actor.keep('run');
       return renderList(ui.view, listRepos(store.index, host.now()), ui, host.now(), store.offers).value;
     },
     attention: () => {
@@ -40,15 +38,21 @@ export function regions(store: Store): Record<Region, () => string> {
       store.drawn = items.map(identity);
       return renderAttention(items, ui.attention).value;
     },
+    link: () =>
+      html`<button class="btn" type="button" data-action="copy-link" aria-label="copy link" title="copy link">⧉</button>`
+        .value,
     main: () => {
       const panel = openQueue(store);
       if (panel !== undefined) {
         // What was typed in the add field survives the draw, but not an add that took.
         store.actor.keep('queue', { kind: 'workflow', repo: panel.repo, workflow: panel.workflow });
         // A drop dialog whose item can't be dropped now (it runs, or is gone) closes with nothing sent, and its menu shuts.
-        // So do both while the workflow isn't watched: the controls are disabled then.
+        // So do both while the workflow isn't watched, and so does a dialog of the workflow's own (an add skipping its
+        // checks): the controls are disabled then.
         const unwatched = panel.watch.state !== 'watched';
         const asked = store.actor.dialogFor();
+        if (asked?.kind === 'workflow' && asked.repo === panel.repo && asked.workflow === panel.workflow && unwatched)
+          store.actor.cancel();
         if (asked?.kind === 'item' && asked.repo === panel.repo && asked.workflow === panel.workflow) {
           const target = panel.items.find((each) => each.dedupKey === asked.item);
           if (unwatched || target === undefined || !offeredDrop(panel, target)) store.actor.cancel();
@@ -64,15 +68,14 @@ export function regions(store: Store): Record<Region, () => string> {
         }
         const menuItem = panel.items.find((item) => item.dedupKey === ui.itemMenu);
         if (unwatched || menuItem === undefined || !hasItemActions(panel, menuItem)) delete ui.itemMenu;
-        const repoOffers = store.index?.find((repo) => repo.name === panel.repo)?.offers;
-        return renderQueue(panel, store.queues.get(ui.queue ?? '')?.stream, ui, host.now(), repoOffers).value;
+        return renderQueue(panel, store.queues.get(ui.queue ?? '')?.stream, ui, host.now()).value;
       }
       if (store.run === undefined) return html`<div class="qempty">no run selected</div>`.value;
       const error = store.run.error === undefined ? '' : html`<div class="code bad">${store.run.error}</div>`;
       const card = opened(store);
       const view =
         card === undefined
-          ? renderRun(store.run.model, summaryOf(store, store.run), ui, host.now())
+          ? renderRun(store.run.model, summaryOf(store, store.run), ui, host.now(), store.offers)
           : renderTimeline(card, ui, host.now(), store.outputs);
       return html`${error}${view}`.value;
     },
@@ -96,6 +99,9 @@ export function flush(store: Store): void {
     store.detail = detail;
     host.setDetail(detail);
   }
+  // A raise typed and a stage chosen in the open run's view header or row menu survive the draw, but not a switch of run:
+  // read once, before either region is written, so the one-shot flag covers both.
+  if (dirty.includes('list') || dirty.includes('main')) store.actor.keep('run');
   for (const region of dirty) {
     // A region that can't be drawn says so, and the others are still drawn (review R2-1).
     let markup: string;

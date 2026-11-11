@@ -3,11 +3,12 @@
 // folding groups: Active's `waiting on you` and `running`, History's `failed` and `done`, and in Queues one per
 // repository. A run's row is a `div` holding two sibling buttons: its own, which opens the run and shows on one line
 // its status, id, title, repository › workflow, stalled mark, duration, cost and stop reason, with a problem wrapping
-// inside it, and, but on a completed run, a ⋯ of its own that opens the run and, under the row, a menu of what it
-// offers: Resume, Restart, Stop and Clean. A queue's row is a `div` holding its open button and, beside it, poll, watch
-// and unwatch from the registry. The button names the live watcher's watch state, what waits, runs, failed and is
-// parked (a zero count left out), when the queue was last polled, and a pause and a hold; a queue that can't be read
-// shows its problem in place of its counts. A Queues group's header row also carries
+// inside it, and, but on a completed run, a ⋯ of its own that opens the run and a menu of what it offers: Resume,
+// Restart, Stop and Clean. The menu is drawn inside its row and floats over the rows under it, pushing none down. A
+// queue's row is a `div` holding its open button and, beside it, poll, watch and unwatch from the registry. The button
+// names the live watcher's watch state, what waits, runs, failed and is parked (a zero count left out), when the queue
+// was last polled, and a pause and a hold; a queue that can't be read shows its problem in place of its counts. A
+// Queues group's header row also carries
 // the Watch all and Unwatch all the repository offers, drawn from the registry, and its problem; each runs at once, its
 // answer is a toast, and while its request is out the buttons read the word under way, as a run's row reads it in place
 // of its status. A folded group draws its header alone.
@@ -46,7 +47,8 @@ export const tooltipOf = (run: ListRun): string | undefined =>
   run.pr === undefined ? run.title : run.title === undefined ? run.runId : `${run.runId} · ${run.title}`;
 
 /** Whether `run`'s menu is open: only the open run's can be. */
-const isMenuOpen = (repo: string, run: ListRun, ui: UiState) => isOpen(repo, run, ui) && ui.runMenu === run.runId;
+const isMenuOpen = (repo: string, run: ListRun, ui: UiState) =>
+  isOpen(repo, run, ui) && ui.runMenu?.runId === run.runId && ui.runMenu.at === 'row';
 
 /** A row's ⋯: on any run but a completed one, which offers nothing. */
 export function more(repo: string, run: ListRun, ui: UiState): SafeHtml | '' {
@@ -54,7 +56,7 @@ export function more(repo: string, run: ListRun, ui: UiState): SafeHtml | '' {
   return html`<button class="r-more${isMenuOpen(repo, run, ui) ? ' open' : ''}" type="button" data-action="run-menu" data-repo="${repo}" data-run="${run.runId}" aria-label="actions for ${run.runId}" aria-expanded="${isMenuOpen(repo, run, ui) ? 'true' : 'false'}" title="actions for ${run.runId}">⋯</button>`;
 }
 
-/** The open menu under `run`'s row: what the run offers, once its actions are read. */
+/** The open menu over the rows under `run`'s row: what the run offers, once its actions are read. */
 export function runMenu(repo: string, run: ListRun, ui: UiState, offers: RunActions | undefined): SafeHtml | '' {
   if (!isMenuOpen(repo, run, ui)) return '';
   const controls = runControls(offers, ui);
@@ -64,8 +66,9 @@ export function runMenu(repo: string, run: ListRun, ui: UiState, offers: RunActi
 }
 
 /**
- * The watch or unwatch button each offered, drawn from the registry, for a workflow, or for the whole repository when
- * `workflow` is left out. While a request for it is out, the word under way takes their place.
+ * The repository's watch or unwatch button each offered, drawn from the registry, for all its workflows at once, or, given
+ * a workflow, for that one alone, as a queue's row draws them. While a request for it is out, the word under way takes
+ * their place. A queue view draws its workflow's own in its view header.
  */
 export function watchButtons(repo: string, offers: RepoOffers | undefined, ui: UiState, workflow?: string): SafeHtml {
   const subject: Subject = workflow === undefined ? { kind: 'repo', repo } : { kind: 'workflow', repo, workflow };
@@ -106,7 +109,7 @@ function runRow(row: RunRow, ui: UiState, offers: RunActions | undefined): SafeH
       : ''
   }<span class="r-el">${duration(run.durationMs)}</span><span class="r-cost">${cost(run.costUsd)}</span>${
     run.stopReason === undefined ? '' : html`<span class="why">${run.stopReason}</span>`
-  }</span>${run.problem === undefined ? '' : html`<span class="r-problem">${run.problem}</span>`}</button>${more(repo, run, ui)}</div>${runMenu(repo, run, ui, offers)}`;
+  }</span>${run.problem === undefined ? '' : html`<span class="r-problem">${run.problem}</span>`}</button>${more(repo, run, ui)}${runMenu(repo, run, ui, offers)}</div>`;
 }
 
 /** The ` · ` free chips of a queue's row: its pause and its hold, in the words its queue view uses. */

@@ -242,6 +242,21 @@
         padding-left: 18px;
         font-size: 12px;
       }
+      .dlg-fields {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        margin-top: 8px;
+        font-family: var(--mono);
+        font-size: 12px;
+      }
+      .dlg-bad {
+        color: var(--del);
+      }
+      .dlg .num {
+        width: 7em;
+      }
       .dlg-acts {
         display: flex;
         gap: 8px;
@@ -279,6 +294,35 @@
         border-color: var(--line-2);
         color: var(--fg);
       }
+      .h-acts {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        margin-left: auto;
+      }
+      .h-more {
+        position: relative;
+      }
+      .h-menu {
+        position: absolute;
+        top: calc(100% + 4px);
+        right: 0;
+        z-index: 5;
+        min-width: 14em;
+        padding: 8px;
+        border: 1px solid var(--line-2);
+        border-radius: 8px;
+        background: var(--panel);
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+      }
+      .h-menu .acts {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+      }
+      .h-menu .act {
+        flex-wrap: wrap;
+      }
       .qmenu {
         position: absolute;
         top: calc(100% + 4px);
@@ -308,7 +352,7 @@
         font-size: 10px;
         line-height: 1.4;
       }
-      .srcbar .btn {
+      .srcbar .h-acts {
         margin-left: auto;
       }
       .qadd {
@@ -624,6 +668,7 @@
         opacity: 0.5;
       }
       .run {
+        position: relative;
         display: flex;
         align-items: flex-start;
         gap: 6px;
@@ -742,7 +787,11 @@
         color: var(--fg);
       }
       .r-menu {
-        margin: 2px 10px 8px 14px;
+        position: absolute;
+        top: 100%;
+        left: 34px;
+        right: 10px;
+        z-index: 5;
         padding: 8px;
         border: 1px solid var(--line-2);
         border-radius: 8px;
@@ -1858,6 +1907,7 @@
         <div class="brand"><i></i>sail dashboard</div>
         <div class="spacer"></div>
         <div id="attention"></div>
+        <div id="link"></div>
         <button class="btn" type="button" data-action="toggle-theme" aria-label="switch theme" title="theme">◐</button>
         <button class="btn" type="button" data-action="toggle-inspector" aria-label="toggle inspector" title="inspector (i)">⇥</button>
       </header>

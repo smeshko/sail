@@ -1,11 +1,13 @@
-// The run view: the run's header, its totals against its budget, one stage card per call grouped by loop iteration, a
+// The run view: its view header, its totals against its budget, one stage card per call grouped by loop iteration, a
 // group's cards side by side under a header of their own, the roster stages not called yet, the pull request it opened,
 // and the CLI commands to copy. The cards come from the run model, fed by the run's events. The totals come from the
 // summary in the index when there is one, and from the cards otherwise. The Resume, Restart, Stop or Clean a run offers
-// are drawn here too, by `runControls`, but shown in the ⋯ menu under the open run's list row.
+// are drawn in the run view's view header, by `runHeaderActions`: a button for each the run's status has (Stop while it runs,
+// Resume while suspended, Restart and Clean once failed) and the rest behind a ⋯. `runControls` is the one component both
+// that ⋯ menu and the list row's ⋯ menu are drawn with.
 import type { Summary } from '../../events/summary';
 import type { RunActions } from '../actions';
-import { ACTIONS, type Subject } from './action-registry';
+import { ACTIONS, type ActionDef, type OfferSource, type Subject } from './action-registry';
 import { actionControl } from './action-view';
 import { runCommands } from './commands';
 import { cost, duration, percent, tokens } from './format';
@@ -118,32 +120,75 @@ function totals(model: RunModel, summary: Summary | null | undefined, now: numbe
 </div>`;
 }
 
-/** The run actions the list row's ⋯ menu draws, in the registry's order: every action done to a run. */
+/** The run actions the menus draw, in the registry's order: every action done to a run. */
 const RUN_ACTIONS = ACTIONS.filter((def) => def.appliesTo.includes('run'));
 
+/** The actions the run view's view header draws as buttons, by the run's status. Every other offered action is behind its ⋯. */
+const HEADER_BUTTONS: Readonly<Record<string, readonly string[]>> = {
+  running: ['stop-run'],
+  suspended: ['resume-run'],
+  failed: ['restart-run', 'clean-run'],
+};
+
+const runSubject = (ui: UiState, runId = ui.runId ?? ''): Subject => ({ kind: 'run', repo: ui.repo ?? '', runId });
+
 /**
- * What the run offers (Resume, Restart, Stop, Clean), whichever it does: the body of the ⋯ menu under the open run's
- * list row, drawn from the registry. Undefined when it offers none of them.
+ * What the run offers, drawn from the registry: the body of a ⋯ menu, the row's with every run action and the header's
+ * with the ones the header has no button for. Undefined when it offers none of `defs`.
  */
-export function runControls(actions: RunActions | undefined, ui: UiState): SafeHtml | undefined {
-  if (
-    actions === undefined ||
-    (actions.resume === undefined &&
-      actions.restart === undefined &&
-      actions.stop === undefined &&
-      actions.clean === undefined)
-  ) {
-    return undefined;
-  }
-  const subject: Subject = { kind: 'run', repo: ui.repo ?? '', runId: ui.runId ?? '' };
-  const source = { run: actions, index: [] };
-  return html`<div class="acts">${RUN_ACTIONS.map((def) =>
+export function runControls(
+  actions: RunActions | undefined,
+  ui: UiState,
+  defs: readonly ActionDef[] = RUN_ACTIONS,
+  runId?: string,
+): SafeHtml | undefined {
+  if (actions === undefined) return undefined;
+  const subject = runSubject(ui, runId);
+  const source: OfferSource = { run: actions, index: [] };
+  if (!defs.some((def) => def.available(subject, source).offered)) return undefined;
+  return html`<div class="acts">${defs.map((def) =>
     actionControl(def, subject, ui.act, source, { honourDisabled: true, wrap: true }),
   )}</div>`;
 }
 
+/**
+ * The run view's view header's actions: a button for each of the status's actions the run offers, and a ⋯ for the rest, whose menu
+ * opens under it. Nothing while the offers are not read or offer nothing, and nothing while the row's menu is open: it
+ * draws every action, so the header's would put a field on the page twice.
+ */
+export function runHeaderActions(
+  status: string | undefined,
+  runId: string,
+  offers: RunActions | undefined,
+  ui: UiState,
+): SafeHtml | '' {
+  if (offers === undefined || ui.runMenu?.at === 'row') return '';
+  const subject = runSubject(ui, runId);
+  const source: OfferSource = { run: offers, index: [] };
+  const ids = HEADER_BUTTONS[status ?? ''] ?? [];
+  const buttons = RUN_ACTIONS.filter((def) => ids.includes(def.id));
+  const rest = RUN_ACTIONS.filter((def) => !ids.includes(def.id));
+  const drawn = buttons.map((def) => actionControl(def, subject, ui.act, source, { honourDisabled: true, wrap: true }));
+  const menu = runControls(offers, ui, rest, runId);
+  if (menu === undefined && drawn.every((each) => each === '')) return '';
+  const open = ui.runMenu?.runId === runId && ui.runMenu.at === 'header';
+  const more =
+    menu === undefined
+      ? ''
+      : html`<span class="h-more"><button class="btn more" type="button" data-action="run-menu" data-at="header" data-repo="${ui.repo ?? ''}" data-run="${runId}" aria-label="more actions for ${runId}" aria-expanded="${open ? 'true' : 'false'}">⋯</button>${
+          open ? html`<div class="h-menu">${menu}</div>` : ''
+        }</span>`;
+  return html`<span class="h-acts">${drawn}${more}</span>`;
+}
+
 /** The run view. `now` is ms since the epoch, for the running cards' durations. */
-export function renderRun(model: RunModel, summary: Summary | null | undefined, ui: UiState, now: number): SafeHtml {
+export function renderRun(
+  model: RunModel,
+  summary: Summary | null | undefined,
+  ui: UiState,
+  now: number,
+  offers?: RunActions,
+): SafeHtml {
   const runId = model.runId ?? summary?.runId ?? ui.runId ?? '';
   const status = model.end?.status ?? (model.runId === undefined ? summary?.status : 'running');
   const stopReason = model.end?.stopReason ?? summary?.stopReason;
@@ -156,7 +201,7 @@ export function renderRun(model: RunModel, summary: Summary | null | undefined, 
     stopReason === undefined ? '' : html`<span class="warnchip">${stopReason}</span>`
   }<span class="d-agent">${runId}${model.workflow === undefined ? '' : html` · ${model.workflow}`}${
     model.fromRun === undefined ? '' : html` · seeded from ${model.fromRun}`
-  }</span></div>
+  }</span>${runHeaderActions(status, runId, offers, ui)}</div>
 ${model.end?.message === undefined ? '' : html`<div class="d-msg">${model.end.message}</div>`}
 <div class="run-b">
 ${totals(model, summary, now)}

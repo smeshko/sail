@@ -208,11 +208,13 @@ export interface QueuePanel {
   watch: QueueWatch;
   /** What the queue offers: its own actions and each item's. */
   offers?: QueueOffers;
+  /** What its repository offers: the workflow's watch and unwatch among them. */
+  repoOffers?: RepoOffers;
 }
 
 /** The offers of `panel`, as a source the registry reads them from. */
 export const panelSource = (panel: QueuePanel): OfferSource => ({
-  index: [{ name: panel.repo, queues: [{ workflow: panel.workflow, offers: panel.offers }] }],
+  index: [{ name: panel.repo, queues: [{ workflow: panel.workflow, offers: panel.offers }], offers: panel.repoOffers }],
 });
 
 export type QueuePanelFile = Omit<NonNullable<IndexRepo['queues'][number]['queue']>, 'items'>;
@@ -240,6 +242,7 @@ export function queuePanels(index: readonly IndexRepo[]): QueuePanel[] {
       }
       if (view.problem !== undefined) panel.problem = view.problem;
       if (view.offers !== undefined) panel.offers = view.offers;
+      if (repo.offers !== undefined) panel.repoOffers = repo.offers;
       return panel;
     }),
   );

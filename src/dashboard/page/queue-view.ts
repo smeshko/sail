@@ -1,9 +1,10 @@
 // The queue view: one watched workflow's queue, opened from its row in the list and drawn in the centre in place of the
 // run, with its polling, a box of items for each state that has any, running first, each folding from its heading, and
 // its recent events from the queue's own stream, folded until the person opens them, and the error that stream sent.
-// The controls ask the watcher and change nothing themselves: the header's poll button and its workflow's Watch or Unwatch, a field to add a ticket (for a
-// workflow that polls tickets), and, at a row's right, ▲ and ▼ on a waiting item to move it before or after its waiting
-// neighbour, and a ⋯ on any item but a running one, which opens its menu: requeue, on a parked item or a failed one
+// The controls ask the watcher and change nothing themselves: the header's poll button and its workflow's Watch or
+// Unwatch, drawn from the registry and, when the offer is disabled, drawn disabled with its reason, a field to add a
+// ticket, with an add and an add that skips its checks (for a workflow that polls tickets), and, at a row's right, ▲
+// and ▼ on a waiting item to move it before or after its waiting neighbour, and a ⋯ on any item but a running one, which opens its menu: requeue, on a parked item or a failed one
 // whose run has ended, and drop, which opens the confirmation dialog. One menu is open at a time. The answer to any of
 // them, a refusal or that the watcher has not taken it yet, is a toast, and while a request is out the header or the
 // item's row reads the word under way. A queue held on the usage limit of a harness key also offers a release of that
@@ -14,13 +15,11 @@
 // prerequisites names them.
 import type { QueueEvent } from '../../events/types';
 import type { QueueItemState } from '../../watch/queue-store';
-import type { RepoOffers } from '../offers';
 import { ACTIONS, actionOf, type OfferSource, type Subject } from './action-registry';
 import { actionControl } from './action-view';
 import { ago, clock } from './format';
 import { html, type SafeHtml, safeHref } from './html';
 import { type PanelItem, panelSource, QUEUE_STATES, type QueuePanel } from './index-model';
-import { watchButtons } from './list-view';
 import type { UiState } from './ui-state';
 
 /** What the shell has heard on a queue's stream: its last events. */
@@ -141,13 +140,13 @@ function releaseControl(panel: QueuePanel, key: string, ui: UiState): SafeHtml |
   });
 }
 
-/** The field to add a ticket by its key, with Force, as typed so far. */
+/** The field to add a ticket by its key, as typed so far, and the two buttons that add it, the second skipping its checks. */
 function addForm(panel: QueuePanel, ui: UiState, why: string | undefined): SafeHtml {
   const typed = ui.act.drafts['add-ticket'];
   if (why !== undefined) {
-    return html`<div class="qadd"><input class="txt" type="text" name="add-ticket" placeholder="ticket key" value="${typed?.ticket ?? ''}" disabled title="${why}"><label class="lbl"><input type="checkbox" name="add-force"${typed?.force === 'on' ? ' checked' : ''} disabled title="${why}"> force</label><button class="btn" disabled title="${why}">add</button></div>`;
+    return html`<div class="qadd"><input class="txt" type="text" name="add-ticket" placeholder="ticket key" value="${typed?.ticket ?? ''}" disabled title="${why}"><button class="btn" disabled title="${why}">add</button><button class="btn" disabled title="${why}">add, skipping its checks</button></div>`;
   }
-  return html`<div class="qadd"><input class="txt" type="text" name="add-ticket" placeholder="ticket key" value="${typed?.ticket ?? ''}"><label class="lbl"><input type="checkbox" name="add-force"${typed?.force === 'on' ? ' checked' : ''}> force</label><button class="btn" data-action="add-ticket" data-repo="${panel.repo}" data-workflow="${panel.workflow}" title="add the ticket to the queue">add</button></div>`;
+  return html`<div class="qadd"><input class="txt" type="text" name="add-ticket" placeholder="ticket key" value="${typed?.ticket ?? ''}"><button class="btn" data-action="add-ticket" data-repo="${panel.repo}" data-workflow="${panel.workflow}" title="add the ticket to the queue">add</button><button class="btn" data-action="add-ticket-force" data-repo="${panel.repo}" data-workflow="${panel.workflow}" title="add the ticket without checking its label or state">add, skipping its checks</button></div>`;
 }
 
 /** A waiting row's ▲ or ▼: `target` is the waiting neighbour the item moves before or after. */
@@ -219,13 +218,28 @@ function recentEvents(stream: QueueStream | undefined, ui: UiState): SafeHtml {
   )}</div>`;
 }
 
-function panelView(
-  panel: QueuePanel,
-  stream: QueueStream | undefined,
-  ui: UiState,
-  now: number,
-  repoOffers: RepoOffers | undefined,
-): SafeHtml {
+/**
+ * The view header's actions, drawn from the registry for the workflow: poll, then whichever of watch or unwatch it offers,
+ * a disabled one with its reason. While a request to watch or unwatch it is out, the word under way takes their place.
+ */
+function headerActions(panel: QueuePanel, ui: UiState): SafeHtml {
+  const subject: Subject = { kind: 'workflow', repo: panel.repo, workflow: panel.workflow };
+  const source = panelSource(panel);
+  const options = { honourDisabled: true, data: true, wrap: true } as const;
+  const underway = ui.underway[`watch:${panel.repo}/${panel.workflow}`];
+  const watch =
+    underway !== undefined
+      ? html`<span class="busy">${underway}</span>`
+      : ACTIONS.filter((def) => def.place === 'repo' && def.appliesTo.includes('workflow')).map((def) =>
+          actionControl(def, subject, ui.act, source, options),
+        );
+  const poll = actionOf('poll-queue');
+  const pollControl =
+    poll === undefined ? '' : actionControl(poll, subject, ui.act, source, { ...options, title: 'poll now' });
+  return html`<span class="h-acts">${pollControl}${watch}</span>`;
+}
+
+function panelView(panel: QueuePanel, stream: QueueStream | undefined, ui: UiState, now: number): SafeHtml {
   const { state } = panel.watch;
   const why = panel.watch.state === 'watched' ? undefined : panel.watch.why;
   const polling = panel.queue?.polling;
@@ -245,13 +259,7 @@ function panelView(
     held === undefined
       ? ''
       : html`<span class="warnchip">held${held.until === undefined ? '' : html` until ${clock(held.until, ui.tz)}`}: ${held.reason}</span>${held.harnessKey === undefined ? '' : releaseControl(panel, held.harnessKey, ui)}`
-  }${
-    !queueOffered(panel, 'poll-queue')
-      ? ''
-      : why === undefined
-        ? html`<button class="btn" data-action="poll-queue" data-repo="${panel.repo}" data-workflow="${panel.workflow}" title="poll now">poll</button>`
-        : html`<span class="act"><button class="btn" disabled title="${why}">poll</button><span class="act-why">${why}</span></span>`
-  }${watchButtons(panel.repo, repoOffers, ui, panel.workflow)}</div>
+  }${headerActions(panel, ui)}</div>
 ${stream?.polls === 'ticket' && queueOffered(panel, 'add-ticket') ? addForm(panel, ui, why) : ''}
 ${panel.problem === undefined ? '' : html`<div class="code bad">${panel.problem}</div>`}
 ${stream?.error === undefined ? '' : html`<div class="code bad">${stream.error}</div>`}
@@ -274,13 +282,7 @@ ${recentEvents(stream, ui)}
 }
 
 /** The queue view of `panel`, under a header naming its workflow and repository. */
-export function renderQueue(
-  panel: QueuePanel,
-  stream: QueueStream | undefined,
-  ui: UiState,
-  now: number,
-  repoOffers?: RepoOffers | undefined,
-): SafeHtml {
+export function renderQueue(panel: QueuePanel, stream: QueueStream | undefined, ui: UiState, now: number): SafeHtml {
   return html`<div class="d-h"><span class="d-title">${panel.workflow} queue</span><span class="d-agent">${panel.repo}</span></div>
-${panelView(panel, stream, ui, now, repoOffers)}`;
+${panelView(panel, stream, ui, now)}`;
 }

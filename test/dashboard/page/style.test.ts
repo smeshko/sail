@@ -85,6 +85,13 @@ test("a run's ⋯ shows on hover and on focus inside the row, and is never hidde
   expect(forMore.filter(([, body]) => /visibility:\s*hidden/.test(body))).toEqual([]);
 });
 
+test("a row's menu floats: .r-menu is absolute inside a relative .run (ADW-516)", () => {
+  const body = (selector: string) => rules().find(([sel]) => sel === selector)?.[1] ?? '';
+  expect(body('.run')).toContain('position: relative');
+  expect(body('.r-menu')).toContain('position: absolute');
+  expect(body('.r-menu')).toContain('top: 100%');
+});
+
 test('the theme and inspector buttons carry an aria-label beside their title (ADW-508)', () => {
   expect(html).toContain('data-action="toggle-theme" aria-label="switch theme" title="theme"');
   expect(html).toContain('data-action="toggle-inspector" aria-label="toggle inspector" title="inspector (i)"');

@@ -234,7 +234,14 @@ function fakeWindow(
   const root = { dataset: {} as Record<string, string | undefined> };
   const stored = new Map<string, string>();
   const copied: string[] = [];
-  const replaced: { state: unknown; title: string; url: string }[] = [];
+  const windowListeners: Record<string, (() => void)[]> = {};
+  const history: { kind: string; data: unknown; unused: string; url: string }[] = [];
+  const location = {
+    host: '127.0.0.1:4100',
+    search: options.search ?? '',
+    pathname: '/',
+    href: 'http://127.0.0.1:4100/?repo=a',
+  };
   const win: BrowserWindow = {
     document: {
       getElementById: (id) => elements[id] ?? null,
@@ -249,11 +256,13 @@ function fakeWindow(
         return focus.active;
       },
     },
-    location: { host: '127.0.0.1:4100', pathname: '/dashboard', search: options.search ?? '' },
+    location,
+    addEventListener: (type, listener) => {
+      windowListeners[type] = [...(windowListeners[type] ?? []), listener];
+    },
     history: {
-      replaceState: (state, title, url) => {
-        replaced.push({ state, title, url });
-      },
+      pushState: (data, unused, url) => history.push({ kind: 'push', data, unused, url }),
+      replaceState: (data, unused, url) => history.push({ kind: 'replace', data, unused, url }),
     },
     async fetch(url, init) {
       fetched.push({
@@ -334,7 +343,9 @@ function fakeWindow(
     root,
     stored,
     copied,
-    replaced,
+    history,
+    location,
+    windowListeners,
     fire,
     listeners,
     focus,
@@ -691,6 +702,76 @@ describe('the confirmation dialog', () => {
     const list = fake.live('list');
     return { fake, calls, list, host: browserHost(fake.win) };
   };
+
+  /** A live `#dialog`, which shows modally and closes as a browser's does. */
+  const liveDialog = () => {
+    const fake = fakeWindow();
+    /** A `[name="x"]` lookup over a live region's fields, as a browser answers it. */
+    const named = (region: ReturnType<typeof liveRegion>) => {
+      region.querySelector = (selectors: string) => {
+        const match = /^\[name="([^"]*)"\]$/.exec(selectors);
+        return match === null ? null : (region.els.find((el) => el.attributes.name === match[1]) ?? null);
+      };
+      return region;
+    };
+    const dialog = named(fake.live('dialog'));
+    dialog.showModal = () => {};
+    dialog.close = () => {};
+    const list = named(fake.live('list'));
+    return { fake, dialog, list, host: browserHost(fake.win) };
+  };
+
+  test('dialogValue reads a field of #dialog alone', () => {
+    const { dialog, list, host } = liveDialog();
+    host.render('list', '<input name="raise" value="from the list">');
+    expect(host.dialogValue('raise')).toBeUndefined();
+    host.openDialog('<input class="num" type="number" name="raise" value="5">');
+    expect(host.dialogValue('raise')).toBe('5');
+    expect(host.dialogValue('stage')).toBeUndefined();
+    (dialog.els[0] as ElementLike).value = '7';
+    expect(host.dialogValue('raise')).toBe('7');
+    expect(list.els[0]?.value).toBe('from the list');
+  });
+
+  test('redrawDialog keeps the typed value and the focus', () => {
+    const { fake, dialog, host } = liveDialog();
+    host.openDialog('<ul><li>one</li></ul><input type="text" name="raise" value=""><button>x</button>');
+    const typed = dialog.els[0] as ElementLike;
+    typed.value = '12.5';
+    typed.focus?.();
+    host.redrawDialog('<ul><li>two</li></ul><input type="text" name="raise" value=""><button>x</button>');
+    expect(dialog.innerHTML).toContain('<li>two</li>');
+    expect(host.dialogValue('raise')).toBe('12.5');
+    expect(fake.focus.active).toBe(dialog.els[0] as ElementLike);
+  });
+
+  test('redrawDialog draws #dialog-body alone, so the confirm button a mousedown pressed is still there at its click', () => {
+    const { fake, dialog, host } = liveDialog();
+    const body = fake.live('dialog-body');
+    host.openDialog(
+      '<div id="dialog-body"><ul><li>one</li></ul><input class="num" type="number" name="raise" value=""></div><div class="dlg-acts"><button class="btn primary" data-action="dialog-confirm">resume</button></div>',
+    );
+    body.innerHTML = '<ul><li>one</li></ul><input class="num" type="number" name="raise" value="">';
+    const confirm = dialog.els.find((el) => el.dataset.action === 'dialog-confirm');
+    host.redrawDialog(
+      '<ul><li>raises the budget by $5.00</li></ul><input class="num" type="number" name="raise" value="">',
+    );
+    expect(body.innerHTML).toContain('<li>raises the budget by $5.00</li>');
+    expect(confirm).toBeDefined();
+    expect(dialog.els).toContain(confirm as LiveElement);
+  });
+
+  test('a change inside #dialog is the action dialog-change', () => {
+    const { fake, dialog, list, host } = liveDialog();
+    const got: [string, Record<string, string>][] = [];
+    host.onAction((action, data) => got.push([action, data]));
+    host.openDialog('<select name="stage"><option value="a">a</option></select>');
+    host.render('list', '<select name="other"><option value="a">a</option></select>');
+    fake.fire('change', { target: list.els[0] as ElementLike });
+    expect(got).toEqual([]);
+    fake.fire('change', { target: dialog.els[0] as ElementLike });
+    expect(got).toEqual([['dialog-change', {}]]);
+  });
 
   test('openDialog writes its markup into #dialog and calls showModal', () => {
     const { fake, calls, host } = dialogWindow();
@@ -1050,16 +1131,28 @@ describe('the list host members (ADW-522)', () => {
   });
 });
 
-describe('the URL parameters (ADW-522)', () => {
-  test('setParam rewrites the query through replaceState, keeping the other parameters and the path', () => {
-    const fake = fakeWindow({ search: '?repo=alpha&run=FAKE-2&view=active' });
-    browserHost(fake.win).setParam('view', 'history');
-    expect(fake.replaced).toEqual([{ state: null, title: '', url: '/dashboard?repo=alpha&run=FAKE-2&view=history' }]);
-  });
+test('setUrl pushes or replaces the history entry with the query, and writes the path for an empty one', () => {
+  const fake = fakeWindow();
+  const host = browserHost(fake.win);
+  host.setUrl('repo=a&run=b', true);
+  host.setUrl('repo=a', false);
+  host.setUrl('', false);
+  expect(fake.history).toEqual([
+    { kind: 'push', data: null, unused: '', url: '?repo=a&run=b' },
+    { kind: 'replace', data: null, unused: '', url: '?repo=a' },
+    { kind: 'replace', data: null, unused: '', url: '/' },
+  ]);
+});
 
-  test('setParam adds a parameter the URL lacks, and encodes its value', () => {
-    const fake = fakeWindow();
-    browserHost(fake.win).setParam('view', 'a b');
-    expect(fake.replaced.map((each) => each.url)).toEqual(['/dashboard?view=a+b']);
-  });
+test("href is the window's whole URL", () => {
+  expect(browserHost(fakeWindow().win).href()).toBe('http://127.0.0.1:4100/?repo=a');
+});
+
+test('onNavigate calls the handler with the query of a popstate, parsed as start() parses it', () => {
+  const fake = fakeWindow({ search: '?repo=beta' });
+  const asked: Record<string, string>[] = [];
+  browserHost(fake.win).onNavigate((query) => asked.push(query));
+  fake.location.search = '?repo=alpha&run=r';
+  for (const listener of fake.windowListeners.popstate ?? []) listener();
+  expect(asked).toEqual([{ repo: 'alpha', run: 'r' }]);
 });

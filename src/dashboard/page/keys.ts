@@ -8,6 +8,7 @@
 import { actions, closeAttention, step } from './actions';
 import { listRepos } from './index-model';
 import { entries, filterRows, groupsOf, type ListRow, VIEWS } from './list-model';
+import { syncUrl } from './location';
 import { closeFile, selectCard } from './reads';
 import type { Store } from './store';
 
@@ -65,7 +66,7 @@ export const keys: Record<string, (store: Store) => void> = {
     const { ui } = store;
     if (ui.runMenu !== undefined) {
       delete ui.runMenu;
-      store.mark('list');
+      store.mark('list', 'main');
     } else if (ui.itemMenu !== undefined) {
       delete ui.itemMenu;
       store.mark('main');
@@ -109,6 +110,7 @@ export function onKey(store: Store, key: string, inInput: boolean, on?: string):
   const by = MOVES[key];
   if (by === undefined) {
     keys[key]?.(store);
+    syncUrl(store, true);
     return key === '/';
   }
   if (!detailOpen(store)) {

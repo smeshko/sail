@@ -5,6 +5,7 @@
 
 import { actionOf } from './action-registry';
 import { VIEWS, type ViewName } from './list-model';
+import { syncUrl } from './location';
 import { closeFile, openedOutputKeys, openFile, readLog, readOutput, selectCard } from './reads';
 import { FILTER_KEY, LIST_KEY, THEME_KEY } from './saved';
 import type { Store } from './store';
@@ -115,7 +116,6 @@ export const actions: Record<string, Action> = {
   'select-view': (store, data) => {
     if (!(VIEWS as readonly string[]).includes(data.view ?? '')) return;
     store.ui.view = data.view as ViewName;
-    store.host.setParam('view', store.ui.view);
     store.ui.listFilter = '';
     delete store.ui.listCursor;
     // The filter field gives up what was typed in it, so it reads as empty as the filter now is.
@@ -147,32 +147,27 @@ export const actions: Record<string, Action> = {
     else store.ui.itemMenu = data.item;
     store.mark('main');
   },
-  // Ticking Stop now only records the tick: the dialog reads it at the click.
-  'stop-now': (store) => {
-    store.ui.act.drafts['stop-run'] = {
-      ...store.ui.act.drafts['stop-run'],
-      now: store.host.value('now') === 'on' ? 'on' : '',
-    };
-  },
   // A run's ⋯ opens it and its menu under its row; on the open menu's run, it shuts the menu.
   'run-menu': (store, data) => {
     const { repo, run: runId } = data;
     if (repo === undefined || runId === undefined) return;
+    const at = data.at === 'header' ? 'header' : 'row';
     // A dialog open for a run closes with nothing sent when its menu is toggled or another run's opened.
     if (store.actor.dialogFor()?.kind === 'run') store.actor.cancel();
     if (
-      store.ui.runMenu === runId &&
+      store.ui.runMenu?.runId === runId &&
+      store.ui.runMenu.at === at &&
       store.ui.queue === undefined &&
       store.run?.repo === repo &&
       store.run.runId === runId
     ) {
       delete store.ui.runMenu;
-      store.mark('list');
+      store.mark('list', 'main');
       return;
     }
     actions['select-run']?.(store, data);
-    store.ui.runMenu = runId;
-    store.mark('list');
+    store.ui.runMenu = { runId, at };
+    store.mark('list', 'main');
   },
   'toggle-queue-events': (store) => {
     store.ui.queueEvents = !store.ui.queueEvents;
@@ -203,6 +198,15 @@ export const actions: Record<string, Action> = {
     store.ui.follow = !store.ui.follow;
     store.mark('main', 'inspector');
   },
+  // Copies the page's URL, and says in a toast whether the clipboard took it.
+  'copy-link': (store) => {
+    const { host } = store;
+    void host.copy(host.href()).then((copied) => {
+      if (store.stopped) return;
+      if (copied) toast(store, 'ok', 'copy link', 'link copied');
+      else toast(store, 'bad', 'copy link', 'the link could not be copied');
+    });
+  },
   copy: (store, data) => {
     const { text } = data;
     if (text === undefined) return;
@@ -214,6 +218,8 @@ export const actions: Record<string, Action> = {
   },
   'dialog-confirm': (store) => store.actor.confirm(),
   'dialog-cancel': (store) => store.actor.cancel(),
+  // A field of the dialog changed: its lines follow it.
+  'dialog-change': (store) => store.actor.changed(),
   'dismiss-toast': (store, data) => dismissToast(store, Number(data.toast)),
   'undo-toast': (store, data) => undoToast(store, Number(data.toast)),
 };
@@ -225,9 +231,9 @@ export function dispatch(store: Store, action: string, data: Record<string, stri
   // item's confirmed action, whose dialog opens over it, and the dialog's own buttons. A run's menu shuts on any click
   // but a run action, a run's ⋯, which handles its own, and the dialog's buttons.
   const acts = def !== undefined;
-  const runAction = action === 'stop-now' || (def?.appliesTo.includes('run') ?? false);
+  const runAction = def?.appliesTo.includes('run') ?? false;
   const confirming = def?.appliesTo.includes('item') === true && def.tier === 'confirmed';
-  const dialogClick = action === 'dialog-confirm' || action === 'dialog-cancel';
+  const dialogClick = action === 'dialog-confirm' || action === 'dialog-cancel' || action === 'dialog-change';
   const shuts = ui.itemMenu !== undefined && action !== 'item-menu' && !confirming && !dialogClick;
   const shutsRun = ui.runMenu !== undefined && !runAction && action !== 'run-menu' && !dialogClick;
   if (shuts) delete ui.itemMenu;
@@ -235,4 +241,5 @@ export function dispatch(store: Store, action: string, data: Record<string, stri
   if (shuts || shutsRun) store.mark('main', 'list');
   if (acts) store.actor.act(action, data);
   else actions[action]?.(store, data);
+  syncUrl(store, true);
 }

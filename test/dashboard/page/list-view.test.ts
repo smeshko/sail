@@ -105,17 +105,35 @@ test('the open run draws its ⋯ menu under its row with the run controls, and t
   const offers = { stop: { now: true } } as never;
   const markup = draw(
     'active',
-    { repo: 'alpha', runId: 'a-run', runMenu: 'a-run', listCursor: 'run:alpha/a-run' },
+    { repo: 'alpha', runId: 'a-run', runMenu: { runId: 'a-run', at: 'row' as const }, listCursor: 'run:alpha/a-run' },
     offers,
   );
   expect(markup).toContain('class="run lrow sel cur" data-row="run:alpha/a-run"');
   expect(markup).toContain(
     'data-action="run-menu" data-repo="alpha" data-run="a-run" aria-label="actions for a-run" aria-expanded="true"',
   );
-  expect(markup).toMatch(/<\/div><div class="r-menu"><div class="acts">/);
+  expect(markup).toMatch(/<\/button><div class="r-menu"><div class="acts">/);
   expect(markup.match(/ cur"/g)).toHaveLength(1);
-  const reading = draw('active', { repo: 'alpha', runId: 'a-run', runMenu: 'a-run' });
+  const reading = draw('active', { repo: 'alpha', runId: 'a-run', runMenu: { runId: 'a-run', at: 'row' as const } });
   expect(reading).toContain('<div class="r-menu"><span class="act-why">reading what the run offers…</span></div>');
+});
+
+test("a run's menu opened from its header draws no row menu, and the row's ⋯ stays shut", () => {
+  const markup = draw('active', { repo: 'alpha', runId: 'a-run', runMenu: { runId: 'a-run', at: 'header' as const } }, {
+    stop: { now: true },
+  } as never);
+  expect(markup).not.toContain('class="r-menu"');
+  expect(markup).toContain('aria-expanded="false"');
+});
+
+test("a row's menu is drawn inside its row", () => {
+  const markup = draw('active', { repo: 'alpha', runId: 'a-run', runMenu: { runId: 'a-run', at: 'row' as const } }, {
+    stop: { now: true },
+  } as never);
+  const row = markup.slice(markup.indexOf('data-row="run:alpha/a-run"'));
+  expect(row).toContain('</button><div class="r-menu"><div class="acts"><span class="act">');
+  expect(row).toContain('<button class="btn" disabled>stop</button>');
+  expect(row).not.toContain('</div><div class="r-menu">');
 });
 
 test('a completed run has no ⋯', () => {

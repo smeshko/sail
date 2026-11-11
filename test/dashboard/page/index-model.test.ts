@@ -110,6 +110,8 @@ test("queuePanels gives beta's queue with its counts and its items by state, and
     'sail',
   ]);
   expect(panel?.counts).toEqual({ queued: 1, dispatched: 1, failed: 0, parked: 1, done: 1 });
+  expect(panel?.repoOffers).toEqual(index(m.registryDir).find((repo) => repo.name === 'beta')?.offers);
+  expect(panel?.repoOffers?.workflows[QUEUE_WORKFLOW]?.watch?.enabled).toBe(true);
   expect(panel?.items.map((item) => [item.dedupKey, item.state, item.runListed])).toEqual([
     ['ticket:FAKE-3', 'dispatched', true],
     ['ticket:FAKE-5', 'queued', false],
