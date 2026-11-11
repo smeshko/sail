@@ -1453,9 +1453,13 @@
           radial-gradient(farthest-side at 50% 100%, var(--line-2), transparent) center bottom / 100% 10px no-repeat
             scroll;
       }
-      .cmdk-rows {
+      .cmdk-rows,
+      .cmdk-group {
         display: flex;
         flex-direction: column;
+      }
+      .cmdk-group {
+        flex-shrink: 0;
       }
       .cmdk-subj {
         align-self: flex-start;

@@ -57,7 +57,7 @@ export interface PageHost {
   onInput(handler: (name: string, value: string) => void): void;
   /** Focuses the field named `name`, in whichever region draws it. */
   focus(name: string): void;
-  /** Focuses the command menu's field, else the menu itself, remembering what had the focus for when it closes. */
+  /** Focuses the command menu's field, else its focusable listbox, else the menu itself, remembering what had the focus for when it closes. */
   focusMenu(): void;
   /** Takes the focus off the focused element. */
   blur(): void;
@@ -406,7 +406,11 @@ export function browserHost(win: BrowserWindow): PageHost {
   };
   const menuTarget = () => {
     const menu = doc.getElementById('menu');
-    return menu?.querySelector?.('[name="menu-query"]') ?? menu?.querySelector?.('.cmdk');
+    return (
+      menu?.querySelector?.('[name="menu-query"]') ??
+      menu?.querySelector?.('.cmdk-rows[tabindex]') ??
+      menu?.querySelector?.('.cmdk')
+    );
   };
   /** Moves on a focus the write of `region` took away, from the row it was in, if any. */
   const moveOn = (region: Region, element: ElementLike, markup: string, row: ReturnType<typeof rowAround>) => {

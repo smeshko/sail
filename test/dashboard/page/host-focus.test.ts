@@ -148,6 +148,8 @@ const ROWS = (...ids: string[]) =>
     .join('');
 const MENU =
   '<div class="cmdk" tabindex="-1"><input class="cmdk-in" name="menu-query"><button data-action="menu-run" data-row="0">x</button></div>';
+const LISTBOX =
+  '<div class="cmdk ctx" tabindex="-1"><div class="cmdk-rows" id="cmdk-rows" role="listbox" tabindex="-1"><button data-action="menu-run" data-row="0">x</button></div></div>';
 const SHEET = '<div class="cmdk keys" tabindex="-1">keys</div>';
 
 describe('audit 2: overlays behave (ADW-542)', () => {
@@ -172,6 +174,19 @@ describe('audit 2: overlays behave (ADW-542)', () => {
     expect(state.active).toBe(find('menu', '.cmdk'));
     host.render('menu', `${SHEET}<i></i>`);
     expect(state.active).toBe(find('menu', '.cmdk'));
+    host.render('menu', '');
+    expect(state.active).toBe(find('list', '.r-open[data-run="a"]'));
+  });
+
+  test('a menu with no field focuses its listbox, on open and after a redraw, and gives the focus back on close (ADW-547)', () => {
+    const { host, state, find } = fakeDom();
+    host.render('list', ROWS('a'));
+    find('list', '.r-open[data-run="a"]').focus?.();
+    host.render('menu', LISTBOX);
+    host.focusMenu();
+    expect(state.active).toBe(find('menu', '.cmdk-rows'));
+    host.render('menu', `${LISTBOX}<i></i>`);
+    expect(state.active).toBe(find('menu', '.cmdk-rows'));
     host.render('menu', '');
     expect(state.active).toBe(find('list', '.r-open[data-run="a"]'));
   });
