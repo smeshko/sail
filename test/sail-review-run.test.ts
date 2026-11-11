@@ -1015,7 +1015,7 @@ test('review-tests is asked for medium and high findings only', async () => {
   });
 }, 120_000);
 
-test('each reviewer runs on its model: architecture and bugs on Opus, requirements, tests and security on Sonnet, conventions on Haiku', async () => {
+test('each reviewer runs on its model: architecture and bugs on the frontier model, requirements, tests and security on Sonnet, conventions on Haiku', async () => {
   await withTempRepo(async (repo) => {
     setUp(repo);
     const { code, stderr, dir } = await review(repo);
@@ -1028,8 +1028,8 @@ test('each reviewer runs on its model: architecture and bugs on Opus, requiremen
     }
     expect(models).toEqual({
       'review-requirements': 'claude-sonnet-5-5',
-      'review-architecture': 'claude-opus-5-5',
-      'review-bugs': 'claude-opus-5-5',
+      'review-architecture': 'claude-fable-5-2',
+      'review-bugs': 'claude-fable-5-2',
       'review-tests': 'claude-sonnet-5-5',
       'review-security': 'claude-sonnet-5-5',
       'review-conventions': 'claude-haiku-5-5',
