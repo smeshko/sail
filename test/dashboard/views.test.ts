@@ -41,6 +41,7 @@ test('the committed dashboard views are what the fixtures render now', async () 
     'queue-watched.html',
     'menu-item.html',
     'run-golden.html',
+    'list-menu-golden.html',
     'run-fake-2.html',
     'list-menu-fake-2.html',
     'dialog-clean.html',
@@ -49,6 +50,7 @@ test('the committed dashboard views are what the fixtures render now', async () 
     'run-fake-3.html',
     'list-menu-fake-3.html',
     'run-review.html',
+    'list-menu-review.html',
     'toasts.html',
     'inspector-fake-2-implement-1-permissions.html',
     'inspector-golden-implement-2-overview.html',
@@ -88,8 +90,14 @@ test('a view changed by one byte is named as stale, and so is one missing', asyn
   ]);
 });
 
-test('no golden view holds a checkbox', () => {
+test("no golden view holds a checkbox but Restart's dialog, which holds its two ticks, unticked", () => {
   const files = filesIn(COMMITTED);
   expect(files.length).toBeGreaterThan(20);
-  expect(files.filter((file) => readFileSync(join(COMMITTED, file), 'utf8').includes('type="checkbox"'))).toEqual([]);
+  expect(files.filter((file) => readFileSync(join(COMMITTED, file), 'utf8').includes('type="checkbox"'))).toEqual([
+    'dialog-restart.html',
+  ]);
+  const dialog = readFileSync(join(COMMITTED, 'dialog-restart.html'), 'utf8');
+  expect(dialog).toContain('<input type="checkbox" name="only"> this stage only');
+  expect(dialog).toContain('<input type="checkbox" name="base"> from the base');
+  expect(dialog).not.toContain('checked');
 });
