@@ -692,6 +692,60 @@ describe('the confirmation dialog', () => {
     return { fake, calls, list, host: browserHost(fake.win) };
   };
 
+  /** A live `#dialog`, which shows modally and closes as a browser's does. */
+  const liveDialog = () => {
+    const fake = fakeWindow();
+    /** A `[name="x"]` lookup over a live region's fields, as a browser answers it. */
+    const named = (region: ReturnType<typeof liveRegion>) => {
+      region.querySelector = (selectors: string) => {
+        const match = /^\[name="([^"]*)"\]$/.exec(selectors);
+        return match === null ? null : (region.els.find((el) => el.attributes.name === match[1]) ?? null);
+      };
+      return region;
+    };
+    const dialog = named(fake.live('dialog'));
+    dialog.showModal = () => {};
+    dialog.close = () => {};
+    const list = named(fake.live('list'));
+    return { fake, dialog, list, host: browserHost(fake.win) };
+  };
+
+  test('dialogValue reads a field of #dialog alone', () => {
+    const { dialog, list, host } = liveDialog();
+    host.render('list', '<input name="raise" value="from the list">');
+    expect(host.dialogValue('raise')).toBeUndefined();
+    host.openDialog('<input class="num" type="number" name="raise" value="5">');
+    expect(host.dialogValue('raise')).toBe('5');
+    expect(host.dialogValue('stage')).toBeUndefined();
+    (dialog.els[0] as ElementLike).value = '7';
+    expect(host.dialogValue('raise')).toBe('7');
+    expect(list.els[0]?.value).toBe('from the list');
+  });
+
+  test('redrawDialog keeps the typed value and the focus', () => {
+    const { fake, dialog, host } = liveDialog();
+    host.openDialog('<ul><li>one</li></ul><input type="text" name="raise" value=""><button>x</button>');
+    const typed = dialog.els[0] as ElementLike;
+    typed.value = '12.5';
+    typed.focus?.();
+    host.redrawDialog('<ul><li>two</li></ul><input type="text" name="raise" value=""><button>x</button>');
+    expect(dialog.innerHTML).toContain('<li>two</li>');
+    expect(host.dialogValue('raise')).toBe('12.5');
+    expect(fake.focus.active).toBe(dialog.els[0] as ElementLike);
+  });
+
+  test('a change inside #dialog is the action dialog-change', () => {
+    const { fake, dialog, list, host } = liveDialog();
+    const got: [string, Record<string, string>][] = [];
+    host.onAction((action, data) => got.push([action, data]));
+    host.openDialog('<select name="stage"><option value="a">a</option></select>');
+    host.render('list', '<select name="other"><option value="a">a</option></select>');
+    fake.fire('change', { target: list.els[0] as ElementLike });
+    expect(got).toEqual([]);
+    fake.fire('change', { target: dialog.els[0] as ElementLike });
+    expect(got).toEqual([['dialog-change', {}]]);
+  });
+
   test('openDialog writes its markup into #dialog and calls showModal', () => {
     const { fake, calls, host } = dialogWindow();
     host.openDialog('<h2 id="dialog-title">clean R1</h2>');

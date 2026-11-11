@@ -43,11 +43,15 @@ export interface PageHost {
   reveal(region: Region): void;
   /**
    * Opens the confirmation dialog with `html`, modal, and remembers what had the focus. A close the browser makes
-   * itself reaches the action handler as `dialog-cancel`.
+   * itself reaches the action handler as `dialog-cancel`, and a `change` of a field inside it as `dialog-change`.
    */
   openDialog(html: string): void;
   /** Closes the dialog and gives the focus back to what had it at the open. */
   closeDialog(): void;
+  /** Draws `html` into the open dialog as `render()` draws a region, keeping its focus, field values and caret. */
+  redrawDialog(html: string): void;
+  /** The current value of the field named `name` inside the dialog alone, or undefined when it holds none. A checkbox reads as `value()` reads it. */
+  dialogValue(name: string): string | undefined;
   /** A GET of `path` on the dashboard, with the client header. A failed request answers status 0. */
   get(path: string): Promise<{ status: number; body: string }>;
   /** A POST of `body` as JSON to `path`, with the client header. A failed request answers status 0. */
@@ -249,81 +253,84 @@ export function browserHost(win: BrowserWindow): PageHost {
     for (const [name, value] of Object.entries(element.dataset)) if (value !== undefined) data[name] = value;
     onAction(data.action ?? '', data);
   };
+  /** Draws `markup` into `element`, keeping its focus, field values, caret and scrolled boxes unless `fresh`. */
+  const draw = (element: ElementLike, markup: string, fresh: boolean) => {
+    // The focus: the key of the focused element of this region, and its place among the ones with that key.
+    let focused: { key: string; place: number } | undefined;
+    const active = doc.activeElement;
+    if (active !== null && active !== undefined && element.contains?.(active) === true) {
+      const key = focusKey(active);
+      const place = key === undefined ? -1 : keyed(element, key).indexOf(active);
+      if (key !== undefined && place >= 0) focused = { key, place };
+    }
+    // The fields: what each held, and the focused one's selection.
+    const held: Held[] = [];
+    let selection: { start: number | null; end: number | null; direction: string | null } | undefined;
+    if (!fresh) {
+      for (const { field, name, place } of namedFields(element)) {
+        held.push(
+          isTick(field) ? { name, place, checked: field.checked === true } : { name, place, value: field.value },
+        );
+      }
+      if (focused !== undefined && active !== null && active !== undefined && active.name !== undefined)
+        selection = {
+          start: active.selectionStart ?? null,
+          end: active.selectionEnd ?? null,
+          direction: active.selectionDirection ?? null,
+        };
+    }
+    const scrolled = new Map<string, number>();
+    for (const box of Array.from(element.querySelectorAll?.('[data-scroll]') ?? [])) {
+      const key = box.dataset.scroll;
+      if (key !== undefined && (box.scrollTop ?? 0) > 0) scrolled.set(key, box.scrollTop ?? 0);
+    }
+    element.innerHTML = markup;
+    if (scrolled.size > 0) {
+      for (const box of Array.from(element.querySelectorAll?.('[data-scroll]') ?? [])) {
+        const offset = scrolled.get(box.dataset.scroll ?? '');
+        if (offset !== undefined) box.scrollTop = offset;
+      }
+    }
+    if (held.length > 0) {
+      const fields = namedFields(element);
+      for (const keep of held) {
+        const target = fields.find((entry) => entry.name === keep.name && entry.place === keep.place)?.field;
+        if (target === undefined) continue;
+        if (keep.checked !== undefined) target.checked = keep.checked;
+        else if (keep.value !== undefined) {
+          // A value that didn't take, a select without that option, leaves the markup's choice.
+          const given = target.value;
+          target.value = keep.value;
+          if (target.value !== keep.value && given !== undefined) target.value = given;
+        }
+      }
+    }
+    if (focused !== undefined) {
+      const found = keyed(element, focused.key);
+      const target = found[Math.min(focused.place, found.length - 1)];
+      target?.focus?.({ preventScroll: true });
+      if (target !== undefined && selection !== undefined) {
+        if (typeof selection.start === 'number' && typeof selection.end === 'number') {
+          try {
+            target.setSelectionRange?.(selection.start, selection.end, selection.direction ?? undefined);
+          } catch {
+            // A field with no selection leaves its caret where the assignment put it.
+          }
+        } else if (selection.start === null && target.tagName === 'INPUT' && !isTick(target)) {
+          // A number field reports no selection: assigning its value again leaves the caret at its end.
+          const value = target.value;
+          if (value !== undefined) {
+            target.value = '';
+            target.value = value;
+          }
+        }
+      }
+    }
+  };
   return {
     render(region, markup, fresh = false) {
       const element = doc.getElementById(region);
-      if (element === null) return;
-      // The focus: the key of the focused element of this region, and its place among the ones with that key.
-      let focused: { key: string; place: number } | undefined;
-      const active = doc.activeElement;
-      if (active !== null && active !== undefined && element.contains?.(active) === true) {
-        const key = focusKey(active);
-        const place = key === undefined ? -1 : keyed(element, key).indexOf(active);
-        if (key !== undefined && place >= 0) focused = { key, place };
-      }
-      // The fields: what each held, and the focused one's selection.
-      const held: Held[] = [];
-      let selection: { start: number | null; end: number | null; direction: string | null } | undefined;
-      if (!fresh) {
-        for (const { field, name, place } of namedFields(element)) {
-          held.push(
-            isTick(field) ? { name, place, checked: field.checked === true } : { name, place, value: field.value },
-          );
-        }
-        if (focused !== undefined && active !== null && active !== undefined && active.name !== undefined)
-          selection = {
-            start: active.selectionStart ?? null,
-            end: active.selectionEnd ?? null,
-            direction: active.selectionDirection ?? null,
-          };
-      }
-      const scrolled = new Map<string, number>();
-      for (const box of Array.from(element.querySelectorAll?.('[data-scroll]') ?? [])) {
-        const key = box.dataset.scroll;
-        if (key !== undefined && (box.scrollTop ?? 0) > 0) scrolled.set(key, box.scrollTop ?? 0);
-      }
-      element.innerHTML = markup;
-      if (scrolled.size > 0) {
-        for (const box of Array.from(element.querySelectorAll?.('[data-scroll]') ?? [])) {
-          const offset = scrolled.get(box.dataset.scroll ?? '');
-          if (offset !== undefined) box.scrollTop = offset;
-        }
-      }
-      if (held.length > 0) {
-        const fields = namedFields(element);
-        for (const keep of held) {
-          const target = fields.find((entry) => entry.name === keep.name && entry.place === keep.place)?.field;
-          if (target === undefined) continue;
-          if (keep.checked !== undefined) target.checked = keep.checked;
-          else if (keep.value !== undefined) {
-            // A value that didn't take, a select without that option, leaves the markup's choice.
-            const given = target.value;
-            target.value = keep.value;
-            if (target.value !== keep.value && given !== undefined) target.value = given;
-          }
-        }
-      }
-      if (focused !== undefined) {
-        const found = keyed(element, focused.key);
-        const target = found[Math.min(focused.place, found.length - 1)];
-        target?.focus?.({ preventScroll: true });
-        if (target !== undefined && selection !== undefined) {
-          if (typeof selection.start === 'number' && typeof selection.end === 'number') {
-            try {
-              target.setSelectionRange?.(selection.start, selection.end, selection.direction ?? undefined);
-            } catch {
-              // A field with no selection leaves its caret where the assignment put it.
-            }
-          } else if (selection.start === null && target.tagName === 'INPUT' && !isTick(target)) {
-            // A number field reports no selection: assigning its value again leaves the caret at its end.
-            const value = target.value;
-            if (value !== undefined) {
-              target.value = '';
-              target.value = value;
-            }
-          }
-        }
-      }
+      if (element !== null) draw(element, markup, fresh);
     },
     openDialog(markup) {
       const dialog = doc.getElementById('dialog');
@@ -354,6 +361,16 @@ export function browserHost(win: BrowserWindow): PageHost {
         }
       }
     },
+    redrawDialog(markup) {
+      const dialog = doc.getElementById('dialog');
+      if (dialog !== null) draw(dialog, markup, false);
+    },
+    dialogValue(name) {
+      const field = doc.getElementById('dialog')?.querySelector?.(`[name="${name}"]`);
+      if (field === null || field === undefined) return undefined;
+      if (field.type === 'checkbox') return field.checked === true ? 'on' : '';
+      return field.value ?? undefined;
+    },
     scrollToEnd(region) {
       const box = doc.getElementById(region)?.parentElement;
       if (box !== null && box !== undefined) box.scrollTop = box.scrollHeight ?? 0;
@@ -363,6 +380,12 @@ export function browserHost(win: BrowserWindow): PageHost {
       doc.addEventListener('click', (event) => {
         const element = actionOf(event.target);
         if (element !== undefined) fire(element);
+      });
+      // A field of the confirmation dialog changed: the page draws its lines again.
+      doc.addEventListener('change', (event) => {
+        const dialog = doc.getElementById('dialog');
+        if (dialog !== null && isElement(event.target) && dialog.contains?.(event.target) === true)
+          onAction('dialog-change', {});
       });
     },
     onInput(handler) {

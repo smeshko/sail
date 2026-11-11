@@ -94,6 +94,16 @@ class FakeHost implements PageHost {
     this.dialog = undefined;
     this.dialogCloses++;
   }
+  /** The values of the dialog's fields, by name, and how many times the dialog was drawn again. */
+  dialogFields: Record<string, string> = {};
+  dialogRedraws = 0;
+  dialogValue(name: string) {
+    return this.dialogFields[name];
+  }
+  redrawDialog(html: string) {
+    this.dialog = html;
+    this.dialogRedraws++;
+  }
   /** The reads of a run's actions: answered at once, and kept apart from the reads of its calls. */
   actionReads: string[] = [];
   get(path: string) {
