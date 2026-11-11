@@ -31,6 +31,7 @@ import {
 } from './store';
 import { renderTimeline } from './timeline-view';
 import { renderToasts } from './toast-view';
+import { topButton } from './top-bar';
 
 /** How often a running time is drawn again. */
 export const TICK_MS = 1000;
@@ -60,9 +61,7 @@ export function regions(store: Store): Record<Region, () => string> {
           : [];
       return renderList(ui.view, repos, ui, host.now(), store.offers, items).value;
     },
-    link: () =>
-      html`<button class="btn" type="button" data-action="copy-link" aria-label="copy link" title="copy link">⧉</button>`
-        .value,
+    link: () => topButton('copy-link').value,
     main: () => {
       const panel = openQueue(store);
       if (panel !== undefined) {

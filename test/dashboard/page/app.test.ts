@@ -3992,7 +3992,7 @@ test('Enter on a go-to row pushes the URL of what it opened, and a key that chan
   expect(host.urls).toEqual([]);
 });
 
-test('Enter on switch theme changes the theme and on toggle inspector the inspector, and Enter on a disabled row does nothing', async () => {
+test('Enter on switch theme changes the theme and on pin inspector the inspector, and Enter on a disabled row does nothing', async () => {
   await openRunPage(FAKE_2_ID);
   cmdK();
   host.type('menu-query', 'switch theme');
@@ -4000,7 +4000,7 @@ test('Enter on switch theme changes the theme and on toggle inspector the inspec
   host.press('Enter', true);
   expect(page?.ui.theme).toBe('light');
   cmdK();
-  host.type('menu-query', 'toggle inspector');
+  host.type('menu-query', 'pin inspector');
   host.advance(100);
   host.press('Enter', true);
   expect(page?.ui.pinned).toBe(true);

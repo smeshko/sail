@@ -97,10 +97,16 @@ test('the page starts with the inspector closed and unpinned (ADW-528)', () => {
 });
 
 test('the theme and inspector buttons carry an aria-label beside their title (ADW-508)', () => {
-  expect(html).toContain('data-action="toggle-theme" aria-label="switch theme" title="theme"');
+  expect(html).toContain('data-action="toggle-theme" aria-label="switch theme" title="switch theme"');
   expect(html).toContain(
-    'data-action="toggle-inspector" aria-label="pin inspector" aria-pressed="false" title="pin the inspector (i)"',
+    'data-action="toggle-inspector" aria-label="pin inspector" aria-pressed="false" title="pin inspector (I)"',
   );
+});
+
+test('the pinned inspector toggle is drawn in the focus colour, not the error colour (ADW-548)', () => {
+  const rule = rules().find(([sel]) => sel === ':root[data-pinned="true"] [data-action="toggle-inspector"]');
+  expect(rule?.[1]).toContain('border-color: var(--focus)');
+  expect(rule?.[1]).not.toContain('--err');
 });
 
 test('--focus is at least 3:1 on every surface in each theme block (ADW-508)', () => {

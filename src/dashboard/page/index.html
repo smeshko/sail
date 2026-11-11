@@ -240,6 +240,16 @@
         border-color: var(--line-2);
         color: var(--fg);
       }
+      .btn .ico {
+        display: block;
+        width: 14px;
+        height: 14px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.5;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
       .btn[disabled] {
         opacity: 0.5;
         cursor: not-allowed;
@@ -1056,7 +1066,7 @@
         border-left-color: var(--run);
       }
       :root[data-pinned="true"] [data-action="toggle-inspector"] {
-        border-color: var(--err);
+        border-color: var(--focus);
         color: var(--fg);
       }
       .in-failed,
@@ -2525,12 +2535,12 @@
   <body>
     <div class="shell">
       <header class="top">
-        <button class="btn sidebar-btn" type="button" data-action="toggle-sidebar" aria-label="sidebar" title="sidebar">☰</button>
+        <button class="btn sidebar-btn" type="button" data-action="toggle-sidebar" aria-label="sidebar" title="sidebar"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 3h12v10H2zM6 3v10"/></svg></button>
         <div class="brand"><i></i><span class="brand-t">sail dashboard</span></div>
         <div class="spacer"></div>
         <div id="link"></div>
-        <button class="btn" type="button" data-action="toggle-theme" aria-label="switch theme" title="theme">◐</button>
-        <button id="pin-inspector" class="btn" type="button" data-action="toggle-inspector" aria-label="pin inspector" aria-pressed="false" title="pin the inspector (i)">⇥</button>
+        <button class="btn" type="button" data-action="toggle-theme" aria-label="switch theme" title="switch theme"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5zM8 1.5V3M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1 1M11.6 11.6l1 1M3.4 12.6l1-1M11.6 4.4l1-1"/></svg></button>
+        <button id="pin-inspector" class="btn" type="button" data-action="toggle-inspector" aria-label="pin inspector" aria-pressed="false" title="pin inspector (I)"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 3h12v10H2zM10 3v10"/></svg></button>
       </header>
       <div class="body" id="body">
         <nav class="side">

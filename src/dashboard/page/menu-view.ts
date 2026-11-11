@@ -8,6 +8,7 @@ import { html, type SafeHtml } from './html';
 import { type IconName, icon } from './icons';
 import { keyLabel } from './keymap';
 import type { MenuModel, MenuRow } from './menu-model';
+import { VIEW_ACTIONS, type ViewAction } from './top-bar';
 import { type MenuState, pillOf } from './ui-state';
 
 const HEADINGS: Partial<Record<MenuRow['group'], string>> = { goto: 'go to', general: 'general' };
@@ -37,7 +38,7 @@ const BY_KIND: Record<string, IconName> = { run: 'run', item: 'ticket', workflow
 export function iconOf(run: MenuRow['run']): IconName {
   if ('act' in run) return BY_ACTION.find(([word]) => run.act.includes(word))?.[1] ?? 'arrow';
   if ('goto' in run) return BY_KIND[run.goto.kind] ?? 'arrow';
-  if ('view' in run) return run.view === 'toggle-theme' ? 'sun' : run.view === 'toggle-inspector' ? 'panel' : 'arrow';
+  if ('view' in run) return (VIEW_ACTIONS as Record<string, ViewAction | undefined>)[run.view]?.icon ?? 'arrow';
   if ('pollAll' in run) return 'refresh';
   if ('pick' in run) return BY_ACTION.find(([word]) => run.pick.includes(word))?.[1] ?? 'plus';
   if ('repo' in run) return 'folder';
