@@ -210,6 +210,63 @@ test('a run whose header or summary source is a pull request carries its number,
   expect([byId('ticket-1')?.pr, byId('ticket-1')?.ticketKey]).toEqual([undefined, 'FAKE-9']);
 });
 
+test("a run's title is its summary's ticket's, else the one its intake wrote, else its queue item's, and blank ones are passed over (ADW-550)", () => {
+  const pr = (number: number) => ({ kind: 'pr', number, headSha: 'abc1234', via: 'watch', forced: [] });
+  const [alpha] = index(m.registryDir);
+  if (alpha === undefined) throw new Error('no alpha');
+  const golden = alpha.runs[0];
+  const run = (runId: string, extra: Record<string, unknown>) =>
+    ({ runId, status: { status: 'running' }, summary: null, source: pr(12), ...extra }) as unknown as NonNullable<
+      typeof golden
+    >;
+  const item = (runId: string | undefined, title: string) => ({
+    dedupKey: `pr:12@${title}`,
+    source: { kind: 'pr', number: 12, headSha: 'abc1234', branch: 'b' },
+    title,
+    url: 'https://example.test/pull/12',
+    state: runId === undefined ? 'queued' : 'dispatched',
+    attempts: 1,
+    addedAt: '2026-10-01T00:00:00.000Z',
+    ...(runId === undefined ? {} : { runId }),
+  });
+  const queues = [
+    {
+      workflow: 'review',
+      watch: { state: 'watched' },
+      queue: {
+        items: [
+          item(undefined, 'waits'),
+          item('pr-young', 'from its queue item'),
+          item('pr-read', 'queue'),
+          item('summarised', 'queue'),
+        ],
+      },
+    },
+  ] as unknown as typeof alpha.queues;
+  const repo = {
+    ...alpha,
+    queues,
+    runs: [
+      run('pr-young', {}),
+      run('pr-read', { title: 'from its pr.json' }),
+      run('pr-blank', { title: ' ' }),
+      run('pr-none', {}),
+      run('summarised', { summary: golden?.summary, source: golden?.source, title: 'intake' }),
+    ],
+  };
+  const titles = Object.fromEntries((listRepos([repo], NOW)[0]?.runs ?? []).map((each) => [each.runId, each.title]));
+  expect(titles).toEqual({
+    'pr-young': 'from its queue item',
+    'pr-read': 'from its pr.json',
+    'pr-blank': undefined,
+    'pr-none': undefined,
+    summarised: golden?.summary?.ticket?.title,
+  });
+  expect(golden?.summary?.ticket?.title).toBeTruthy();
+  const young = listRepos([repo], NOW)[0]?.runs.find((each) => each.runId === 'pr-none');
+  expect(young && 'title' in young).toBe(false);
+});
+
 /** The list's beta when its index entry carries `watching`, and its queue views' `watch` as `watch` says. */
 function betaList(watching?: { pid: number; workflows: string[] }, watch?: QueueWatch) {
   const repos = index(m.registryDir).map((repo) =>

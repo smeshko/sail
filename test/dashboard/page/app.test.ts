@@ -3149,7 +3149,9 @@ test('Stop opens the dialog on a first click and posts nothing; its confirm post
   host.click({ action: 'dialog-confirm' });
   host.advance(100);
   expect(host.regions.list).toContain('<span class="busy">stopping…</span>');
-  expect(host.regions.list).not.toMatch(new RegExp(`<span class="st [^"]*"></span><span class="r-id">${FAKE_3_ID}`));
+  expect(host.regions.list).not.toMatch(
+    new RegExp(`data-run="${FAKE_3_ID}"><span class="r-line"><span class="st [^"]*"></span>`),
+  );
   await settle();
   host.advance(100);
   expect(host.posts).toEqual([{ path: `${FAKE_3_PATH}/stop`, body: { now: false } }]);
