@@ -186,6 +186,8 @@ export interface BrowserWindow {
   Date: { new (): { getTimezoneOffset(): number }; now(): number };
   /** Optional, so a window without it reads as wide. */
   matchMedia?(query: string): { matches: boolean };
+  /** Optional, so a window without it reads as wide. */
+  innerWidth?: number;
 }
 
 const isElement = (value: unknown): value is ElementLike =>
@@ -259,27 +261,59 @@ const keyed = (root: ElementLike, key: string) =>
 
 const INPUTS = new Set(['INPUT', 'TEXTAREA', 'SELECT']);
 
-/** How wide each resizable column may be, and its CSS variable. */
-const COLUMNS: Record<string, { variable: string; min: number; max: number; start: number; sign: number }> = {
-  left: { variable: '--side-w', min: 140, max: 480, start: 180, sign: 1 },
-  right: { variable: '--ins-w', min: 240, max: 640, start: 360, sign: -1 },
-};
+type Side = 'left' | 'right';
 
-/** Drags the column of a `data-resize` handle, which sets its CSS variable on `#body`. */
-function installResize(win: BrowserWindow): void {
+/**
+ * How wide each resizable column may be, the window width from which it is a column of the grid, and its CSS variable:
+ * the sidebar is one from 800px, the open inspector from 1100px.
+ */
+const COLUMNS: Record<Side, { variable: string; min: number; max: number; start: number; sign: number; from: number }> =
+  {
+    left: { variable: '--side-w', min: 140, max: 480, start: 180, sign: 1, from: 800 },
+    right: { variable: '--ins-w', min: 240, max: 640, start: 360, sign: -1, from: 1100 },
+  };
+/** The grid's resize handle width and the centre's floor, as `index.html` lays them out. */
+const HANDLE = 5;
+const CENTRE_MIN = 320;
+
+/**
+ * Drags the column of a `data-resize` handle, which sets its CSS variable on `#body`, never so wide that the centre falls
+ * under its floor and the grid runs past the window (ADW-536). Answers the re-clamp a window resize runs, the inspector
+ * first, for a change of layout the window doesn't announce, such as the inspector opening.
+ */
+function installResize(win: BrowserWindow): () => void {
   const doc = win.document;
-  const widths: Record<string, number> = { left: COLUMNS.left?.start ?? 0, right: COLUMNS.right?.start ?? 0 };
+  const widths: Record<Side, number> = { left: COLUMNS.left.start, right: COLUMNS.right.start };
+  /** Whether `side` takes a column of the grid at the window's width; a window that gives none reads as wide. */
+  const inGrid = (side: Side) =>
+    (win.innerWidth ?? Number.POSITIVE_INFINITY) >= COLUMNS[side].from &&
+    (side === 'left' || doc.documentElement.dataset.inspector === 'open');
+  /** The widest `side` may be: its fixed maximum, or what the window leaves beside the other column, the handles in the grid and the centre's floor, never under its minimum. */
+  const widest = (side: Side) => {
+    const column = COLUMNS[side];
+    const width = win.innerWidth;
+    if (width === undefined || !inGrid(side)) return column.max;
+    const other: Side = side === 'left' ? 'right' : 'left';
+    const beside = inGrid(other) ? widths[other] + HANDLE : 0;
+    return Math.max(column.min, Math.min(column.max, width - beside - HANDLE - CENTRE_MIN));
+  };
+  const set = (side: Side, width: number) => {
+    widths[side] = width;
+    doc.getElementById('body')?.style?.setProperty(COLUMNS[side].variable, `${width}px`);
+  };
+  const fit = () => {
+    for (const side of ['right', 'left'] as const) if (widths[side] > widest(side)) set(side, widest(side));
+  };
+  win.addEventListener('resize', fit);
   doc.addEventListener('mousedown', (down) => {
     const side = isElement(down.target) ? down.target.dataset.resize : undefined;
-    const column = side === undefined ? undefined : COLUMNS[side];
-    if (side === undefined || column === undefined) return;
+    if (side !== 'left' && side !== 'right') return;
+    const column = COLUMNS[side];
     down.preventDefault?.();
     const from = down.clientX ?? 0;
-    const start = widths[side] ?? column.start;
+    const start = widths[side];
     const move = (event: EventLike) => {
-      const width = Math.max(column.min, Math.min(column.max, start + column.sign * ((event.clientX ?? from) - from)));
-      widths[side] = width;
-      doc.getElementById('body')?.style?.setProperty(column.variable, `${width}px`);
+      set(side, Math.max(column.min, Math.min(widest(side), start + column.sign * ((event.clientX ?? from) - from))));
     };
     const up = () => {
       doc.removeEventListener('mousemove', move);
@@ -288,12 +322,13 @@ function installResize(win: BrowserWindow): void {
     doc.addEventListener('mousemove', move);
     doc.addEventListener('mouseup', up);
   });
+  return fit;
 }
 
 /** A real window as a `PageHost`. */
 export function browserHost(win: BrowserWindow): PageHost {
   const doc = win.document;
-  installResize(win);
+  const fitColumns = installResize(win);
   /** The focus key of what had the focus when the dialog opened. */
   let opener: string | undefined;
   let onAction: (action: string, data: Record<string, string>) => void = () => {};
@@ -597,6 +632,8 @@ export function browserHost(win: BrowserWindow): PageHost {
     setInspector(open, pinned) {
       doc.documentElement.dataset.inspector = open ? 'open' : 'closed';
       doc.documentElement.dataset.pinned = pinned ? 'true' : 'false';
+      // An inspector that opens beside a sidebar dragged wide takes its column within what the window leaves.
+      fitColumns();
     },
     setSidebar(open) {
       doc.documentElement.dataset.sidebar = open ? 'open' : 'closed';
