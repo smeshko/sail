@@ -928,6 +928,21 @@ test('a queue open over a selected card closes the inspector, and a pinned one s
   expect(host.regions.inspector).not.toContain('implement#1');
 });
 
+test('the status bar is empty while a queue is open and describes the run again once it is back (ADW-528)', () => {
+  page = boot(host);
+  firstIndex();
+  expect(host.regions.status ?? '').toBe('');
+  replay(host.open('run=')[0], GOLDEN());
+  host.advance(100);
+  expect(host.regions.status).toContain('calls <b>');
+  host.click({ action: 'select-queue', queue: `beta/${QUEUE_WORKFLOW}` });
+  host.advance(100);
+  expect(host.regions.status).toBe('');
+  host.click({ action: 'select-run', repo: 'alpha', run: GOLDEN_RUN_ID });
+  host.advance(100);
+  expect(host.regions.status).toContain('calls <b>');
+});
+
 test('a copy that took draws one ok toast reading what it copied, and 4,000 ms on it is gone', async () => {
   page = boot(host);
   host.click({ action: 'copy', text: 'sail show X' });

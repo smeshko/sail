@@ -91,7 +91,10 @@ export function regions(store: Store): Record<Region, () => string> {
     },
     inspector: () =>
       renderInspector(centreCard(store), centreRun(store)?.model.roster, store.result, store.log, ui).value,
-    status: () => (store.run === undefined ? '' : renderStatus(store.run.model, summaryOf(store, store.run)).value),
+    status: () => {
+      const run = centreRun(store);
+      return run === undefined ? '' : renderStatus(run.model, summaryOf(store, run)).value;
+    },
     drawer: () => renderDrawer(ui, store.doc).value,
     toasts: () => renderToasts(ui.toasts).value,
   };

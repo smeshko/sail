@@ -28,7 +28,7 @@ export function leaveQueue(store: Store) {
   const { ui } = store;
   if (ui.queue === undefined) return;
   delete ui.queue;
-  store.mark('list', 'main', 'inspector');
+  store.mark('list', 'main', 'inspector', 'status');
 }
 
 export function closeAttention(store: Store) {
@@ -48,7 +48,7 @@ export const actions: Record<string, Action> = {
     if (data.queue === undefined) return;
     reopenQueue(store, data.queue);
     store.ui.queue = data.queue;
-    store.mark('list', 'main', 'inspector');
+    store.mark('list', 'main', 'inspector', 'status');
   },
   'select-card': (store, data) => selectCard(store, data.key, undefined, true),
   open: (store, data) => {
