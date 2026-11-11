@@ -16,6 +16,7 @@ import {
 } from './action-registry';
 import { listRepos, type QueuePanel, queuePanels, workflowOf } from './index-model';
 import { VIEWS, type ViewName } from './list-model';
+import { VIEW_ACTIONS } from './top-bar';
 import type { MenuState, MenuStep } from './ui-state';
 
 export type MenuRun =
@@ -483,8 +484,13 @@ export function generalRows(source: OfferSource): MenuRow[] {
       { pollAll: true },
       'no queue is watched from this clone',
     ),
-    { group: 'general', label: 'switch theme', disabled: false, run: { view: 'toggle-theme' } },
-    { group: 'general', label: 'toggle inspector', disabled: false, run: { view: 'toggle-inspector' } },
+    { group: 'general', label: VIEW_ACTIONS['toggle-theme'].label, disabled: false, run: { view: 'toggle-theme' } },
+    {
+      group: 'general',
+      label: VIEW_ACTIONS['toggle-inspector'].label,
+      disabled: false,
+      run: { view: 'toggle-inspector' },
+    },
   ];
 }
 

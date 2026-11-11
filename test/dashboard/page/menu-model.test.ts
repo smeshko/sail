@@ -138,7 +138,7 @@ test('with no subject there is no head and no subject row, and the general rows 
     'add a ticket…',
     'poll every queue',
     'switch theme',
-    'toggle inspector',
+    'pin inspector',
   ]);
   expect(model.rows.map((row) => row.group)).toEqual([...Array(4).fill('goto'), ...Array(4).fill('general')]);
 });
@@ -153,7 +153,7 @@ test('the head names the subject as the list does, with no word for its kind', (
 });
 
 test('adding and polling are left out where no queue offers them, and disabled with the reason where none is enabled', () => {
-  expect(labels(generalRows({ index: [] }))).toEqual(['switch theme', 'toggle inspector']);
+  expect(labels(generalRows({ index: [] }))).toEqual(['switch theme', 'pin inspector']);
   const closed = JSON.parse(JSON.stringify(index)) as IndexRepo[];
   const queue = closed[1]?.queues[0] as unknown as { offers: { poll: unknown; add: unknown } };
   queue.offers.poll = off;
@@ -339,7 +339,7 @@ describe('audit 2: the menu ranks across groups, matches within words and says a
       'all clear',
       'dismiss',
       'switch theme',
-      'toggle inspector',
+      'pin inspector',
     ]);
   });
 

@@ -40,12 +40,14 @@ test('the open view is marked current and an unopened one is not', () => {
   expect(markup).toMatch(/data-view="history" aria-current="true"/);
 });
 
-test('each repository is one filter button with a dot that says watching, not watching or broken', () => {
+test('each repository is one filter button with a dot that says watching, watcher not running or broken', () => {
   const markup = draw({ repoFilter: 'beta' });
   expect(markup).toContain(
     '<button class="side-repo" type="button" data-action="filter-repo" data-repo="alpha" aria-pressed="false"><span class="dot dot-watching" title="watching"></span>',
   );
-  expect(markup).toContain('data-repo="beta" aria-pressed="true"><span class="dot dot-idle" title="not watching">');
+  expect(markup).toContain(
+    'data-repo="beta" aria-pressed="true"><span class="dot dot-idle" title="watcher not running">',
+  );
   expect(markup).toContain('<span class="dot dot-broken" title="broken">');
   expect(markup.match(/data-action="filter-repo"/g)).toHaveLength(3);
 });

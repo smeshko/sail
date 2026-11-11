@@ -5,7 +5,7 @@
 import { html, type SafeHtml } from './html';
 import { keyLabel } from './keymap';
 import type { ListGroup, ListRow, ViewName } from './list-model';
-import { EMPTY } from './list-view';
+import { EMPTY, VIEW_LABELS } from './list-view';
 import { commandList } from './run-view';
 import type { UiState } from './ui-state';
 
@@ -61,6 +61,27 @@ function firstRun(copied: UiState['copied']): SafeHtml {
   )}</div>`;
 }
 
+/** The line the empty centre holds under its headline: the view's counts, `nothing matches`, or its empty words. */
+export function viewLine(
+  view: ViewName,
+  groups: readonly ListGroup[] | undefined,
+  ui?: Pick<UiState, 'listFilter' | 'historyStatus' | 'historyWorkflow'>,
+): string | undefined {
+  if (groups === undefined) return undefined;
+  if (groups.some((group) => group.rows.length > 0)) return countsOf(view, groups);
+  return narrowed(view, ui) ? 'nothing matches' : EMPTY[view];
+}
+
+/** The status bar with nothing open: the view's name and the empty centre's line. */
+export function renderViewStatus(
+  view: ViewName,
+  groups: readonly ListGroup[] | undefined,
+  ui?: Pick<UiState, 'listFilter' | 'historyStatus' | 'historyWorkflow'>,
+): SafeHtml {
+  const line = viewLine(view, groups, ui);
+  return html`<span>${VIEW_LABELS[view]}</span>${line === undefined ? '' : html`<span>${line}</span>`}`;
+}
+
 /**
  * The centre with nothing open: `groups` is what the list shows, its filters applied, undefined before the first index.
  * `repos` is how many repositories the index lists: none is the first run's state.
@@ -74,14 +95,7 @@ export function renderEmpty(
   if (repos === 0) return firstRun(ui?.copied);
   const headline = view === 'queues' ? 'No queue selected' : 'No run selected';
   const rows = groups?.some((group) => group.rows.length > 0) === true;
-  const holds =
-    groups === undefined
-      ? undefined
-      : rows
-        ? countsOf(view, groups)
-        : narrowed(view, ui)
-          ? 'nothing matches'
-          : EMPTY[view];
+  const holds = viewLine(view, groups, ui);
   return html`<div class="empty"><div class="empty-t">${headline}</div>${
     holds === undefined ? '' : html`<div class="empty-c">${holds}</div>`
   }<div class="empty-k">${keys(rows)}</div></div>`;

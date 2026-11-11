@@ -11,6 +11,7 @@ import {
   fromClone,
   minute,
   percent,
+  sentence,
   tokens,
 } from '../../../src/dashboard/page/format';
 
@@ -119,4 +120,15 @@ test('dayOf gives the date at the offset across midnight, and undefined for a mi
   expect([undefined, 'nope', ''].map((t) => dayOf(t, 0))).toEqual([undefined, undefined, undefined]);
   expect(dayOfMs(Date.parse('2026-01-05T00:00:00Z'), 0)).toBe('2026-01-05');
   expect(dayOfMs(Date.parse('2026-01-05T00:00:00Z'), -1)).toBe('2026-01-04');
+});
+
+describe('sentence (ADW-548)', () => {
+  test('upper-cases the first letter and leaves the rest', () => {
+    expect(sentence('raise $')).toBe('Raise $');
+    expect(sentence('go to')).toBe('Go to');
+    expect(sentence('Inbox')).toBe('Inbox');
+  });
+  test('an empty string stays empty', () => {
+    expect(sentence('')).toBe('');
+  });
 });

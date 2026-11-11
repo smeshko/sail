@@ -66,9 +66,9 @@ test('the full menu draws the head, a field, one row per row with the highlight,
     '<button class="cmdk-row sel" type="button" role="option" id="cmdk-opt-1" aria-selected="true" data-action="menu-run" data-row="1"><span class="cmdk-label">clean</span><kbd>C</kbd><svg class="cmdk-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4"/></svg></button>',
   );
   expect(markup).toContain(
-    '<div class="cmdk-grp" id="cmdk-grp-goto" role="presentation">go to</div><button class="cmdk-row" type="button" role="option" id="cmdk-opt-2" aria-selected="false" data-action="menu-run" data-row="2"><span class="cmdk-label">R1</span><span class="cmdk-hint">run</span>',
+    '<div class="cmdk-grp" id="cmdk-grp-goto" role="presentation">Go to</div><button class="cmdk-row" type="button" role="option" id="cmdk-opt-2" aria-selected="false" data-action="menu-run" data-row="2"><span class="cmdk-label">R1</span><span class="cmdk-hint">run</span>',
   );
-  expect(markup).toContain('<div class="cmdk-grp" id="cmdk-grp-general" role="presentation">general</div>');
+  expect(markup).toContain('<div class="cmdk-grp" id="cmdk-grp-general" role="presentation">General</div>');
   expect(markup).toContain('<button class="cmdk-back" type="button" data-action="menu-close"');
   expect(markup.match(/class="cmdk-row[ "]/g)).toHaveLength(4);
   // The rows scroll in their own box, after the chip and the field, which stay (ADW-542).
@@ -122,7 +122,7 @@ test('a typed step draws its label, its lines and a field of its type; a choice 
     rows: [],
     step: { label: 'raise $', field: { type: 'number', min: 0.01 }, lines: ['spent $1.00'], rows: [], start: 0 },
   }).value;
-  expect(typed).toContain('<div class="cmdk-step">raise $</div><div class="cmdk-line">spent $1.00</div>');
+  expect(typed).toContain('<div class="cmdk-step">Raise $</div><div class="cmdk-line">spent $1.00</div>');
   expect(typed).toContain('type="number"');
   expect(typed).toContain('min="0.01"');
   expect(typed).toContain('<div class="cmdk-err">give the dollars</div>');
@@ -156,6 +156,7 @@ test('a row leads with the icon of what it runs, and an arrow when it has none o
     'arrow',
   ]);
   expect(['restart-run', 'start-run-go'].map(act)).toEqual(['restart', 'run']);
+  expect(['stop-run', 'stop-run-now', 'suspend-run'].map(act)).toEqual(['stop', 'stopNow', 'pause']);
   expect(iconOf({ goto: { kind: 'run', repo: 'a', runId: 'r' } })).toBe('run');
   expect(iconOf({ goto: none })).toBe('arrow');
   expect(['toggle-theme', 'toggle-inspector', 'x'].map((view) => iconOf({ view }))).toEqual(['sun', 'panel', 'arrow']);
@@ -199,10 +200,10 @@ describe('the command menu is a combobox over a listbox of options (ADW-547)', (
   test('go to and general rows sit in a group their heading labels; subject rows are the listbox own children', () => {
     const markup = renderMenu(state(), full).value;
     expect(markup).toContain(
-      '<div class="cmdk-group" role="group" aria-labelledby="cmdk-grp-goto"><div class="cmdk-grp" id="cmdk-grp-goto" role="presentation">go to</div><button class="cmdk-row" type="button" role="option" id="cmdk-opt-2"',
+      '<div class="cmdk-group" role="group" aria-labelledby="cmdk-grp-goto"><div class="cmdk-grp" id="cmdk-grp-goto" role="presentation">Go to</div><button class="cmdk-row" type="button" role="option" id="cmdk-opt-2"',
     );
     expect(markup).toContain(
-      '<div class="cmdk-group" role="group" aria-labelledby="cmdk-grp-general"><div class="cmdk-grp" id="cmdk-grp-general" role="presentation">general</div><button class="cmdk-row" type="button" role="option" id="cmdk-opt-4"',
+      '<div class="cmdk-group" role="group" aria-labelledby="cmdk-grp-general"><div class="cmdk-grp" id="cmdk-grp-general" role="presentation">General</div><button class="cmdk-row" type="button" role="option" id="cmdk-opt-4"',
     );
     expect(markup).toMatch(
       /aria-label="commands"><button class="cmdk-row[^"]*" type="button" role="option" id="cmdk-opt-0"/,

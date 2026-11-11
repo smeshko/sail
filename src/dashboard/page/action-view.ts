@@ -28,6 +28,8 @@ export interface ControlOptions {
   wrap?: boolean;
   /** Draw the action's key after its button, boxed: a menu's row has the room. */
   kbd?: boolean;
+  /** Where a disabled offer's reason goes: in a span `beside` the button (the default), or in the button's `title`. */
+  why?: 'beside' | 'title';
 }
 
 /** A row's ` data-subject` and the `data-*` that name its subject, for the focus to read from the row under the pointer. */
@@ -89,6 +91,9 @@ export function actionControl(
   const key = options.kbd === true && def.key !== undefined ? html`<kbd>${keyLabel(def.key)}</kbd>` : '';
   const wrap = (inner: SafeHtml) => (options.wrap === true ? html`<span class="act">${inner}${key}</span>` : inner);
   if (!available.enabled && options.honourDisabled === true) {
+    if (options.why === 'title') {
+      return wrap(html`<button class="btn" disabled title="${available.why}">${def.label(subject)}</button>`);
+    }
     return wrap(
       html`<button class="btn" disabled>${def.label(subject)}</button><span class="act-why">${available.why}</span>`,
     );
