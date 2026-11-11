@@ -131,7 +131,7 @@ The calls one `run.all()` makes at once. Their keys are assigned in the order gi
 _Avoid_: batch, fan-out, parallel block
 
 **Try**:
-One execution of a call's body, in a directory of its own, whose `out/` is its `$STAGE_OUT` and holds only what the body produced: the engine's records of the try (its `result.json`, logs, prompt and session transcript) and a later try's `try-M/` sit beside `out/`, out of a session's reach. A call has a later try when a resume runs it again after an interruption, and one corrective try when the engine rejects what an agent step handed in: invalid output, a missing declared file or a failed validator. A corrective try's prompt ends with the problems of the try it corrects. A try belongs to a call's body, or to one step of a multi-step call: a step's later try sits in that step's own directory, and the call keeps one `out/`.
+One execution of a call's body, in a directory of its own, whose `out/` is its `$STAGE_OUT` and holds only what the body produced, beside a scratch folder that is there for as long as the step runs: the engine's records of the try (its `result.json`, logs, prompt and session transcript) and a later try's `try-M/` sit beside `out/`, out of a session's reach. A call has a later try when a resume runs it again after an interruption, and one corrective try when the engine rejects what an agent step handed in: invalid output, a missing declared file or a failed validator. A corrective try's prompt ends with the problems of the try it corrects. A try belongs to a call's body, or to one step of a multi-step call: a step's later try sits in that step's own directory, and the call keeps one `out/`.
 _Avoid_: attempt, retry (as a noun)
 
 **Key**:
@@ -448,7 +448,7 @@ Masking credential-named values of at least eight characters from the run's envi
 _Avoid_: scrubbing, censoring, sanitising
 
 **Script environment**:
-The environment a script step runs with: the allowlist's names that are no credential, `SSH_AUTH_SOCK`, sail's own `SAIL_*` settings, git's identity and the preamble, plus the variables its `env` names and those the adapters of the ports its `ports` names require. Its `script:exec` lists the names it was given, never their values. A step in the clone keeps git's repository variables too.
+The environment a script step runs with: the allowlist's names that are no credential, `SSH_AUTH_SOCK`, sail's own `SAIL_*` settings, git's identity and the preamble (which sets `TMPDIR`, `TMP` and `TEMP` to its try's scratch folder), plus the variables its `env` names and those the adapters of the ports its `ports` names require. Its `script:exec` lists the names it was given, never their values. A step in the clone keeps git's repository variables too.
 _Avoid_: inherited environment, env passthrough
 
 **Guardrail**:

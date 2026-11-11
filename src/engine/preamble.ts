@@ -10,7 +10,8 @@ export interface PreambleVariable {
   path: boolean;
 }
 
-/** The variables of one try of a step, in order: the call, where it reads and writes, then its `INPUT_<NAME>`s. */
+/** The variables of one try of a step, in order: the call, where it reads and writes, then the scratch folder
+ * (`TMPDIR`, `TMP` and `TEMP`, all the try's `tmp/`), then its `INPUT_<NAME>`s. */
 export function preamble(context: StepContext): PreambleVariable[] {
   return [
     { name: 'RUN_ID', value: context.runId, path: false },
@@ -22,6 +23,9 @@ export function preamble(context: StepContext): PreambleVariable[] {
     { name: 'WORKSPACE', value: context.workspace, path: true },
     { name: 'BRANCH', value: context.branch, path: false },
     { name: 'SAIL_CONFIG', value: context.config, path: true },
+    { name: 'TMPDIR', value: context.paths.tmp, path: true },
+    { name: 'TMP', value: context.paths.tmp, path: true },
+    { name: 'TEMP', value: context.paths.tmp, path: true },
     ...Object.entries(context.inputs).map(([name, value]) => ({ name, value, path: true })),
   ];
 }

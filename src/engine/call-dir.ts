@@ -2,6 +2,7 @@
 //
 //   NN-<stage>/call-N/out/        $STAGE_OUT: the files the call produces
 //   NN-<stage>/call-N/in/         $STAGE_IN: its bindings, materialised
+//   NN-<stage>/call-N/tmp/        the scratch folder: TMPDIR, TMP and TEMP, there while the step runs
 //   NN-<stage>/call-N/stdout.log  what it printed, in full
 //   NN-<stage>/call-N/stderr.log
 //   NN-<stage>/call-N/result.json the engine's record of the call
@@ -28,6 +29,8 @@ export interface CallPaths {
   out: string;
   /** `$STAGE_IN`: `<dir>/in`. */
   stageIn: string;
+  /** The scratch folder: `<dir>/tmp`, `$TMPDIR`, made before the step runs and removed once it has. */
+  tmp: string;
   stdout: string;
   stderr: string;
   result: string;
@@ -64,6 +67,7 @@ export function callPaths(runDir: string, index: number, stage: string, call: nu
     dir,
     out: join(dir, 'out'),
     stageIn: join(dir, 'in'),
+    tmp: join(dir, 'tmp'),
     stdout: join(dir, 'stdout.log'),
     stderr: join(dir, 'stderr.log'),
     result: join(dir, 'result.json'),
@@ -112,6 +116,7 @@ export function stepPaths(
     dir,
     out,
     stageIn: join(dir, 'in'),
+    tmp: join(dir, 'tmp'),
     stdout: join(dir, 'stdout.log'),
     stderr: join(dir, 'stderr.log'),
     result: join(dir, 'result.json'),
@@ -190,6 +195,23 @@ export function createCallDir(paths: CallPaths, options: { durable?: boolean; st
   createDir(paths.dir);
   if (stageIn) createDir(paths.stageIn);
   createDir(paths.out);
+}
+
+/** Makes the try's scratch folder, empty. Beside `createCallDir()`: a call that runs no step has none. */
+export function createScratch(paths: CallPaths): void {
+  mkdirSync(paths.tmp);
+}
+
+/**
+ * Removes the try's scratch folder and all it holds. A link in it is removed, never followed. It never throws: a tree
+ * it can't remove stays for `sail clean`, and doesn't replace the step's result.
+ */
+export function removeScratch(paths: CallPaths): void {
+  try {
+    rmSync(paths.tmp, { recursive: true, force: true });
+  } catch {
+    // left for `sail clean`
+  }
 }
 
 /** The directories from `top` down to `dir` that don't exist yet, outermost first, `top` included. */

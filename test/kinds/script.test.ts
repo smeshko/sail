@@ -304,6 +304,9 @@ test('exit 0 is passed, with the parsed report and junit.xml recorded', async ()
         WORKSPACE: '.',
         BRANCH: 'sail/FAKE-1',
         SAIL_CONFIG: '.sail/project.yaml',
+        TMPDIR: `.sail-runs/${RUN_ID}/00-tests/call-1/tmp`,
+        TMP: `.sail-runs/${RUN_ID}/00-tests/call-1/tmp`,
+        TEMP: `.sail-runs/${RUN_ID}/00-tests/call-1/tmp`,
       },
     },
   });
@@ -516,6 +519,9 @@ test('the script sees the whole preamble, inherits the environment, and runs fro
     'WORKSPACE',
     'BRANCH',
     'SAIL_CONFIG',
+    'TMPDIR',
+    'TMP',
+    'TEMP',
     'INPUT_SPEC',
   ];
   writeFileSync(
@@ -538,6 +544,9 @@ test('the script sees the whole preamble, inherits the environment, and runs fro
     WORKSPACE: s.workspace,
     BRANCH: 'sail/FAKE-1',
     SAIL_CONFIG: context.config,
+    TMPDIR: context.paths.tmp,
+    TMP: context.paths.tmp,
+    TEMP: context.paths.tmp,
     INPUT_SPEC: spec,
     CWD: realpathSync(s.workspace),
     HAS_PATH: 'true',
@@ -681,6 +690,9 @@ test('a script that is missing reports script:exec, and nothing more', async () 
     'WORKSPACE',
     'BRANCH',
     'SAIL_CONFIG',
+    'TMPDIR',
+    'TMP',
+    'TEMP',
   ]);
 });
 
@@ -868,6 +880,9 @@ test('SAIL_EVENTS names port-events.ndjson in the call directory: it is recorded
       'WORKSPACE',
       'BRANCH',
       'SAIL_CONFIG',
+      'TMPDIR',
+      'TMP',
+      'TEMP',
       'SAIL_EVENTS',
     ],
   });

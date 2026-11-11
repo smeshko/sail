@@ -1,15 +1,27 @@
 import { afterEach, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   callPaths,
   createCallDir,
+  createScratch,
   existingStepTries,
   existingTries,
   isPlainName,
   nextStepTry,
   nextTry,
+  removeScratch,
   runRelative,
   stageDirName,
   stepPaths,
@@ -42,6 +54,7 @@ test("a call's paths sit in NN-<stage>/call-N/, with $STAGE_IN as in/ inside it"
     dir: '/r/03-tests/call-2',
     out: '/r/03-tests/call-2/out',
     stageIn: '/r/03-tests/call-2/in',
+    tmp: '/r/03-tests/call-2/tmp',
     stdout: '/r/03-tests/call-2/stdout.log',
     stderr: '/r/03-tests/call-2/stderr.log',
     result: '/r/03-tests/call-2/result.json',
@@ -58,6 +71,7 @@ test("a later try's paths sit in call-N/try-M/, and try 1 is call-N/ itself", ()
     dir: '/r/03-tests/call-2/try-3',
     out: '/r/03-tests/call-2/try-3/out',
     stageIn: '/r/03-tests/call-2/try-3/in',
+    tmp: '/r/03-tests/call-2/try-3/tmp',
     stdout: '/r/03-tests/call-2/try-3/stdout.log',
     stderr: '/r/03-tests/call-2/try-3/stderr.log',
     result: '/r/03-tests/call-2/try-3/result.json',
@@ -139,6 +153,7 @@ test("a step's paths sit in call-N/steps/<i>-<step>/, a later try's in try-M/ be
     dir: '/r/05-publish/call-1/steps/1-describe',
     out: '/r/05-publish/call-1/out',
     stageIn: '/r/05-publish/call-1/steps/1-describe/in',
+    tmp: '/r/05-publish/call-1/steps/1-describe/tmp',
     stdout: '/r/05-publish/call-1/steps/1-describe/stdout.log',
     stderr: '/r/05-publish/call-1/steps/1-describe/stderr.log',
     result: '/r/05-publish/call-1/steps/1-describe/result.json',
@@ -147,6 +162,7 @@ test("a step's paths sit in call-N/steps/<i>-<step>/, a later try's in try-M/ be
     dir: '/r/05-publish/call-2/steps/2-open/try-3',
     out: '/r/05-publish/call-2/out',
     stageIn: '/r/05-publish/call-2/steps/2-open/try-3/in',
+    tmp: '/r/05-publish/call-2/steps/2-open/try-3/tmp',
     stdout: '/r/05-publish/call-2/steps/2-open/try-3/stdout.log',
     stderr: '/r/05-publish/call-2/steps/2-open/try-3/stderr.log',
     result: '/r/05-publish/call-2/steps/2-open/try-3/result.json',
@@ -198,4 +214,42 @@ test("a durable step directory is synced into each directory it was made in, fro
   const retry = stepPaths(runDir, 5, 'publish', 1, 1, 'describe', 2);
   expect(syncedDirs(() => createCallDir(retry, { durable: true }))).toEqual([describe.dir, retry.dir]);
   expect(readdirSync(retry.dir)).toEqual(['in']);
+});
+
+test("createScratch makes the try's tmp/ empty beside out/ and in/, and removeScratch removes it with what is in it", () => {
+  const paths = callPaths(tempDir(), 0, 'tests', 1);
+  createCallDir(paths);
+  createScratch(paths);
+  expect(readdirSync(paths.tmp)).toEqual([]);
+  expect(readdirSync(paths.dir).sort()).toEqual(['in', 'out', 'tmp']);
+  mkdirSync(join(paths.tmp, 'a', 'b'), { recursive: true });
+  writeFileSync(join(paths.tmp, 'a', 'b', 'f'), 'x');
+  removeScratch(paths);
+  expect(readdirSync(paths.dir).sort()).toEqual(['in', 'out']);
+});
+
+test("removeScratch of a folder that isn't there, or that holds one it can't remove, doesn't throw", () => {
+  const paths = callPaths(tempDir(), 0, 'tests', 1);
+  createCallDir(paths);
+  expect(() => removeScratch(paths)).not.toThrow();
+  createScratch(paths);
+  mkdirSync(join(paths.tmp, 'locked'));
+  writeFileSync(join(paths.tmp, 'locked', 'f'), 'x');
+  chmodSync(join(paths.tmp, 'locked'), 0o500);
+  try {
+    expect(() => removeScratch(paths)).not.toThrow();
+  } finally {
+    chmodSync(join(paths.tmp, 'locked'), 0o700);
+  }
+});
+
+test('removeScratch removes a link in the folder and not what it points at', () => {
+  const dir = tempDir();
+  const paths = callPaths(dir, 0, 'tests', 1);
+  createCallDir(paths);
+  createScratch(paths);
+  writeFileSync(join(dir, 'keep.txt'), 'kept');
+  symlinkSync(join(dir, 'keep.txt'), join(paths.tmp, 'link'));
+  removeScratch(paths);
+  expect([existsSync(paths.tmp), existsSync(join(dir, 'keep.txt'))]).toEqual([false, true]);
 });

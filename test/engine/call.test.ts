@@ -8,6 +8,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   statSync,
   symlinkSync,
   writeFileSync,
@@ -207,6 +208,52 @@ test("a stage with no bindings records the golden result's env keys, in the same
   });
 });
 
+test("a script step sees TMPDIR, TMP and TEMP as the try's empty tmp/ beside out/, makes a file there with mktemp, and its result and script:exec name them", async () => {
+  await withTempRepo(async (repo) => {
+    const s = tests(repo);
+    s.run(
+      `ls -A "$TMPDIR" | wc -l | tr -d ' ' > "$STAGE_OUT/before.txt"\nf=$(mktemp "$TMPDIR/f.XXXXXX")\necho ok > "$f"\nprintf '%s|%s|%s|%s\\n' "$TMPDIR" "$TMP" "$TEMP" "$f" > "$STAGE_OUT/seen.txt"\n${PASSES}`,
+    );
+    const { events, emit } = collect();
+    const { paths } = await runCall({ ...s.request(plainStep()), emit });
+    const tmp = join(repo.dir, '.sail-runs', RUN_ID, '00-tests', 'call-1', 'tmp');
+    const seen = readFileSync(join(paths.out, 'seen.txt'), 'utf8').trim().split('|');
+    expect(readFileSync(join(paths.out, 'before.txt'), 'utf8').trim()).toBe('0');
+    const real = realpathSync(dirname(paths.out));
+    expect(seen.slice(0, 3)).toEqual([`${real}/tmp`, `${real}/tmp`, `${real}/tmp`]);
+    expect(paths.tmp).toBe(tmp);
+    expect(seen[3]?.startsWith(`${seen[0]}/`)).toBe(true);
+    const env = readBack(paths.result).env as Record<string, string>;
+    const rel = `.sail-runs/${RUN_ID}/00-tests/call-1/tmp`;
+    expect([env.TMPDIR, env.TMP, env.TEMP]).toEqual([rel, rel, rel]);
+    expect((events.find((event) => event.type === 'script:exec') as { envKeys: string[] }).envKeys).toEqual(
+      expect.arrayContaining(['TMPDIR', 'TMP', 'TEMP']),
+    );
+  });
+});
+
+test('after a script step ends passed, failed or timed out, its tmp/ is gone and its out/ stays', async () => {
+  await withTempRepo(async (repo) => {
+    const s = tests(repo);
+    const ends: unknown[] = [];
+    for (const [body, step] of [
+      [`touch "$TMPDIR/x"\n${PASSES}`, plainStep()],
+      [`touch "$TMPDIR/x"\nexit 1`, plainStep()],
+      [`touch "$TMPDIR/x"\nexec sleep 5`, plainStep({ timeoutSeconds: 1 })],
+    ] as const) {
+      s.run(body);
+      const call = ends.length + 1;
+      const { paths } = await runCall({ ...s.request(step), call });
+      ends.push([existsSync(paths.tmp), existsSync(paths.out)]);
+    }
+    expect(ends).toEqual([
+      [false, true],
+      [false, true],
+      [false, true],
+    ]);
+  });
+});
+
 test('a later try writes into call-N/try-M/, and its script sees TRY as M', async () => {
   await withTempRepo(async (repo) => {
     const s = tests(repo);
@@ -295,7 +342,20 @@ const plainStep = (options: { timeoutSeconds?: number } = {}) =>
 
 const PASSES = `echo "<testsuites/>" > "$STAGE_OUT/junit.xml"\nprintf '${REPORT}\\n' true 0`;
 /** The preamble's names. The script kind adds one of its own after them, which test/kinds/script.test.ts holds. */
-const ENV_KEYS = ['RUN_ID', 'STAGE', 'CALL', 'TRY', 'STAGE_IN', 'STAGE_OUT', 'WORKSPACE', 'BRANCH', 'SAIL_CONFIG'];
+const ENV_KEYS = [
+  'RUN_ID',
+  'STAGE',
+  'CALL',
+  'TRY',
+  'STAGE_IN',
+  'STAGE_OUT',
+  'WORKSPACE',
+  'BRANCH',
+  'SAIL_CONFIG',
+  'TMPDIR',
+  'TMP',
+  'TEMP',
+];
 
 test('a passing call reports its events in order, each keyed by its call', async () => {
   await withTempRepo(async (repo) => {
@@ -1440,6 +1500,31 @@ test('a document left as its template is corrected once: try-2 starts from the t
         },
       },
     ]);
+  });
+});
+
+test("an agent step's request names one empty tmp/ for TMPDIR, TMP and TEMP, gone once the try's result is written, and a corrective try gets a new empty one in try-2/", async () => {
+  await withTempRepo(async (repo) => {
+    const s = specStage(repo);
+    const step = documentStep(repo);
+    const seen: { tmpdir: string; same: boolean; entries: string[] }[] = [];
+    const harness = fake(
+      [submits(SPEC, 0.125, { files: {} }), submits(SPEC, 0.25, { files: { 'spec.md': VALID_SPEC } })],
+      {
+        before: (request) => {
+          const env = request.env;
+          const dir = env.TMPDIR ?? '';
+          seen.push({ tmpdir: dir, same: env.TMP === dir && env.TEMP === dir, entries: readdirSync(dir) });
+          writeFileSync(join(dir, 'left.txt'), 'x');
+        },
+      },
+    );
+    await runCall(s.request(step, harness));
+    expect(seen).toEqual([
+      { tmpdir: join(s.dir(1), 'tmp'), same: true, entries: [] },
+      { tmpdir: join(s.dir(2), 'tmp'), same: true, entries: [] },
+    ]);
+    expect([existsSync(join(s.dir(1), 'tmp')), existsSync(join(s.dir(2), 'tmp'))]).toEqual([false, false]);
   });
 });
 
