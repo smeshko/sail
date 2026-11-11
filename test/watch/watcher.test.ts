@@ -17,6 +17,7 @@ import { QUEUE_LEASE_DIR, startWatcher, type Watcher, type WatcherOptions } from
 import { fakeAdapters } from '../helpers/adapters';
 import { fakeTimers } from '../helpers/fake-timers';
 import { edit, patchTicket } from '../helpers/fixture';
+import { writeLiveRun } from '../helpers/live-run';
 import { seedPullRequests, writePrWorkflow } from '../helpers/pr-workflow';
 import { queueEventIssues, queueEvents } from '../helpers/queue';
 import { writeStub } from '../helpers/stub-workflow';
@@ -281,6 +282,45 @@ test('a config the check refuses pauses the dispatch, said once, until the check
       asked: true,
     });
     await watcher.stop();
+  });
+});
+
+test('with a cap of 1 and its one dispatched run held, a poll and its ticks leave the second ticket queued and spawn nothing (ADW-530)', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(
+      repo,
+      [{ name: 'a', label: 'sail-a', cap: 1 }],
+      tickets({ 'FAKE-1': 'sail-a', 'FAKE-2': 'sail-a' }),
+    );
+    const watcher = await w.start(['a']);
+    await w.timers.advance(1000);
+    expect(w.order('a')).toEqual(['FAKE-1']);
+    await w.spawner.end('FAKE-1', { status: 'suspended', stopReason: 'interrupted' });
+    const held = await writeLiveRun(repo.dir, {
+      workflow: 'a',
+      ticketKey: 'FAKE-1',
+      runId: w.spawner.run('FAKE-1').runId,
+      adapters: w.adapters,
+    });
+    await held.hold();
+    try {
+      await w.timers.advance(1000);
+      await w.timers.advance(60_000);
+      await w.timers.advance(1000);
+      const items = JSON.parse(readFileSync(join(queueDir(w.runs, 'a'), 'queue.json'), 'utf8')).items;
+      expect({
+        spawned: w.order('a'),
+        resumes: w.spawner.resumes,
+        states: items.map((item: { dedupKey: string; state: string }) => `${item.dedupKey} ${item.state}`),
+      }).toEqual({
+        spawned: ['FAKE-1'],
+        resumes: [],
+        states: ['ticket:FAKE-1 dispatched', 'ticket:FAKE-2 queued'],
+      });
+    } finally {
+      await held.release();
+      await watcher.stop();
+    }
   });
 });
 

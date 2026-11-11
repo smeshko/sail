@@ -67,7 +67,7 @@ export interface TicketRunSource {
   /**
    * The checks `--force` overrode, each at most once: `designation` when the ticket didn't carry the repository's
    * label, `state` when the claim didn't take because the ticket was not in a pick-up state, `cap` when its workflow's
-   * live runs filled its maxConcurrentRuns. Empty for a run nobody forced, and for one `--force` had nothing to override.
+   * live and held runs filled its maxConcurrentRuns. Empty for a run nobody forced, and for one `--force` had nothing to override.
    */
   forced: Forced[];
 }
@@ -81,7 +81,7 @@ export interface PullRequestRunSource {
   via: 'cli' | 'watch';
   /**
    * The checks `--force` overrode: `designation` when the pull request didn't carry the label, `state` when it was
-   * closed, merged or a draft, `cap` when its workflow's live runs filled its maxConcurrentRuns.
+   * closed, merged or a draft, `cap` when its workflow's live and held runs filled its maxConcurrentRuns.
    */
   forced: Forced[];
 }

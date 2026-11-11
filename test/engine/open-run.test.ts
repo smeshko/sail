@@ -1629,6 +1629,79 @@ test('a suspended run of the workflow takes no slot', async () => {
   });
 });
 
+test('a start at a cap that one held run fills is refused naming the held run, and leaves no run directory', async () => {
+  await withTempRepo(async (repo) => {
+    const live = await cappedWithLive(repo, 1, 1);
+    try {
+      await live.runs[0]?.hold();
+      const refused = await openStub(repo.dir, { ticket: 'FAKE-1', workflow: 'capped' });
+      expect(refused).toEqual({
+        refused: `workflow 'capped' has 1 held run, its maxConcurrentRuns of 1: ${LIVE_A} (held); --force starts it anyway`,
+      });
+      expect(runIds(repo.dir)).toEqual([LIVE_A]);
+    } finally {
+      await live.release();
+    }
+  });
+});
+
+test('a refusal at a cap of 2 with one live and one held run names both', async () => {
+  await withTempRepo(async (repo) => {
+    const live = await cappedWithLive(repo, 2, 2);
+    try {
+      await live.runs[1]?.hold();
+      expect(await openStub(repo.dir, { ticket: 'FAKE-1', workflow: 'capped' })).toEqual({
+        refused: `workflow 'capped' has 1 live run and 1 held run, its maxConcurrentRuns of 2: ${LIVE_A}, ${LIVE_B} (held); --force starts it anyway`,
+      });
+    } finally {
+      await live.release();
+    }
+  });
+});
+
+test('a forced start at a cap a held run fills opens and records cap', async () => {
+  await withTempRepo(async (repo) => {
+    const live = await cappedWithLive(repo, 1, 1);
+    try {
+      await live.runs[0]?.hold();
+      const run = await openStub(repo.dir, { ticket: 'FAKE-1', workflow: 'capped', force: true });
+      if ('refused' in run) throw new Error(run.refused);
+      expect(readRunHeader(run.dir).source).toMatchObject({ forced: ['cap'] });
+    } finally {
+      await live.release();
+    }
+  });
+});
+
+test('a held run that was stopped takes no slot', async () => {
+  await withTempRepo(async (repo) => {
+    const live = await cappedWithLive(repo, 1, 1);
+    try {
+      await live.runs[0]?.hold();
+      writeStatus(live.runs[0]?.runDir ?? '', 'failed', 'stopped');
+      const run = await openStub(repo.dir, { ticket: 'FAKE-1', workflow: 'capped' });
+      if ('refused' in run) throw new Error(run.refused);
+      expect(readRunHeader(run.dir).source).toMatchObject({ forced: [] });
+    } finally {
+      await live.release();
+    }
+  });
+});
+
+test('a dispatched start at a cap a held run fills opens and records no cap', async () => {
+  await withTempRepo(async (repo) => {
+    const live = await cappedWithLive(repo, 1, 1);
+    try {
+      await live.runs[0]?.hold();
+      const run = await openStub(repo.dir, { ticket: 'FAKE-1', workflow: 'capped', dispatch: { runId: DISPATCHED } });
+      if ('refused' in run) throw new Error(run.refused);
+      expect(readRunHeader(run.dir).source).toMatchObject({ via: 'watch', forced: [] });
+    } finally {
+      await live.release();
+    }
+  });
+});
+
 test('a workflow that declares no maxConcurrentRuns is never held to a cap', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
@@ -1709,6 +1782,34 @@ test('a pull-request start at a full cap is refused the same way', async () => {
       expect(await openStub(repo.dir, { ticket: '#1', workflow: 'review-pr' })).toEqual({
         refused: `workflow 'review-pr' has 1 live run, its maxConcurrentRuns of 1: ${LIVE_A}; --force starts it anyway`,
       });
+    } finally {
+      await live.release();
+    }
+  });
+});
+
+test('a pull-request start at a cap a held run fills is refused naming it', async () => {
+  await withTempRepo(async (repo) => {
+    const live = await pullRequestAtCap(repo);
+    try {
+      await live.hold();
+      expect(await openStub(repo.dir, { ticket: '#1', workflow: 'review-pr' })).toEqual({
+        refused: `workflow 'review-pr' has 1 held run, its maxConcurrentRuns of 1: ${LIVE_A} (held); --force starts it anyway`,
+      });
+    } finally {
+      await live.release();
+    }
+  });
+});
+
+test('a forced pull-request start at a cap a held run fills opens and records cap', async () => {
+  await withTempRepo(async (repo) => {
+    const live = await pullRequestAtCap(repo);
+    try {
+      await live.hold();
+      const run = await openStub(repo.dir, { ticket: '#1', workflow: 'review-pr', force: true });
+      if ('refused' in run) throw new Error(run.refused);
+      expect(readRunHeader(run.dir).source).toMatchObject({ kind: 'pr', number: 1, via: 'cli', forced: ['cap'] });
     } finally {
       await live.release();
     }

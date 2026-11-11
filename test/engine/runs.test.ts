@@ -4,8 +4,9 @@ import { expect, test } from 'bun:test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { isAlive } from '../../src/adapters/leases';
-import { runsDir } from '../../src/engine/run-dir';
-import { listRuns, liveRuns, resolveRun } from '../../src/engine/runs';
+import { holdRun } from '../../src/engine/control';
+import { runsDir, writeStatus } from '../../src/engine/run-dir';
+import { heldRuns, listRuns, liveRuns, resolveRun, slotRuns } from '../../src/engine/runs';
 import { fakeAdapters } from '../helpers/adapters';
 import { copyGoldenRun, emptySailDir, GOLDEN_RUN_ID } from '../helpers/golden-run';
 import { writeLiveRun } from '../helpers/live-run';
@@ -204,5 +205,67 @@ test('liveRuns finds nothing in a clone with no runs', () => {
     const sail = writeStub(repo.dir);
     const adapters = await fakeAdapters(repo.dir);
     expect(await liveRuns(runsDir(sail), 'ticket-to-pr', { workspace: adapters.ports.workspace, isAlive })).toEqual([]);
+  });
+});
+
+// heldRuns() and slotRuns(): what the cap counts besides the live runs.
+
+const HELD_1 = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD11';
+const HELD_2 = 'FAKE-2-01M3BWNZM08Q4T6V2XRJ5KWD12';
+
+test('heldRuns lists the held runs of the workflow that have not ended, in id order', () => {
+  return withTempRepo(async (repo) => {
+    const sail = writeStub(repo.dir);
+    const adapters = await fakeAdapters(repo.dir);
+    const make = (workflow: string, key: string, id: string) =>
+      writeLiveRun(repo.dir, { workflow, ticketKey: key, runId: id, adapters });
+    const second = await make('ticket-to-pr', 'FAKE-2', HELD_2);
+    const first = await make('ticket-to-pr', 'FAKE-1', HELD_1);
+    const other = await make('other', 'FAKE-3', 'FAKE-3-01M3BWNZM08Q4T6V2XRJ5KWD13');
+    const unheld = await make('ticket-to-pr', 'FAKE-4', 'FAKE-4-01M3BWNZM08Q4T6V2XRJ5KWD14');
+    const failed = await make('ticket-to-pr', 'FAKE-5', 'FAKE-5-01M3BWNZM08Q4T6V2XRJ5KWD15');
+    const done = await make('ticket-to-pr', 'FAKE-6', 'FAKE-6-01M3BWNZM08Q4T6V2XRJ5KWD16');
+    const all = [second, first, other, unheld, failed, done];
+    try {
+      for (const run of [second, first, other, failed, done]) await run.hold();
+      await unheld.suspend();
+      writeStatus(failed.runDir, 'failed', 'stopped');
+      writeStatus(done.runDir, 'completed');
+      expect(heldRuns(runsDir(sail), 'ticket-to-pr')).toEqual([HELD_1, HELD_2]);
+    } finally {
+      for (const run of all) await run.release();
+    }
+  });
+});
+
+test('heldRuns finds nothing in a clone with no runs directory', () => {
+  expect(heldRuns('/nonexistent/sail-runs', 'ticket-to-pr')).toEqual([]);
+});
+
+test('slotRuns puts a run that is held and still live in live alone, and a held suspended run in held', () => {
+  return withTempRepo(async (repo) => {
+    const sail = writeStub(repo.dir);
+    const adapters = await fakeAdapters(repo.dir);
+    const alive = await writeLiveRun(repo.dir, {
+      workflow: 'ticket-to-pr',
+      ticketKey: 'FAKE-1',
+      runId: HELD_1,
+      adapters,
+    });
+    const suspended = await writeLiveRun(repo.dir, {
+      workflow: 'ticket-to-pr',
+      ticketKey: 'FAKE-2',
+      runId: HELD_2,
+      adapters,
+    });
+    try {
+      holdRun(alive.runDir);
+      await suspended.hold();
+      const slots = await slotRuns(runsDir(sail), 'ticket-to-pr', { workspace: adapters.ports.workspace, isAlive });
+      expect(slots).toEqual({ live: [HELD_1], held: [HELD_2] });
+    } finally {
+      await alive.release();
+      await suspended.release();
+    }
   });
 });
