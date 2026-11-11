@@ -156,7 +156,7 @@ export function severalPlan(
 ) {
   const goes = runs.filter(({ subject, offers }) => {
     const available = def.available(subject, { run: offers, index });
-    return available.offered && available.enabled;
+    return available.offered && available.enabled && several.skips?.(offers) === undefined;
   });
   const requests = goes.flatMap(({ subject, offers }) => {
     const request = def.request?.(subject, {}, { run: offers, index });
@@ -194,11 +194,25 @@ export interface ActionDef {
   ): { path: string; body: unknown } | { invalid: string } | undefined;
   answer?(status: number, body: string, subject: Subject): ActResult;
   /** The form of the action over several runs: the one dialog that lists what each does. */
-  several?: { dialog(runs: readonly SeveralRun[], source: OfferSource): DialogView };
+  several?: {
+    dialog(runs: readonly SeveralRun[], source: OfferSource): DialogView;
+    /** Why a run its offer enables is still left out of the several form, when it is. */
+    skips?(offers: RunActions | undefined): string | undefined;
+  };
   /** The name of the effect a local action has the shell perform. */
   run?: string;
   /** The rows the action is more than one: each its own label, with the `data-*` a click on it gives. */
   variants?(subject: Subject, source: OfferSource): { label: string; data: Record<string, string> }[];
+}
+
+/** The `problems` a 200 answer carries: what a clean went on to do after the archive and could not finish. */
+function problemsOf(body: string): string[] {
+  try {
+    const { problems } = JSON.parse(body) as { problems?: unknown };
+    return Array.isArray(problems) ? problems.filter((each): each is string => typeof each === 'string') : [];
+  } catch {
+    return [];
+  }
 }
 
 /** Why a request of kind `what` (a move, a resume, a restart) was refused: the `error` its answer carries, else its status. */
@@ -470,6 +484,14 @@ const suspendAction: ActionDef = {
   },
 };
 
+/** Why a clean of several leaves a run out although its Clean is enabled: a queue item names it. */
+function cleanSkips(offers: RunActions | undefined): string | undefined {
+  const item = offers?.clean?.item;
+  return item === undefined
+    ? undefined
+    : `queue item ${item.dedupKey} names it: clean it alone to requeue or drop the item`;
+}
+
 /** The ticket key field the two adds share. */
 const addParams = (): Param[] => [
   { name: 'ticket', dom: 'add-ticket', label: 'ticket key', type: 'text', placeholder: 'ticket key' },
@@ -593,11 +615,35 @@ export const ACTIONS: readonly ActionDef[] = [
     tier: 'confirmed',
     place: 'run',
     holdsDisabled: true,
-    params: () => [],
+    params: (_, source) => {
+      const item = source.run?.clean?.item;
+      return item === undefined
+        ? []
+        : [
+            {
+              name: 'item',
+              dom: 'clean-item',
+              label: `queue item ${item.dedupKey}`,
+              type: 'choice',
+              options: [{ value: 'requeue' }, { value: 'drop' }],
+              initial: 'requeue',
+              ask: 'dialog',
+            },
+          ];
+    },
     available: runOffer('clean'),
     underway: 'cleaning…',
-    dialog: (subject, _, source) => {
+    dialog: (subject, values, source) => {
       const offer = source.run?.clean;
+      const { item } = offer ?? {};
+      const settles =
+        item === undefined
+          ? []
+          : [
+              values.item === 'drop'
+                ? `drops ${item.dedupKey} from ${item.workflow}'s queue and takes the watcher's label off its ticket`
+                : `requeues ${item.dedupKey} in ${item.workflow}'s queue`,
+            ];
       return {
         title: `clean ${runName(subject)}`,
         lines:
@@ -606,15 +652,23 @@ export const ACTIONS: readonly ActionDef[] = [
             : [
                 ...(offer.removes.length === 0 ? ['removes nothing'] : offer.removes.map((each) => `removes ${each}`)),
                 ...(offer.archive === undefined ? [] : [`run directory → ${offer.archive}`]),
+                ...(offer.ticketKey === undefined
+                  ? []
+                  : [`moves ${offer.ticketKey} back to unstarted when it is started`]),
+                ...settles,
               ],
         verb: 'clean',
       };
     },
     several: {
+      // A run a queue item names is cleaned alone, where the dialog asks what becomes of its item.
+      skips: cleanSkips,
       dialog: (runs) => ({
         title: `clean ${runs.length} ${runs.length === 1 ? 'run' : 'runs'}`,
         lines: runs.map(({ subject, offers }) => {
           const offer = offers?.clean;
+          const skipped = cleanSkips(offers);
+          if (skipped !== undefined) return `skips ${runName(subject)}: ${skipped}`;
           if (offer?.enabled === true) {
             const removes = offer.removes.length === 0 ? 'removes nothing' : `removes ${offer.removes.join(', ')}`;
             return `${runName(subject)}: ${removes}${offer.archive === undefined ? '' : `; run directory → ${offer.archive}`}`;
@@ -625,11 +679,16 @@ export const ACTIONS: readonly ActionDef[] = [
         verb: 'clean',
       }),
     },
-    request: (subject) => ({ path: runPath(subject, '/clean'), body: {} }),
+    request: (subject, values, source) => ({
+      path: runPath(subject, '/clean'),
+      body: source.run?.clean?.item === undefined ? {} : { item: values.item ?? 'requeue' },
+    }),
     answer: (status, body) => {
       if (!ok(status)) return { text: refusal(status, body, 'clean'), refused: true };
-      const text = answerField(body, 'message');
-      return { effect: 'leave', ...(text === undefined ? {} : { text }) };
+      const message = answerField(body, 'message');
+      const problems = problemsOf(body);
+      if (problems.length > 0) return { effect: 'leave', refused: true, text: [message, ...problems].join('\n') };
+      return { effect: 'leave', ...(message === undefined ? {} : { text: message }) };
     },
   },
   queueItemAction('requeue-item', 'requeue', 'instant', '/requeue'),

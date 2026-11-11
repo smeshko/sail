@@ -11,6 +11,7 @@ import {
   refusal,
   type Subject,
   severalHead,
+  severalPlan,
   subjectName,
   subjectOf,
   underwayId,
@@ -541,4 +542,84 @@ test('a move says its rows from the waiting neighbours', () => {
   expect(rows(2, all)).toEqual([{ label: 'move up', data: { dir: 'up', target: 'ticket:FAKE-1' } }]);
   expect(rows(3, all)).toEqual([]);
   expect(move?.variants?.(WORKFLOW, source(all))).toEqual([]);
+});
+
+const withItem = {
+  clean: {
+    ...on,
+    removes: ['run ref'],
+    archive: '/m/failed-runs/x',
+    ticketKey: 'FAKE-1',
+    item: { workflow: 'wf', dedupKey: 'ticket:FAKE-1', state: 'parked' },
+  },
+} as unknown as RunActions;
+
+test('clean asks requeue or drop in its dialog only when a queue item names the run, starting at requeue', () => {
+  expect(def('clean-run').params(RUN, source())).toEqual([]);
+  expect(def('clean-run').params(RUN, source({ run: withItem }))).toEqual([
+    {
+      name: 'item',
+      dom: 'clean-item',
+      label: 'queue item ticket:FAKE-1',
+      type: 'choice',
+      options: [{ value: 'requeue' }, { value: 'drop' }],
+      initial: 'requeue',
+      ask: 'dialog',
+    },
+  ]);
+});
+
+test('the clean dialog says what its ticket and the chosen queue choice do', () => {
+  const lines = (values: Record<string, string>) =>
+    def('clean-run').dialog?.(RUN, values, source({ run: withItem }))?.lines;
+  expect(lines({ item: 'requeue' })).toEqual([
+    'removes run ref',
+    'run directory → /m/failed-runs/x',
+    'moves FAKE-1 back to unstarted when it is started',
+    "requeues ticket:FAKE-1 in wf's queue",
+  ]);
+  expect(lines({ item: 'drop' })?.at(-1)).toBe(
+    "drops ticket:FAKE-1 from wf's queue and takes the watcher's label off its ticket",
+  );
+});
+
+test('the clean request sends the item choice only when a queue item names the run', () => {
+  expect(request('clean-run', RUN)).toEqual({ path: '/api/repos/alpha/runs/FAKE-1-RUN/clean', body: {} });
+  expect(request('clean-run', RUN, { item: 'drop' }, source({ run: withItem }))).toEqual({
+    path: '/api/repos/alpha/runs/FAKE-1-RUN/clean',
+    body: { item: 'drop' },
+  });
+  expect(request('clean-run', RUN, {}, source({ run: withItem }))).toEqual({
+    path: '/api/repos/alpha/runs/FAKE-1-RUN/clean',
+    body: { item: 'requeue' },
+  });
+});
+
+test('a clean answer with problems is a red toast of the message and each problem, and still leaves the run', () => {
+  expect(
+    def('clean-run').answer?.(200, '{"message":"cleaned R","problems":["R: its ticket T was not reset: down"]}', RUN),
+  ).toEqual({ effect: 'leave', refused: true, text: 'cleaned R\nR: its ticket T was not reset: down' });
+  expect(def('clean-run').answer?.(200, '{"message":"cleaned R","problems":[]}', RUN)).toEqual({
+    effect: 'leave',
+    text: 'cleaned R',
+  });
+});
+
+test('a clean of several skips a run a queue item names, in the dialog and the count, since its item needs a choice', () => {
+  const runOf = (runId: string): Subject => ({ kind: 'run', repo: 'alpha', runId });
+  const several = def('clean-run').several;
+  const plan = severalPlan(
+    def('clean-run'),
+    several as NonNullable<typeof several>,
+    [
+      { subject: runOf('R-a'), offers: runActions },
+      { subject: runOf('R-b'), offers: withItem },
+    ],
+    [],
+  );
+  expect(plan.goes).toBe(1);
+  expect(plan.view.lines).toEqual([
+    'R-a: removes its worktree, its branch; run directory → /m/failed-runs/x',
+    'skips R-b: queue item ticket:FAKE-1 names it: clean it alone to requeue or drop the item',
+  ]);
 });

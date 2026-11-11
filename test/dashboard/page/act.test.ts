@@ -933,3 +933,37 @@ test('a Restart or Resume of a run that is not open opens the run it started or 
   await r.answer(200, {});
   expect(r.effects).toEqual(['open alpha/R3', 'open alpha/R2']);
 });
+
+const NAMED = {
+  clean: {
+    ...on,
+    removes: ['a'],
+    archive: '/x',
+    item: { workflow: 'wf', dedupKey: 'ticket:FAKE-1', state: 'parked' },
+  },
+} as unknown as RunActions;
+
+test('a clean whose offer names a queue item asks requeue or drop in its dialog, redraws the line at a change and posts the choice', async () => {
+  const r = rig(NAMED);
+  r.actor.act('clean-run', {});
+  expect(r.ui.dialog?.lines).toEqual(['removes a', 'run directory → /x', "requeues ticket:FAKE-1 in wf's queue"]);
+  expect(r.dialogs[0]).toContain('<select name="clean-item" autofocus>');
+  expect(r.dialogs[0]).toContain('<option value="requeue" selected>requeue</option>');
+  expect(r.dialogs[0]).toContain('<option value="drop">drop</option>');
+  r.dialogFields['clean-item'] = 'drop';
+  r.actor.changed();
+  expect(r.ui.dialog?.lines.at(-1)).toBe(
+    "drops ticket:FAKE-1 from wf's queue and takes the watcher's label off its ticket",
+  );
+  r.actor.confirm();
+  expect(r.posts).toEqual([{ path: '/api/repos/alpha/runs/R1/clean', body: { item: 'drop' } }]);
+  await r.answer(200, { message: 'cleaned R1', problems: ['R1: queue item still names it'] });
+  expect([r.effects, r.toasts]).toEqual([['leave'], ['bad clean R1: cleaned R1\nR1: queue item still names it']]);
+});
+
+test('cancelling the clean dialog of a run a queue item names posts nothing', () => {
+  const r = rig(NAMED);
+  r.actor.act('clean-run', {});
+  r.actor.cancel();
+  expect(r.posts).toEqual([]);
+});
