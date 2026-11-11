@@ -55,8 +55,8 @@ export interface PageHost {
   focusMenu(): void;
   /** Takes the focus off the focused element. */
   blur(): void;
-  /** Scrolls the `.cur` element of `region` into view, as little as it takes. */
-  reveal(region: Region): void;
+  /** Scrolls the `.cur` element of `region`, or with `sel` its selected row (`[data-row].sel`), into view, as little as it takes. */
+  reveal(region: Region, what?: 'cur' | 'sel'): void;
   /**
    * Opens the confirmation dialog with `html`, modal, and remembers what had the focus. A close the browser makes
    * itself reaches the action handler as `dialog-cancel`, and a `change` of a field inside it as `dialog-change`.
@@ -95,6 +95,8 @@ export interface PageHost {
   setSidebar(open: boolean): void;
   /** Whether a run or queue is open beside the list: the centre is laid out by it. */
   setDetail(open: boolean): void;
+  /** Whether the window is under 800px: the list and the centre are two screens, and no first row is selected. */
+  narrow(): boolean;
   /** The browser's offset east of UTC, in minutes. */
   offset(): number;
   /** What the page's URL asks it to open first, from `?repo=…&run=…&key=…&tab=…&timeline=1&file=…` or `?queue=…`, each with `&view=…`: empty when it asks nothing. */
@@ -182,6 +184,8 @@ export interface BrowserWindow {
   setTimeout(fn: () => void, ms: number): number;
   clearTimeout(id: number): void;
   Date: { new (): { getTimezoneOffset(): number }; now(): number };
+  /** Optional, so a window without it reads as wide. */
+  matchMedia?(query: string): { matches: boolean };
 }
 
 const isElement = (value: unknown): value is ElementLike =>
@@ -468,8 +472,11 @@ export function browserHost(win: BrowserWindow): PageHost {
     blur() {
       doc.activeElement?.blur?.();
     },
-    reveal(region) {
-      doc.getElementById(region)?.querySelector?.('.cur')?.scrollIntoView?.({ block: 'nearest' });
+    reveal(region, what = 'cur') {
+      doc
+        .getElementById(region)
+        ?.querySelector?.(what === 'sel' ? '[data-row].sel' : '.cur')
+        ?.scrollIntoView?.({ block: 'nearest' });
     },
     onKey(handler) {
       doc.addEventListener('keydown', (event) => {
@@ -597,6 +604,7 @@ export function browserHost(win: BrowserWindow): PageHost {
     setDetail(open) {
       doc.documentElement.dataset.detail = open ? 'open' : 'closed';
     },
+    narrow: () => win.matchMedia?.('(max-width: 799px)').matches ?? false,
     offset: () => -new win.Date().getTimezoneOffset(),
   };
 }

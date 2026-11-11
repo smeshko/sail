@@ -44,6 +44,25 @@ test('the full menu draws the head, a field, one row per row with the highlight,
   expect(markup.match(/class="cmdk-row/g)).toHaveLength(4);
 });
 
+test("a run's go-to row draws the list's dot, its key and its title after its icon", () => {
+  const run = row('Fix the parser', {
+    group: 'goto',
+    hint: 'alpha › ticket-to-pr',
+    lead: 'FAKE-1',
+    status: 'failed',
+    run: { goto: { kind: 'run', repo: 'alpha', runId: 'FAKE-1-AAA' } },
+  });
+  const dot = '<span class="st p-fail"></span><span class="cmdk-key">FAKE-1</span>';
+  const tail = '<span class="cmdk-label">Fix the parser</span><span class="cmdk-hint">alpha › ticket-to-pr</span>';
+  const plain = renderMenu(state({ at: 0 }), { rows: [run] }).value;
+  expect(plain).toContain(`data-row="0">${dot}${tail}<svg class="cmdk-ico"`);
+  expect(plain).not.toContain('cmdk-id');
+  const twin = renderMenu(state({ at: 0 }), { rows: [{ ...run, id: 'AAA' }] }).value;
+  expect(twin).toContain(`${dot}<span class="cmdk-id">AAA</span>${tail}`);
+  const hostile = renderMenu(state({ at: 0 }), { rows: [{ ...run, label: '<b>x</b>' }] }).value;
+  expect(hostile).toContain('<span class="cmdk-label">&lt;b&gt;x&lt;/b&gt;</span>');
+});
+
 test('a disabled row is disabled and says why, and no head means no subject line', () => {
   const markup = renderMenu(state({ at: 0 }), {
     rows: [row('stop', { disabled: true, why: 'it already ended' })],

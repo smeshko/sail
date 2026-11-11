@@ -168,7 +168,7 @@ test('a parameter asked in the dialog is not drawn beside its button', () => {
   );
 });
 
-test('no action draws a checkbox', () => {
+test('no action draws a checkbox beside its button: a tick is asked in the dialog alone', () => {
   const on = { enabled: true };
   const source = {
     run: {
@@ -206,7 +206,10 @@ test('no action draws a checkbox', () => {
       const out = actionControl(def, subject, idle, source).toString();
       if (out !== '') drawn++;
       expect([def.id, out.includes('type="checkbox"')]).toEqual([def.id, false]);
-      for (const param of def.params(subject, source)) expect(['number', 'text', 'choice']).toContain(param.type);
+      for (const param of def.params(subject, source)) {
+        expect(['number', 'text', 'choice', 'tick']).toContain(param.type);
+        if (param.type === 'tick') expect([def.id, param.ask]).toEqual([def.id, 'dialog']);
+      }
     }
   expect(drawn).toBeGreaterThanOrEqual(12);
 });

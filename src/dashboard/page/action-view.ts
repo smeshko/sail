@@ -59,6 +59,8 @@ export function field(param: Param, values: Values, focus = false): SafeHtml | '
       return html`<label class="lbl">${param.label} <input class="txt" type="text" name="${param.dom}"${
         param.placeholder === undefined ? '' : html` placeholder="${param.placeholder}"`
       } value="${typed ?? ''}"${focus ? ' autofocus' : ''}></label>`;
+    case 'tick':
+      return html`<label class="lbl"><input type="checkbox" name="${param.dom}"${typed === 'on' ? ' checked' : ''}${focus ? ' autofocus' : ''}> ${param.label}</label>`;
     case 'choice': {
       const chosen = param.options.some((each) => each.value === typed) ? typed : param.initial;
       return html`<label class="lbl">${param.label} <select name="${param.dom}"${focus ? ' autofocus' : ''}>${param.options.map(

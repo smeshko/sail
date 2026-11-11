@@ -1175,6 +1175,19 @@ describe('the list host members (ADW-522)', () => {
     expect(scrolled).toEqual([{ block: 'nearest' }]);
   });
 
+  test("reveal('list', 'sel') scrolls the selected row, not the cursor's", () => {
+    const fake = fakeWindow();
+    const scrolled: string[] = [];
+    const cur = element({ scrollIntoView: () => void scrolled.push('cur') });
+    const sel = element({ scrollIntoView: (options) => void scrolled.push(`sel ${JSON.stringify(options)}`) });
+    fake.elements.list = element({
+      querySelector: (selectors: string) => (selectors === '.cur' ? cur : selectors === '[data-row].sel' ? sel : null),
+    });
+    const host = browserHost(fake.win);
+    host.reveal('list', 'sel');
+    expect(scrolled).toEqual(['sel {"block":"nearest"}']);
+  });
+
   test('a key whose handler answers true has its default suppressed, and one answered false does not', () => {
     const fake = fakeWindow();
     const host = browserHost(fake.win);
@@ -1297,4 +1310,19 @@ test('a contextmenu on a row reaches the handler with its data and point, and is
     ['context', undefined, { x: 0, y: 0 }],
   ]);
   expect(prevented).toBe(1);
+});
+
+test('narrow() asks the window whether it is under 800px, and a window without matchMedia reads as wide', () => {
+  const asked: string[] = [];
+  const media = (matches: boolean) => ({
+    ...fakeWindow().win,
+    matchMedia: (query: string) => {
+      asked.push(query);
+      return { matches };
+    },
+  });
+  expect(browserHost(media(true)).narrow()).toBe(true);
+  expect(browserHost(media(false)).narrow()).toBe(false);
+  expect(asked).toEqual(['(max-width: 799px)', '(max-width: 799px)']);
+  expect(browserHost(fakeWindow().win).narrow()).toBe(false);
 });

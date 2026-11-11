@@ -70,9 +70,10 @@ test('a run row holds its status, id, title, repository › workflow, duration, 
   const markup = draw('active');
   const row = markup.match(/<div class="run lrow" data-row="run:alpha\/a-run"[^>]*>.*?<\/button>/s)?.[0] ?? '';
   expect(row).toContain(
-    '<span class="st p-run"></span><span class="r-id">ADW-1</span><span class="r-title">Fix the parser</span><span class="r-wf">alpha › flow</span>',
+    '<span class="st p-run"></span><span class="r-id">ADW-1</span><span class="r-title">Fix the parser</span><span class="r-el">1m 5s</span>',
   );
-  expect(row).toContain('<span class="r-el">1m 5s</span><span class="r-cost">$1.50</span>');
+  expect(row).not.toContain('r-wf');
+  expect(row).not.toContain('r-cost');
   const susp = markup.match(/data-row="run:alpha\/a-susp"[^>]*>.*?<\/button>/s)?.[0] ?? '';
   expect(susp).toContain('<span class="why">usage_limit</span>');
   const bad = markup.match(/data-row="run:alpha\/a-bad"[^>]*>.*?<\/button>/s)?.[0] ?? '';
@@ -139,10 +140,22 @@ test("a row's menu is drawn inside its row", () => {
   expect(row).not.toContain('</div><div class="r-menu">');
 });
 
-test('a completed run has no ⋯', () => {
-  expect(draw('history')).toContain('data-run="b-done"');
-  expect(draw('history')).not.toContain('data-action="run-menu" data-repo="beta"');
+test('a completed run has a ⋯, and its open menu draws restart', () => {
+  expect(draw('history')).toContain('data-action="run-menu" data-repo="beta" data-run="b-done"');
   expect(draw('history')).toContain('data-action="run-menu" data-repo="alpha" data-run="a-fail"');
+  const markup = draw('history', { repo: 'beta', runId: 'b-done', runMenu: { runId: 'b-done', at: 'row' as const } }, {
+    restart: { enabled: true, stages: [{ stage: 'spec', runsAgain: 'spec#1 and everything after it' }], stage: 'spec' },
+  } as never);
+  expect(markup).toContain('data-action="restart-run"');
+});
+
+test('a run that offers Rebuild alone draws its menu with a rebuild button', () => {
+  const markup = draw('history', { repo: 'beta', runId: 'b-done', runMenu: { runId: 'b-done', at: 'row' as const } }, {
+    rebuild: { enabled: true, problem: 'summary.json is not a sail.summary.v1' },
+  } as never);
+  expect(markup).toContain(
+    '<div class="r-menu"><div class="acts"><span class="act"><button class="btn" data-action="rebuild-run">rebuild</button></span></div></div>',
+  );
 });
 
 test('History lists one group per start day and Queues one row per queue under its repository, with Watch all on each header row', () => {
@@ -211,9 +224,7 @@ test('a stalled running run names its stalled key in its row, and a stalled mark
       NOW,
       undefined as never,
     ).value;
-  expect(stalled('running')).toContain(
-    '<span class="r-wf">alpha › flow</span><span class="stalled">stalled spec#1</span>',
-  );
+  expect(stalled('running')).toContain('<span class="stalled">stalled spec#1</span>');
   expect(stalled('suspended')).not.toContain('class="stalled"');
 });
 
@@ -358,9 +369,8 @@ test('the Inbox is headed Inbox with its count, and each row holds its title, wh
   const markup = inbox();
   expect(markup).toContain('<span class="lh-t">Inbox</span><span class="c">3</span>');
   expect(heads(markup)).toEqual(['inbox:runs runs 1', 'inbox:parked parked 1', 'inbox:problems problems 1']);
-  expect(markup).toContain(
-    '<b class="r-title">build#1 ended in error</b><span class="r-wf">alpha · a-run · build#1</span>',
-  );
+  expect(markup).toContain('<b class="r-title">build#1 ended in error</b><span class="r-detail"');
+  expect(markup).not.toContain('r-wf');
   expect(markup).toContain('title="it broke">it broke</span>');
   expect(markup).toContain('<span class="r-problem">cannot &lt;b&gt;read&lt;/b&gt;</span>');
 });

@@ -199,6 +199,25 @@ test("dashboard refuses a steps file that isn't a JSON list", async () => {
   expect({ code, named: stderr.includes('list'), png }).toEqual({ code: 2, named: true, png: false });
 });
 
+test('dashboard refuses a key or type step of the wrong shape', async () => {
+  for (const bad of ['[{"key":""}]', '[{"key":"k","mod":"yes"}]', '[{"type":"input"}]', '[{"key":"k","text":"x"}]']) {
+    const { code, stderr, png } = await stepsRefusal(bad);
+    expect({
+      bad,
+      code,
+      named: stderr.includes('step 1'),
+      lists: /"key"/.test(stderr) && /"type"/.test(stderr),
+      png,
+    }).toEqual({
+      bad,
+      code: 2,
+      named: true,
+      lists: true,
+      png: false,
+    });
+  }
+});
+
 async function seededDemo(repo: { dir: string; env: Record<string, string> }) {
   const dir = join(repo.dir, 'demo');
   expect((await demo(repo.env, 'new', dir, '--runs', RECORDED)).code).toBe(0);
@@ -306,6 +325,50 @@ test.skipIf(chrome === undefined)(
         plain: false,
       });
       expect(readFileSync(join(dir, 'cap-one.html'), 'utf8')).toContain('data-action="toggle-tool"');
+    });
+  },
+  120_000,
+);
+
+test.skipIf(chrome === undefined)(
+  'dashboard presses a key and types into a field, and prints the URL per shot',
+  async () => {
+    await withTempRepo(async (repo) => {
+      const dir = await seededDemo(repo);
+      const file = join(repo.dir, 'steps.json');
+      const field = '[name="menu-query"]';
+      await Bun.write(
+        file,
+        JSON.stringify([
+          { wait: 'body' },
+          { shot: 'before' },
+          { key: 'k', mod: true },
+          { wait: field },
+          { type: field, text: 'switch theme' },
+          { shot: 'typed' },
+        ]),
+      );
+      const { code, stdout } = await demo(repo.env, 'dashboard', dir, 'menu', 'repo=fixture', `steps=${file}`);
+      const typed = readFileSync(join(dir, 'menu-typed.html'), 'utf8');
+      const labels = [...typed.matchAll(/<button class="cmdk-row[^>]*><span class="cmdk-label">([^<]*)<\/span>/g)].map(
+        ([, label]) => label,
+      );
+      expect({
+        code,
+        pressed: stdout.includes('step 3 {"key":"k","mod":true}: pressed'),
+        typedLine: /step 5 \{"type":.*\}: typed/.test(stdout),
+        labels,
+        urls: stdout.split('\n').filter((line) => /^ {2}url \//.test(line)).length,
+      }).toEqual({ code: 0, pressed: true, typedLine: true, labels: ['switch theme'], urls: 2 });
+      const plain = await demo(repo.env, 'dashboard', dir, 'plain', 'repo=fixture');
+      expect(/^url \//m.test(plain.stdout)).toBe(true);
+      await Bun.write(file, JSON.stringify([{ shot: 'before' }, { type: '#no-such-field', text: 'x' }]));
+      const miss = await demo(repo.env, 'dashboard', dir, 'typemiss', `steps=${file}`);
+      expect({
+        code: miss.code,
+        named: /step 2 .*#no-such-field.* matched nothing/.test(miss.stdout),
+        kept: existsSync(join(dir, 'typemiss-before.png')),
+      }).toEqual({ code: 1, named: true, kept: true });
     });
   },
   120_000,

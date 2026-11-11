@@ -12,10 +12,12 @@
 //    message when one fails, drops the command, and waits up to 15 s for the watcher to take it. Once applied it
 //    answers 200 `{ message }` with the line `sail queue` prints; a command not taken in time is 202 `{ waiting }`, and one
 //    taken but not applied 409. A resume or a restart checks again what the
-//    run offers (src/dashboard/actions.ts), then starts `sail resume <run>` or `sail run --from-run <run> --stage …`
+//    run offers (src/dashboard/actions.ts), then starts `sail resume <run>` or `sail run --from-run <run> --stage … --continue` (a restart's body may drop
+//    `--continue` with `continue: false` and add `--from-base` with `fromBase: true`)
 //    itself, detached in the clone, its output in `.sail-runs/dashboard/<run id>.log`, as a typed command would: it
 //    needs no watcher and skips the watcher's cap. It answers 202 once the run has started, or 409 with the line the
-//    start was refused with. The last two are `…/runs/<run>/stop` (body `{ now, suspend? }`) and `…/clean` (`{ item? }`): each calls the
+//    start was refused with. A `running` run no live process holds is resumed too: it has started once a live process
+//    holds it or its STATUS no longer reads `running`. The last two are `…/runs/<run>/stop` (body `{ now, suspend? }`) and `…/clean` (`{ item? }`): each calls the
 //    engine function `sail stop` or `sail clean` calls (src/engine/stop.ts, src/engine/clean.ts) in this process,
 //    with the clone's Workspace port, and is refused in the same words, 409. A `suspend` holds the run as `sail stop
 //    --suspend` does, and with `now` is a 400. A stop answers 202 `{ message }`, since a
@@ -24,7 +26,10 @@
 //    | 'drop'` in its body, settles the queue item that names the run, as `sail clean --requeue|--drop` does; a run a
 //    queue item names is refused without it. `/api/repos/<repo>/clean-failed` and `/api/clean-failed` (body `{ runs: {
 //    repo, runId }[], items: 'skip' | 'requeue' | 'drop' }`) clean each listed run that way, one at a time, and answer
-//    200 `{ message, runs, cleaned, left, failed }` with one line per run in `sail clean`'s words; one bulk clean runs at a time. The watch set is changed at `/api/repos/<repo>/watch` and
+//    200 `{ message, runs, cleaned, left, failed }` with one line per run in `sail clean`'s words; one bulk clean runs at a time.
+//    `…/runs/<run>/rebuild` (body `{}`) calls `rebuildSummary()`, which
+//    `sail show --rebuild` calls, and answers 200 `{ message }` with its line, `rebuilt <path>` relative to the clone; a run
+//    whose summary reads fine, or whose events can't be read, is 409. The watch set is changed at `/api/repos/<repo>/watch` and
 //    `…/unwatch` (body `{ workflows: string[] }`, none meaning all): each runs `sail watch` or `sail unwatch` in the
 //    clone and passes the CLI's line and refusals through. A watch with no live watcher starts one, detached, its
 //    output in `.sail-runs/dashboard/watcher.log`, and answers 202 `{ message, pid }` once the registry records it; any
@@ -53,15 +58,16 @@ import { RUN_HEADER_FILE, readRunHeader } from '../engine/run-header';
 import { newRunId } from '../engine/run-id';
 import { formatIssue } from '../engine/schemas';
 import { stoppedMessage, stopRun } from '../engine/stop';
+import { rebuildSummary } from '../events/consumers/summary';
 import type { TicketSource } from '../ports/ticket-source';
 import { cleanRuns, locateRegistered } from '../watch/clean-runs';
 import { releasedLine, releaseHold } from '../watch/holds';
 import { commandTaken, dropCommand, NOT_TAKEN } from '../watch/inbox';
 import { commandFor, itemLine, outcomeOf, streamMark } from '../watch/queue-commands';
-import { queueItemsNaming, startingRun } from '../watch/queue-store';
+import { startingRun } from '../watch/queue-store';
 import { liveSet, liveWatcher } from '../watch/registry';
 import { lastLine, type SpawnedRun, spawnDetached } from '../watch/spawn';
-import { runActions } from './actions';
+import { runActions, runAlive } from './actions';
 import { clonePorts, type ResolveClonePorts } from './clone-ports';
 import { callFile, containedFile, findRepo, findRunDir, repos, runItems } from './files';
 import { renderMarkdown } from './markdown';
@@ -134,6 +140,8 @@ const RESTART_PATH = /^\/api\/repos\/[^/]+\/runs\/[^/]+\/restart$/;
 /** The paths a run is stopped and cleaned at: `/api/repos/<repo>/runs/<run>/stop` and `…/clean`. */
 const STOP_PATH = /^\/api\/repos\/[^/]+\/runs\/[^/]+\/stop$/;
 const CLEAN_PATH = /^\/api\/repos\/[^/]+\/runs\/[^/]+\/clean$/;
+/** The path a run's summary is rebuilt at: `/api/repos/<repo>/runs/<run>/rebuild`. */
+const REBUILD_PATH = /^\/api\/repos\/[^/]+\/runs\/[^/]+\/rebuild$/;
 
 /** The paths every failed run is cleaned at: `/api/repos/<repo>/clean-failed` and `/api/clean-failed`. */
 const CLEAN_FAILED_PATH = /^\/api\/(repos\/[^/]+\/)?clean-failed$/;
@@ -154,6 +162,7 @@ const CLEAN_FAILED_MAX_CHARS = 262_144;
 
 const StopBody = z.strictObject({ now: z.boolean(), suspend: z.boolean().optional() });
 const CleanBody = z.strictObject({ item: z.enum(['requeue', 'drop']).optional() });
+const RebuildBody = z.strictObject({});
 
 const ResumeBody = z.strictObject({
   raise: z
@@ -164,7 +173,11 @@ const ResumeBody = z.strictObject({
     .optional(),
 });
 
-const RestartBody = z.strictObject({ stage: z.string().min(1) });
+const RestartBody = z.strictObject({
+  stage: z.string().min(1),
+  continue: z.boolean().optional(),
+  fromBase: z.boolean().optional(),
+});
 
 const MoveBody = z
   .strictObject({
@@ -393,8 +406,9 @@ function runOf(registryDir: string, segments: string[]) {
 }
 
 /**
- * Starts `sail resume <run>` for a suspended run, detached in its clone. A run suspended over its budget needs the
- * raise of the budget it ran out of. Answers 202 once STATUS no longer reads `suspended`.
+ * Starts `sail resume <run>` for a suspended run, or a `running` one no live process holds, detached in its clone. A
+ * run suspended over its budget needs the raise of the budget it ran out of. Answers 202 once STATUS no longer reads
+ * `suspended`; for a run that read `running`, once a live process holds it or STATUS no longer reads `running`.
  */
 async function resumeRoute(starts: Starts, segments: string[], request: Request): Promise<Response> {
   const { options, underway } = starts;
@@ -424,6 +438,8 @@ async function resumeRoute(starts: Starts, segments: string[], request: Request)
   if (underway.has(runId)) return error(409, `a start of ${runId} is already under way`);
   underway.add(runId);
   try {
+    const wasRunning = readStatus(dir).status === 'running';
+    const header = readRunHeader(dir);
     const log = join(runsDir(entry.sailDir), 'dashboard', `${runId}.log`);
     const spawned = spawnDetached(
       dirname(entry.sailDir),
@@ -432,21 +448,24 @@ async function resumeRoute(starts: Starts, segments: string[], request: Request)
       environmentOf(options),
       options.cli,
     );
-    const suspended = () => {
+    const taken = () => {
       try {
-        return readStatus(dir).status !== 'suspended';
+        const { status } = readStatus(dir);
+        if (!wasRunning) return status !== 'suspended';
+        return status !== 'running' || runAlive(entry, runId, header, options);
       } catch {
         return false;
       }
     };
-    return await started(spawned, log, options.startWaitMs ?? 120_000, suspended, runAnswers(runId));
+    return await started(spawned, log, options.startWaitMs ?? 120_000, taken, runAnswers(runId));
   } finally {
     underway.delete(runId);
   }
 }
 
 /**
- * Starts `sail run --from-run <run> --stage <stage> --continue --run-id <minted>` for a failed run, detached in its
+ * Starts `sail run --from-run <run> --stage <stage> --continue --run-id <minted>` for a failed or a completed run,
+ * without `--continue` when the body says `continue: false` and with `--from-base` when it says `fromBase: true`, detached in its
  * clone, under an id minted here so the answer can name the new run. Answers 202 `{ runId }` once its `STATUS` reads, which the run writes after its `run.json`.
  */
 async function restartRoute(starts: Starts, segments: string[], request: Request): Promise<Response> {
@@ -478,7 +497,17 @@ async function restartRoute(starts: Starts, segments: string[], request: Request
     const minted = newRunId(source.ticketKey);
     const runs = runsDir(entry.sailDir);
     const log = join(runs, 'dashboard', `${minted}.log`);
-    const args = ['run', '--from-run', runId, '--stage', stage, '--continue', '--run-id', minted];
+    const args = [
+      'run',
+      '--from-run',
+      runId,
+      '--stage',
+      stage,
+      ...(parsed.body.continue === false ? [] : ['--continue']),
+      ...(parsed.body.fromBase === true ? ['--from-base'] : []),
+      '--run-id',
+      minted,
+    ];
     const spawned = spawnDetached(dirname(entry.sailDir), log, args, environmentOf(options), options.cli);
     const opened = () => {
       if (!existsSync(join(runs, minted, RUN_HEADER_FILE))) return false;
@@ -783,6 +812,35 @@ async function cleanFailedRoute(starts: Starts, segments: string[], request: Req
   });
 }
 
+/**
+ * Rewrites a run's `summary.json` from its events, as `sail show --rebuild` does, and answers 200 `{ message }` with
+ * the line it prints: `rebuilt <path>`, relative to the clone. A run whose summary reads fine offers no rebuild: 409.
+ */
+async function rebuildRoute(starts: Starts, segments: string[], request: Request): Promise<Response> {
+  const { options, underway } = starts;
+  const found = runOf(options.registryDir, segments);
+  if (found instanceof Response) return found;
+  const { entry, runId, dir } = found;
+  const parsed = await bodyOf(request, RebuildBody, 'a rebuild');
+  if (parsed instanceof Response) return parsed;
+  const actions = await runActions(entry, runId, {
+    leasesDir: options.leasesDir,
+    env: options.env,
+    ports: options.ports,
+  });
+  if (actions.rebuild === undefined) return error(409, `run ${runId} offers no rebuild`);
+  const key = `rebuild ${runId}`;
+  if (underway.has(key)) return error(409, `a rebuild of ${runId} is already under way`);
+  underway.add(key);
+  try {
+    const rebuilt = rebuildSummary(dir);
+    if ('refused' in rebuilt) return error(409, rebuilt.refused);
+    return Response.json({ message: `rebuilt ${relative(dirname(entry.sailDir), rebuilt.path)}` });
+  } finally {
+    underway.delete(key);
+  }
+}
+
 /** The environment a run the server starts gets: the server's own, with no variable left unset. */
 function environmentOf(options: DashboardOptions): Record<string, string> {
   const env = options.env ?? process.env;
@@ -808,12 +866,13 @@ export function guard(request: Request, port: number): Response | undefined {
         STOP_PATH,
         CLEAN_PATH,
         CLEAN_FAILED_PATH,
+        REBUILD_PATH,
         WATCH_PATH,
       ].some((each) => each.test(path))
     ) {
       return error(
         405,
-        'the dashboard answers only GET, and POST to a queue change, a resume, a restart, a stop, a clean, a clean of every failed run, a watch or an unwatch',
+        'the dashboard answers only GET, and POST to a queue change, a resume, a restart, a stop, a clean, a rebuild, a clean of every failed run, a watch or an unwatch',
         {
           Allow: 'GET',
         },
@@ -968,7 +1027,9 @@ export function startDashboard(options: DashboardOptions): Dashboard | { refused
                 ? stopRoute
                 : CLEAN_PATH.test(path)
                   ? cleanRoute
-                  : undefined;
+                  : REBUILD_PATH.test(path)
+                    ? rebuildRoute
+                    : undefined;
           if (start !== undefined) {
             self.timeout(request, 0);
             return start(starts, segments, request);

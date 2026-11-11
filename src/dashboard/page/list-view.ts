@@ -5,8 +5,8 @@
 // folding groups: Active's `waiting on you` and `running`, History's days, and in Queues one per repository, and the Inbox's one group each of runs, parked items and problems, whose rows
 // open their run (at its last call in error) or queue, the view staying Inbox, and carry a ✕ that dismisses them. A
 // run's row is a `div` holding two sibling buttons: its own, which opens the run and shows on one line
-// its status, id, title, repository › workflow, stalled mark, duration, cost and stop reason, with a problem wrapping
-// inside it, and, but on a completed run, a ⋯ of its own that opens the run and a menu of what it offers: Resume,
+// its status, id, title, stalled mark, duration and stop reason, with a problem wrapping
+// inside it, and a ⋯ of its own that opens the run and a menu of what it offers: Resume,
 // Restart, Stop and Clean. The menu is drawn inside its row and floats over the rows under it, pushing none down. A
 // queue's row is a `div` holding its open button and, beside it, poll, watch and unwatch from the registry. The button
 // names the live watcher's watch state, what waits, runs, failed and is parked (a zero count left out), when the queue
@@ -20,9 +20,9 @@ import type { RepoOffers } from '../offers';
 import { ACTIONS, actionOf, type OfferSource, type Subject } from './action-registry';
 import { actionControl, subjectAttrs } from './action-view';
 import { type AttentionItem, identity } from './attention';
-import { ago, clock, cost, duration } from './format';
+import { ago, clock, duration } from './format';
 import { html, type SafeHtml } from './html';
-import { type ListRepo, type ListRun, workflowOf } from './index-model';
+import type { ListRepo, ListRun } from './index-model';
 import {
   type AttentionRow,
   attentionSubject,
@@ -65,9 +65,8 @@ export const tooltipOf = (run: ListRun): string | undefined =>
 const isMenuOpen = (repo: string, run: ListRun, ui: UiState) =>
   isOpen(repo, run, ui) && ui.runMenu?.runId === run.runId && ui.runMenu.at === 'row';
 
-/** A row's ⋯: on any run but a completed one, which offers nothing. */
+/** A row's ⋯: on every run, a completed one included, which offers Restart. */
 export function more(repo: string, run: ListRun, ui: UiState): SafeHtml | '' {
-  if (run.status === 'completed') return '';
   return html`<button class="r-more${isMenuOpen(repo, run, ui) ? ' open' : ''}" type="button" data-action="run-menu" data-repo="${repo}" data-run="${run.runId}" aria-label="actions for ${run.runId}" aria-expanded="${isMenuOpen(repo, run, ui) ? 'true' : 'false'}" title="actions for ${run.runId}">⋯</button>`;
 }
 
@@ -119,11 +118,11 @@ function runRow(row: RunRow, ui: UiState, offers: RunActions | undefined): SafeH
   const tip = tooltipOf(run);
   return html`<div class="run lrow${isOpen(repo, run, ui) ? ' sel' : ''}${picked ? ' picked' : ''}${cur(row.id, ui)}" data-row="${row.id}"${picked ? html` aria-selected="true"` : ''}${subjectAttrs({ kind: 'run', repo, runId: run.runId })}><button class="r-open"${
     tip === undefined ? '' : html` title="${tip}"`
-  } data-action="select-run" data-repo="${repo}" data-run="${run.runId}"><span class="r-line">${statusMark(repo, run, ui)}<span class="r-id">${runLabel(run)}</span><span class="r-title">${run.title}</span><span class="r-wf">${repo} › ${workflowOf(run)}</span>${
+  } data-action="select-run" data-repo="${repo}" data-run="${run.runId}"><span class="r-line">${statusMark(repo, run, ui)}<span class="r-id">${runLabel(run)}</span><span class="r-title">${run.title}</span>${
     run.status === 'running' && run.stalled !== undefined
       ? html`<span class="stalled">stalled ${run.stalled}</span>`
       : ''
-  }<span class="r-el">${duration(run.durationMs)}</span><span class="r-cost">${cost(run.costUsd)}</span>${
+  }<span class="r-el">${duration(run.durationMs)}</span>${
     run.stopReason === undefined ? '' : html`<span class="why">${run.stopReason}</span>`
   }</span>${run.problem === undefined ? '' : html`<span class="r-problem">${run.problem}</span>`}</button>${more(repo, run, ui)}${runMenu(repo, run, ui, offers)}</div>`;
 }
@@ -170,17 +169,13 @@ function queueRow(row: QueueRow, ui: UiState, now: number, repoOffers: RepoOffer
   return html`<div class="q-row${row.problem === undefined ? '' : ' bad'}${sel}" data-row="${row.id}"${subjectAttrs({ kind: 'workflow', repo: row.repo, workflow: row.workflow })}><button class="q-open" data-action="select-queue" data-queue="${id}">${body}</button>${queueActions(row, ui, repoOffers)}</div>`;
 }
 
-/** Where an Inbox item is: its repository, workflow, run and call. */
-const whereOf = (item: AttentionItem): string =>
-  [item.repo, item.workflow, item.runId, item.key].filter((part) => part !== undefined).join(' · ');
-
 /** An Inbox row: what needs attention, opening its run (at its call in error) or its queue, the view staying Inbox. */
 function attentionRow(row: AttentionRow, ui: UiState): SafeHtml {
   const { item } = row;
   const { opens } = item;
   const queue = item.workflow === undefined ? undefined : queueId(row.repo, item.workflow);
   const sel = opens === undefined ? queue !== undefined && ui.queue === queue : isOpenRun(opens.repo, opens.runId, ui);
-  const body = html`<span class="r-line"><b class="r-title">${item.title}</b><span class="r-wf">${whereOf(item)}</span>${
+  const body = html`<span class="r-line"><b class="r-title">${item.title}</b>${
     item.detail === '' || item.kind === 'problem'
       ? ''
       : html`<span class="r-detail" title="${item.detail}">${item.detail}</span>`
@@ -227,7 +222,7 @@ function groupBlock(group: ListGroup, ui: UiState, now: number, offers: RunActio
   return html`<div class="lgrp">${head}${open ? group.rows.map((row) => rowOf(row, ui, now, offers, group.repo?.offers)) : ''}</div>`;
 }
 
-const EMPTY: Record<ViewName, string> = {
+export const EMPTY: Record<ViewName, string> = {
   inbox: 'nothing needs attention',
   active: 'no live run',
   queues: 'no queue',

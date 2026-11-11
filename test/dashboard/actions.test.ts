@@ -2,7 +2,7 @@
 // alpha holds the golden run and FAKE-2 (failed, its implement call in error); beta holds FAKE-3 (suspended on its
 // budget, its queue item dispatched) and FAKE-4 (a completed group).
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { takeLease } from '../../src/adapters/leases';
 import { runActions } from '../../src/dashboard/actions';
@@ -110,13 +110,23 @@ test('a failed ticket run offers Restart with its stages in the order they ran, 
   });
 });
 
-test('a completed run offers neither, and says it completed', async () => {
-  expect(await actions('beta', FAKE_4_ID)).toEqual({
-    why: `run ${FAKE_4_ID} completed: there is nothing to start again`,
-  });
+test('a completed run offers Restart with its stages, the last journaled call as its default, and nothing else', async () => {
+  // The default is the stage of the call that ended `failed` (the golden run's tests), else the last journaled call's.
+  for (const [clone, id, stage] of [
+    ['beta', FAKE_4_ID, 'style'],
+    ['alpha', GOLDEN_RUN_ID, 'tests'],
+  ] as const) {
+    const offers = await actions(clone, id);
+    expect(Object.keys(offers)).toEqual(['restart']);
+    expect(offers.restart?.enabled).toBe(true);
+    expect(offers.restart?.stages.length).toBeGreaterThan(0);
+    expect(offers.restart?.stage).toBe(stage);
+  }
 });
 
-test('a running run offers both, disabled, saying it is running', async () => {
+const FAKE_2_BUDGET = { maxUsd: 25, maxMinutes: 90 };
+
+test('a running run a live process holds offers both, disabled, saying it is running', async () => {
   setStatus(runDir('alpha', FAKE_2_ID), 'running');
   takeLease(leasesDir, 'fake://origin', FAKE_2_BRANCH, {
     runId: FAKE_2_ID,
@@ -125,10 +135,63 @@ test('a running run offers both, disabled, saying it is running', async () => {
   });
   const why = `run ${FAKE_2_ID} is running`;
   expect(await actions('alpha', FAKE_2_ID)).toEqual({
-    resume: { enabled: false, why, spentUsd: 0.3625, budget: { maxUsd: 25, maxMinutes: 90 } },
-    restart: { enabled: false, why, stages: [], budget: { maxUsd: 25, maxMinutes: 90 } },
+    resume: { enabled: false, why, spentUsd: 0.3625, budget: FAKE_2_BUDGET },
+    restart: { enabled: false, why, stages: [], budget: FAKE_2_BUDGET },
     stop: { enabled: true },
     suspend: { enabled: true },
+  });
+});
+
+test('a running run no live process holds offers Resume', async () => {
+  setStatus(runDir('alpha', FAKE_2_ID), 'running');
+  expect(await actions('alpha', FAKE_2_ID)).toEqual({
+    resume: { enabled: true, spentUsd: 0.3625, budget: FAKE_2_BUDGET },
+    stop: { enabled: true },
+    suspend: {
+      enabled: false,
+      why: `run ${FAKE_2_ID} reads running, but no live process holds it: sail resume ${FAKE_2_ID} takes it`,
+    },
+  });
+});
+
+test('a running run whose lease names a dead process offers Resume', async () => {
+  setStatus(runDir('alpha', FAKE_2_ID), 'running');
+  const dead = Bun.spawnSync(['true']).pid;
+  takeLease(leasesDir, 'fake://origin', FAKE_2_BRANCH, {
+    runId: FAKE_2_ID,
+    runDir: runDir('alpha', FAKE_2_ID),
+    pid: dead,
+  });
+  expect(await actions('alpha', FAKE_2_ID)).toEqual({
+    resume: { enabled: true, spentUsd: 0.3625, budget: FAKE_2_BUDGET },
+    stop: { enabled: true },
+    suspend: {
+      enabled: false,
+      why: `run ${FAKE_2_ID} reads running, but no live process holds it: sail resume ${FAKE_2_ID} takes it`,
+    },
+  });
+});
+
+test('a running run no live process holds, whose branch another run leases, offers Resume disabled naming that run', async () => {
+  setStatus(runDir('alpha', FAKE_2_ID), 'running');
+  takeLease(leasesDir, 'fake://origin', FAKE_2_BRANCH, {
+    runId: 'FAKE-9-01HZX3Y4Z5A6B7C8D9E0F1G2H3',
+    runDir: m.root,
+    pid: process.pid,
+  });
+  expect((await actions('alpha', FAKE_2_ID)).resume).toMatchObject({
+    enabled: false,
+    why: `branch ${FAKE_2_BRANCH} is leased by run FAKE-9-01HZX3Y4Z5A6B7C8D9E0F1G2H3`,
+  });
+});
+
+test('a suspended run that crashed offers Resume', async () => {
+  settleQueue();
+  setStatus(runDir('beta', FAKE_3_ID), 'suspended crashed');
+  expect((await actions('beta', FAKE_3_ID)).resume).toEqual({
+    enabled: true,
+    spentUsd: 1.0625,
+    budget: { maxUsd: 1, maxMinutes: 90 },
   });
 });
 
@@ -264,6 +327,11 @@ test('a suspended run offers Stop beside Resume, and a running run offers Stop w
   settleQueue();
   expect((await actions('beta', FAKE_3_ID)).stop).toEqual({ enabled: true });
   setStatus(runDir('beta', FAKE_3_ID), 'running');
+  takeLease(leasesDir, 'fake://origin', FAKE_3_BRANCH, {
+    runId: FAKE_3_ID,
+    runDir: runDir('beta', FAKE_3_ID),
+    pid: process.pid,
+  });
   expect((await actions('beta', FAKE_3_ID)).stop).toEqual({ enabled: true });
 });
 
@@ -387,4 +455,33 @@ test('with no ports given, a clone without a project.yaml disables Clean, saying
   const { clean } = await runActions(alpha(), FAKE_2_ID, { leasesDir, env: { SAIL_HOME: m.sailHome } });
   expect(clean?.enabled).toBe(false);
   expect(clean?.why).toBe('[sail.project.v1]  / is missing');
+});
+
+test('a run whose summary can not be read offers Rebuild beside what its status offers', async () => {
+  settleQueue();
+  const broken = (clone: 'alpha' | 'beta', id: string, text: string) =>
+    writeFileSync(join(runDir(clone, id), 'summary.json'), text);
+  broken('alpha', FAKE_2_ID, '{}');
+  const failed = await actions('alpha', FAKE_2_ID);
+  expect(Object.keys(failed)).toEqual(['restart', 'clean', 'rebuild']);
+  expect(failed.rebuild).toEqual({
+    enabled: true,
+    problem: expect.stringMatching(/^summary\.json is not a sail\.summary\.v1/),
+  });
+  broken('beta', FAKE_3_ID, 'not json');
+  const suspended = await actions('beta', FAKE_3_ID);
+  expect(Object.keys(suspended)).toEqual(['resume', 'stop', 'rebuild']);
+  expect(suspended.rebuild?.problem).toContain("can't be read");
+  broken('beta', FAKE_4_ID, '{}');
+  expect(Object.keys(await actions('beta', FAKE_4_ID))).toEqual(['restart', 'rebuild']);
+});
+
+test('a run with a readable summary, or a summary linked out of the run, offers no Rebuild', async () => {
+  expect((await actions('alpha', FAKE_2_ID)).rebuild).toBeUndefined();
+  const away = join(m.root, 'elsewhere.json');
+  writeFileSync(away, '{}');
+  const file = join(runDir('alpha', FAKE_2_ID), 'summary.json');
+  rmSync(file);
+  symlinkSync(away, file);
+  expect((await actions('alpha', FAKE_2_ID)).rebuild).toBeUndefined();
 });

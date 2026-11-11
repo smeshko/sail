@@ -11,6 +11,7 @@ import { queuePanels } from './index-model';
 import { fromQuery, syncUrl } from './location';
 import { queueId } from './queue-view';
 import { closeFile, openFile, readLog, selectCard } from './reads';
+import { selectFirst } from './selection';
 import type { Store } from './store';
 import { closeDetail, reopenQueue, selectRun } from './streams';
 import { sayMissing } from './toast';
@@ -28,6 +29,7 @@ export function showView(store: Store, asked: Record<string, string>): void {
   const view = fromQuery(asked).view ?? 'active';
   if (view === ui.view) return;
   ui.view = view;
+  store.deselected = false;
   ui.listFilter = '';
   delete ui.listCursor;
   store.fresh.add('list');
@@ -43,6 +45,8 @@ export function navigate(store: Store, asked: Record<string, string>, moved: boo
     if (queuePanels(repos).some((panel) => queueId(panel.repo, panel.workflow) === id)) {
       reopenQueue(store, id);
       ui.queue = id;
+      store.deselected = false;
+      store.revealOpen = true;
     } else sayMissing(store, `queue ${id} is not listed`);
   } else if (target.repo !== undefined && target.run !== undefined) {
     const { repo, run } = target;
@@ -63,6 +67,9 @@ export function navigate(store: Store, asked: Record<string, string>, moved: boo
           missing(store, target.file ?? '', run),
         );
     } else sayMissing(store, `run ${run} of ${repo} is not listed`);
-  } else if (moved) closeDetail(store);
+  } else if (moved) {
+    closeDetail(store);
+    store.deselected = true;
+  } else selectFirst(store);
   store.mark('sidebar', 'list', 'main', 'inspector');
 }
