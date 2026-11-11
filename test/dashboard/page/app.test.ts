@@ -12,6 +12,8 @@ import { attention, identity } from '../../../src/dashboard/page/attention';
 import { focused } from '../../../src/dashboard/page/focus';
 import { browserHost, type ConnectHandlers, type PageHost, type Region } from '../../../src/dashboard/page/host';
 import { listRepos, newestFirst } from '../../../src/dashboard/page/index-model';
+import { readSubjectOffers } from '../../../src/dashboard/page/reads';
+import { sourceFor } from '../../../src/dashboard/page/store';
 import type { QueueWatch } from '../../../src/dashboard/watch-state';
 import { readEvents } from '../../../src/events/consumers/ndjson';
 import {
@@ -619,6 +621,18 @@ test('the list draws each row with its subject: a run, a queue and a repository'
   host.advance(100);
   expect(host.regions.list).toContain(`data-subject="workflow" data-repo="beta" data-workflow="${QUEUE_WORKFLOW}"`);
   expect(host.regions.list).toContain('data-subject="repo" data-repo="beta"');
+});
+
+test('the offers of a run that is not open are read once into the store, and the open run keeps its own', async () => {
+  page = boot(host);
+  firstIndex(GOLDEN_RUN_ID);
+  await settle();
+  const other = { kind: 'run', repo: 'alpha', runId: FAKE_2_ID } as const;
+  expect(sourceFor(page.store, other).run).toBeUndefined();
+  readSubjectOffers(page.store, other);
+  await settle();
+  expect(sourceFor(page.store, other).run?.clean?.enabled).toBe(true);
+  expect(sourceFor(page.store, { kind: 'run', repo: 'alpha', runId: GOLDEN_RUN_ID }).run).toBe(page.store.offers);
 });
 
 test('a queue opened over a run stays open when that run leaves the index, and the run alone closes (review R10)', () => {

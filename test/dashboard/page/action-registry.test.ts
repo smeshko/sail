@@ -399,3 +399,23 @@ test('actionOf finds an entry by id in a registry given, and none that is not th
   expect(actionOf('nope')).toBeUndefined();
   expect(actionOf('stop-run', [])).toBeUndefined();
 });
+
+test('a move says its rows from the waiting neighbours', () => {
+  const move = actionOf('move-item');
+  const items = (states: string[]) =>
+    states.map((state, at) => ({ dedupKey: `ticket:FAKE-${at}`, state, attempts: 0 }));
+  const source = (states: string[]): OfferSource => ({
+    index: [{ name: 'alpha', queues: [{ workflow: 'wf', queue: { items: items(states) } }] }],
+  });
+  const at = (n: number): Subject => ({ ...ITEM, item: `ticket:FAKE-${n}` });
+  const rows = (n: number, states: string[]) => move?.variants?.(at(n), source(states));
+  const all = ['queued', 'queued', 'queued', 'parked'];
+  expect(rows(1, all)).toEqual([
+    { label: 'move up', data: { dir: 'up', target: 'ticket:FAKE-0' } },
+    { label: 'move down', data: { dir: 'down', target: 'ticket:FAKE-2' } },
+  ]);
+  expect(rows(0, all)).toEqual([{ label: 'move down', data: { dir: 'down', target: 'ticket:FAKE-1' } }]);
+  expect(rows(2, all)).toEqual([{ label: 'move up', data: { dir: 'up', target: 'ticket:FAKE-1' } }]);
+  expect(rows(3, all)).toEqual([]);
+  expect(move?.variants?.(WORKFLOW, source(all))).toEqual([]);
+});

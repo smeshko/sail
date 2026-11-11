@@ -2,6 +2,7 @@
 // drawer and what the open run offers. Each read drops its answer when the selection has moved on or a newer read of
 // the same kind has been asked for, and a running call's log and output are read again at most once a second.
 import type { RunActions } from '../actions';
+import type { Subject } from './action-registry';
 import { isMarkdown } from './drawer-view';
 import { statusOf } from './index-model';
 import { logTarget } from './inspector-view';
@@ -211,6 +212,31 @@ export function readOffers(store: Store) {
         // An answer that isn't JSON offers nothing.
       }
     }
+    store.mark('list');
+  });
+}
+
+/**
+ * Reads what `subject` offers when it is a run that is not the open one, into `store.subjectOffers`, dropping an answer
+ * a newer read replaced. The open run's offers are `store.offers`, and any other subject's are the index's.
+ */
+export function readSubjectOffers(store: Store, subject: Subject): void {
+  if (subject.kind !== 'run') return;
+  if (store.run?.repo === subject.repo && store.run.runId === subject.runId) return;
+  const asked = ++store.subjectOffersRead;
+  const { repo, runId } = subject;
+  store.subjectOffers = { repo, runId, offers: undefined };
+  void store.host.get(`/api/repos/${enc(repo)}/runs/${enc(runId)}/actions`).then((answer) => {
+    if (asked !== store.subjectOffersRead || store.stopped) return;
+    let offers: RunActions | undefined;
+    if (answer.status === 200) {
+      try {
+        offers = JSON.parse(answer.body) as RunActions;
+      } catch {
+        // An answer that isn't JSON offers nothing.
+      }
+    }
+    store.subjectOffers = { repo, runId, offers };
     store.mark('list');
   });
 }

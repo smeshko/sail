@@ -26,6 +26,8 @@ interface Rig {
   open: { repo: string; runId: string } | undefined;
   stopped: boolean;
   run: RunActions | undefined;
+  /** The offers of runs that are not the open one, by run id, as the shell reads them. */
+  others: Record<string, RunActions>;
   registry: ActionDef[];
 }
 
@@ -44,6 +46,7 @@ function rig(run?: RunActions, index: IndexRepo[] = []): Rig {
     open: { repo: 'alpha', runId: 'R1' } as Rig['open'],
     stopped: false,
     run,
+    others: {} as Record<string, RunActions>,
     registry: [...ACTIONS],
   };
   const actor = createActor({
@@ -57,7 +60,10 @@ function rig(run?: RunActions, index: IndexRepo[] = []): Rig {
       closeDialog: () => state.dialogs.push('closed'),
     },
     ui: state.ui,
-    source: () => ({ run: state.run, index }),
+    source: (subject) => ({
+      run: subject?.kind === 'run' && subject.runId !== state.open?.runId ? state.others[subject.runId] : state.run,
+      index,
+    }),
     openRun: () => state.open,
     effects: {
       reopen: (repo, runId, keepMenu) => state.effects.push(`reopen ${repo}/${runId}${keepMenu ? ' keep' : ''}`),
@@ -214,6 +220,7 @@ test('the same action on another run opens its own dialog, and a dialog for a ru
   const r = rig(RESTART);
   r.actor.act('stop-run', {});
   r.actor.cancel();
+  r.others.R2 = { stop: on } as unknown as RunActions;
   r.actor.act('stop-run', { repo: 'alpha', run: 'R2' });
   expect(r.actor.dialogFor()).toEqual({ kind: 'run', repo: 'alpha', runId: 'R2' });
   r.actor.forget('run');
@@ -599,4 +606,25 @@ test('the inert actor, the store holds until the shell wires the real one, does 
   expect(actor.keep('run')).toBeUndefined();
   expect(actor.forget('run')).toBeUndefined();
   expect([actor.dialogFor(), actor.confirm(), actor.cancel()]).toEqual([undefined, undefined, undefined]);
+});
+
+test('values given with the act are read before the page fields', async () => {
+  const r = rig(RESTART);
+  r.fields.raise = '9';
+  r.actor.act('resume-run', {}, { raise: '2' });
+  expect(r.ui.dialog?.lines).toEqual(['spent $1.00 of $2.00', 'raises the budget by $2.00']);
+  r.actor.confirm();
+  expect(r.posts).toEqual([{ path: '/api/repos/alpha/runs/R1/resume', body: { raise: { usd: 2 } } }]);
+});
+
+test('a run that is not open is acted on with its own offers', () => {
+  const r = rig(RESTART);
+  const other = { repo: 'alpha', run: 'R2' };
+  r.actor.act('clean-run', other);
+  expect([r.ui.dialog, r.dialogs]).toEqual([undefined, []]);
+  r.others.R2 = { clean: { ...on, removes: ['b'], archive: '/y' } } as unknown as RunActions;
+  r.actor.act('clean-run', other);
+  expect(r.ui.dialog).toEqual({ title: 'clean R2', lines: ['removes b', 'run directory → /y'], verb: 'clean' });
+  r.actor.confirm();
+  expect(r.posts).toEqual([{ path: '/api/repos/alpha/runs/R2/clean', body: {} }]);
 });

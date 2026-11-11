@@ -5,6 +5,7 @@
 import type { RunActions } from '../actions';
 import type { IndexRepo } from '../files';
 import { type Actor, inertActor } from './act';
+import type { OfferSource, Subject } from './action-registry';
 import { attention, identity } from './attention';
 import type { PageHost, Region } from './host';
 import { queuePanels } from './index-model';
@@ -55,6 +56,10 @@ export interface Store {
   offers: RunActions | undefined;
   /** What the open run's status and queue item were when its actions were read. */
   offersFor: string | undefined;
+  /** What a run that is not the open one offers, read for the command menu: its repository, its id and its offers. */
+  subjectOffers: { repo: string; runId: string; offers: RunActions | undefined } | undefined;
+  /** Bumped on every read of a subject's offers: only the latest is kept. */
+  subjectOffersRead: number;
   /** Carries the registry's actions out: `boot()` wires it, with the effects only the shell can perform. */
   actor: Actor;
   /** The needs-attention identities a person cleared, and the identities of the rows last drawn. */
@@ -122,6 +127,8 @@ export function createStore(host: PageHost): Store {
     doc: undefined,
     offers: undefined,
     offersFor: undefined,
+    subjectOffers: undefined,
+    subjectOffersRead: 0,
     actor: inertActor(),
     cleared,
     drawn: [],
@@ -178,3 +185,16 @@ export const opened = (store: Store) => (store.ui.timeline ? selected(store) : u
 
 export const listed = (store: Store) =>
   store.index === undefined ? [] : attention(store.index).filter((item) => !store.cleared.has(identity(item)));
+
+/**
+ * What the offers say for `subject`: the open run's offers for the open run, and a run that is not open its own, once
+ * they were read (`readSubjectOffers`), else none.
+ */
+export function sourceFor(store: Store, subject?: Subject): OfferSource {
+  const index = store.index ?? [];
+  if (subject?.kind !== 'run' || (store.run?.repo === subject.repo && store.run.runId === subject.runId))
+    return { run: store.offers, index };
+  const read = store.subjectOffers;
+  const own = read?.repo === subject.repo && read.runId === subject.runId ? read.offers : undefined;
+  return { run: own, index };
+}

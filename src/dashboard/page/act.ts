@@ -49,7 +49,8 @@ export interface ActorEffects {
 export interface ActorDeps {
   host: Pick<PageHost, 'post' | 'value' | 'openDialog' | 'closeDialog'>;
   ui: UiState;
-  source(): OfferSource;
+  /** What the offers say for `subject`: a run that is not open has its own. */
+  source(subject?: Subject): OfferSource;
   openRun(): { repo: string; runId: string } | undefined;
   effects: ActorEffects;
   mark(...regions: Region[]): void;
@@ -60,7 +61,7 @@ export interface ActorDeps {
 
 export interface Actor {
   /** Carries out action `id` for the subject `data` names. */
-  act(id: string, data: Readonly<Record<string, string>>): void;
+  act(id: string, data: Readonly<Record<string, string>>, values?: Values): void;
   /** Reads the drawn parameters of the actions shown in `place` into the drafts, before a draw. */
   keep(place: 'run' | 'queue', subject?: Subject): void;
   /** Forgets what a run's actions hold: an open dialog for it and the drafts. */
@@ -104,8 +105,16 @@ export function createActor(deps: ActorDeps): Actor {
   };
 
   /** What the page holds for `param`: its field, else its draft, else the choice it starts at. */
-  function typed(def: ActionDef, param: Param, data: Readonly<Record<string, string>>): string | undefined {
+  function typed(
+    def: ActionDef,
+    param: Param,
+    data: Readonly<Record<string, string>>,
+    asked: Values | undefined,
+  ): string | undefined {
     if (param.given !== undefined) return data[param.name];
+    // A value the caller has already asked is the one given: no field the page draws takes its place.
+    const given = asked?.[param.name];
+    if (given !== undefined) return given;
     const drafts = draftsOf(def.id);
     let value = host.value(param.dom) ?? drafts[param.name];
     if (value === undefined && param.type === 'choice' && param.tick !== true) value = param.initial;
@@ -114,10 +123,15 @@ export function createActor(deps: ActorDeps): Actor {
     return value;
   }
 
-  function read(def: ActionDef, subject: Subject, data: Readonly<Record<string, string>>): Values {
+  function read(
+    def: ActionDef,
+    subject: Subject,
+    data: Readonly<Record<string, string>>,
+    asked: Values | undefined,
+  ): Values {
     const values: Record<string, string> = {};
-    for (const param of def.params(subject, deps.source())) {
-      const value = typed(def, param, data);
+    for (const param of def.params(subject, deps.source(subject))) {
+      const value = typed(def, param, data, asked);
       if (value !== undefined) values[param.name] = value;
     }
     return values;
@@ -164,7 +178,7 @@ export function createActor(deps: ActorDeps): Actor {
         // A change that took empties the text typed for it, and keeps what was ticked. One with no text of its own,
         // such as a poll or a drop, leaves every field as it is typed.
         const texts = def
-          .params(subject, deps.source())
+          .params(subject, deps.source(subject))
           .filter((param) => param.type === 'text' && param.given === undefined);
         if (texts.length > 0) {
           const drafts = draftsOf(def.id);
@@ -186,7 +200,7 @@ export function createActor(deps: ActorDeps): Actor {
     void host.post(request.path, request.body).then(({ status, body }) => finish(def, subject, status, body, undo));
   }
 
-  function act(id: string, data: Readonly<Record<string, string>>) {
+  function act(id: string, data: Readonly<Record<string, string>>, asked?: Values) {
     const def = actionOf(id, registry);
     if (def === undefined) return;
     const subject = subjectOf(def.appliesTo, data, deps.openRun());
@@ -197,11 +211,11 @@ export function createActor(deps: ActorDeps): Actor {
       if (done !== undefined) effects.toast('ok', headOf(def, subject), done.text, done.undo);
       return;
     }
-    const source = deps.source();
+    const source = deps.source(subject);
     const available = def.available(subject, source);
     if (!available.offered) return;
     if (!available.enabled && def.holdsDisabled === true) return;
-    const values = read(def, subject, data);
+    const values = read(def, subject, data, asked);
     const request = def.request?.(subject, values, source);
     if (request === undefined) return;
     if ('invalid' in request) {

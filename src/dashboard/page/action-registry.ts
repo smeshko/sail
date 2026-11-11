@@ -155,6 +155,8 @@ export interface ActionDef {
   answer?(status: number, body: string, subject: Subject): ActResult;
   /** The name of the effect a local action has the shell perform. */
   run?: string;
+  /** The rows the action is more than one: each its own label, with the `data-*` a click on it gives. */
+  variants?(subject: Subject, source: OfferSource): { label: string; data: Record<string, string> }[];
 }
 
 /** Why a request of kind `what` (a move, a resume, a restart) was refused: the `error` its answer carries, else its status. */
@@ -558,6 +560,18 @@ export const ACTIONS: readonly ActionDef[] = [
       { name: 'target', dom: 'target', type: 'text', given: 'data' },
     ],
     available: itemOffer('move'),
+    variants: (subject, source) => {
+      if (subject.kind !== 'item') return [];
+      const waiting = (queueOf(subject, source)?.queue?.items ?? []).filter((each) => each.state === 'queued');
+      const at = waiting.findIndex((each) => each.dedupKey === subject.item);
+      if (at < 0) return [];
+      const above = waiting[at - 1];
+      const below = waiting[at + 1];
+      return [
+        ...(above === undefined ? [] : [{ label: 'move up', data: { dir: 'up', target: above.dedupKey } }]),
+        ...(below === undefined ? [] : [{ label: 'move down', data: { dir: 'down', target: below.dedupKey } }]),
+      ];
+    },
     request: (subject, values) => ({
       path: queuePath(subject, '/move'),
       body:

@@ -18,7 +18,7 @@ import { REGIONS } from './host';
 import { onKey } from './keys';
 import { stopReads } from './reads';
 import { saveCleared, storedCleared } from './saved';
-import { createStore } from './store';
+import { createStore, type Store, sourceFor } from './store';
 import { closeRun, openIndex, selectRun, stopStreams } from './streams';
 import { toast } from './toast';
 import type { UiState } from './ui-state';
@@ -33,6 +33,8 @@ export interface Page {
   stop(): void;
   /** What the page holds, for tests. */
   readonly ui: UiState;
+  /** The store behind it, for tests. */
+  readonly store: Store;
 }
 
 export function boot(host: PageHost): Page {
@@ -40,7 +42,7 @@ export function boot(host: PageHost): Page {
   store.actor = createActor({
     host,
     ui: store.ui,
-    source: () => ({ run: store.offers, index: store.index ?? [] }),
+    source: (subject) => sourceFor(store, subject),
     openRun: () => (store.run === undefined ? undefined : { repo: store.run.repo, runId: store.run.runId }),
     effects: {
       reopen(repo, runId, keepMenu) {
@@ -92,6 +94,7 @@ export function boot(host: PageHost): Page {
 
   return {
     ui: store.ui,
+    store,
     stop() {
       store.stopped = true;
       stopStreams(store);
