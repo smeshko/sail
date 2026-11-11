@@ -704,6 +704,26 @@ describe('the confirmation dialog', () => {
     expect(fake.focus.calls).toEqual([{ preventScroll: true }]);
   });
 
+  test('a close the browser makes itself cancels the dialog, and the close closeDialog makes, or one after a reopen, does not', () => {
+    const { fake, host } = dialogWindow();
+    const got: string[] = [];
+    host.onAction((action) => got.push(action));
+    const dialog = fake.elements.dialog as ElementLike;
+    host.openDialog('x');
+    // The platform closes the modal (a close request no keydown reports): the dialog is no longer open.
+    dialog.open = false;
+    dialog.onclose?.();
+    expect(got).toEqual(['dialog-cancel']);
+    host.openDialog('y');
+    host.closeDialog();
+    dialog.onclose?.();
+    host.openDialog('z');
+    // A close event that arrives once the dialog is open again is the earlier close's.
+    dialog.open = true;
+    dialog.onclose?.();
+    expect(got).toEqual(['dialog-cancel']);
+  });
+
   test('closeDialog with nothing focused at the open closes and focuses nothing, and with no #dialog does nothing', () => {
     const { fake, calls, host } = dialogWindow();
     host.openDialog('x');

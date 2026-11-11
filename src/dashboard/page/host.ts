@@ -30,7 +30,10 @@ export interface PageHost {
   onAction(handler: (action: string, data: Record<string, string>) => void): void;
   /** `on` is the `data-action` of the element the key landed on. */
   onKey(handler: (key: string, inInput: boolean, on?: string) => void): void;
-  /** Opens the confirmation dialog with `html`, modal, and remembers what had the focus. */
+  /**
+   * Opens the confirmation dialog with `html`, modal, and remembers what had the focus. A close the browser makes
+   * itself reaches the action handler as `dialog-cancel`.
+   */
   openDialog(html: string): void;
   /** Closes the dialog and gives the focus back to what had it at the open. */
   closeDialog(): void;
@@ -79,6 +82,8 @@ export interface ElementLike {
   /** A `<dialog>`'s. */
   showModal?(): void;
   close?(): void;
+  open?: boolean;
+  onclose?: (() => void) | null;
   contains?(other: ElementLike): boolean;
   focus?(options?: { preventScroll?: boolean }): void;
   getAttribute?(name: string): string | null;
@@ -308,10 +313,17 @@ export function browserHost(win: BrowserWindow): PageHost {
       const active = doc.activeElement;
       opener = active === null || active === undefined ? undefined : focusKey(active);
       dialog.innerHTML = markup;
+      // A close the browser makes itself, with no Escape the page saw, cancels the dialog as its cancel button does.
+      // A close event that finds it open again is an earlier close's, made before a reopen.
+      dialog.onclose = () => {
+        if (dialog.open !== true) onAction('dialog-cancel', {});
+      };
       dialog.showModal?.();
     },
     closeDialog() {
-      doc.getElementById('dialog')?.close?.();
+      const dialog = doc.getElementById('dialog');
+      if (dialog !== null) dialog.onclose = null;
+      dialog?.close?.();
       const key = opener;
       opener = undefined;
       if (key === undefined) return;
