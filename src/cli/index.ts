@@ -62,6 +62,7 @@ Usage:
   sail dashboard [--port <n>]                                Serve every repository's runs and queues on localhost
   sail watch [<workflow>...]                                 Watch these workflows, or every watched one: start this repository's watcher, or add them to it
   sail watch --install [<workflow>...] | --install --all    Run this repository's watcher, or every registered repository's, as a login service (macOS)
+  sail watch --restart [<repository>|--all]                  Restart that login service's watcher, or every one's, from any directory
   sail watch --uninstall [--all]                             Unload that login service and delete its plist
   sail watch --release-hold <harness>                        Release the usage-limit hold on a harness key, such as claude-code or pi:openai-codex, on every watcher
   sail unwatch [<workflow>...]                               Stop watching them, or every watched one. Their runs keep running: sail stop ends one. The watcher exits when it watches none

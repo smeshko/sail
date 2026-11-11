@@ -9,7 +9,7 @@ import { EXIT_OK, EXIT_REFUSED, EXIT_RESTART } from '../../src/cli/exit-codes';
 import type { Io } from '../../src/cli/index';
 import type { Launchctl } from '../../src/cli/service';
 import { queueDir } from '../../src/watch/queue-store';
-import { readEntry } from '../../src/watch/registry';
+import { readEntry, recordEntry } from '../../src/watch/registry';
 import { fakeTimers } from '../helpers/fake-timers';
 import { fakeInterrupts, runCaptured } from '../helpers/run-captured';
 import { writeStub } from '../helpers/stub-workflow';
@@ -362,5 +362,145 @@ test('--service is accepted by the parser and --install, --uninstall and --resta
     expect(help.stdout).toContain('  sail watch --uninstall [--all]');
     const refused = await runCaptured(['watch', '--all'], repo.dir);
     expect(refused.stderr).toContain('--all goes with --install, --uninstall or --restart');
+  });
+}, 30_000);
+
+// --- --restart ---
+
+/**
+ * Two installed watcher agents, `alpha` (pid 7001) and `beta` (pid 7002), each with a registry entry recording a live
+ * watcher. The recording launchctl's kickstart rewrites that entry's pid to the old one + 100, standing in for launchd
+ * starting the new watcher. `failing` names a label whose kickstart exits 3, and `silent` one that records nothing.
+ */
+async function restartWorld(repo: TempRepo, options: { failing?: string; silent?: string } = {}) {
+  const sailHome = join(repo.home, 'sail-home');
+  const registry = join(sailHome, 'watchers');
+  const pids: Record<string, number> = { alpha: 7001, beta: 7002 };
+  const calls: string[][] = [];
+  const write = (name: string) =>
+    recordEntry(registry, {
+      schema: 'sail.registry.v1',
+      name,
+      remote: null,
+      clone: join(repo.home, name),
+      sailDir: join(repo.home, name, '.sail'),
+      updatedAt: START,
+      watcher: {
+        pid: pids[name] ?? 0,
+        startedAt: START,
+        sailDir: join(repo.home, name, '.sail'),
+        ticketSource: 'fake',
+        labels: [name],
+      },
+    });
+  for (const name of Object.keys(pids)) write(name);
+  const launchctl: Launchctl = async (args) => {
+    calls.push(args);
+    if (args[0] === 'kickstart') {
+      const label = args[2] ?? '';
+      if (label.endsWith(`.${options.failing}`)) return { code: 3, stdout: '', stderr: 'Could not find service' };
+      const name = label.slice(label.lastIndexOf('.') + 1);
+      if (name !== options.silent && pids[name] !== undefined) {
+        pids[name] += 100;
+        write(name);
+      }
+    }
+    return { code: 0, stdout: '', stderr: '' };
+  };
+  const home = join(repo.home, 'login-home');
+  const deps: WatchDeps = {
+    service: { platform: 'darwin', uid: 501, launchctl, home, sail: ['/bin/bun'] },
+    isAlive: () => true,
+    applyTimeoutMs: 100,
+    pollMs: 5,
+  };
+  const agents = join(home, 'Library', 'LaunchAgents');
+  const install = (...names: string[]) => {
+    mkdirSync(agents, { recursive: true });
+    for (const name of names) writeFileSync(join(agents, `sail.watcher.${name}.plist`), '<plist/>');
+  };
+  return { deps, calls, install, env: { ...repo.env, SAIL_HOME: sailHome } };
+}
+
+test("sail watch --restart --all from a directory with no .sail/ kickstarts every installed watcher and prints each one's old and new pid", async () => {
+  await withTempRepo(async (repo) => {
+    const w = await restartWorld(repo);
+    w.install('alpha', 'beta');
+    const got = await sail(w.deps, repo.home, w.env, { restart: true, all: true });
+    expect(got.code).toBe(EXIT_OK);
+    expect(w.calls).toEqual([
+      ['kickstart', '-k', 'gui/501/sail.watcher.alpha'],
+      ['kickstart', '-k', 'gui/501/sail.watcher.beta'],
+    ]);
+    expect(got.stdout).toBe(
+      "sail watch: restarted the watcher of 'alpha' (pid 7001 → 7101)\nsail watch: restarted the watcher of 'beta' (pid 7002 → 7102)\n",
+    );
+  });
+}, 30_000);
+
+test("sail watch --restart <name> kickstarts that repository alone, and sail watch --restart in a clone kickstarts the clone's", async () => {
+  await withTempRepo(async (repo) => {
+    const w = await restartWorld(repo);
+    w.install('alpha', 'beta', 'stub');
+    const one = await sail(w.deps, repo.home, w.env, { restart: true }, ['beta']);
+    expect(one.code).toBe(EXIT_OK);
+    expect(w.calls).toEqual([['kickstart', '-k', 'gui/501/sail.watcher.beta']]);
+    expect(one.stdout).toBe("sail watch: restarted the watcher of 'beta' (pid 7002 → 7102)\n");
+    w.calls.length = 0;
+    repository(repo);
+    const here = await sail(w.deps, repo.dir, w.env, { restart: true });
+    expect(here.code).toBe(EXIT_OK);
+    expect(w.calls).toEqual([['kickstart', '-k', 'gui/501/sail.watcher.stub']]);
+  });
+}, 30_000);
+
+test('when no watcher records itself within the timeout, --restart exits 0 with the line naming the log', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await restartWorld(repo, { silent: 'alpha' });
+    w.install('alpha');
+    const got = await sail(w.deps, repo.home, w.env, { restart: true }, ['alpha']);
+    expect(got.code).toBe(EXIT_OK);
+    expect(got.stdout).toBe(
+      `sail watch: restarted the login service of 'alpha': no watcher has recorded itself yet: its log is ${join(repo.home, 'sail-home', 'services', 'sail.watcher.alpha.log')}\n`,
+    );
+  });
+}, 30_000);
+
+test('with no agent installed, --restart, --restart <name> and --restart --all each exit 3 naming sail watch --install, and launchctl sees nothing', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await restartWorld(repo);
+    repository(repo);
+    const here = await sail(w.deps, repo.dir, w.env, { restart: true });
+    const named = await sail(w.deps, repo.home, w.env, { restart: true }, ['alpha']);
+    const every = await sail(w.deps, repo.home, w.env, { restart: true, all: true });
+    expect([here, named, every].map(({ code, stderr }) => ({ code, stderr }))).toEqual([
+      { code: 3, stderr: "sail watch: no login service is installed for 'stub': sail watch --install installs it\n" },
+      { code: 3, stderr: "sail watch: no login service is installed for 'alpha': sail watch --install installs it\n" },
+      { code: 3, stderr: 'sail watch: no login service is installed: sail watch --install installs one\n' },
+    ]);
+    expect(w.calls).toEqual([]);
+  });
+}, 30_000);
+
+test("a kickstart that exits non-zero makes --restart --all exit 3 with launchctl's stderr, after trying the other agent", async () => {
+  await withTempRepo(async (repo) => {
+    const w = await restartWorld(repo, { failing: 'alpha' });
+    w.install('alpha', 'beta');
+    const got = await sail(w.deps, repo.home, w.env, { restart: true, all: true });
+    expect(got.code).toBe(EXIT_REFUSED);
+    expect(got.stderr).toBe('sail watch: launchctl kickstart failed (exit 3): Could not find service\n');
+    expect(w.calls.map((call) => call[2])).toEqual(['gui/501/sail.watcher.alpha', 'gui/501/sail.watcher.beta']);
+    expect(got.stdout).toBe("sail watch: restarted the watcher of 'beta' (pid 7002 → 7102)\n");
+  });
+}, 30_000);
+
+test('sail watch --restart a b exits 3', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await restartWorld(repo);
+    w.install('alpha', 'beta');
+    const got = await sail(w.deps, repo.home, w.env, { restart: true }, ['alpha', 'beta']);
+    expect(got.code).toBe(EXIT_REFUSED);
+    expect(got.stderr).toBe('sail watch: --restart takes one repository\n');
+    expect(w.calls).toEqual([]);
   });
 }, 30_000);
