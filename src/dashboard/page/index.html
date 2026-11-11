@@ -189,7 +189,8 @@
         z-index: 10;
         transition: background 0.15s;
       }
-      .resize-handle:hover {
+      .resize-handle:hover,
+      .resize-handle:focus-visible {
         background: var(--line-2);
       }
       .top {
@@ -2547,7 +2548,8 @@
         <nav class="side">
           <div id="sidebar"></div>
         </nav>
-        <div class="resize-handle" data-resize="left"></div>
+        <!-- biome-ignore lint/a11y/useSemanticElements: a focusable separator with a value is the window splitter, which no <hr> is -->
+        <div class="resize-handle" id="resize-left" data-resize="left" role="separator" aria-orientation="vertical" aria-label="sidebar width" aria-valuenow="180" aria-valuemin="140" aria-valuemax="480" tabindex="0"></div>
         <section class="list">
           <div id="list"></div>
         </section>
@@ -2555,7 +2557,8 @@
           <button class="btn back" type="button" data-action="close-detail" title="back to the list (Esc)">‹ list</button>
           <div id="main"></div>
         </main>
-        <div class="resize-handle resize-right" data-resize="right"></div>
+        <!-- biome-ignore lint/a11y/useSemanticElements: a focusable separator with a value is the window splitter, which no <hr> is -->
+        <div class="resize-handle resize-right" id="resize-right" data-resize="right" role="separator" aria-orientation="vertical" aria-label="inspector width" aria-valuenow="360" aria-valuemin="240" aria-valuemax="640" tabindex="0"></div>
         <aside class="inspector">
           <button class="btn ins-close" type="button" data-action="close-inspector" aria-label="close inspector" title="close the inspector (Esc)">✕</button>
           <div class="inspector-b" id="inspector"></div>

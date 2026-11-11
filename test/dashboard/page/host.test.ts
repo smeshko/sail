@@ -221,7 +221,19 @@ function fakeWindow(
   options: { storage?: 'throws'; clipboard?: 'rejects' | 'missing'; fetch?: 'fails'; search?: string } = {},
 ) {
   const listeners: Record<string, ((event: EventLike) => void)[]> = {};
-  const elements: Record<string, ReturnType<typeof element>> = { list: element(), body: element() };
+  const attributes: Record<string, Record<string, string>> = { 'resize-left': {}, 'resize-right': {} };
+  const handle = (id: string) =>
+    element({
+      setAttribute: (name, value) => {
+        (attributes[id] as Record<string, string>)[name] = value;
+      },
+    });
+  const elements: Record<string, ReturnType<typeof element>> = {
+    list: element(),
+    body: element(),
+    'resize-left': handle('resize-left'),
+    'resize-right': handle('resize-right'),
+  };
   const fetched: { url: string; headers: Record<string, string>; method?: string; body?: string }[] = [];
   const sockets: FakeSocket[] = [];
   const timers: number[] = [];
@@ -336,6 +348,7 @@ function fakeWindow(
   return {
     win,
     elements,
+    attributes,
     fetched,
     sockets,
     timers,
@@ -618,6 +631,131 @@ test('narrowing the window after a drag clamps the dragged widths again, the ins
   opening.host.setInspector(true, false);
   opening.drag('right', -400);
   expect([opening.styles['--side-w'], opening.styles['--ins-w']]).toEqual(['480px', '350px']);
+});
+
+describe('the resize handles take keys (ADW-547)', () => {
+  const handle = (side: 'left' | 'right') => element({ dataset: { resize: side } });
+  /** A host whose handles are focused and keyed: `press` fires a keydown at one, and answers whether its default was prevented. */
+  const keyed = (width: number, inspector: boolean) => {
+    const c = columns(width, inspector);
+    const heard: string[] = [];
+    c.host.onKey((key) => {
+      heard.push(key);
+      return false;
+    });
+    const press = (side: 'left' | 'right', key: string, extra: Partial<EventLike> = {}) => {
+      let prevented = false;
+      c.fake.fire('keydown', {
+        target: handle(side),
+        key,
+        preventDefault: () => {
+          prevented = true;
+        },
+        ...extra,
+      });
+      return prevented;
+    };
+    const values = (side: 'left' | 'right') => c.fake.attributes[`resize-${side}`] ?? {};
+    return { ...c, heard, press, values };
+  };
+
+  test('ArrowRight and ArrowLeft move the sidebar 16px the way they point, and the inspector the other way', () => {
+    const k = keyed(1800, true);
+    k.press('left', 'ArrowRight');
+    expect(k.styles['--side-w']).toBe('196px');
+    k.press('left', 'ArrowLeft');
+    expect(k.styles['--side-w']).toBe('180px');
+    k.press('right', 'ArrowRight');
+    expect(k.styles['--ins-w']).toBe('344px');
+    k.press('right', 'ArrowLeft');
+    expect(k.styles['--ins-w']).toBe('360px');
+  });
+
+  test('Home sets the minimum and End the widest, and at 1400px with the inspector open the inspector stops at the drag clamp', () => {
+    const k = keyed(1400, true);
+    k.press('left', 'Home');
+    expect(k.styles['--side-w']).toBe('140px');
+    k.press('left', 'End');
+    expect(k.styles['--side-w']).toBe('370px');
+    k.press('right', 'End');
+    expect(k.styles['--ins-w']).toBe('360px');
+    k.press('right', 'Home');
+    expect(k.styles['--ins-w']).toBe('240px');
+    // With the sidebar at its 180px start, the inspector's widest is the drag test's own 550px.
+    const inspector = keyed(1400, true);
+    inspector.press('right', 'End');
+    expect(inspector.styles['--ins-w']).toBe('550px');
+    // The sidebar at its minimum leaves it 1400 - 145 - 5 - 340 - 320 = 590px.
+    inspector.press('left', 'Home');
+    inspector.press('right', 'End');
+    expect(inspector.styles['--ins-w']).toBe('590px');
+    const wide = keyed(1800, true);
+    wide.press('left', 'End');
+    wide.press('right', 'End');
+    expect([wide.styles['--side-w'], wide.styles['--ins-w']]).toEqual(['480px', '640px']);
+  });
+
+  test('repeated arrows stop at the minimum and at the widest', () => {
+    const k = keyed(1800, true);
+    for (let i = 0; i < 40; i++) k.press('left', 'ArrowLeft');
+    expect(k.styles['--side-w']).toBe('140px');
+    for (let i = 0; i < 40; i++) k.press('left', 'ArrowRight');
+    expect(k.styles['--side-w']).toBe('480px');
+    for (let i = 0; i < 40; i++) k.press('right', 'ArrowRight');
+    expect(k.styles['--ins-w']).toBe('240px');
+    for (let i = 0; i < 40; i++) k.press('right', 'ArrowLeft');
+    expect(k.styles['--ins-w']).toBe('640px');
+  });
+
+  test("each handle's value attributes are written at install, after a key, a drag, a window resize and an inspector open", () => {
+    const k = keyed(1800, false);
+    expect(k.values('left')).toEqual({ 'aria-valuenow': '180', 'aria-valuemin': '140', 'aria-valuemax': '480' });
+    expect(k.values('right')).toEqual({ 'aria-valuenow': '360', 'aria-valuemin': '240', 'aria-valuemax': '640' });
+    k.press('left', 'ArrowRight');
+    expect(k.values('left')['aria-valuenow']).toBe('196');
+    k.drag('left', 100);
+    expect(k.values('left')['aria-valuenow']).toBe('296');
+    k.resize(1100);
+    // 1100 - 5 - 340 - 320 = 435 for the sidebar with the inspector out of the grid.
+    expect([k.values('left')['aria-valuenow'], k.values('left')['aria-valuemax']]).toEqual(['296', '435']);
+    k.resize(1800);
+    k.drag('left', 200);
+    expect(k.values('left')['aria-valuenow']).toBe('480');
+    k.resize(1500);
+    k.host.setInspector(true, false);
+    // The inspector opening beside a 480px sidebar leaves it 1500 - 485 - 5 - 340 - 320 = 350, and the sidebar a width beside 360.
+    expect(k.values('right')).toEqual({ 'aria-valuenow': '350', 'aria-valuemin': '240', 'aria-valuemax': '350' });
+    expect(k.values('left')['aria-valuemax']).toBe('480');
+    k.press('right', 'End');
+    k.press('left', 'End');
+    expect(k.values('left')['aria-valuemax']).toBe('480');
+  });
+
+  test("the sidebar's widest follows the inspector's width", () => {
+    const k = keyed(1400, true);
+    expect(k.values('left')['aria-valuemax']).toBe('370');
+    k.press('right', 'Home');
+    expect(k.values('left')['aria-valuemax']).toBe('480');
+  });
+
+  test('the four keys on a handle do not reach the page, are prevented, and any other key or the arrows elsewhere do', () => {
+    const k = keyed(1800, true);
+    for (const key of ['ArrowLeft', 'ArrowRight', 'Home', 'End']) expect(k.press('left', key)).toBe(true);
+    expect(k.heard).toEqual([]);
+    expect(k.press('left', 'j')).toBe(false);
+    expect(k.heard).toEqual(['j']);
+    k.fake.fire('keydown', { target: element(), key: 'ArrowRight' });
+    expect(k.heard).toEqual(['j', 'ArrowRight']);
+  });
+
+  test('a key held with Alt, Ctrl or Meta on a handle resizes nothing and is left to the browser', () => {
+    const k = keyed(1800, true);
+    for (const extra of [{ altKey: true }, { ctrlKey: true }, { metaKey: true }]) {
+      expect(k.press('left', 'ArrowRight', extra)).toBe(false);
+    }
+    expect(k.styles['--side-w']).toBeUndefined();
+    expect(k.values('left')['aria-valuenow']).toBe('180');
+  });
 });
 
 test("render keeps an opened tool call's input box scrolled across a redraw", () => {
