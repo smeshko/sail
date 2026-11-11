@@ -32,7 +32,7 @@ Run sail only through `.sail/lib/demo.sh`. It runs this branch's `sail` in a scr
   copied to `$STAGE_OUT/demo/clones/<name>/.sail-runs/` and the dashboard lists its runs beside the demo repository's.
   `test/fixtures/dashboard/dense/` holds five clone folders (`atlas`, `borealis`, `cirrus`, `delta`, `ember`) with 44
   runs between them, for a view that must hold up on a busy machine. `dashboard … width=<px>` sets the window's width,
-  from 800 to 2560 (1440 when left out), to capture a narrower page.
+  from 320 to 2560 (1440 when left out), to capture a narrower page.
 - `.sail/lib/demo.sh run $STAGE_OUT/demo <command> [args…]` commits what changed in the demo repository, runs the
   command there, prints its output and its exit code, and appends both to `$STAGE_OUT/demo/transcript.txt`. It exits
   with the command's code. Run `sail` by name: `.sail/lib/demo.sh run $STAGE_OUT/demo sail FAKE-1`.

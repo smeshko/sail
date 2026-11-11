@@ -30,7 +30,13 @@ const seed = (overrides: Record<string, number> = {}) =>
   });
 
 /** The repository's own `.sail/` on fakes, with fake pull request #7 pointed at commits the repository holds. */
-function setUp(repo: TempRepo, jev?: object, glossary?: string, gateFile?: string): void {
+function setUp(
+  repo: TempRepo,
+  jev?: object,
+  glossary?: string,
+  gateFile?: string,
+  extra: Record<string, string> = {},
+): void {
   writeOwnSail(repo, jev === undefined ? {} : { jev });
   if (glossary !== undefined) {
     writeFileSync(join(repo.dir, 'CONTEXT.md'), glossary);
@@ -40,6 +46,10 @@ function setUp(repo: TempRepo, jev?: object, glossary?: string, gateFile?: strin
   const base = repo.git('rev-parse', 'HEAD').trim();
   writeFileSync(join(repo.dir, 'notes.txt'), 'a change\n');
   repo.git('add', 'notes.txt');
+  for (const [name, text] of Object.entries(extra)) {
+    writeFileSync(join(repo.dir, name), text);
+    repo.git('add', name);
+  }
   if (gateFile !== undefined) {
     if (gateFile.startsWith('.sail/')) appendFileSync(join(repo.dir, gateFile), '\n// a gate change\n');
     else writeFileSync(join(repo.dir, gateFile), '# a gate change\n');
@@ -293,6 +303,36 @@ test('a leak-check Jev hit reaches the judge as L1', async () => {
     expect(leak.detail).toContain('0.8');
     expect(asked(dir, 'leak-check#1')).toHaveLength(1);
     expect(asked(dir, 'banned-words#1')).toEqual([]);
+  });
+}, 120_000);
+
+test('several thousand tracker keys of one prefix reach the judge as one finding', async () => {
+  await withTempRepo(async (repo) => {
+    const keys = Array.from({ length: 3000 }, (_, i) => `export const k${i} = 'CIR-${i + 1}';\n`).join('');
+    setUp(repo, seed(), undefined, undefined, { 'keys.ts': keys });
+    const sail = join(repo.dir, '.sail');
+    const [answer] = JSON.parse(readFileSync(join(sail, 'fake', 'harness.json'), 'utf8')).judge;
+    answer.output.decisions.push({ finding: 'L1', verdict: 'drop', rationale: 'A fixture.', ticket: null });
+    seedHarness(sail, 'judge', [answer]);
+    const { code, dir } = await review(repo);
+    expect(code).toBe(0);
+    const folder = readdirSync(dir).find((name) => name.endsWith('-judge'));
+    const input = JSON.parse(readFileSync(join(dir, folder ?? '', 'call-1', 'in', 'findings.json'), 'utf8'));
+    const leaks = input.findings.filter((finding: { source: string }) => finding.source === 'leak-check');
+    expect(leaks).toHaveLength(1);
+    const [leak] = leaks;
+    expect(leak).toMatchObject({
+      id: 'L1',
+      file: 'keys.ts:1',
+      title: 'A tracker key other than ADW: prefix CIR, 3000 occurrences in 1 file',
+    });
+    expect(leak.detail).toContain('git diff');
+    expect(leak.detail).toContain('\\bCIR-\\d+\\b');
+    expect(leak.detail.match(/keys\.ts:\d+/g)).toHaveLength(5);
+    const comments = (await pullRequest(repo)).comments;
+    const title = 'A tracker key other than ADW: prefix CIR, 3000 occurrences in 1 file';
+    expect(comments.join('\n').split(title)).toHaveLength(2);
+    expect(comments.join('\n')).not.toContain('| L2 ');
   });
 }, 120_000);
 

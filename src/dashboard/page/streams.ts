@@ -302,7 +302,7 @@ export function onIndex(store: Store, text: string, onStart: (asked: Record<stri
   }
   if (ui.queue !== undefined && openQueue(store) === undefined) delete ui.queue;
   syncUrl(store, false);
-  store.mark('sidebar', 'list', 'main', 'status');
+  store.mark('sidebar', 'list', 'main', 'inspector', 'status');
   // The command menu draws its rows from the index's offers too.
   if (ui.menu !== undefined) store.mark('menu');
   tick(store);

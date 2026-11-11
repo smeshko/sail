@@ -2,7 +2,7 @@
 // reason, the context menu at the pointer with no field, and what a hostile string can't do.
 import { expect, test } from 'bun:test';
 import type { MenuModel } from '../../../src/dashboard/page/menu-model';
-import { renderMenu } from '../../../src/dashboard/page/menu-view';
+import { iconOf, renderMenu } from '../../../src/dashboard/page/menu-view';
 import type { MenuState } from '../../../src/dashboard/page/ui-state';
 
 const row = (label: string, extra: Partial<MenuModel['rows'][number]> = {}): MenuModel['rows'][number] => ({
@@ -34,7 +34,7 @@ test('the full menu draws the head, a field, one row per row with the highlight,
   expect(markup).toContain('<div class="cmdk-subj">run R1</div>');
   expect(markup).toContain('<input class="cmdk-in" name="menu-query" type="text" value=""');
   expect(markup).toContain(
-    '<button class="cmdk-row sel" type="button" data-action="menu-run" data-row="1"><span class="cmdk-label">clean</span><kbd>c</kbd></button>',
+    '<button class="cmdk-row sel" type="button" data-action="menu-run" data-row="1"><span class="cmdk-label">clean</span><kbd>c</kbd><svg class="cmdk-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4"/></svg></button>',
   );
   expect(markup).toContain(
     '<div class="cmdk-grp">go to</div><button class="cmdk-row" type="button" data-action="menu-run" data-row="2"><span class="cmdk-label">R1</span><span class="cmdk-hint">run</span>',
@@ -90,4 +90,24 @@ test('a hostile label, reason and query are escaped', () => {
   expect(markup).not.toContain('<img');
   expect(markup).not.toContain('<b>x');
   expect(markup).not.toContain('<i>no');
+});
+
+test('a row leads with the icon of what it runs, and an arrow when it has none of its own', () => {
+  const none = { kind: 'none' } as const;
+  const act = (id: string) => iconOf({ act: id, subject: none, data: {} });
+  expect(['resume-run', 'stop-run', 'unwatch', 'watch', 'clean-run', 'other'].map(act)).toEqual([
+    'play',
+    'stop',
+    'eyeOff',
+    'eye',
+    'trash',
+    'arrow',
+  ]);
+  expect(iconOf({ goto: { kind: 'run', repo: 'a', runId: 'r' } })).toBe('run');
+  expect(iconOf({ goto: none })).toBe('arrow');
+  expect(['toggle-theme', 'toggle-inspector', 'x'].map((view) => iconOf({ view }))).toEqual(['sun', 'panel', 'arrow']);
+  expect(iconOf({ pollAll: true })).toBe('refresh');
+  expect(iconOf({ pick: 'add-ticket' })).toBe('plus');
+  expect(iconOf({ queue: { repo: 'a', workflow: 'w' } })).toBe('list');
+  expect(iconOf({ value: 'spec' })).toBe('arrow');
 });

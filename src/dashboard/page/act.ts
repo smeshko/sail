@@ -25,7 +25,10 @@ import {
   actionOf,
   type OfferSource,
   type Param,
+  type SeveralRun,
   type Subject,
+  severalHead,
+  severalPlan,
   subjectName,
   subjectOf,
   underwayId,
@@ -34,6 +37,8 @@ import {
 import { type DialogAsk, renderDialog, renderDialogBody } from './dialog-view';
 import type { PageHost, Region } from './host';
 import type { UiState } from './ui-state';
+
+type Data = Readonly<Record<string, string>>;
 
 export interface ActorEffects {
   /** Reads the run again, keeping its ⋯ menu open when `keepMenu`. */
@@ -47,7 +52,7 @@ export interface ActorEffects {
   /** Puts a toast on the stack. */
   toast(kind: 'ok' | 'bad', head: string, text: string, undo?: () => void): void;
   /** The local actions' effects, by the name their entry's `run` gives: the text of their toast and what undoes them. */
-  local: Record<string, (data: Readonly<Record<string, string>>) => { text: string; undo: () => void } | undefined>;
+  local: Record<string, (data: Data) => { text: string; undo: () => void } | undefined>;
 }
 
 export interface ActorDeps {
@@ -65,7 +70,12 @@ export interface ActorDeps {
 
 export interface Actor {
   /** Carries out action `id` for the subject `data` names. */
-  act(id: string, data: Readonly<Record<string, string>>, values?: Values): void;
+  act(id: string, data: Data, values?: Values): void;
+  /**
+   * Carries out `id` over `runs`: one dialog listing each, then a request per run that can, in order. False when it took
+   * nothing: a run request is still out, which a red toast says, or the action has no several form.
+   */
+  actSeveral(id: string, runs: readonly SeveralRun[]): boolean;
   /** Reads the drawn parameters of the actions shown in `place` into the drafts, before a draw. */
   keep(place: 'run' | 'queue', subject?: Subject): void;
   /** Forgets what a run's actions hold: an open dialog for it and the drafts. */
@@ -84,6 +94,7 @@ export interface Actor {
 export function inertActor(): Actor {
   return {
     act: () => {},
+    actSeveral: () => false,
     keep: () => {},
     forget: () => {},
     dialogFor: () => undefined,
@@ -113,12 +124,7 @@ export function createActor(deps: ActorDeps): Actor {
   };
 
   /** What the page holds for `param`: its field, else its draft, else the choice it starts at. */
-  function typed(
-    def: ActionDef,
-    param: Param,
-    data: Readonly<Record<string, string>>,
-    asked: Values | undefined,
-  ): string | undefined {
+  function typed(def: ActionDef, param: Param, data: Data, asked: Values | undefined): string | undefined {
     if (param.given !== undefined) return data[param.name];
     // A value the caller has already asked is the one given: no field the page draws takes its place.
     const given = asked?.[param.name];
@@ -130,12 +136,7 @@ export function createActor(deps: ActorDeps): Actor {
     return value;
   }
 
-  function read(
-    def: ActionDef,
-    subject: Subject,
-    data: Readonly<Record<string, string>>,
-    asked: Values | undefined,
-  ): Values {
+  function read(def: ActionDef, subject: Subject, data: Data, asked: Values | undefined): Values {
     const values: Record<string, string> = {};
     for (const param of def.params(subject, deps.source(subject))) {
       const value = typed(def, param, data, asked);
@@ -206,14 +207,48 @@ export function createActor(deps: ActorDeps): Actor {
     if (effect === 'leave') mark('sidebar', 'inspector', 'status');
   }
 
-  function send(def: ActionDef, subject: Subject, request: { path: string; body: unknown }, undo: Undo | undefined) {
+  function send(def: ActionDef, subject: Subject, request: { path: string; body: unknown }, undo?: Undo) {
     if (subject.kind === 'run') runsOut++;
     if (def.underway !== undefined) ui.underway[underwayId(def, subject)] = def.underway;
     mark('list', 'main');
-    void host.post(request.path, request.body).then(({ status, body }) => finish(def, subject, status, body, undo));
+    return host.post(request.path, request.body).then(({ status, body }) => finish(def, subject, status, body, undo));
   }
 
-  function act(id: string, data: Readonly<Record<string, string>>, asked?: Values) {
+  /**
+   * One dialog listing what the server says each run does, whose confirm sends each run that can once the one before
+   * is answered. A selection with none that can opens no dialog: a red toast says why.
+   */
+  function actSeveral(id: string, runs: readonly SeveralRun[]): boolean {
+    const def = actionOf(id, registry);
+    if (def?.several === undefined) return false;
+    mark('list', 'main');
+    const head = severalHead(def, runs.length);
+    if (runsOut > 0) {
+      effects.toast('bad', head, 'another run action is under way: try again once it is answered');
+      return false;
+    }
+    const { view, goes, requests } = severalPlan(def, def.several, runs, deps.source().index);
+    if (goes === 0) {
+      effects.toast('bad', head, view.lines.map((line) => line.replace(/^skips /, '')).join('; '));
+      return true;
+    }
+    dialog = {
+      subject: { kind: 'none' },
+      submit: () => () => {
+        const sendFrom = (at: number) => {
+          const next = requests[at];
+          if (next === undefined || deps.stopped()) return;
+          void send(def, next.subject, next.request).then(() => sendFrom(at + 1));
+        };
+        sendFrom(0);
+      },
+    };
+    ui.dialog = view;
+    host.openDialog(renderDialog(view).value);
+    return true;
+  }
+
+  function act(id: string, data: Data, asked?: Values) {
     const def = actionOf(id, registry);
     if (def === undefined) return;
     const subject = subjectOf(def.appliesTo, data, deps.openRun());
@@ -266,7 +301,7 @@ export function createActor(deps: ActorDeps): Actor {
     subject: Subject,
     source: OfferSource,
     asked: Param[],
-    data: Readonly<Record<string, string>>,
+    data: Data,
     given: Values | undefined,
   ) {
     const placed: Record<string, string> = {};
@@ -325,6 +360,7 @@ export function createActor(deps: ActorDeps): Actor {
 
   return {
     act,
+    actSeveral,
     dialogFor: () => dialog?.subject,
     confirm() {
       // The dialog is cleared first, so the click a browser makes of Enter on its focused button finds nothing to do.
@@ -333,9 +369,7 @@ export function createActor(deps: ActorDeps): Actor {
       closeDialog();
       submitted?.();
     },
-    cancel() {
-      closeDialog();
-    },
+    cancel: closeDialog,
     changed() {
       dialog?.changed?.();
     },
