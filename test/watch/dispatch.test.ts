@@ -1617,6 +1617,25 @@ test('a run that is held and still alive fills one slot, not two', async () => {
   });
 });
 
+test('a dispatched run held while its process is still alive fills one slot, not two: a cap of 2 still dispatches one item (review R1)', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 3, 2);
+    const dispatcher = w.dispatcher();
+    await dispatcher.tick();
+    expect(spawnedKeys(w.spawner)).toEqual(['FAKE-1', 'FAKE-2']);
+    // FAKE-1's process lives on while its run is suspended and held, as one shutting down after `sail stop --suspend`.
+    const held = await manualRun(w, repo, 'a', w.spawner.run('FAKE-1').runId);
+    try {
+      await held.hold();
+      await w.spawner.end('FAKE-2');
+      await dispatcher.tick();
+      expect(spawnedKeys(w.spawner)).toEqual(['FAKE-1', 'FAKE-2', 'FAKE-3']);
+    } finally {
+      await held.release();
+    }
+  });
+});
+
 test('a dispatched run suspended with no hold is resumed at a cap of 2 beside a held run, and waits at a cap of 1', async () => {
   await withTempRepo(async (repo) => {
     const w = await world(repo, 1, 2);
