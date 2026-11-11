@@ -2554,6 +2554,16 @@ describe('Back and forward open what an entry names, and push nothing (ADW-513)'
     expect(pushes()).toBe(1);
   });
 
+  test('a move to an entry with an empty query leaves the queue for the newest run (review R3)', () => {
+    open();
+    host.click({ action: 'select-queue', queue: QUEUE });
+    host.go('');
+    host.advance(100);
+    expect(page?.ui.queue).toBeUndefined();
+    expect(cards(host.regions.main)).toContain('implement#1');
+    expect(host.urls.at(-1)).toEqual({ query: query(0), push: false });
+  });
+
   test('a move to a query with a file opens the drawer, and to one without it empties it', async () => {
     host.bodies.set(FILE_READ, { status: 200, body: 'hello notes' });
     open();

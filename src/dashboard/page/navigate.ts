@@ -1,8 +1,8 @@
 // Opens what a query names, at the page's first index and on the browser's Back and forward. A listed queue opens in the
 // centre; a listed run opens with its call, tab, timeline and file, each only when it differs from what is open. A run
 // or queue the index does not list sets `ui.indexNotice` and, as `fallback` says, opens the newest run (`first`, at
-// load) or keeps what is shown (`keep`, on Back and forward). An empty query opens the newest run at load, with no
-// notice. It never writes the URL: the caller does, once it has opened what it can.
+// load) or keeps what is shown (`keep`, on Back and forward). An empty query leaves a queue for the run open, or the
+// newest run when none is, with no notice. It never writes the URL: the caller does, once it has opened what it can.
 
 import { queuePanels } from './index-model';
 import { fromQuery, syncUrl } from './location';
@@ -62,6 +62,10 @@ export function navigate(store: Store, asked: Record<string, string>, fallback: 
       if (fallback === 'first') openFirst(store);
       ui.indexNotice = `run ${run} of ${repo} is not listed`;
     }
-  } else if (fallback === 'first') openFirst(store);
+  } else {
+    // An empty query names no queue: the centre shows a run, the one open or else the newest.
+    delete ui.queue;
+    if (store.run === undefined) openFirst(store);
+  }
   store.mark('rail', 'main', 'inspector');
 }
