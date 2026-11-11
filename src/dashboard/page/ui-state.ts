@@ -122,6 +122,8 @@ export interface UiState {
   toasts: Toast[];
   /** The start the CLI last refused with a check a flag overrides, for start anyway. */
   start?: RefusedStart;
+  /** The command last copied and whether the clipboard took it, shown on its copy button until it times out. */
+  copied?: { text: string; ok: boolean };
   /** The command menu, while it is open. */
   menu?: MenuState;
   /** The subject each source of the focus holds. */

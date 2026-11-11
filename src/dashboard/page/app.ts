@@ -6,10 +6,11 @@
 // - `streams.ts` keeps the index, run and queue sockets, and `reads.ts` reads over REST what the selection shows.
 // - `actions.ts` does what a click on a view asks, and `act.ts` carries out the registry's actions (`action-registry.ts`,
 //   drawn by `action-view.ts`), the only module that posts; `keys.ts` does what a key asks. Enter and Space on
-//   a focused stage card arrive as its action, and on a focused button or link not at all.
+//   a focused stage card arrive as its action, and on a focused button or link not at all; Enter in the queue
+//   view's add field arrives as `add-ticket`.
 //
 // The page's URL names the view and the selection (`location.ts`, opened by `navigate.ts`, also on Back and forward),
-// and the top bar's Copy link copies it (`actions.ts`).
+// and the top bar's Copy link copies it (`actions.ts`). A copy button says for a moment whether its copy took.
 //
 // The rules each module follows are in its own header.
 import { createActor } from './act';
@@ -32,6 +33,7 @@ import { closeRun, openIndex, selectRun, stopStreams } from './streams';
 import { toast } from './toast';
 import type { UiState } from './ui-state';
 
+export { COPIED_MS } from './actions';
 export { TICK_MS } from './draw';
 export { LOG_REFRESH_MS } from './reads';
 export { CLEARED_KEY, FILTER_KEY, LIST_KEY, THEME_KEY } from './saved';
@@ -183,6 +185,7 @@ export function boot(host: PageHost): Page {
       stopReads(store);
       for (const timer of store.toastTimers.values()) host.cancel(timer);
       if (store.tickTimer !== undefined) host.cancel(store.tickTimer);
+      if (store.copiedTimer !== undefined) host.cancel(store.copiedTimer);
     },
   };
 }
