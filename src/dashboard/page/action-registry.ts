@@ -87,6 +87,8 @@ export type Param = ParamBase &
         initial?: string | undefined;
       }
     | { type: 'text'; placeholder?: string }
+    /** A checkbox, drawn in the dialog: its value is `on` while ticked, and it starts unticked. */
+    | { type: 'tick' }
   );
 
 /** `instant` is sent at once, `undoable` at once with a way back, `confirmed` after the confirmation dialog. */
@@ -488,6 +490,8 @@ export const ACTIONS: readonly ActionDef[] = [
               initial: offer.stage,
               ask: 'dialog',
             },
+            { name: 'only', dom: 'only', label: 'this stage only', type: 'tick', ask: 'dialog' },
+            { name: 'base', dom: 'base', label: 'from the base', type: 'tick', ask: 'dialog' },
           ];
     },
     available: runOffer('restart'),
@@ -497,13 +501,21 @@ export const ACTIONS: readonly ActionDef[] = [
       const chosen =
         offer?.stages.find((each) => each.stage === values.stage) ??
         offer?.stages.find((each) => each.stage === offer.stage);
+      const only = values.only === 'on';
+      const again =
+        chosen === undefined
+          ? []
+          : [only ? `runs ${chosen.stage} alone, then the new run is suspended` : `runs again: ${chosen.runsAgain}`];
       return {
         title: `restart ${runName(subject)}`,
         lines:
           offer === undefined
             ? []
             : [
-                ...(chosen === undefined ? [] : [`runs again: ${chosen.runsAgain}`]),
+                ...again,
+                ...(values.base === 'on'
+                  ? [`starts from ${runName(subject)}'s base, without the commits it made`]
+                  : []),
                 budgetOf(offer),
                 `starts a new run seeded from ${runName(subject)}`,
               ],
@@ -512,7 +524,11 @@ export const ACTIONS: readonly ActionDef[] = [
     },
     request: (subject, values, source) => ({
       path: runPath(subject, '/restart'),
-      body: { stage: values.stage ?? source.run?.restart?.stage },
+      body: {
+        stage: values.stage ?? source.run?.restart?.stage,
+        ...(values.only === 'on' ? { continue: false } : {}),
+        ...(values.base === 'on' ? { fromBase: true } : {}),
+      },
     }),
     answer: (status, body) => {
       if (!ok(status)) return { text: refusal(status, body, 'restart'), refused: true };

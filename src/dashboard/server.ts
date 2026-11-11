@@ -12,7 +12,8 @@
 //    message when one fails, drops the command, and waits up to 15 s for the watcher to take it. Once applied it
 //    answers 200 `{ message }` with the line `sail queue` prints; a command not taken in time is 202 `{ waiting }`, and one
 //    taken but not applied 409. A resume or a restart checks again what the
-//    run offers (src/dashboard/actions.ts), then starts `sail resume <run>` or `sail run --from-run <run> --stage …`
+//    run offers (src/dashboard/actions.ts), then starts `sail resume <run>` or `sail run --from-run <run> --stage … --continue` (a restart's body may drop
+//    `--continue` with `continue: false` and add `--from-base` with `fromBase: true`)
 //    itself, detached in the clone, its output in `.sail-runs/dashboard/<run id>.log`, as a typed command would: it
 //    needs no watcher and skips the watcher's cap. It answers 202 once the run has started, or 409 with the line the
 //    start was refused with. A `running` run no live process holds is resumed too: it has started once a live process
@@ -149,7 +150,11 @@ const ResumeBody = z.strictObject({
     .optional(),
 });
 
-const RestartBody = z.strictObject({ stage: z.string().min(1) });
+const RestartBody = z.strictObject({
+  stage: z.string().min(1),
+  continue: z.boolean().optional(),
+  fromBase: z.boolean().optional(),
+});
 
 const MoveBody = z
   .strictObject({
@@ -431,7 +436,8 @@ async function resumeRoute(starts: Starts, segments: string[], request: Request)
 }
 
 /**
- * Starts `sail run --from-run <run> --stage <stage> --continue --run-id <minted>` for a failed run, detached in its
+ * Starts `sail run --from-run <run> --stage <stage> --continue --run-id <minted>` for a failed or a completed run,
+ * without `--continue` when the body says `continue: false` and with `--from-base` when it says `fromBase: true`, detached in its
  * clone, under an id minted here so the answer can name the new run. Answers 202 `{ runId }` once its `STATUS` reads, which the run writes after its `run.json`.
  */
 async function restartRoute(starts: Starts, segments: string[], request: Request): Promise<Response> {
@@ -463,7 +469,17 @@ async function restartRoute(starts: Starts, segments: string[], request: Request
     const minted = newRunId(source.ticketKey);
     const runs = runsDir(entry.sailDir);
     const log = join(runs, 'dashboard', `${minted}.log`);
-    const args = ['run', '--from-run', runId, '--stage', stage, '--continue', '--run-id', minted];
+    const args = [
+      'run',
+      '--from-run',
+      runId,
+      '--stage',
+      stage,
+      ...(parsed.body.continue === false ? [] : ['--continue']),
+      ...(parsed.body.fromBase === true ? ['--from-base'] : []),
+      '--run-id',
+      minted,
+    ];
     const spawned = spawnDetached(dirname(entry.sailDir), log, args, environmentOf(options), options.cli);
     const opened = () => {
       if (!existsSync(join(runs, minted, RUN_HEADER_FILE))) return false;

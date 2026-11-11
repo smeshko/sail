@@ -104,3 +104,36 @@ test('a suspended run resumes to completion from the dashboard, and a failed one
     }
   });
 }, 180_000);
+
+test('a restart of this stage only leaves the new run suspended on until', async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    const env = { ...repo.env, SAIL_HOME: join(repo.home, '.sail') };
+    const ran = await runCaptured(['FAKE-1', '--until', 'spec'], repo.dir, { env });
+    expect(ran.code).toBe(EXIT_SUSPENDED);
+    const runs = join(repo.dir, '.sail-runs');
+    const [runId = ''] = readdirSync(runs).filter((name) => isRunIdOf('FAKE-1', name));
+    const dir = join(runs, runId);
+    const registry = registryDir(machineDir(env));
+    const { name = '' } = readRegistry(registry).entries.find((entry) => entry.clone === repo.dir) ?? {};
+    const started = startDashboard({ registryDir: registry, port: 0, env });
+    if ('refused' in started) throw new Error(started.refused);
+    try {
+      const base = `http://127.0.0.1:${started.port}/api/repos/${name}/runs`;
+      await fetch(`${base}/${runId}/resume`, { method: 'POST', headers: POST, body: '{}' });
+      await until('the resumed run to end', () => statusOf(dir) === 'completed' && endedCompleted(dir));
+
+      const restarted = await fetch(`${base}/${runId}/restart`, {
+        method: 'POST',
+        headers: POST,
+        body: '{"stage":"spec","continue":false}',
+      });
+      const { runId: seeded } = (await restarted.json()) as { runId: string };
+      expect(restarted.status).toBe(202);
+      await until('the seeded run to be suspended', () => statusOf(join(runs, seeded)).startsWith('suspended'));
+      expect(statusOf(join(runs, seeded))).toBe('suspended until');
+    } finally {
+      await started.stop();
+    }
+  });
+}, 180_000);

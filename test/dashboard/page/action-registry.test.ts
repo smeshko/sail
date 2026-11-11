@@ -115,6 +115,22 @@ test('every entry posts what its handler posted', () => {
     path: '/api/repos/alpha/runs/FAKE-1-RUN/restart',
     body: { stage: 'spec' },
   });
+  expect(request('restart-run', RUN, { stage: 'spec', only: 'on' })).toEqual({
+    path: '/api/repos/alpha/runs/FAKE-1-RUN/restart',
+    body: { stage: 'spec', continue: false },
+  });
+  expect(request('restart-run', RUN, { stage: 'spec', base: 'on' })).toEqual({
+    path: '/api/repos/alpha/runs/FAKE-1-RUN/restart',
+    body: { stage: 'spec', fromBase: true },
+  });
+  expect(request('restart-run', RUN, { stage: 'spec', only: 'on', base: 'on' })).toEqual({
+    path: '/api/repos/alpha/runs/FAKE-1-RUN/restart',
+    body: { stage: 'spec', continue: false, fromBase: true },
+  });
+  expect(request('restart-run', RUN, { stage: 'spec', only: '', base: '' })).toEqual({
+    path: '/api/repos/alpha/runs/FAKE-1-RUN/restart',
+    body: { stage: 'spec' },
+  });
   expect(request('resume-run', RUN, { raise: '5' })).toEqual({
     path: '/api/repos/alpha/runs/FAKE-1-RUN/resume',
     body: { raise: { usd: 5 } },
@@ -300,6 +316,17 @@ test('a confirmed run action opens a dialog naming the run and each consequence,
     verb: 'restart',
   });
   expect(dialog('restart-run', { stage: 'gone' })?.lines[0]).toBe('runs again: tests');
+  expect(dialog('restart-run', { stage: 'spec', only: 'on' })?.lines).toEqual([
+    'runs spec alone, then the new run is suspended',
+    'budget $10.00',
+    'starts a new run seeded from FAKE-1-RUN',
+  ]);
+  expect(dialog('restart-run', { stage: 'spec', base: 'on' })?.lines).toEqual([
+    'runs again: spec',
+    "starts from FAKE-1-RUN's base, without the commits it made",
+    'budget $10.00',
+    'starts a new run seeded from FAKE-1-RUN',
+  ]);
   expect(dialog('stop-run')).toEqual({
     title: 'stop FAKE-1-RUN',
     lines: ['stops at its next call boundary', 'the run fails as stopped'],

@@ -709,6 +709,42 @@ test('a POST to restart a completed run starts a seeded run', async () => {
   expect(stub.argv()).toEqual([`run --from-run ${GOLDEN_RUN_ID} --stage tests --continue --run-id ${runId}`]);
 });
 
+const seededStub = () =>
+  stubSail(
+    `id=$(echo "$*" | sed 's/.*--run-id //')\nmkdir -p ".sail-runs/$id"\necho '{}' > ".sail-runs/$id/run.json"\nprintf 'running\\n' > ".sail-runs/$id/STATUS"\nsleep 1`,
+  );
+
+test('a restart passes --continue unless told this stage only, and --from-base when told from the base', async () => {
+  m = seedFixtures();
+  const stub = seededStub();
+  const server = startWith(stub.cli);
+  const ids: string[] = [];
+  for (const body of [
+    '{"stage":"spec"}',
+    '{"stage":"spec","continue":false}',
+    '{"stage":"spec","fromBase":true}',
+    '{"stage":"spec","continue":false,"fromBase":true}',
+  ]) {
+    const response = await post(server, RESTART, startedBy(body));
+    expect(response.status).toBe(202);
+    ids.push(((await response.json()) as { runId: string }).runId);
+  }
+  const head = `run --from-run ${FAKE_2_ID} --stage spec`;
+  expect(stub.argv()).toEqual([
+    `${head} --continue --run-id ${ids[0]}`,
+    `${head} --run-id ${ids[1]}`,
+    `${head} --continue --from-base --run-id ${ids[2]}`,
+    `${head} --from-base --run-id ${ids[3]}`,
+  ]);
+});
+
+test('a restart whose continue is not a boolean is 400 and starts nothing', async () => {
+  m = seedFixtures();
+  const stub = stubSail('exit 0');
+  const response = await post(startWith(stub.cli), RESTART, startedBy('{"stage":"spec","continue":"no"}'));
+  expect([response.status, stub.argv()]).toEqual([400, []]);
+});
+
 test('a restart whose sail exits after run.json and before STATUS is 409 with the last line it printed', async () => {
   m = seedFixtures();
   const stub = stubSail(
