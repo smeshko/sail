@@ -38,6 +38,13 @@ export function closeAttention(store: Store) {
   store.mark('attention');
 }
 
+/** Shuts the folded sidebar, when it is open. */
+export function shutNav(store: Store) {
+  if (!store.ui.nav) return;
+  store.ui.nav = false;
+  store.host.setNav(false);
+}
+
 export const actions: Record<string, Action> = {
   'select-run': (store, data) => {
     if (data.repo === undefined || data.run === undefined) return;
@@ -241,10 +248,7 @@ export function dispatch(store: Store, action: string, data: Record<string, stri
   const shuts = ui.itemMenu !== undefined && action !== 'item-menu' && !confirming && !dialogClick;
   const shutsRun = ui.runMenu !== undefined && !runAction && action !== 'run-menu' && !dialogClick;
   // The folded sidebar shuts on any action but its own button, so choosing a view or a repository shows the list.
-  if (ui.nav && action !== 'toggle-nav') {
-    ui.nav = false;
-    store.host.setNav(false);
-  }
+  if (action !== 'toggle-nav') shutNav(store);
   if (shuts) delete ui.itemMenu;
   if (shutsRun) delete ui.runMenu;
   if (shuts || shutsRun) store.mark('main', 'list');

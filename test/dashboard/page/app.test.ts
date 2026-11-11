@@ -970,6 +970,20 @@ test('the navigation button opens the folded sidebar, and choosing a view or pre
   expect(host.regions.main).toContain('no run selected');
 });
 
+test('a key that changes the list or moves its cursor shuts the open sidebar too (review R1) (ADW-528)', () => {
+  page = boot(host);
+  firstIndex();
+  host.click({ action: 'toggle-nav' });
+  host.press('3');
+  expect([host.navs, page.ui.view]).toEqual([[true, false], 'history']);
+  host.click({ action: 'toggle-nav' });
+  host.press('j');
+  expect(host.navs).toEqual([true, false, true, false]);
+  host.click({ action: 'toggle-nav' });
+  host.press('Escape');
+  expect(host.navs).toEqual([true, false, true, false, true, false]);
+});
+
 test('a copy that took draws one ok toast reading what it copied, and 4,000 ms on it is gone', async () => {
   page = boot(host);
   host.click({ action: 'copy', text: 'sail show X' });
