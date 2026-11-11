@@ -292,7 +292,7 @@ test('undoable tier: on the real bundle, clear-attention empties the Inbox and d
   expect(page.posted).toEqual([]);
 }, 30_000);
 
-test('on the real bundle, Cmd+K draws the command menu with the open run as its subject, and Escape empties it', async () => {
+test('on the real bundle, Cmd+K draws the command menu with the open run as its subject, and Escape lets go of it, then empties it', async () => {
   m = seedFixtures();
   const leasesDir = join(m.root, 'leases');
   const started = startDashboard({
@@ -314,6 +314,10 @@ test('on the real bundle, Cmd+K draws the command menu with the open run as its 
   expect(await until(() => page.text('menu').includes('class="cmdk"'))).toBe(true);
   expect(page.text('menu')).toContain('<div class="cmdk-subj">FAKE-2 · Print the version with --version</div>');
   expect(await until(() => page.text('menu').includes('<span class="cmdk-label">clean</span>'))).toBe(true);
+  // The first Escape lets go of the run, the second closes the menu.
+  page.press('Escape');
+  expect(await until(() => !page.text('menu').includes('cmdk-subj'))).toBe(true);
+  expect(page.text('menu')).toContain('class="cmdk"');
   page.press('Escape');
   expect(await until(() => page.text('menu') === '')).toBe(true);
   expect(page.posted).toEqual([]);

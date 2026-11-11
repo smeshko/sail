@@ -12,7 +12,7 @@
 //   lists its options, a number or a text is typed in the field. After the last, the registry's `request()` decides:
 //   `invalid` shows its words and keeps the step, nothing to send keeps it too, else the menu closes and the actor is
 //   handed the action with the values asked, which opens the confirmation dialog for a confirmed one. Escape goes back
-//   one step before it closes the menu.
+//   one step, then lets go of the subject, then closes the menu.
 
 import { actionOf, type Subject } from './action-registry';
 import { actions } from './actions';
@@ -243,14 +243,25 @@ export function runRow(store: Store, n: number): void {
   else runStepRow(store, menu, row);
 }
 
-/** Escape: back one step, and with none open, closes the menu. */
+/**
+ * Escape: back one step; with none open, the full menu lets go of its subject, so its chip and the subject's actions
+ * go and what was typed stays; with no subject, or in a context menu, it closes.
+ */
 function back(store: Store, menu: MenuState): void {
-  if (menu.steps.length === 0) {
-    closeMenu(store);
+  if (menu.steps.length > 0) {
+    menu.steps.pop();
+    enter(store, menu, modelOf(store, menu).step?.start ?? 0);
     return;
   }
-  menu.steps.pop();
-  enter(store, menu, modelOf(store, menu).step?.start ?? 0);
+  if (menu.mode === 'full' && menu.subject !== undefined && menu.subject.kind !== 'none') {
+    delete menu.subject;
+    menu.at = 0;
+    delete menu.row;
+    delete menu.error;
+    store.mark('menu');
+    return;
+  }
+  closeMenu(store);
 }
 
 /** Handles a key while the menu is open. Answers true for a key it took. */
