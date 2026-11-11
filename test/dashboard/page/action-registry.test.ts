@@ -59,6 +59,7 @@ test('ACTIONS has exactly the seventeen ids, each with a label, appliesTo, a tie
       'restart-run',
       'stop-run',
       'stop-run-now',
+      'suspend-run',
       'clean-run',
       'rebuild-run',
       'drop-item',
@@ -87,6 +88,7 @@ test('ACTIONS has exactly the seventeen ids, each with a label, appliesTo, a tie
     'restart-run',
     'stop-run',
     'stop-run-now',
+    'suspend-run',
     'clean-run',
     'drop-item',
     'release-hold',
@@ -112,6 +114,10 @@ test('every entry posts what its handler posted', () => {
   expect(request('stop-run-now', RUN)).toEqual({
     path: '/api/repos/alpha/runs/FAKE-1-RUN/stop',
     body: { now: true },
+  });
+  expect(request('suspend-run', RUN)).toEqual({
+    path: '/api/repos/alpha/runs/FAKE-1-RUN/stop',
+    body: { now: false, suspend: true },
   });
   expect(request('clean-run', RUN)).toEqual({ path: '/api/repos/alpha/runs/FAKE-1-RUN/clean', body: {} });
   expect(request('rebuild-run', RUN)).toEqual({ path: '/api/repos/alpha/runs/FAKE-1-RUN/rebuild', body: {} });
@@ -225,6 +231,28 @@ test('each answer means what it meant: resume reopens, restart opens the run nam
     true,
     expect.stringContaining("run R's events hold no run:start"),
   ]);
+});
+
+test('suspend and hold asks in a dialog of its own, is offered only with a suspend offer, and answers as stop does', () => {
+  const suspend = def('suspend-run');
+  expect(suspend.tier).toBe('confirmed');
+  expect(suspend.label(RUN)).toBe('suspend and hold');
+  expect(suspend.dialog?.(RUN, {}, source())).toEqual({
+    title: 'suspend and hold FAKE-1-RUN',
+    lines: [
+      'ends its running call now',
+      'the run is suspended and held: it keeps its workspace and its branch, and the watcher leaves it until Resume',
+      'unlike stop, the run does not fail',
+    ],
+    verb: 'suspend and hold',
+  });
+  expect(suspend.available(RUN, source({ run: {} as unknown as RunActions }))).toEqual({ offered: false });
+  expect(suspend.available(RUN, source({ run: { suspend: on } as unknown as RunActions }))).toEqual({
+    offered: true,
+    enabled: true,
+  });
+  expect(suspend.answer?.(202, '{"message":"held"}', RUN)).toEqual({ effect: 'reopen', keepMenu: true, text: 'held' });
+  expect(suspend.answer?.(409, '{"error":"no"}', RUN)).toEqual({ text: 'no', refused: true });
 });
 
 test('a queue change shows a 200 message and took, a 202 waiting, and any other status its refusal', () => {
@@ -383,6 +411,7 @@ test('every confirmed action has a dialog, and unwatch and all clear are the und
     'restart-run',
     'stop-run',
     'stop-run-now',
+    'suspend-run',
     'clean-run',
     'drop-item',
     'release-hold',

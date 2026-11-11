@@ -8,7 +8,16 @@ import { takeLease } from '../../../src/adapters/leases';
 import { runActions } from '../../../src/dashboard/actions';
 import { callFile, findRepo, findRunDir, index } from '../../../src/dashboard/files';
 import type { Subject } from '../../../src/dashboard/page/action-registry';
-import { boot, CLEARED_KEY, FILTER_KEY, LIST_KEY, type Page, THEME_KEY } from '../../../src/dashboard/page/app';
+import {
+  boot,
+  CLEARED_KEY,
+  COPIED_MS,
+  FILTER_KEY,
+  FLUSH_MS,
+  LIST_KEY,
+  type Page,
+  THEME_KEY,
+} from '../../../src/dashboard/page/app';
 import { attention, identity } from '../../../src/dashboard/page/attention';
 import { focused, setFocus } from '../../../src/dashboard/page/focus';
 import { browserHost, type ConnectHandlers, type PageHost, type Region } from '../../../src/dashboard/page/host';
@@ -67,6 +76,10 @@ class FakeHost implements PageHost {
   startAt: Record<string, string> = {};
   clock = Date.parse('2026-10-01T12:00:00.000Z');
   private timers = new Map<number, { at: number; fn: () => void }>();
+  /** How many timers are waiting. */
+  get pendingTimers() {
+    return this.timers.size;
+  }
   private next = 1;
   private action?: (action: string, data: Record<string, string>) => void;
   private key?: (key: string, inInput: boolean, on?: string, mod?: boolean) => boolean;
@@ -1134,6 +1147,75 @@ test('a copy the host refuses draws a red alert that is still drawn 60 s on, unt
   host.click({ action: 'dismiss-toast', toast: '1' });
   host.advance(100);
   expect(host.regions.toasts).toBe('');
+});
+
+describe('a copy button says whether the copy took', () => {
+  const text = `sail show ${GOLDEN_RUN_ID}`;
+  const open = () => {
+    page = boot(host);
+    firstIndex();
+    replay(host.open('run=')[0], GOLDEN(), false);
+    host.advance(FLUSH_MS);
+  };
+  const button = (label: string) => `data-text="${text}">${label}</button>`;
+
+  test('a copy the clipboard took reads copied, and COPIED_MS later copy again', async () => {
+    open();
+    expect(host.regions.main).toContain(button('copy'));
+    host.click({ action: 'copy', text });
+    await settle();
+    host.advance(FLUSH_MS);
+    expect(host.regions.main).toContain(button('copied'));
+    expect(page?.ui.copied).toEqual({ text, ok: true });
+    host.advance(COPIED_MS + FLUSH_MS);
+    expect(host.regions.main).toContain(button('copy'));
+    expect(host.regions.main).not.toContain('>copied</button>');
+    expect(page?.ui.copied).toBeUndefined();
+  });
+
+  test('a copy the clipboard refused reads copy failed, then copy again', async () => {
+    open();
+    host.copyTakes = false;
+    host.click({ action: 'copy', text });
+    await settle();
+    host.advance(FLUSH_MS);
+    expect(host.regions.main).toContain(button('copy failed'));
+    expect(page?.ui.copied).toEqual({ text, ok: false });
+    host.advance(COPIED_MS + FLUSH_MS);
+    expect(host.regions.main).toContain(button('copy'));
+    expect(page?.ui.copied).toBeUndefined();
+  });
+
+  test('a second copy 1 s after the first keeps the label until COPIED_MS after the second', async () => {
+    open();
+    host.click({ action: 'copy', text });
+    await settle();
+    host.advance(1000);
+    host.click({ action: 'copy', text });
+    await settle();
+    host.advance(COPIED_MS - 1);
+    expect(page?.ui.copied).toEqual({ text, ok: true });
+    host.advance(1 + FLUSH_MS);
+    expect(page?.ui.copied).toBeUndefined();
+    expect(host.regions.main).toContain(button('copy'));
+  });
+
+  test('a page stopped before the clipboard answers sets nothing and leaves no timer', async () => {
+    open();
+    host.click({ action: 'copy', text });
+    page?.stop();
+    await settle();
+    expect(page?.ui.copied).toBeUndefined();
+    expect(host.pendingTimers).toBe(0);
+  });
+
+  test('stopping a page while the label shows cancels its timer', async () => {
+    open();
+    host.click({ action: 'copy', text });
+    await settle();
+    page?.stop();
+    expect(host.pendingTimers).toBe(0);
+  });
 });
 
 test('the theme cycles and is saved, a section toggles, copy copies, follow toggles, and the stream buttons read that stream', async () => {
@@ -2437,6 +2519,16 @@ async function openOffering(repo: string, runId: string, dir: string) {
   host.advance(100);
 }
 
+/** FAKE-3 read `running`, its branch leased by this live process, as a run its process still holds is. */
+const holdLive = () => {
+  writeFileSync(join(m.beta.runDir, 'STATUS'), 'running\n');
+  takeLease(join(m.root, 'leases'), 'fake://origin', 'sail/FAKE-3-escape-b-this-b-that', {
+    runId: FAKE_3_ID,
+    runDir: m.beta.runDir,
+    pid: process.pid,
+  });
+};
+
 /** The queue item of FAKE-3 as the watcher leaves it when it has let go: settled, so nothing holds the run. */
 const settleQueue = () => {
   const file = join(queueDirOf(m), 'queue.json');
@@ -2973,6 +3065,45 @@ test('the run menu offers stop and stop now as two buttons; Stop now opens its o
   host.click({ action: 'dialog-confirm' });
   await settle();
   expect(host.posts).toEqual([{ path: `${FAKE_3_PATH}/stop`, body: { now: true } }]);
+});
+test('Suspend and hold opens its dialog and posts nothing; its confirm posts { now: false, suspend: true }, shows suspending… meanwhile, toasts the answer and reads the run again', async () => {
+  holdLive();
+  await openOffering('beta', FAKE_3_ID, m.beta.runDir);
+  expect(buttons(host.regions.list).filter(([, action]) => action === 'suspend-run')).toEqual([
+    ['suspend and hold', 'suspend-run', ''],
+  ]);
+  host.click({ action: 'suspend-run' });
+  host.advance(100);
+  expect([host.posts, dialogTitle(), dialogLines(), dialogVerb()]).toEqual([
+    [],
+    `suspend and hold ${FAKE_3_ID}`,
+    [
+      'ends its running call now',
+      'the run is suspended and held: it keeps its workspace and its branch, and the watcher leaves it until Resume',
+      'unlike stop, the run does not fail',
+    ],
+    'suspend and hold',
+  ]);
+  const message = `run ${FAKE_3_ID} suspends now, held until sail resume ${FAKE_3_ID} (pid 7)`;
+  host.postAnswer = { status: 202, body: JSON.stringify({ message }) };
+  host.click({ action: 'dialog-confirm' });
+  host.advance(100);
+  expect(host.regions.list).toContain('<span class="busy">suspending…</span>');
+  await settle();
+  host.advance(100);
+  expect(host.posts).toEqual([{ path: `${FAKE_3_PATH}/stop`, body: { now: false, suspend: true } }]);
+  expect(toasts()).toEqual([`ok suspend and hold ${FAKE_3_ID}: ${message}`]);
+  expect(host.actionReads.filter((path) => path === `${FAKE_3_PATH}/actions`).length).toBeGreaterThan(1);
+});
+test('a refused suspend and hold toasts the server words', async () => {
+  holdLive();
+  await openOffering('beta', FAKE_3_ID, m.beta.runDir);
+  host.click({ action: 'suspend-run' });
+  host.postAnswer = { status: 409, body: JSON.stringify({ error: 'run X is still starting' }) };
+  host.click({ action: 'dialog-confirm' });
+  await settle();
+  host.advance(100);
+  expect(toasts()).toEqual([`bad suspend and hold ${FAKE_3_ID}: run X is still starting`]);
 });
 test('the dispatch of the removed stop-now action does nothing', async () => {
   settleQueue();

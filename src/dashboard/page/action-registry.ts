@@ -1,4 +1,4 @@
-// The page's actions, defined once: each thing a person can have done from the page (stop, stop now, resume, restart,
+// The page's actions, defined once: each thing a person can have done from the page (stop, stop now, suspend and hold, resume, restart,
 // clean, rebuild, drop, requeue, move, poll, release a usage-limit hold, add, add skipping its checks, watch, unwatch, all clear,
 // dismiss) with its id and label, the subject it applies to, its
 // availability from the server's offers, its parameters, its tier, its request and what its answer means. Pure: it
@@ -273,7 +273,7 @@ function availability(offer: (Offered & { why?: string | undefined }) | undefine
 
 const NOT_OFFERED: Availability = { offered: false };
 
-function runOffer(key: 'resume' | 'restart' | 'stop' | 'clean' | 'rebuild') {
+function runOffer(key: 'resume' | 'restart' | 'stop' | 'suspend' | 'clean' | 'rebuild') {
   return (_: Subject, source: OfferSource): Availability => availability(source.run?.[key]);
 }
 
@@ -444,6 +444,34 @@ function stopAction(id: string, now: boolean): ActionDef {
   };
 }
 
+/** Suspend and hold: Stop's route with `suspend`, so the run keeps its workspace and branch and does not fail. */
+const suspendAction: ActionDef = {
+  id: 'suspend-run',
+  label: () => 'suspend and hold',
+  appliesTo: ['run'],
+  tier: 'confirmed',
+  place: 'run',
+  holdsDisabled: true,
+  params: () => [],
+  available: runOffer('suspend'),
+  underway: 'suspending…',
+  dialog: (subject) => ({
+    title: `suspend and hold ${runName(subject)}`,
+    lines: [
+      'ends its running call now',
+      'the run is suspended and held: it keeps its workspace and its branch, and the watcher leaves it until Resume',
+      'unlike stop, the run does not fail',
+    ],
+    verb: 'suspend and hold',
+  }),
+  request: (subject) => ({ path: runPath(subject, '/stop'), body: { now: false, suspend: true } }),
+  answer: (status, body) => {
+    if (!ok(status)) return { text: refusal(status, body, 'suspend'), refused: true };
+    const text = answerField(body, 'message');
+    return { effect: 'reopen', keepMenu: true, ...(text === undefined ? {} : { text }) };
+  },
+};
+
 /** The ticket key field the two adds share. */
 const addParams = (): Param[] => [
   { name: 'ticket', dom: 'add-ticket', label: 'ticket key', type: 'text', placeholder: 'ticket key' },
@@ -573,6 +601,7 @@ export const ACTIONS: readonly ActionDef[] = [
   },
   stopAction('stop-run', false),
   stopAction('stop-run-now', true),
+  suspendAction,
   {
     id: 'clean-run',
     label: () => 'clean',

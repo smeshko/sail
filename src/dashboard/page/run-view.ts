@@ -29,10 +29,13 @@ export function link(url: string | undefined, label: string | SafeHtml): SafeHtm
 }
 
 /** The commands to copy, each with its copy button. */
-export function commandList(commands: readonly { label: string; command: string }[]): SafeHtml {
+export function commandList(
+  commands: readonly { label: string; command: string }[],
+  copied?: UiState['copied'],
+): SafeHtml {
   return html`<div class="cmds">${commands.map(
     ({ label, command }) =>
-      html`<span class="cmd"><span class="lbl">${label}</span><code>${command}</code><button class="btn" data-action="copy" data-text="${command}">copy</button></span>`,
+      html`<span class="cmd"><span class="lbl">${label}</span><code>${command}</code><button class="btn" data-action="copy" data-text="${command}">${copied?.text === command ? (copied.ok ? 'copied' : 'copy failed') : 'copy'}</button></span>`,
   )}</div>`;
 }
 
@@ -216,7 +219,7 @@ ${
     ? ''
     : html`<div class="grp"><div class="grp-t">pull request</div>${link(typeof pr.url === 'string' ? pr.url : undefined, `#${text(pr.number)}`)}</div>`
 }
-${runId === '' ? '' : html`<div class="grp"><div class="grp-t">commands</div>${commandList(runCommands(runId, status))}</div>`}
+${runId === '' ? '' : html`<div class="grp"><div class="grp-t">commands</div>${commandList(runCommands(runId, status), ui.copied)}</div>`}
 ${
   model.unreadable === 0
     ? ''

@@ -913,6 +913,84 @@ test('a POST to stop a run another process runs asks it to stop at its next call
   expect(statusOf(betaRun())).toBe('running');
 });
 
+const SUSPEND = '{"now":false,"suspend":true}';
+
+function liveBeta() {
+  writeFileSync(join(betaRun(), 'STATUS'), 'running\n');
+  const leasesDir = join(m.root, 'leases');
+  mkdirSync(leasesDir, { recursive: true });
+  const held = takeLease(leasesDir, 'fake://origin', FAKE_3_BRANCH, {
+    runId: FAKE_3_ID,
+    runDir: betaRun(),
+    pid: process.ppid,
+  });
+  expect(held.leased).toBe(true);
+}
+
+test('a POST to suspend a live run asks it to suspend now, holds it, and answers 202 with the CLI words', async () => {
+  m = seedFixtures();
+  settleQueue();
+  liveBeta();
+  const server = startPorts();
+  const answer = await post(server, STOP, startedBy(SUSPEND));
+  expect([answer.status, await answer.json()]).toEqual([
+    202,
+    { message: `run ${FAKE_3_ID} suspends now, held until sail resume ${FAKE_3_ID} (pid ${process.ppid})` },
+  ]);
+  expect(control()).toBe('suspended');
+  expect(existsSync(join(betaRun(), 'HOLD'))).toBe(true);
+  expect(statusOf(betaRun())).toBe('running');
+});
+
+test('a POST to suspend a suspended run holds it and leaves its status and events', async () => {
+  m = seedFixtures();
+  settleQueue();
+  const before = readFileSync(join(betaRun(), 'events.ndjson'), 'utf8');
+  const server = startPorts();
+  const answer = await post(server, STOP, startedBy(SUSPEND));
+  expect([answer.status, await answer.json()]).toEqual([
+    202,
+    { message: `run ${FAKE_3_ID} is held: the watcher leaves it until sail resume ${FAKE_3_ID}` },
+  ]);
+  expect(existsSync(join(betaRun(), 'HOLD'))).toBe(true);
+  expect(statusOf(betaRun())).toStartWith('suspended');
+  expect(readFileSync(join(betaRun(), 'events.ndjson'), 'utf8')).toBe(before);
+});
+
+test('a POST with now and suspend both set is 400 and writes nothing', async () => {
+  m = seedFixtures();
+  settleQueue();
+  liveBeta();
+  const server = startPorts();
+  const answer = await post(server, STOP, startedBy('{"now":true,"suspend":true}'));
+  expect([answer.status, await answer.json()]).toEqual([
+    400,
+    { error: "not a stop: now and suspend can't both be set" },
+  ]);
+  expect(existsSync(join(betaRun(), 'CONTROL'))).toBe(false);
+  expect(existsSync(join(betaRun(), 'HOLD'))).toBe(false);
+});
+
+test('a POST whose suspend is no boolean is 400', async () => {
+  m = seedFixtures();
+  const server = startPorts();
+  const answer = await post(server, STOP, startedBy('{"now":false,"suspend":"yes"}'));
+  expect(answer.status).toBe(400);
+});
+
+test('a POST to suspend a dispatched run still starting is 409 with the engine words', async () => {
+  m = seedFixtures();
+  const startingId = 'FAKE-5-01M3BWNZM08Q4T6V2XRJ5KWD9Z';
+  const file = join(queueDirOf(m), 'queue.json');
+  writeFileSync(file, readFileSync(file, 'utf8').replace(`"runId": "${FAKE_3_ID}"`, `"runId": "${startingId}"`));
+  const server = startPorts();
+  const answer = await post(server, `/api/repos/beta/runs/${startingId}/stop`, startedBy(SUSPEND));
+  expect([answer.status, await answer.json()]).toEqual([
+    409,
+    { error: `run ${startingId} is still starting: sail stop ends it before its intake` },
+  ]);
+});
+
 test('a POST to stop a suspended run ends it failed, stopped, with run:end in its events', async () => {
   m = seedFixtures();
   settleQueue();

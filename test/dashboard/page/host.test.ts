@@ -683,6 +683,39 @@ describe('Enter and Space on a focused control', () => {
     ]);
     expect(actions).toEqual([]);
   });
+
+  const addForm = (found: boolean, tick = false) => {
+    const button = element({
+      tagName: 'BUTTON',
+      dataset: { action: 'add-ticket', repo: 'beta', workflow: 'ticket-to-pr' },
+    });
+    const parent = element({
+      tagName: 'DIV',
+      dataset: { enter: 'add-ticket' },
+      querySelector: (selectors: string) => (found && selectors === '[data-action="add-ticket"]' ? button : null),
+    });
+    return element({ tagName: 'INPUT', type: tick ? 'checkbox' : 'text', parentElement: parent });
+  };
+
+  test("Enter in the add field delivers the add button's action with its repo and workflow, stops the default and reaches no key handler", () => {
+    const { actions, keys, press } = setup();
+    expect(press('Enter', addForm(true))).toBe(1);
+    expect(actions).toEqual([['add-ticket', { action: 'add-ticket', repo: 'beta', workflow: 'ticket-to-pr' }]]);
+    expect(keys).toEqual([]);
+  });
+
+  test('a tickbox under the add form, a letter in its field and an add form with no button deliver no action', () => {
+    const { actions, keys, press } = setup();
+    press('Enter', addForm(true, true));
+    press('a', addForm(true));
+    press('Enter', addForm(false));
+    expect(actions).toEqual([]);
+    expect(keys).toEqual([
+      ['Enter', true],
+      ['a', true],
+      ['Enter', true],
+    ]);
+  });
 });
 
 const row = (run: string) => `<button data-action="select-run" data-repo="alpha" data-run="${run}">${run}</button>`;

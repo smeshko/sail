@@ -136,6 +136,7 @@ test('a running run a live process holds offers both, disabled, saying it is run
     resume: { enabled: false, why, spentUsd: 0.3625, budget: FAKE_2_BUDGET },
     restart: { enabled: false, why, stages: [], budget: FAKE_2_BUDGET },
     stop: { enabled: true },
+    suspend: { enabled: true },
   });
 });
 
@@ -144,6 +145,10 @@ test('a running run no live process holds offers Resume', async () => {
   expect(await actions('alpha', FAKE_2_ID)).toEqual({
     resume: { enabled: true, spentUsd: 0.3625, budget: FAKE_2_BUDGET },
     stop: { enabled: true },
+    suspend: {
+      enabled: false,
+      why: `run ${FAKE_2_ID} reads running, but no live process holds it: sail resume ${FAKE_2_ID} takes it`,
+    },
   });
 });
 
@@ -158,6 +163,10 @@ test('a running run whose lease names a dead process offers Resume', async () =>
   expect(await actions('alpha', FAKE_2_ID)).toEqual({
     resume: { enabled: true, spentUsd: 0.3625, budget: FAKE_2_BUDGET },
     stop: { enabled: true },
+    suspend: {
+      enabled: false,
+      why: `run ${FAKE_2_ID} reads running, but no live process holds it: sail resume ${FAKE_2_ID} takes it`,
+    },
   });
 });
 
@@ -326,6 +335,28 @@ test('a suspended run offers Stop beside Resume, and a running run offers Stop w
 
 test('Stop stays enabled while a watcher has the run, since sail stop stops a dispatched run', async () => {
   expect((await actions('beta', FAKE_3_ID)).stop).toEqual({ enabled: true });
+});
+
+test('only a running run offers suspend: not a suspended, failed, completed or starting one', async () => {
+  const startingId = 'FAKE-5-01M3BWNZM08Q4T6V2XRJ5KWD9Z';
+  change(queueFile(), '"runId": "FAKE-3-01M39H4ZW0S46MV303CFX3T4PY"', `"runId": "${startingId}"`);
+  expect(await actions('beta', startingId)).not.toHaveProperty('suspend');
+  expect(await actions('beta', FAKE_3_ID)).not.toHaveProperty('suspend');
+  expect(await actions('alpha', FAKE_2_ID)).not.toHaveProperty('suspend');
+  expect(await actions('beta', FAKE_4_ID)).not.toHaveProperty('suspend');
+});
+
+test('a running run whose process has died offers suspend disabled, saying so', async () => {
+  const dir = runDir('alpha', FAKE_2_ID);
+  setStatus(dir, 'running');
+  expect((await actions('alpha', FAKE_2_ID)).suspend).toEqual({
+    enabled: false,
+    why: `run ${FAKE_2_ID} reads running, but no live process holds it: sail resume ${FAKE_2_ID} takes it`,
+  });
+  const dead = Bun.spawnSync(['true']).pid;
+  takeLease(leasesDir, 'fake://origin', FAKE_2_BRANCH, { runId: FAKE_2_ID, runDir: dir, pid: dead });
+  expect((await actions('alpha', FAKE_2_ID)).suspend?.enabled).toBe(false);
+  expect((await actions('alpha', FAKE_2_ID)).stop).toEqual({ enabled: true });
 });
 
 test('a completed or a failed run offers no Stop', async () => {

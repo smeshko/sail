@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import type { CleanOffer, RestartOffer, ResumeOffer, StopOffer } from '../../../src/dashboard/actions';
 import { ACTIONS } from '../../../src/dashboard/page/action-registry';
 import { foldRun } from '../../../src/dashboard/page/run-model';
-import { renderRun, renderStatus, runControls } from '../../../src/dashboard/page/run-view';
+import { commandList, renderRun, renderStatus, runControls } from '../../../src/dashboard/page/run-view';
 import { initialUi } from '../../../src/dashboard/page/ui-state';
 import { readEvents } from '../../../src/events/consumers/ndjson';
 import { type Summary, summarize } from '../../../src/events/summary';
@@ -262,6 +262,16 @@ test('Restart is one button and no stage choice, since the dialog asks the stage
   );
 });
 
+test('Suspend and hold is drawn after stop and stop now when offered, and not when it is not', () => {
+  const view = (offers: Parameters<typeof runControls>[0]) => runControls(offers, initialUi(0))?.value ?? '';
+  const names = (markup: string) => [...markup.matchAll(/data-action="([a-z-]+)">/g)].map((each) => each[1]);
+  expect(names(view({ stop: STOP, suspend: { enabled: true } }))).toEqual(['stop-run', 'stop-run-now', 'suspend-run']);
+  expect(view({ stop: STOP, suspend: { enabled: true } })).toContain(
+    'data-action="stop-run-now">stop now</button></span><span class="act"><button class="btn" data-action="suspend-run">suspend and hold</button>',
+  );
+  expect(view({ stop: STOP })).not.toContain('suspend-run');
+});
+
 test('Stop shows two buttons, stop and stop now, and no box, and a disabled one gives its reason', () => {
   const view = (ui: Partial<ReturnType<typeof initialUi>>, stop: StopOffer = { enabled: true }) =>
     runControls({ stop }, { ...initialUi(0), ...ui })?.value;
@@ -336,6 +346,12 @@ test("a running run's header holds stop, and its disabled resume and restart onl
   expect(open).toContain('<button class="btn" disabled>resume</button><span class="act-why">run is running</span>');
   expect(open).toContain('<button class="btn" disabled>restart</button><span class="act-why">run is running</span>');
   expect(open).toContain('aria-expanded="true"');
+  expect(closed).not.toContain('suspend-run');
+  const suspendable = { ...offers, suspend: { enabled: true } };
+  expect(header(running, suspendable)).not.toContain('suspend-run');
+  expect(header(running, suspendable, { runMenu: { runId: running.runId ?? '', at: 'header' } })).toContain(
+    'data-action="suspend-run">suspend and hold</button>',
+  );
 });
 
 test("a suspended run's header holds resume as a button and stop in the ⋯ menu", () => {
@@ -398,4 +414,23 @@ test('runControls draws only the actions it is given, and none when none is offe
   expect(drawn).toContain('stop-run');
   expect(drawn).not.toContain('resume');
   expect(runControls({ resume: RESUME_OFFER }, initialUi(0), stopOnly)).toBeUndefined();
+});
+
+test('commandList labels the copied command copied or copy failed and every other copy, keeping its attributes', () => {
+  const commands = [
+    { label: 'show', command: 'sail show X' },
+    { label: 'stop', command: 'sail stop X' },
+  ];
+  const button = (command: string, label: string) =>
+    `<button class="btn" data-action="copy" data-text="${command}">${label}</button>`;
+  expect(commandList(commands).value).toContain(button('sail show X', 'copy'));
+  expect(commandList(commands).value).not.toContain('copied');
+  const took = commandList(commands, { text: 'sail show X', ok: true }).value;
+  expect([took.includes(button('sail show X', 'copied')), took.includes(button('sail stop X', 'copy'))]).toEqual([
+    true,
+    true,
+  ]);
+  const refused = commandList(commands, { text: 'sail show X', ok: false }).value;
+  expect(refused).toContain(button('sail show X', 'copy failed'));
+  expect(refused).toContain(button('sail stop X', 'copy'));
 });
