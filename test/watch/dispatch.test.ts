@@ -18,6 +18,7 @@ import type { PullRequestDetails } from '../../src/ports/types';
 import type { WorkspacePort } from '../../src/ports/workspace';
 import { createDispatcher, type Settled } from '../../src/watch/dispatch';
 import { readHold, releaseHold } from '../../src/watch/holds';
+import { itemLine } from '../../src/watch/queue-commands';
 import { openQueue, type QueueStore, queueDir } from '../../src/watch/queue-store';
 import { dispatchLog, spawnResume, spawnRun } from '../../src/watch/spawn';
 import { fakeAdapters } from '../helpers/adapters';
@@ -290,6 +291,54 @@ test('a re-check the ticket source fails leaves the item failed with no attempt,
     w.clock.advance(1);
     await dispatcher.tick();
     expect(spawnedKeys(w.spawner)).toEqual(['FAKE-1', 'FAKE-2']);
+  });
+});
+
+test('a waiting item whose ticket read fails once is queued and waiting again on the next good read, with its reason and retryAt cleared and queue:waiting recorded', async () => {
+  await withTempRepo(async (repo) => {
+    let down = false;
+    const w = await world(repo, 1, 1, {
+      claiming: false,
+      source: (own) => ({
+        ...own,
+        get: (ticketKey: string) => {
+          if (down) throw new PortError('ticketSource', 'get', 'unavailable', 'bad gateway');
+          return own.get(ticketKey);
+        },
+      }),
+    });
+    patchTicket(join(repo.dir, '.sail'), 'FAKE-1', { prerequisites: ['FAKE-99'] });
+    const dispatcher = w.dispatcher();
+    await dispatcher.tick();
+    expect(states(w.store)).toEqual(['FAKE-1 queued 0']);
+    expect(w.store.snapshot().items[0]?.waitingOn).toEqual(['FAKE-99 (unreadable)']);
+    expect(eventsOf(w.runs, 'queue:waiting')).toHaveLength(1);
+    down = true;
+    w.clock.advance(FIVE_MINUTES);
+    await dispatcher.tick();
+    expect(states(w.store)).toEqual(['FAKE-1 failed 0']);
+    expect(w.store.snapshot().items[0]).toMatchObject({
+      reason: 'ticketSource.get: bad gateway (unavailable)',
+      waitingOn: ['FAKE-99 (unreadable)'],
+    });
+    expect(w.store.snapshot().items[0]?.retryAt).toBeDefined();
+    down = false;
+    w.clock.advance(FIVE_MINUTES);
+    await dispatcher.tick();
+    const item = w.store.snapshot().items[0];
+    expect(states(w.store)).toEqual(['FAKE-1 queued 0']);
+    expect(item?.waitingOn).toEqual(['FAKE-99 (unreadable)']);
+    expect(item?.reason).toBeUndefined();
+    expect(item?.retryAt).toBeUndefined();
+    expect(eventsOf(w.runs, 'queue:waiting')).toHaveLength(2);
+    expect(spawnedKeys(w.spawner)).toEqual([]);
+    const line = itemLine(item as NonNullable<typeof item>);
+    expect(line.startsWith('queued ')).toBe(true);
+    expect(line).toContain('waiting on FAKE-99 (unreadable)');
+    expect(line).not.toContain('retry at');
+    w.clock.advance(FIVE_MINUTES);
+    await dispatcher.tick();
+    expect(eventsOf(w.runs, 'queue:waiting')).toHaveLength(2);
   });
 });
 
