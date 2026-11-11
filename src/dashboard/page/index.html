@@ -608,6 +608,10 @@
         color: var(--warn);
         border-color: var(--warn);
       }
+      .qbadge.bad {
+        color: var(--del);
+        border-color: var(--del);
+      }
       .qbadge.idle {
         color: var(--fg-4);
         visibility: hidden;
@@ -768,6 +772,14 @@
       .q-row .n {
         margin-left: auto;
         color: var(--warn);
+      }
+      .q-row {
+        flex-wrap: wrap;
+      }
+      .q-row .r-problem {
+        flex-basis: 100%;
+        overflow-wrap: anywhere;
+        text-align: left;
       }
       /* needs attention: a button in the top bar, and the pane it opens */
       .att-btn {

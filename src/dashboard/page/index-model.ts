@@ -27,7 +27,7 @@ export interface RailRun {
 export interface RailWorkflow {
   name: string;
   runs: RailRun[];
-  queue?: { waiting: number; lastPolledAt?: string };
+  queue?: { waiting?: number; lastPolledAt?: string; problem?: string };
   /**
    * Its watch state from the live watcher, with why it isn't watched: its queue view's, else `watched` while it is in the
    * watch set, else none for a workflow with runs alone.
@@ -121,9 +121,15 @@ function workflows(repo: IndexRepo, runs: readonly RailRun[]): RailWorkflow[] {
     const workflow: RailWorkflow = { name, runs: runs.filter((run) => workflowOf(run) === name) };
     const view = repo.queues.find((each) => each.workflow === name);
     if (view !== undefined) {
+      // A queue that can't be read has nothing to count: its problem is listed in place of its waiting count.
       const waiting = (view.queue?.items ?? []).filter((item) => item.state === 'queued').length;
       const polled = view.queue?.polling.lastPolledAt;
-      workflow.queue = polled === undefined ? { waiting } : { waiting, lastPolledAt: polled };
+      workflow.queue =
+        view.problem !== undefined
+          ? { problem: view.problem }
+          : polled === undefined
+            ? { waiting }
+            : { waiting, lastPolledAt: polled };
     }
     if (view !== undefined) workflow.watch = view.watch.state === 'watched' ? { state: 'watched' } : view.watch;
     else if (watched.includes(name)) workflow.watch = { state: 'watched' };

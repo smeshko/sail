@@ -410,3 +410,40 @@ test("a run's ⋯ is named for its run and says whether its menu is open (ADW-50
     `<button class="r-more open" type="button" data-action="run-menu" data-repo="alpha" data-run="${FAKE_2_ID}" aria-label="actions for ${FAKE_2_ID}" aria-expanded="true"`,
   );
 });
+
+test("a queue that can't be read has a marked row in the queued block with its problem, and a marked badge that opens it", () => {
+  const repos = railRepos(index(m.registryDir), NOW).map((repo) =>
+    repo.name === 'beta'
+      ? {
+          ...repo,
+          workflows: [
+            ...repo.workflows,
+            { name: 'broken', runs: [], queue: { problem: 'queue.json <bad>' } },
+            { name: 'quiet', runs: [], queue: { waiting: 0 } },
+          ],
+        }
+      : repo,
+  );
+  const markup = renderRail(repos, { ...initialUi(0), expanded: [...ALL, 'beta/broken', 'beta/quiet'] }, NOW).value;
+  expect(markup).toContain(
+    '<button class="q-row bad" data-action="select-queue" data-queue="beta/broken"><span class="qd"></span><span class="nm">beta › broken</span><span class="n">unreadable</span><span class="r-problem">queue.json &lt;bad&gt;</span></button>',
+  );
+  expect(markup).toContain('<div class="rail-h"><span>queued</span><span class="c">1</span></div>');
+  expect(markup).toContain(
+    '<button class="qbadge bad" title="queue.json &lt;bad&gt;" data-action="select-queue" data-queue="beta/broken">queue unreadable</button>',
+  );
+  expect(markup).not.toContain('beta › quiet');
+  expect(markup.match(/class="q-row/g)).toHaveLength(2);
+  const selected = renderRail(repos, { ...initialUi(0), expanded: ALL, queue: 'beta/broken' }, NOW).value;
+  expect(selected).toContain('<button class="q-row bad sel"');
+  expect(selected).toContain('<button class="qbadge bad sel"');
+  const alone = renderRail(
+    handMade([{}], 0).map((repo) => ({
+      ...repo,
+      workflows: [{ name: 'broken', runs: [], queue: { problem: 'x' } }],
+    })),
+    initialUi(0),
+    NOW,
+  ).value;
+  expect(alone).toContain('<div class="rail-h"><span>queued</span><span class="c">0</span></div>');
+});

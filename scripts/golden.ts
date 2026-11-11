@@ -263,6 +263,29 @@ export async function renderDashboardViews(outDir: string): Promise<string[]> {
       { ...selected, expanded: ['alpha', 'beta'] },
       VIEWS_NOW,
     );
+    const unreadable = repos.map((repo) =>
+      repo.name === 'beta'
+        ? {
+            ...repo,
+            queues: [
+              ...repo.queues,
+              {
+                workflow: 'nightly',
+                problem: 'queue.json is not a queue: /version Invalid input',
+                watch: {
+                  state: 'watcher not running' as const,
+                  why: "no watcher is running for 'beta': sail watch nightly first",
+                },
+              },
+            ],
+          }
+        : repo,
+    );
+    views['rail-queue-problem.html'] = renderRail(
+      railRepos(unreadable, VIEWS_NOW),
+      { ...selected, expanded: ['alpha', 'beta'] },
+      VIEWS_NOW,
+    );
     views['attention.html'] = renderAttention(attention(repos), true);
     const queueEvents = readEvents(queueDirOf(machine)) as unknown as QueueEvent[];
     const stream = { recent: queueEvents.slice(-20), polls: pollKind(queueEvents) };

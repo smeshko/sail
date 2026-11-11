@@ -1,7 +1,7 @@
 // The rail's repositories and runs and the queue panel's model, from the index alone (D8, D9). The input is `index()`
 // of the seeded fixtures: the very object the index stream sends, built server-side in the test.
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { index } from '../../../src/dashboard/files';
 import { pollKind, queuePanels, railRepos, workflowOf } from '../../../src/dashboard/page/index-model';
@@ -12,7 +12,6 @@ import {
   GOLDEN_RUN_ID,
   type Machine,
   QUEUE_WORKFLOW,
-  queueDirOf,
   RUNNING_ID,
   runningCopy,
   seedFixtures,
@@ -268,4 +267,16 @@ test('a workflow in the watch set with no queue view is listed too, reads watche
     [QUEUE_WORKFLOW, 'watched', 'unwatch'],
   ]);
   expect(beta.workflows.find((workflow) => workflow.name === 'ghost')?.runs).toEqual([]);
+});
+
+test("a queue whose queue.json can't be read has a problem and no waiting count in the rail, and one not written yet has waiting 0", () => {
+  const queues = join(m.beta.clone, '.sail-runs', 'queue');
+  mkdirSync(join(queues, 'broken'));
+  writeFileSync(join(queues, 'broken', 'queue.json'), '{');
+  mkdirSync(join(queues, 'fresh'));
+  const queueOf = (name: string) => betaRail().workflows.find((workflow) => workflow.name === name)?.queue;
+  const broken = queueOf('broken');
+  expect(broken?.problem?.startsWith("queue.json can't be read")).toBe(true);
+  expect(broken).not.toHaveProperty('waiting');
+  expect(queueOf('fresh')).toEqual({ waiting: 0 });
 });

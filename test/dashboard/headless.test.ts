@@ -3,7 +3,7 @@
 // fetch and WebSocket are Bun's own, aimed at the server, so the real bundle, server and streams are exercised, and
 // only the DOM is fake.
 import { afterEach, expect, test } from 'bun:test';
-import { rmSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { BrowserWindow, ElementLike, EventLike } from '../../src/dashboard/page/host';
 import { type Dashboard, startDashboard } from '../../src/dashboard/server';
@@ -127,4 +127,20 @@ test("once beta's queue/ is gone, the next index drops its queue row and gives t
   expect(await until(() => !page.text('rail').includes('select-queue'))).toBe(true);
   expect(await until(() => (page.text('main').match(/data-action="select-card"/g) ?? []).length === 8)).toBe(true);
   expect(page.text('rail')).toContain('<span class="nm">beta</span>');
+}, 30_000);
+
+test("a beta queue that can't be read is listed in the rail with its problem, and its row opens a queue view that shows it", async () => {
+  m = seedFixtures();
+  const broken = join(m.beta.clone, '.sail-runs', 'queue', 'broken');
+  mkdirSync(broken, { recursive: true });
+  writeFileSync(join(broken, 'queue.json'), '{');
+  const started = startDashboard({ registryDir: m.registryDir, port: 0, followPollMs: 20, indexPollMs: 50 });
+  if ('refused' in started) throw new Error(started.refused);
+  server = started;
+  const page = await bootHeadless(server);
+  expect(await until(() => page.text('rail').includes('beta › broken'))).toBe(true);
+  expect(page.text('rail')).toContain('<span class="n">unreadable</span>');
+  page.click({ action: 'select-queue', queue: 'beta/broken' });
+  expect(await until(() => page.text('main').includes('broken queue'))).toBe(true);
+  expect(page.text('main')).toContain('queue.json can&#39;t be read');
 }, 30_000);

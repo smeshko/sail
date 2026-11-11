@@ -1,5 +1,5 @@
 // The rail, in three blocks. `running` lists every live run of every repository, newest first, and `queued` every
-// watched workflow with work waiting, each row opening its queue in the centre. Under them, the `repositories` tree:
+// watched workflow with work waiting, and every queue that can't be read, with its problem, each row opening its queue in the centre. Under them, the `repositories` tree:
 // each repository with its workflows, every one folded until the person opens it. A watched workflow's header carries a
 // queue badge that opens its queue. An open workflow shows a history line, whose `failed` and `done` parts each open
 // that status's finished runs, so a long tail of them never buries live work. Whatever is folded, the open run's row
@@ -78,16 +78,19 @@ ${live.map(({ repo, ...run }) => liveRow(repo, run, ui, offers))}`;
 function queuedBlock(repos: readonly RailRepo[], ui: UiState, now: number): SafeHtml {
   const rows = repos.flatMap((repo) =>
     repo.workflows.flatMap((workflow) =>
-      workflow.queue !== undefined && workflow.queue.waiting > 0
+      workflow.queue !== undefined && ((workflow.queue.waiting ?? 0) > 0 || workflow.queue.problem !== undefined)
         ? [{ repo: repo.name, workflow: workflow.name, queue: workflow.queue }]
         : [],
     ),
   );
   if (rows.length === 0) return html``;
-  const total = rows.reduce((sum, row) => sum + row.queue.waiting, 0);
+  const total = rows.reduce((sum, row) => sum + (row.queue.waiting ?? 0), 0);
   return html`<div class="rail-h"><span>queued</span><span class="c">${total}</span></div>
 ${rows.map(({ repo, workflow, queue }) => {
   const id = queueId(repo, workflow);
+  if (queue.problem !== undefined) {
+    return html`<button class="q-row bad${ui.queue === id ? ' sel' : ''}" data-action="select-queue" data-queue="${id}"><span class="qd"></span><span class="nm">${repo} › ${workflow}</span><span class="n">unreadable</span><span class="r-problem">${queue.problem}</span></button>`;
+  }
   return html`<button class="q-row${ui.queue === id ? ' sel' : ''}"${
     queue.lastPolledAt === undefined ? '' : html` title="polled ${ago(queue.lastPolledAt, now)}"`
   } data-action="select-queue" data-queue="${id}"><span class="qd"></span><span class="nm">${repo} › ${workflow}</span><span class="n">${queue.waiting} waiting</span></button>`;
@@ -148,10 +151,14 @@ function counts(runs: readonly RailRun[]): SafeHtml {
 }
 
 function badge(group: string, queue: NonNullable<RailWorkflow['queue']>, ui: UiState, now: number): SafeHtml {
-  const tip = queue.lastPolledAt === undefined ? '' : html` title="polled ${ago(queue.lastPolledAt, now)}"`;
   const sel = ui.queue === group ? ' sel' : '';
-  return html`<button class="qbadge ${queue.waiting > 0 ? 'warn' : 'idle'}${sel}"${tip} data-action="select-queue" data-queue="${group}">${
-    queue.waiting > 0 ? `${queue.waiting} queued` : 'queue'
+  if (queue.problem !== undefined) {
+    return html`<button class="qbadge bad${sel}" title="${queue.problem}" data-action="select-queue" data-queue="${group}">queue unreadable</button>`;
+  }
+  const waiting = queue.waiting ?? 0;
+  const tip = queue.lastPolledAt === undefined ? '' : html` title="polled ${ago(queue.lastPolledAt, now)}"`;
+  return html`<button class="qbadge ${waiting > 0 ? 'warn' : 'idle'}${sel}"${tip} data-action="select-queue" data-queue="${group}">${
+    waiting > 0 ? `${waiting} queued` : 'queue'
   }</button>`;
 }
 
