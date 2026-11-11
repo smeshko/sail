@@ -597,11 +597,13 @@ function standing(rows: readonly MenuRow[], query: string): number {
  * full menu, "go to" and the general group, which leaves out what the subject's group has. A query filters the action
  * groups by label, each ordered by how well its rows match (`labelTier`), and orders the groups by `standing`, so an
  * action the query names comes before every "go to" row. A reason two or more disabled rows of the subject share is said
- * once, under the head, and leaves those rows. The context menu is the subject's group alone, unfiltered.
+ * once, under the head, and leaves those rows. While a step is asked, the head names the subject the step's action is
+ * done to (the repository chosen for a start), else the subject the menu opened on. The context menu is the subject's group alone, unfiltered.
  */
 export function menuRows(state: MenuState, source: OfferSource, index: readonly IndexRepo[], now: number): MenuModel {
-  const head = chipOf(state.subject, index, now);
   const step = state.steps.at(-1);
+  const opened = step !== undefined && 'subject' in step && step.subject.kind !== 'none' ? step.subject : state.subject;
+  const head = chipOf(opened, index, now);
   if (step !== undefined) {
     const model = stepOf(step, source, state.query);
     return { ...(head === undefined ? {} : { head }), rows: model.rows, step: model };

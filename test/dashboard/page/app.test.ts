@@ -5334,6 +5334,26 @@ describe('start a run (ADW-524)', () => {
     expect([page?.ui.runId, toasts()]).toEqual([NEW_ID, [`ok start a run…: started ${NEW_ID}`]]);
   });
 
+  test('the chip keeps the run the menu opened on until the repository is chosen, then names that repository, and Escape brings the run back', async () => {
+    bootStartable();
+    host.point('hover', FAKE_3_ROW);
+    cmdK();
+    host.advance(100);
+    const run = menuHead();
+    expect(run).toContain('FAKE-3');
+    typeIn('start a run');
+    enter();
+    expect([stepLabel(), menuHead()]).toEqual(['repository', run]);
+    enter();
+    expect([stepLabel(), menuHead()]).toEqual(['workflow', 'alpha']);
+    enter();
+    expect([stepLabel(), menuHead()]).toEqual(['ticket key or pull request', 'alpha']);
+    host.press('Escape', true);
+    host.press('Escape', true);
+    host.advance(100);
+    expect([stepLabel(), menuHead()]).toEqual(['repository', run]);
+  });
+
   test('a refused start is a red toast with a start anyway button, the menu then lists it, and its dialog names the check it overrides', async () => {
     bootStartable();
     const line = 'sail FAKE-3: the ticket is not designated. --force runs it anyway';

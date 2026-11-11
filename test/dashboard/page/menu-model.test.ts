@@ -639,6 +639,29 @@ test('while a step is open the menu is its rows under the subject head, and noth
   expect(model.step?.label).toBe('from');
 });
 
+describe('the chip while a step is open', () => {
+  const alpha: Subject = { kind: 'repo', repo: 'alpha' };
+  const startStep = (at: number) => ({ action: 'start-run', subject: alpha, data: {}, values: {}, at }) as const;
+
+  test('a pick step has no subject yet, so the opening subject keeps the chip, and none when the menu has none', () => {
+    const pick = { pick: 'repo', action: 'start-run' } as const;
+    expect(menuRows(state({ subject: RUN, steps: [pick] }), source(), index, NOW).head).toBe('FAKE-1-RUN');
+    expect(menuRows(state({ steps: [pick] }), source(), index, NOW).head).toBeUndefined();
+  });
+
+  test('once the repository is chosen the chip names it on every later step, whatever the menu opened on', () => {
+    for (const at of [0, 1]) {
+      expect(menuRows(state({ subject: RUN, steps: [startStep(at)] }), source(), index, NOW).head).toBe('alpha');
+      expect(menuRows(state({ steps: [startStep(at)] }), source(), index, NOW).head).toBe('alpha');
+    }
+  });
+
+  test('a queue chosen for an action names that queue', () => {
+    const queue = { action: 'add-ticket', subject: QUEUE, data: {}, values: {}, at: 0 } as const;
+    expect(menuRows(state({ subject: RUN, steps: [queue] }), source(), index, NOW).head).toBe('beta › ticket-to-pr');
+  });
+});
+
 test('a workflow offers release only while its queue is held on a harness key, and the row carries that key', () => {
   expect(labels(subjectRows(QUEUE, source())).includes('release')).toBe(false);
   const held = structuredClone(index) as unknown as {
