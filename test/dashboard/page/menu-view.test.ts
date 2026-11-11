@@ -35,6 +35,18 @@ describe('audit 2: a reason every row of the subject shares (ADW-544)', () => {
     expect(markup).not.toContain('cmdk-why');
     expect(renderMenu(state(), { rows: model.rows }).value).not.toContain('cmdk-note');
   });
+
+  test('a row with another reason keeps its own beside the shared one: one note and one why', () => {
+    const model: MenuModel = {
+      head: 'FAKE-6 · Tidy the docs',
+      why: 'no watcher is running',
+      rows: [row('drop', { disabled: true, why: 'it is running' }), row('move up', { disabled: true })],
+    };
+    const markup = renderMenu(state(), model).value;
+    expect(markup.match(/class="cmdk-note"/g)).toHaveLength(1);
+    expect(markup.match(/class="cmdk-why"/g)).toHaveLength(1);
+    expect(markup.match(/no watcher is running/g)).toHaveLength(1);
+  });
 });
 
 test('the full menu draws the head, a field, one row per row with the highlight, and a heading for each other group', () => {

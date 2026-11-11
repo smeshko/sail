@@ -13,6 +13,7 @@ import {
   type MenuRow,
   menuRows,
   rank,
+  sharedWhy,
   stepOf,
   subjectRows,
   wordFuzzy,
@@ -409,6 +410,62 @@ describe('audit 2: the menu ranks across groups, matches within words and says a
     const mixed = menuRows(state({ subject: { ...ITEM, item: 'ticket:FAKE-6' } }), source(), index, NOW);
     expect(mixed.why).toBeUndefined();
     expect(mixed.rows.find((row) => row.label === 'drop')?.why).toBe('no watcher is running');
+  });
+
+  describe('a reason that two or more disabled rows share, beside rows that are not', () => {
+    const reason = "no watcher is running for 'beta': sail watch ticket-to-pr first";
+    const six: Subject = { ...ITEM, item: 'ticket:FAKE-6' };
+    const withOffers = (items: Record<string, unknown>) => {
+      const copy = structuredClone(index) as unknown as { queues: { offers: { items: Record<string, unknown> } }[] }[];
+      const offers = copy[1]?.queues[0]?.offers;
+      if (offers === undefined) throw new Error('no offers');
+      offers.items['ticket:FAKE-6'] = items;
+      return copy as unknown as IndexRepo[];
+    };
+    const own = (repos: IndexRepo[]) => {
+      const model = menuRows(state({ subject: six }), { index: repos }, repos, NOW);
+      return { model, rows: model.rows.filter((row) => row.group === 'subject') };
+    };
+
+    test('an enabled row and two rows disabled for one reason: the reason is said once and leaves those rows', () => {
+      const { model, rows } = own(withOffers({ drop: { enabled: true }, move: { enabled: false, why: reason } }));
+      expect(model.why).toBe(reason);
+      expect(rows.map((row) => [row.label, row.disabled, row.why])).toEqual([
+        ['drop', false, undefined],
+        ['move up', true, undefined],
+        ['move to the top', true, undefined],
+      ]);
+    });
+
+    test('a row disabled for another reason keeps its own', () => {
+      const { model, rows } = own(
+        withOffers({ drop: { enabled: false, why: 'it is running' }, move: { enabled: false, why: reason } }),
+      );
+      expect(model.why).toBe(reason);
+      expect(rows.map((row) => [row.label, row.why])).toEqual([
+        ['drop', 'it is running'],
+        ['move up', undefined],
+        ['move to the top', undefined],
+      ]);
+    });
+
+    test('one disabled row alone keeps its reason and the model says none', () => {
+      const { model, rows } = own(withOffers({ drop: { enabled: false, why: reason }, move: { enabled: true } }));
+      expect(model.why).toBeUndefined();
+      expect(rows.map((row) => [row.label, row.why])).toEqual([
+        ['drop', reason],
+        ['move up', undefined],
+        ['move to the top', undefined],
+      ]);
+    });
+
+    test('two reasons with two rows each: the one with most rows, the first on a tie, is said', () => {
+      const row = (label: string, why: string) =>
+        ({ group: 'subject', label, why, disabled: true, run: { show: 'x' } }) as unknown as MenuRow;
+      expect(sharedWhy([row('a1', 'A'), row('b1', 'B'), row('b2', 'B'), row('b3', 'B')])).toBe('B');
+      expect(sharedWhy([row('a1', 'A'), row('b1', 'B'), row('a2', 'A'), row('b2', 'B')])).toBe('A');
+      expect(sharedWhy([row('a1', 'A'), row('b1', 'B')])).toBeUndefined();
+    });
   });
 });
 
