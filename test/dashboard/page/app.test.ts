@@ -542,7 +542,8 @@ test('boot draws the sidebar and the list from the first index and opens no run;
   expect(host.open('run=')).toEqual([]);
   host.renders = [];
   host.advance(100);
-  expect(host.renders.sort()).toEqual(['list', 'main', 'sidebar']);
+  expect(host.renders.sort()).toEqual(['list', 'main', 'sidebar', 'status']);
+  expect(host.regions.status).toContain('<span>Active</span><span>1 waiting on you</span>');
   expect(host.regions.sidebar).toContain('<span class="nm">alpha</span>');
   expect(host.regions.sidebar).toContain('<span class="nm">beta</span>');
   expect(host.regions.list).toContain('<span class="lh-t">Active</span><span class="c">1</span>');
@@ -1139,16 +1140,35 @@ test('a queue open over a selected card closes the inspector, and a pinned one s
   expect(host.regions.inspector).not.toContain('implement#1');
 });
 
-test('the status bar is empty while a queue is open and describes the run again once it is back (ADW-528)', () => {
+test('the status bar names the view with nothing open, the queue while one is open, and the view again after Esc (ADW-548)', () => {
   page = boot(host);
-  firstIndex();
+  plainIndex();
+  host.advance(100);
+  expect(host.regions.status).toContain('<span>Active</span><span>1 waiting on you</span>');
+  host.click({ action: 'select-view', view: 'history' });
+  host.advance(100);
+  expect(host.regions.status).toContain('<span>History</span><span>');
+  host.click({ action: 'select-queue', queue: `beta/${QUEUE_WORKFLOW}` });
+  host.advance(100);
+  expect(host.regions.status).toContain(`<span>beta / ${QUEUE_WORKFLOW}</span><span>watched</span>`);
+  host.press('Escape');
+  host.advance(100);
+  expect(host.regions.status).toContain('<span>History</span><span>');
+  expect(host.regions.status).not.toContain('beta /');
+});
+
+test('the status bar names the queue while one is open and describes the run again once it is back (ADW-528, ADW-548)', () => {
+  page = boot(host);
   expect(host.regions.status ?? '').toBe('');
+  firstIndex();
   replay(host.open('run=')[0], GOLDEN());
   host.advance(100);
   expect(host.regions.status).toContain('calls <b>');
   host.click({ action: 'select-queue', queue: `beta/${QUEUE_WORKFLOW}` });
   host.advance(100);
-  expect(host.regions.status).toBe('');
+  expect(host.regions.status).toBe(
+    `<span>beta / ${QUEUE_WORKFLOW}</span><span>watched</span><span>waiting <b>1</b></span><span>running <b>1</b></span>`,
+  );
   host.click({ action: 'select-run', repo: 'alpha', run: GOLDEN_RUN_ID });
   host.advance(100);
   expect(host.regions.status).toContain('calls <b>');

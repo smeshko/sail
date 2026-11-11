@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { index } from '../../../src/dashboard/files';
 import { type QueuePanel, queuePanels } from '../../../src/dashboard/page/index-model';
-import { queueEventLine, queueId, renderQueue } from '../../../src/dashboard/page/queue-view';
+import { queueEventLine, queueId, renderQueue, renderQueueStatus } from '../../../src/dashboard/page/queue-view';
 import { initialUi } from '../../../src/dashboard/page/ui-state';
 import type { QueueEvent } from '../../../src/events/types';
 import { FAKE_3_ID, type Machine, QUEUE_WORKFLOW, queueDirOf, seedFixtures } from '../../helpers/dashboard';
@@ -45,6 +45,31 @@ const queueEvents = (): QueueEvent[] =>
     .trimEnd()
     .split('\n')
     .map((line) => JSON.parse(line));
+
+describe('the status bar with a queue open (ADW-548)', () => {
+  test('names the queue, its watch state, and how many items wait and run', () => {
+    const [panel] = watchedPanels();
+    if (panel === undefined) throw new Error('beta has no queue');
+    const counts = { queued: 3, dispatched: 2, failed: 0, parked: 0, done: 0 };
+    expect(renderQueueStatus({ ...panel, counts }).value).toBe(
+      '<span>beta / ticket-to-pr</span><span>watched</span><span>waiting <b>3</b></span><span>running <b>2</b></span>',
+    );
+  });
+
+  test('says a workflow nobody watches, and a zero count', () => {
+    const [panel] = watchedPanels();
+    if (panel === undefined) throw new Error('beta has no queue');
+    const counts = { queued: 0, dispatched: 0, failed: 1, parked: 0, done: 0 };
+    const markup = renderQueueStatus({
+      ...panel,
+      counts,
+      watch: { state: 'watcher not running', why: 'no watcher is running' },
+    }).value;
+    expect(markup).toBe(
+      '<span>beta / ticket-to-pr</span><span>watcher not running</span><span>waiting <b>0</b></span><span>running <b>0</b></span>',
+    );
+  });
+});
 
 describe('audit 2: rows say what they are (ADW-543)', () => {
   test("a queue that can't be read draws its problem in place of its counts, its items and its add field", () => {

@@ -2,7 +2,7 @@
 // empty words when it has no row, and no counts line before the first index.
 import { describe, expect, test } from 'bun:test';
 import type { AttentionItem } from '../../../src/dashboard/page/attention';
-import { renderEmpty } from '../../../src/dashboard/page/empty-view';
+import { renderEmpty, renderViewStatus, viewLine } from '../../../src/dashboard/page/empty-view';
 import type { ListRepo, ListRun } from '../../../src/dashboard/page/index-model';
 import { groupsOf, shownGroups, type ViewName } from '../../../src/dashboard/page/list-model';
 import { initialUi } from '../../../src/dashboard/page/ui-state';
@@ -80,6 +80,28 @@ describe('audit 2: rows say what they are (ADW-543)', () => {
     const markup = renderEmpty('active', [], initialUi(0), 2).value;
     expect(markup).toContain('<div class="empty-c">no live run</div>');
     expect(markup).toContain('<div class="empty-k"><kbd>⌘K</kbd> commands</div>');
+  });
+});
+
+describe('the status bar with nothing open (ADW-548)', () => {
+  const status = (view: ViewName, fields: Partial<ReturnType<typeof initialUi>> = {}, list = repos) => {
+    const ui = { ...initialUi(0), ...fields };
+    return renderViewStatus(view, shownGroups(view, list, ui, CLOCK.now, items), ui).value;
+  };
+
+  test('names the view and the line the empty centre holds', () => {
+    expect(status('history')).toBe('<span>History</span><span>1 failed · 2 done</span>');
+    expect(status('active')).toBe('<span>Active</span><span>1 waiting on you · 2 running</span>');
+    expect(viewLine('active', groupsOf('active', repos, undefined, CLOCK, items))).toBe('1 waiting on you · 2 running');
+  });
+
+  test("says nothing matches for a filter that hides every row, and the view's empty words for an empty view", () => {
+    expect(status('active', { listFilter: 'nothing like it' })).toBe('<span>Active</span><span>nothing matches</span>');
+    expect(status('active', {}, [repo('x', [])])).toBe('<span>Active</span><span>no live run</span>');
+  });
+
+  test("is just the view's name before the first index", () => {
+    expect(renderViewStatus('queues', undefined).value).toBe('<span>Queues</span>');
   });
 });
 
