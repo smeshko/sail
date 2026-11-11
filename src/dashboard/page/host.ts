@@ -28,7 +28,12 @@ export interface PageHost {
   /** Scrolls what holds `region` to its end. */
   scrollToEnd(region: Region): void;
   onAction(handler: (action: string, data: Record<string, string>) => void): void;
-  onKey(handler: (key: string, inInput: boolean) => void): void;
+  /** `on` is the `data-action` of the element the key landed on. */
+  onKey(handler: (key: string, inInput: boolean, on?: string) => void): void;
+  /** Opens the confirmation dialog with `html`, modal, and remembers what had the focus. */
+  openDialog(html: string): void;
+  /** Closes the dialog and gives the focus back to what had it at the open. */
+  closeDialog(): void;
   /** A GET of `path` on the dashboard, with the client header. A failed request answers status 0. */
   get(path: string): Promise<{ status: number; body: string }>;
   /** A POST of `body` as JSON to `path`, with the client header. A failed request answers status 0. */
@@ -71,6 +76,9 @@ export interface ElementLike {
   selectionEnd?: number | null;
   selectionDirection?: string | null;
   setSelectionRange?(start: number, end: number, direction?: string): void;
+  /** A `<dialog>`'s. */
+  showModal?(): void;
+  close?(): void;
   contains?(other: ElementLike): boolean;
   focus?(options?: { preventScroll?: boolean }): void;
   getAttribute?(name: string): string | null;
@@ -209,6 +217,8 @@ function installResize(win: BrowserWindow): void {
 export function browserHost(win: BrowserWindow): PageHost {
   const doc = win.document;
   installResize(win);
+  /** The focus key of what had the focus when the dialog opened. */
+  let opener: string | undefined;
   let onAction: (action: string, data: Record<string, string>) => void = () => {};
   /** Delivers `element`'s action with its data, as a click on it would. */
   const fire = (element: ElementLike) => {
@@ -292,6 +302,28 @@ export function browserHost(win: BrowserWindow): PageHost {
         }
       }
     },
+    openDialog(markup) {
+      const dialog = doc.getElementById('dialog');
+      if (dialog === null) return;
+      const active = doc.activeElement;
+      opener = active === null || active === undefined ? undefined : focusKey(active);
+      dialog.innerHTML = markup;
+      dialog.showModal?.();
+    },
+    closeDialog() {
+      doc.getElementById('dialog')?.close?.();
+      const key = opener;
+      opener = undefined;
+      if (key === undefined) return;
+      for (const region of REGIONS) {
+        const root = doc.getElementById(region);
+        const target = root === null ? undefined : keyed(root, key)[0];
+        if (target !== undefined) {
+          target.focus?.({ preventScroll: true });
+          return;
+        }
+      }
+    },
     scrollToEnd(region) {
       const box = doc.getElementById(region)?.parentElement;
       if (box !== null && box !== undefined) box.scrollTop = box.scrollHeight ?? 0;
@@ -317,7 +349,7 @@ export function browserHost(win: BrowserWindow): PageHost {
             return;
           }
         }
-        handler(event.key ?? '', tag !== undefined && INPUTS.has(tag));
+        handler(event.key ?? '', tag !== undefined && INPUTS.has(tag), actionOf(event.target)?.dataset.action);
       });
     },
     async get(path) {

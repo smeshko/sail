@@ -25,6 +25,7 @@ import {
   underwayId,
   type Values,
 } from './action-registry';
+import { renderDialog } from './dialog-view';
 import type { PageHost, Region } from './host';
 import type { ActPlace, UiState } from './ui-state';
 
@@ -44,7 +45,7 @@ export interface ActorEffects {
 }
 
 export interface ActorDeps {
-  host: Pick<PageHost, 'post' | 'value'>;
+  host: Pick<PageHost, 'post' | 'value' | 'openDialog' | 'closeDialog'>;
   ui: UiState;
   source(): OfferSource;
   openRun(): { repo: string; runId: string } | undefined;
@@ -68,6 +69,12 @@ export interface Actor {
   forget(kind: 'run'): void;
   /** Clears the last result shown at `place`. */
   clearResult(place: ActPlace): void;
+  /** The subject of the confirmation dialog open now, if any. */
+  dialogFor(): Subject | undefined;
+  /** Confirms the open dialog: it sends what it asks, once. */
+  confirm(): void;
+  /** Closes the open dialog and sends nothing. */
+  cancel(): void;
 }
 
 const tickOf = (value: string) => (value === '' ? '' : 'on');
@@ -81,6 +88,9 @@ export function inertActor(): Actor {
     keep: () => {},
     forget: () => {},
     clearResult: () => {},
+    dialogFor: () => undefined,
+    confirm: () => {},
+    cancel: () => {},
   };
 }
 
@@ -92,6 +102,8 @@ export function createActor(deps: ActorDeps): Actor {
   const stale = new Set<string>();
   /** How many run actions' requests are out: until each is answered, another run action is ignored. */
   let runsOut = 0;
+  /** The confirmation dialog open: who it is for, and what its confirm sends. */
+  let dialog: { subject: Subject; send(): void } | undefined;
 
   const draftsOf = (id: string) => {
     state.drafts[id] ??= {};
@@ -189,7 +201,8 @@ export function createActor(deps: ActorDeps): Actor {
   }
 
   function send(def: ActionDef, subject: Subject, values: Values, request: { path: string; body: unknown }) {
-    if (def.tier === 'confirmed') state.pending = { id: def.id, subject, values: { ...values }, sent: true };
+    if (def.tier === 'confirmed' && def.dialog === undefined)
+      state.pending = { id: def.id, subject, values: { ...values }, sent: true };
     if (subject.kind === 'run') runsOut++;
     if (def.underway !== undefined) ui.underway[underwayId(def, subject)] = def.underway;
     if (def.sending !== undefined) setResult(def.id, subject, def.place, def.sending(subject));
@@ -225,6 +238,13 @@ export function createActor(deps: ActorDeps): Actor {
       mark('rail', 'main');
       return;
     }
+    if (def.tier === 'confirmed' && def.dialog !== undefined) {
+      const view = def.dialog(subject, values, source);
+      dialog = { subject, send: () => send(def, subject, values, request) };
+      ui.dialog = view;
+      host.openDialog(renderDialog(view).value);
+      return;
+    }
     if (def.tier === 'confirmed') {
       const { pending } = state;
       const rearms = def.params(subject, source).filter((param) => param.type === 'choice' && param.rearm === true);
@@ -244,8 +264,25 @@ export function createActor(deps: ActorDeps): Actor {
     send(def, subject, values, request);
   }
 
+  function closeDialog() {
+    if (dialog === undefined) return undefined;
+    const { send: confirmed } = dialog;
+    dialog = undefined;
+    delete ui.dialog;
+    host.closeDialog();
+    return confirmed;
+  }
+
   return {
     act,
+    dialogFor: () => dialog?.subject,
+    confirm() {
+      // The dialog is cleared first, so the click a browser makes of Enter on its focused button finds nothing to do.
+      closeDialog()?.();
+    },
+    cancel() {
+      closeDialog();
+    },
     disarm: (except) => disarm(except),
     armed(id, data) {
       const def = actionOf(id, registry);

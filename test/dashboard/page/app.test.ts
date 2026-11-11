@@ -58,7 +58,7 @@ class FakeHost implements PageHost {
   private timers = new Map<number, { at: number; fn: () => void }>();
   private next = 1;
   private action?: (action: string, data: Record<string, string>) => void;
-  private key?: (key: string, inInput: boolean) => void;
+  private key?: (key: string, inInput: boolean, on?: string) => void;
 
   constructor(private readonly machine: Machine) {}
 
@@ -77,8 +77,20 @@ class FakeHost implements PageHost {
   onAction(handler: (action: string, data: Record<string, string>) => void) {
     this.action = handler;
   }
-  onKey(handler: (key: string, inInput: boolean) => void) {
+  onKey(handler: (key: string, inInput: boolean, on?: string) => void) {
     this.key = handler;
+  }
+  /** The dialog's markup while one is open, and how many times it was opened and closed. */
+  dialog: string | undefined;
+  dialogOpens = 0;
+  dialogCloses = 0;
+  openDialog(html: string) {
+    this.dialog = html;
+    this.dialogOpens++;
+  }
+  closeDialog() {
+    this.dialog = undefined;
+    this.dialogCloses++;
   }
   /** The reads of a run's actions: answered at once, and kept apart from the reads of its calls. */
   actionReads: string[] = [];
@@ -191,8 +203,8 @@ class FakeHost implements PageHost {
   click(data: Record<string, string>) {
     this.action?.(data.action ?? '', data);
   }
-  press(key: string, inInput = false) {
-    this.key?.(key, inInput);
+  press(key: string, inInput = false, on?: string) {
+    this.key?.(key, inInput, on);
   }
   /** The open sockets whose query starts with `prefix`. */
   open(prefix: string) {
@@ -1448,11 +1460,8 @@ const buttons = (region: string | undefined) =>
     disabled === undefined ? '' : 'disabled',
   ]);
 
-/** The item whose drop a first click has armed. */
-const armedDrop = () => {
-  const pending = page?.ui.act.pending;
-  return pending?.id === 'drop-item' && pending.subject.kind === 'item' ? pending.subject.item : undefined;
-};
+/** The subject of the dialog open now: its title, or undefined when none is open. */
+const dialogTitle = () => host.dialog?.match(/<h2 id="dialog-title">([^<]*)<\/h2>/)?.[1];
 
 /** Boots the page on `run` of `repo`, its events replayed, its actions read and its ⋯ menu open, and settled. */
 async function openOffering(repo: string, runId: string, dir: string) {
@@ -1749,31 +1758,59 @@ test('the add form shows once the queue stream has polled tickets; add posts the
   expect(host.posts[1]).toEqual({ path: `${QUEUE_PATH}/add`, body: { ticketKey: 'FAKE-9' } });
 });
 
-test('the first click on drop arms it and posts nothing, the second posts the dedup key, and any other click disarms it (ADW-460)', async () => {
+test('the first click on drop opens the dialog and posts nothing; its title names the item, its lines what goes, its button the verb (ADW-514)', () => {
   openBetaQueue();
   const row = { ...BETA, item: 'ticket:FAKE-6' };
   host.click({ action: 'item-menu', item: row.item });
   host.click({ action: 'drop-item', ...row });
-  host.advance(100);
-  expect([host.posts, armedDrop(), host.regions.main?.includes('confirm drop')]).toEqual([[], 'ticket:FAKE-6', true]);
-  host.click({ action: 'toggle-queue-events' });
-  host.advance(100);
-  expect([host.posts, armedDrop(), host.regions.main?.includes('confirm drop')]).toEqual([[], undefined, false]);
-  host.click({ action: 'item-menu', item: row.item });
-  host.click({ action: 'drop-item', ...row });
+  expect([host.posts, host.dialogOpens, dialogTitle()]).toEqual([[], 1, 'drop ticket:FAKE-6']);
+  expect(host.dialog).toContain(`<li>removes ticket:FAKE-6 from beta / ${QUEUE_WORKFLOW}&#39;s queue</li>`);
+  expect(host.dialog).toContain('<li>it is parked after 2 attempts</li>');
+  expect(host.dialog).toContain('<button class="btn primary" data-action="dialog-confirm" autofocus>drop</button>');
+  expect(host.regions.main).not.toContain('armed');
+  expect(page?.ui.itemMenu).toBe('ticket:FAKE-6');
+});
+
+test('Enter on the dialog posts the drop once, also when a dialog-confirm click follows it, and the answer is a toast', async () => {
+  openBetaQueue();
   host.click({ action: 'item-menu', item: 'ticket:FAKE-5' });
   host.click({ action: 'drop-item', ...BETA, item: 'ticket:FAKE-5' });
-  expect([host.posts, armedDrop(), page?.ui.itemMenu]).toEqual([[], 'ticket:FAKE-5', 'ticket:FAKE-5']);
   host.postAnswer = { status: 200, body: JSON.stringify({ message: 'sail queue: ticket:FAKE-5 dropped' }) };
-  host.click({ action: 'drop-item', ...BETA, item: 'ticket:FAKE-5' });
+  host.press('Enter');
+  host.click({ action: 'dialog-confirm' });
   await settle();
   host.advance(100);
-  expect([host.posts, armedDrop(), page?.ui.itemMenu, toasts()]).toEqual([
+  expect([host.posts, host.dialog, host.dialogCloses, toasts()]).toEqual([
     [{ path: `${QUEUE_PATH}/drop`, body: { dedupKey: 'ticket:FAKE-5' } }],
     undefined,
-    undefined,
+    1,
     ['ok drop ticket:FAKE-5: sail queue: ticket:FAKE-5 dropped'],
   ]);
+});
+
+test('Escape and the cancel button close the dialog and post nothing, and Enter on the cancel button posts nothing either', () => {
+  openBetaQueue();
+  const row = { ...BETA, item: 'ticket:FAKE-6' };
+  host.click({ action: 'drop-item', ...row });
+  host.press('Escape');
+  expect([host.dialog, host.dialogCloses, host.posts]).toEqual([undefined, 1, []]);
+  host.click({ action: 'drop-item', ...row });
+  host.click({ action: 'dialog-cancel' });
+  expect([host.dialog, host.dialogCloses, host.posts]).toEqual([undefined, 2, []]);
+  host.click({ action: 'drop-item', ...row });
+  host.press('Enter', false, 'dialog-cancel');
+  expect([dialogTitle(), host.posts]).toEqual(['drop ticket:FAKE-6', []]);
+  host.click({ action: 'dialog-cancel' });
+  expect([host.dialog, host.posts]).toEqual([undefined, []]);
+});
+
+test('while the dialog is open, j, a and i change nothing', () => {
+  openBetaQueue();
+  host.click({ action: 'drop-item', ...BETA, item: 'ticket:FAKE-6' });
+  const before = [page?.ui.attention, page?.ui.inspector, page?.ui.cursor];
+  for (const key of ['j', 'a', 'i']) host.press(key);
+  expect([page?.ui.attention, page?.ui.inspector, page?.ui.cursor]).toEqual(before);
+  expect(dialogTitle()).toBe('drop ticket:FAKE-6');
 });
 
 test("an item's ⋯ opens its menu, one at a time; its ⋯ again, Escape, another control, or its item drawn running shuts it (ADW-464)", () => {
@@ -1794,7 +1831,10 @@ test("an item's ⋯ opens its menu, one at a time; its ⋯ again, Escape, anothe
   host.click({ action: 'drop-item', ...BETA, item: 'ticket:FAKE-6' });
   host.press('Escape');
   host.advance(100);
-  expect([...menus(), armedDrop(), page?.ui.queue]).toEqual([undefined, 0, undefined, 'beta/ticket-to-pr']);
+  expect([...menus(), host.dialog, page?.ui.queue]).toEqual(['ticket:FAKE-6', 1, undefined, 'beta/ticket-to-pr']);
+  host.press('Escape');
+  host.advance(100);
+  expect(menus()).toEqual([undefined, 0]);
   host.click({ action: 'item-menu', item: 'ticket:FAKE-6' });
   host.click({ action: 'toggle-queue-events' });
   host.advance(100);
@@ -1823,7 +1863,7 @@ test("an item's ⋯ opens its menu, one at a time; its ⋯ again, Escape, anothe
   expect(menus()).toEqual([undefined, 0]);
 });
 
-test('an armed drop is disarmed when its item is drawn dispatched, so it asks again once the item can be dropped (review R6)', () => {
+test('an open drop dialog closes with nothing sent when its item is drawn dispatched, and asks again once the item can be dropped (review R6)', () => {
   openBetaQueue();
   const row = { ...BETA, item: 'ticket:FAKE-6' };
   host.click({ action: 'drop-item', ...row });
@@ -1856,9 +1896,9 @@ test('an armed drop is disarmed when its item is drawn dispatched, so it asks ag
   host.advance(100);
   host.push(host.open('index')[0], withState('parked'));
   host.advance(100);
-  expect([armedDrop(), host.regions.main?.includes('confirm drop')]).toEqual([undefined, false]);
+  expect([host.dialog, host.dialogCloses, host.posts]).toEqual([undefined, 1, []]);
   host.click({ action: 'drop-item', ...row });
-  expect(host.posts).toEqual([]);
+  expect([dialogTitle(), host.posts]).toEqual(['drop ticket:FAKE-6', []]);
 });
 
 test("between a requeue's click and its answer the item's row reads requeuing… in place of its state, and the answer takes it away", async () => {

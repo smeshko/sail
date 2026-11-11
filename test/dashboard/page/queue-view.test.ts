@@ -417,21 +417,16 @@ test("a row's controls sit after its title column, at its right: the run link, t
   expect(sides).toEqual([['select-run'], ['item-menu'], ['item-menu'], ['item-menu']]);
 });
 
-test('the drop an armed click named reads confirm drop and is armed; the others stay drop', () => {
+test('the drop in an open item menu reads drop and is never armed: the dialog confirms it', () => {
   const [panel] = queuePanels(index(m.registryDir));
   if (panel === undefined) throw new Error('beta has no queue');
-  const subject = { kind: 'item', repo: 'beta', workflow: 'ticket-to-pr', item: 'ticket:FAKE-6' } as const;
-  const ui = {
-    ...initialUi(0),
-    act: { drafts: {}, results: {}, pending: { id: 'drop-item', subject, values: {}, sent: false } },
-    itemMenu: 'ticket:FAKE-6',
-  };
+  const ui = { ...initialUi(0), itemMenu: 'ticket:FAKE-6' };
   const markup = renderQueue(panel, undefined, ui, NOW).value;
-  expect(controls(markup).filter((row) => row.includes('confirm'))).toEqual([
-    'ticket:FAKE-6: requeue-item requeue, drop-item confirm drop',
+  expect(controls(markup).filter((row) => row.startsWith('ticket:FAKE-6'))).toEqual([
+    'ticket:FAKE-6: requeue-item requeue, drop-item drop',
   ]);
-  expect(markup).toContain('<button class="btn armed" data-action="drop-item"');
-  expect(markup.match(/btn armed/g)).toHaveLength(1);
+  expect(markup).not.toContain('armed');
+  expect(markup).not.toContain('confirm drop');
 });
 
 test('the header has a poll button for the workflow, and the add form shows only for a workflow that polls tickets (ADW-460)', () => {

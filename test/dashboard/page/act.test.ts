@@ -19,6 +19,7 @@ interface Rig {
   fields: Record<string, string>;
   effects: string[];
   toasts: string[];
+  dialogs: string[];
   marks: string[][];
   answer(status: number, body: unknown): Promise<void>;
   open: { repo: string; runId: string } | undefined;
@@ -36,6 +37,7 @@ function rig(run?: RunActions, index: IndexRepo[] = []): Rig {
     fields: {} as Record<string, string>,
     effects: [] as string[],
     toasts: [] as string[],
+    dialogs: [] as string[],
     marks: [] as string[][],
     open: { repo: 'alpha', runId: 'R1' } as Rig['open'],
     stopped: false,
@@ -49,6 +51,8 @@ function rig(run?: RunActions, index: IndexRepo[] = []): Rig {
         return new Promise((resolve) => waiting.push(resolve));
       },
       value: (name) => state.fields[name],
+      openDialog: (html) => state.dialogs.push(html),
+      closeDialog: () => state.dialogs.push('closed'),
     },
     ui: state.ui,
     source: () => ({ run: state.run, index }),
@@ -311,24 +315,23 @@ const queueIndex = [
   },
 ] as unknown as IndexRepo[];
 
-test('a first click on drop arms it, a click elsewhere disarms it, and a second posts the dedup key and shows the answer for the queue', async () => {
+test('a poll clicked while the drop dialog is open leaves it open, and the drop is posted once on confirm, its answer a toast', async () => {
   const r = rig(undefined, queueIndex);
   r.actor.act('drop-item', { ...BETA, item: 'ticket:FAKE-5' });
-  expect([r.posts, r.actor.armed('drop-item', { ...BETA, item: 'ticket:FAKE-5' })]).toEqual([[], true]);
-  expect(r.actor.armed('drop-item', { ...BETA, item: 'ticket:FAKE-6' })).toBe(false);
   r.actor.act('poll-queue', BETA);
-  expect([r.ui.act.pending, r.posts]).toEqual([undefined, [{ path: '/api/repos/beta/queues/wf/poll', body: {} }]]);
+  expect([r.posts, r.actor.dialogFor()?.kind]).toEqual([
+    [{ path: '/api/repos/beta/queues/wf/poll', body: {} }],
+    'item',
+  ]);
   await r.answer(202, { waiting: 'the watcher has not taken it' });
-  r.actor.act('drop-item', { ...BETA, item: 'ticket:FAKE-5' });
-  r.actor.act('drop-item', { ...BETA, item: 'ticket:FAKE-5' });
+  r.actor.confirm();
   expect(r.posts[1]).toEqual({ path: '/api/repos/beta/queues/wf/drop', body: { dedupKey: 'ticket:FAKE-5' } });
   expect(r.ui.underway).toEqual({ 'item:beta/wf/ticket:FAKE-5': 'dropping…' });
   await r.answer(200, { message: 'ticket:FAKE-5 dropped' });
-  expect([r.toasts, r.ui.underway, r.effects, r.ui.act.pending]).toEqual([
+  expect([r.toasts, r.ui.underway, r.effects]).toEqual([
     ['ok poll beta / wf: the watcher has not taken it', 'ok drop ticket:FAKE-5: ticket:FAKE-5 dropped'],
     {},
     [],
-    undefined,
   ]);
 });
 
@@ -382,6 +385,48 @@ test('an add that was only waiting keeps what was typed, since the watcher has n
     [],
     ['ok add beta / wf: not yet'],
   ]);
+});
+
+test('a first click on drop opens a dialog naming the item and posts nothing; confirm posts the dedup key once, and a second confirm does nothing', async () => {
+  const r = rig(undefined, queueIndex);
+  r.actor.act('drop-item', { ...BETA, item: 'ticket:FAKE-5' });
+  expect([r.posts, r.ui.dialog, r.actor.dialogFor()]).toEqual([
+    [],
+    { title: 'drop ticket:FAKE-5', lines: ["removes ticket:FAKE-5 from beta / wf's queue"], verb: 'drop' },
+    { kind: 'item', repo: 'beta', workflow: 'wf', item: 'ticket:FAKE-5' },
+  ]);
+  expect(r.dialogs).toHaveLength(1);
+  r.actor.confirm();
+  r.actor.confirm();
+  expect([r.posts, r.ui.dialog, r.actor.dialogFor(), r.dialogs.at(-1)]).toEqual([
+    [{ path: '/api/repos/beta/queues/wf/drop', body: { dedupKey: 'ticket:FAKE-5' } }],
+    undefined,
+    undefined,
+    'closed',
+  ]);
+  expect(r.ui.act.pending).toBeUndefined();
+});
+
+test('cancelling the dialog sends nothing and a cancel with none open does nothing', () => {
+  const r = rig(undefined, queueIndex);
+  r.actor.cancel();
+  expect(r.dialogs).toEqual([]);
+  r.actor.act('drop-item', { ...BETA, item: 'ticket:FAKE-5' });
+  r.actor.cancel();
+  r.actor.confirm();
+  expect([r.posts, r.ui.dialog, r.dialogs.at(-1)]).toEqual([[], undefined, 'closed']);
+});
+
+test('the drop dialog adds the item state and attempts when the index lists the item', () => {
+  const listed = structuredClone(queueIndex) as unknown as {
+    queues: { queue?: unknown }[];
+  }[];
+  const [first] = listed;
+  if (first?.queues[0] !== undefined)
+    first.queues[0].queue = { items: [{ dedupKey: 'ticket:FAKE-6', state: 'parked', attempts: 2 }] };
+  const r = rig(undefined, listed as unknown as IndexRepo[]);
+  r.actor.act('drop-item', { ...BETA, item: 'ticket:FAKE-6' });
+  expect(r.ui.dialog?.lines).toEqual(["removes ticket:FAKE-6 from beta / wf's queue", 'it is parked after 2 attempts']);
 });
 
 test('an action the queue does not offer for an item is not carried out', () => {
@@ -474,7 +519,7 @@ test('a poll, drop, requeue or move that took leaves the add field as typed: onl
   r.actor.act('requeue-item', { ...BETA, item: 'ticket:FAKE-6' });
   r.actor.act('move-item', { ...BETA, key: 'ticket:FAKE-5', dir: 'up', target: 'ticket:FAKE-4' });
   r.actor.act('drop-item', { ...BETA, item: 'ticket:FAKE-5' });
-  r.actor.act('drop-item', { ...BETA, item: 'ticket:FAKE-5' });
+  r.actor.confirm();
   for (let each = 0; each < 4; each++) await r.answer(200, { message: 'took' });
   r.fields['add-ticket'] = 'FAKE-12';
   r.actor.keep('queue', { kind: 'workflow', ...BETA });

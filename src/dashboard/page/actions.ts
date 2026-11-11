@@ -198,6 +198,8 @@ export const actions: Record<string, Action> = {
       else toast(store, 'bad', 'copy', 'the clipboard refused it');
     });
   },
+  'dialog-confirm': (store) => store.actor.confirm(),
+  'dialog-cancel': (store) => store.actor.cancel(),
   'dismiss-toast': (store, data) => dismissToast(store, Number(data.toast)),
   'undo-toast': (store, data) => undoToast(store, Number(data.toast)),
 };
@@ -212,9 +214,12 @@ export function dispatch(store: Store, action: string, data: Record<string, stri
   const acts = def !== undefined;
   const runAction = action === 'stop-now' || (def?.appliesTo.includes('run') ?? false);
   const arming =
-    def?.appliesTo.includes('item') === true && def.tier === 'confirmed' && !store.actor.armed(action, data);
-  const shuts = ui.itemMenu !== undefined && action !== 'item-menu' && !arming;
-  const shutsRun = ui.runMenu !== undefined && !runAction && action !== 'run-menu';
+    def?.appliesTo.includes('item') === true &&
+    def.tier === 'confirmed' &&
+    (def.dialog !== undefined || !store.actor.armed(action, data));
+  const dialogClick = action === 'dialog-confirm' || action === 'dialog-cancel';
+  const shuts = ui.itemMenu !== undefined && action !== 'item-menu' && !arming && !dialogClick;
+  const shutsRun = ui.runMenu !== undefined && !runAction && action !== 'run-menu' && !dialogClick;
   const disarmed = !acts && action !== 'stop-now' && store.actor.disarm();
   if (shuts) delete ui.itemMenu;
   if (shutsRun) delete ui.runMenu;

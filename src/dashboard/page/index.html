@@ -221,6 +221,29 @@
         border-color: var(--warn);
         color: var(--fg);
       }
+      .btn.primary {
+        border-color: var(--fg);
+      }
+      .dlg {
+        border: 1px solid var(--line-2);
+        border-radius: 8px;
+        background: var(--inset);
+        color: var(--fg);
+        padding: 16px 18px;
+        max-width: min(460px, 90vw);
+      }
+      .dlg::backdrop {
+        background: rgba(0, 0, 0, 0.5);
+      }
+      .dlg-lines {
+        margin: 8px 0 14px;
+        padding-left: 18px;
+        font-size: 12px;
+      }
+      .dlg-acts {
+        display: flex;
+        gap: 8px;
+      }
       .acts {
         display: flex;
         flex-wrap: wrap;
@@ -277,9 +300,6 @@
       }
       .qmenu .btn:hover {
         background: var(--panel-2);
-      }
-      .qmenu .btn.armed {
-        border-color: var(--warn);
       }
       .srcbar .btn {
         padding: 1px 6px;
@@ -1773,6 +1793,8 @@
       </div>
       <footer class="status" id="status"></footer>
       <aside class="drawer" id="drawer"></aside>
+      <!-- biome-ignore lint/a11y/noRedundantRoles: older browsers and the review read the role off the element -->
+      <dialog id="dialog" class="dlg" role="dialog" aria-modal="true" aria-labelledby="dialog-title"></dialog>
       <div id="toasts" class="toasts" aria-live="polite"></div>
     </div>
     <script type="module" id="sail-page"></script>

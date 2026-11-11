@@ -684,3 +684,7 @@ _Avoid_: alerts, signals, triage
 **Toast**:
 The dashboard's answer to an action, drawn at the bottom right and naming the action and its subject. A success leaves after 4 s; a refusal is red, quotes `sail`'s own words and stays until it is dismissed.
 _Avoid_: notice, snackbar, chip
+
+**Confirmation dialog**:
+The one dialog a stop, resume, restart, drop or clean opens before it is done: a title naming the action and its subject, one line per consequence, and one button with the verb. Enter confirms and Esc cancels.
+_Avoid_: modal, popup, prompt, armed button

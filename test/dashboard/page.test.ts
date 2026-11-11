@@ -32,6 +32,14 @@ test('the page builds into one document with exactly one script, inline, holding
   }
 });
 
+test('the page has a modal dialog labelled by its title', async () => {
+  const html = await (await built).clone().text();
+  expect(html).toContain(
+    '<dialog id="dialog" class="dlg" role="dialog" aria-modal="true" aria-labelledby="dialog-title"></dialog>',
+  );
+  expect(html).not.toContain('.qmenu .btn.armed');
+});
+
 test('the page has a toasts region announced politely', async () => {
   const html = await (await built).clone().text();
   expect(html).toContain('<div id="toasts" class="toasts" aria-live="polite"></div>');

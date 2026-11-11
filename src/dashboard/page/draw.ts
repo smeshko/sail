@@ -38,18 +38,11 @@ export function regions(store: Store): Record<Region, () => string> {
       if (panel !== undefined) {
         // What was typed in the add field survives the draw, but not an add that took.
         store.actor.keep('queue', { kind: 'workflow', repo: panel.repo, workflow: panel.workflow });
-        // An armed drop whose item can't be dropped now (it runs, or is gone) asks again once it can, and its menu shuts.
-        const armed = ui.act.pending;
-        if (armed?.id === 'drop-item' && armed.subject.kind === 'item') {
-          const { repo, workflow, item } = armed.subject;
-          const target = panel.items.find((each) => each.dedupKey === item);
-          if (
-            repo === panel.repo &&
-            workflow === panel.workflow &&
-            (target === undefined || !offeredDrop(panel, target))
-          ) {
-            store.actor.disarm();
-          }
+        // A drop dialog whose item can't be dropped now (it runs, or is gone) closes with nothing sent.
+        const asked = store.actor.dialogFor();
+        if (asked?.kind === 'item' && asked.repo === panel.repo && asked.workflow === panel.workflow) {
+          const target = panel.items.find((each) => each.dedupKey === asked.item);
+          if (target === undefined || !offeredDrop(panel, target)) store.actor.cancel();
         }
         const menuItem = panel.items.find((item) => item.dedupKey === ui.itemMenu);
         if (menuItem === undefined || !hasItemActions(panel, menuItem)) delete ui.itemMenu;

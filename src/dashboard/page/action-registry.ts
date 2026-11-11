@@ -10,6 +10,7 @@
 // (`reopen`, `leave`, `took`, or open a run), and never does it.
 import type { RunActions } from '../actions';
 import type { OfferedQueue, RepoOffers } from '../offers';
+import type { DialogView } from './dialog-view';
 import { cost } from './format';
 
 const enc = encodeURIComponent;
@@ -103,7 +104,12 @@ export type Values = Readonly<Record<string, string>>;
 /** What a repository of the index offers: its queues' offers and its own. */
 export interface OfferedRepo {
   name: string;
-  queues: readonly { workflow: string; offers?: OfferedQueue['offers'] | undefined }[];
+  queues: readonly {
+    workflow: string;
+    offers?: OfferedQueue['offers'] | undefined;
+    /** The queue's items, for what a dialog says of one. */
+    queue?: { items?: readonly { dedupKey: string; state: string; attempts: number }[] } | undefined;
+  }[];
   offers?: RepoOffers | undefined;
 }
 
@@ -142,6 +148,8 @@ export interface ActionDef {
   available(subject: Subject, source: OfferSource): Availability;
   /** The armed button's label. */
   confirm?(subject: Subject, values: Values, source: OfferSource): string;
+  /** The confirmation dialog a confirmed action opens in place of arming: its title, a line per consequence, its verb. */
+  dialog?(subject: Subject, values: Values, source: OfferSource): DialogView;
   /** What shows while its request is out. */
   sending?(subject: Subject): string;
   /** What its subject's row reads, in place of its status, while its request is out. */
@@ -309,6 +317,20 @@ function queueAnswer(word: string) {
   };
 }
 
+/** What dropping a queue item says before it is done: what leaves which queue, and what state the item is in. */
+function dropDialog(subject: Subject, _values: Values, source: OfferSource): DialogView {
+  if (subject.kind !== 'item') return { title: 'drop', lines: [], verb: 'drop' };
+  const item = queueOf(subject, source)?.queue?.items?.find((each) => each.dedupKey === subject.item);
+  return {
+    title: `drop ${subject.item}`,
+    lines: [
+      `removes ${subject.item} from ${subject.repo} / ${subject.workflow}'s queue`,
+      ...(item === undefined ? [] : [`it is ${item.state} after ${item.attempts} attempts`]),
+    ],
+    verb: 'drop',
+  };
+}
+
 function queueItemAction(id: string, op: 'requeue' | 'drop', tier: Tier, path: string): ActionDef {
   return {
     id,
@@ -318,7 +340,7 @@ function queueItemAction(id: string, op: 'requeue' | 'drop', tier: Tier, path: s
     place: 'queue',
     params: () => [],
     available: itemOffer(op),
-    ...(tier === 'confirmed' ? { confirm: () => 'confirm drop' } : {}),
+    ...(tier === 'confirmed' ? { dialog: dropDialog } : {}),
     request: (subject) => ({ path: queuePath(subject, path), body: { dedupKey: itemKey(subject) } }),
     underway: op === 'drop' ? 'dropping…' : 'requeuing…',
     answer: queueAnswer(op),

@@ -66,7 +66,7 @@ export function boot(host: PageHost): Page {
   });
   startDraw(store);
   host.onAction((action, data) => dispatch(store, action, data));
-  host.onKey((key, inInput) => onKey(store, key, inInput));
+  host.onKey((key, inInput, on) => onKey(store, key, inInput, on));
   openIndex(store, (asked) => actions.open?.(store, asked));
   store.mark(...REGIONS);
 

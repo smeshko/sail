@@ -5,6 +5,7 @@
 // its subject, the last result and the parameters typed. It holds nothing about the runs themselves.
 
 import type { Subject } from './action-registry';
+import type { DialogView } from './dialog-view';
 import type { Toast } from './toasts';
 
 export const TABS = ['overview', 'files', 'permissions', 'log'] as const;
@@ -83,6 +84,8 @@ export interface UiState {
   tz: number;
   /** The action being carried out, the last result of each place and the parameters typed. */
   act: ActState;
+  /** The confirmation dialog open now, if any. */
+  dialog?: DialogView;
   /** The toasts on the stack, oldest first. */
   toasts: Toast[];
   /** What a subject reads while a request for it is out, by the id `underwayId()` gives: `stopping…`. */
