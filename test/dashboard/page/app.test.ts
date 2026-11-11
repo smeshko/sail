@@ -2098,7 +2098,6 @@ test('an Unwatch click posts the workflow to the unwatch route at once, with no 
   expect([host.dialog, page?.ui.underway]).toEqual([undefined, { [`watch:beta/${QUEUE_WORKFLOW}`]: 'unwatching…' }]);
   host.advance(100);
   expect(host.regions.rail).not.toContain('armed');
-  expect(host.regions.rail).not.toContain('click again');
 });
 
 test('an Unwatch toast has an undo that posts the watch with the same body and takes the toast away; the undo toast is drawn at 7,999 ms and gone at 8,000 ms', async () => {

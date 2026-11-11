@@ -4,8 +4,9 @@
 // The controls ask the watcher and change nothing themselves: the header's poll button, a field to add a ticket (for a
 // workflow that polls tickets), and, at a row's right, ▲ and ▼ on a waiting item to move it before or after its waiting
 // neighbour, and a ⋯ on any item but a running one, which opens its menu: requeue, on a parked item or a failed one
-// whose run has ended, and drop, which needs a second click. One menu is open at a time. The answer to any of them, a refusal or that the watcher has not taken it yet, shows
-// beside the header. An item whose run the rail lists opens it. A waiting item shows its priority. A held item shows
+// whose run has ended, and drop, which opens the confirmation dialog. One menu is open at a time. The answer to any of
+// them, a refusal or that the watcher has not taken it yet, is a toast, and while a request is out the header or the
+// item's row reads the word under way. An item whose run the rail lists opens it. A waiting item shows its priority. A held item shows
 // when its hold ends and why, and its hold's events name it. An item that waits on its ticket's prerequisites names them.
 import type { QueueEvent } from '../../events/types';
 import type { QueueItemState } from '../../watch/queue-store';
@@ -100,7 +101,7 @@ export const hasItemActions = (panel: QueuePanel, item: PanelItem) => {
 
 /**
  * A row's ⋯ and, once opened, its menu, drawn from the registry by what the queue offers: requeue on a parked item, or a
- * failed one whose run has ended; drop on any item that isn't running, which needs a second click. A running item
+ * failed one whose run has ended; drop on any item that isn't running, which opens the dialog. A running item
  * offers neither, so it has no ⋯.
  */
 function itemMenu(panel: QueuePanel, item: PanelItem, ui: UiState): SafeHtml | '' {

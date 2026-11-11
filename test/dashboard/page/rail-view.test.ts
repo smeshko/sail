@@ -312,7 +312,6 @@ test('unwatch and unwatch all read their own words and are never armed: a first 
   expect(markup).toContain(button('gamma', 'unwatch', 'unwatch', 'flow'));
   expect(markup).toContain(button('gamma', 'unwatch', 'unwatch all'));
   expect(markup).not.toContain('armed');
-  expect(markup).not.toContain('click again');
 });
 
 test("while a watch request is out a workflow's or repository's watch buttons read the word under way, and a repository's header shows no answer", () => {
