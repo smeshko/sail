@@ -16,7 +16,7 @@ export function renderSidebar(
   inbox: number,
   ui: UiState,
 ): SafeHtml {
-  return html`<div class="side-nav"><button class="side-ent" type="button" data-action="toggle-attention" aria-pressed="${ui.attention ? 'true' : 'false'}"><span class="nm">Inbox</span><span class="c">${inbox}</span></button>${VIEWS.map(
+  return html`<div class="side-views"><button class="side-ent" type="button" data-action="toggle-attention" aria-pressed="${ui.attention ? 'true' : 'false'}"><span class="nm">Inbox</span><span class="c">${inbox}</span></button>${VIEWS.map(
     (view) =>
       html`<button class="side-ent${ui.view === view ? ' on' : ''}" type="button" data-action="select-view" data-view="${view}"${ui.view === view ? html` aria-current="true"` : ''}><span class="nm">${VIEW_LABELS[view]}</span><span class="c">${counts[view]}</span></button>`,
   )}</div><div class="side-h">repositories</div><div class="side-repos">${repos.map((repo) => {

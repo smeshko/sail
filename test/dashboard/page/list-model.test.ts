@@ -7,10 +7,10 @@ import {
   filterRows,
   groupsOf,
   historyGroups,
-  navCounts,
   queueGroups,
   repoDot,
   VIEWS,
+  viewCounts,
   waitsOnPerson,
 } from '../../../src/dashboard/page/list-model';
 
@@ -89,15 +89,15 @@ test('queueGroups gives a group for every repository, with a row per queue and n
   expect(groups[0]?.rows[0]).toMatchObject({ kind: 'queue', waiting: 2, lastPolledAt: '2026-10-01T10:00:00Z' });
 });
 
-test('groupsOf with a repository filter keeps only that repository, and navCounts counts the same rows', () => {
+test('groupsOf with a repository filter keeps only that repository, and viewCounts counts the same rows', () => {
   expect(ids(groupsOf('active', [alpha, beta], 'alpha'))).toEqual([
     ['waiting on you', ['run:alpha/a-run2']],
     ['running', ['run:alpha/a-run1']],
   ]);
-  expect(navCounts([alpha, beta])).toEqual({ active: 6, queues: 0, history: 4 });
-  expect(navCounts([alpha, beta], 'alpha')).toEqual({ active: 2, queues: 0, history: 2 });
+  expect(viewCounts([alpha, beta])).toEqual({ active: 6, queues: 0, history: 4 });
+  expect(viewCounts([alpha, beta], 'alpha')).toEqual({ active: 2, queues: 0, history: 2 });
   const q = repo('q', [], { workflows: [{ name: 'w', runs: [], queue: { waiting: 0 } }] });
-  expect(navCounts([q, alpha], 'q').queues).toBe(1);
+  expect(viewCounts([q, alpha], 'q').queues).toBe(1);
   expect(groupsOf('queues', [q, alpha], 'q').map((g) => g.id)).toEqual(['queues:q']);
   expect(VIEWS).toEqual(['active', 'queues', 'history']);
 });

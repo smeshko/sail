@@ -8,7 +8,7 @@ import { REGIONS, type Region } from './host';
 import { html } from './html';
 import { listRepos, statusOf } from './index-model';
 import { renderInspector } from './inspector-view';
-import { navCounts } from './list-model';
+import { viewCounts } from './list-model';
 import { renderList } from './list-view';
 import { queueId, renderQueue } from './queue-view';
 import { renderRun, renderStatus } from './run-view';
@@ -26,7 +26,7 @@ export function regions(store: Store): Record<Region, () => string> {
     sidebar: () => {
       if (store.index === undefined) return '';
       const repos = listRepos(store.index, host.now());
-      return renderSidebar(repos, navCounts(repos, ui.repoFilter), listed(store).length, ui).value;
+      return renderSidebar(repos, viewCounts(repos, ui.repoFilter), listed(store).length, ui).value;
     },
     list: () => {
       if (store.index === undefined) return html`<div class="qempty">connecting…</div>`.value;

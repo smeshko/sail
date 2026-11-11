@@ -32,7 +32,7 @@ import { renderAttention } from '../src/dashboard/page/attention-view';
 import type { SafeHtml } from '../src/dashboard/page/html';
 import { listRepos, pollKind, queuePanels, watchState } from '../src/dashboard/page/index-model';
 import { renderInspector } from '../src/dashboard/page/inspector-view';
-import { navCounts } from '../src/dashboard/page/list-model';
+import { viewCounts } from '../src/dashboard/page/list-model';
 import { renderList } from '../src/dashboard/page/list-view';
 import { queueId, renderQueue } from '../src/dashboard/page/queue-view';
 import { foldRun } from '../src/dashboard/page/run-model';
@@ -261,7 +261,7 @@ function renderDenseViews(): Record<string, SafeHtml> {
     }));
     const ui: UiState = { ...initialUi(VIEWS_TZ) };
     return {
-      'dense-sidebar.html': renderSidebar(repos, navCounts(repos), 0, ui),
+      'dense-sidebar.html': renderSidebar(repos, viewCounts(repos), 0, ui),
       'dense-active.html': renderList('active', repos, ui, VIEWS_NOW),
       'dense-history.html': renderList('history', repos, ui, VIEWS_NOW),
       'dense-queues.html': renderList('queues', repos, ui, VIEWS_NOW),
@@ -288,7 +288,7 @@ export async function renderDashboardViews(outDir: string): Promise<string[]> {
     const views: Record<string, SafeHtml> = {};
     const selected = ui({ repo: 'alpha', runId: GOLDEN_RUN_ID });
     const listed = listRepos(repos, VIEWS_NOW);
-    views['sidebar.html'] = renderSidebar(listed, navCounts(listed), attention(repos).length, selected);
+    views['sidebar.html'] = renderSidebar(listed, viewCounts(listed), attention(repos).length, selected);
     views['list-active.html'] = renderList('active', listed, selected, VIEWS_NOW);
     views['list-history.html'] = renderList('history', listed, selected, VIEWS_NOW);
     views['list-queues.html'] = renderList('queues', listed, selected, VIEWS_NOW);

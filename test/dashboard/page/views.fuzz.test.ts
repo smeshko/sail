@@ -10,7 +10,7 @@ import { attention } from '../../../src/dashboard/page/attention';
 import { renderAttention } from '../../../src/dashboard/page/attention-view';
 import { listRepos, queuePanels, watchState } from '../../../src/dashboard/page/index-model';
 import { renderInspector } from '../../../src/dashboard/page/inspector-view';
-import { navCounts } from '../../../src/dashboard/page/list-model';
+import { viewCounts } from '../../../src/dashboard/page/list-model';
 import { renderList } from '../../../src/dashboard/page/list-view';
 import { renderQueue } from '../../../src/dashboard/page/queue-view';
 import { foldRun } from '../../../src/dashboard/page/run-model';
@@ -147,7 +147,7 @@ test('the list, the sidebar, needs attention and the queue view keep their struc
     return [
       renderList('active', listRepos(input, NOW), ui, NOW).value,
       renderList('queues', listRepos(input, NOW), ui, NOW).value,
-      renderSidebar(listRepos(input, NOW), navCounts(listRepos(input, NOW)), 2, ui).value,
+      renderSidebar(listRepos(input, NOW), viewCounts(listRepos(input, NOW)), 2, ui).value,
       renderAttention(attention(input), true).value,
       ...queuePanels(input).map((panel) => renderQueue(panel, stream, ui, NOW).value),
     ];

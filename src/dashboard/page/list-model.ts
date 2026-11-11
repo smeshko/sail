@@ -140,7 +140,7 @@ export function filterRows(groups: readonly ListGroup[], text: string): ListGrou
 }
 
 /** What each view lists under the repository filter: the sidebar's counts. */
-export function navCounts(repos: readonly ListRepo[], repoFilter?: string): Record<ViewName, number> {
+export function viewCounts(repos: readonly ListRepo[], repoFilter?: string): Record<ViewName, number> {
   const count = (view: ViewName) =>
     groupsOf(view, repos, repoFilter).reduce((sum, group) => sum + group.rows.length, 0);
   return { active: count('active'), queues: count('queues'), history: count('history') };

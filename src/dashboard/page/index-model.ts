@@ -6,7 +6,7 @@ import type { QueueEvent } from '../../events/types';
 import type { QueueItem, QueueItemState } from '../../watch/queue-store';
 import type { IndexRepo, RunItem } from '../files';
 
-/** One run as the rail lists it. */
+/** One run as the list shows it. */
 export interface ListRun {
   runId: string;
   workflow?: string;
@@ -23,7 +23,7 @@ export interface ListRun {
   problem?: string;
 }
 
-/** One workflow of a repository as the rail lists it: its runs newest first, its queue when it has one, and the change of the watch set it offers. */
+/** One workflow of a repository as the list shows it: its runs newest first, its queue when it has one, and the change of the watch set it offers. */
 export interface ListWorkflow {
   name: string;
   runs: ListRun[];
@@ -32,7 +32,7 @@ export interface ListWorkflow {
   toggle?: 'watch' | 'unwatch';
 }
 
-/** One repository as the rail lists it: `live` while any of its runs runs, and its runs by workflow. */
+/** One repository as the list shows it: `live` while any of its runs runs, and its runs by workflow. */
 export interface ListRepo {
   name: string;
   remote: string | null;
@@ -78,7 +78,7 @@ function listRun(run: RunItem, now: number): ListRun {
   const status = statusOf(run);
   const row: ListRun = { runId: run.runId, status };
   const { summary } = run;
-  // A pull-request run has no ticket key: its rail entry reads its pull request's number.
+  // A pull-request run has no ticket key: its list row reads its pull request's number.
   const keyOf = (source: { kind: string; ticketKey?: string } | undefined) =>
     source?.kind === 'ticket' ? source.ticketKey : undefined;
   const ticketKey = keyOf(summary?.source) ?? keyOf(run.source);
@@ -126,7 +126,7 @@ function workflows(repo: IndexRepo, runs: readonly ListRun[]): ListWorkflow[] {
   });
 }
 
-/** The rail: every repository by name, each with its runs newest first, also by workflow. `now` is ms since the epoch. */
+/** The list's repositories: every repository by name, each with its runs newest first, also by workflow. `now` is ms since the epoch. */
 export function listRepos(index: readonly IndexRepo[], now: number): ListRepo[] {
   return byName(index).map((repo) => {
     const runs = newestFirst(repo.runs.map((run) => listRun(run, now)));
@@ -146,7 +146,7 @@ export function listRepos(index: readonly IndexRepo[], now: number): ListRepo[] 
 /** The states in the order the queue view lists them: what is running now comes first. */
 export const QUEUE_STATES: readonly QueueItemState[] = ['dispatched', 'queued', 'failed', 'parked', 'done'];
 
-/** A queue item, whether its run is one the rail lists so the queue view can open it, and whether that run has ended. */
+/** A queue item, whether its run is one the list shows so the queue view can open it, and whether that run has ended. */
 export type PanelItem = QueueItem & { runListed: boolean; runEnded: boolean };
 
 /** One watched workflow's queue in one repository. */

@@ -2,7 +2,7 @@
 // group's cards side by side under a header of their own, the roster stages not called yet, the pull request it opened,
 // and the CLI commands to copy. The cards come from the run model, fed by the run's events. The totals come from the
 // summary in the index when there is one, and from the cards otherwise. The Resume, Restart, Stop or Clean a run offers
-// are drawn here too, by `runControls`, but shown in the rail's ⋯ menu for the open run.
+// are drawn here too, by `runControls`, but shown in the ⋯ menu under the open run's list row.
 import type { Summary } from '../../events/summary';
 import type { CleanOffer, RestartOffer, ResumeOffer, RunActions, StopOffer } from '../actions';
 import { runCommands } from './commands';
@@ -182,7 +182,7 @@ function cleanControl(offer: CleanOffer, ui: UiState): SafeHtml {
 
 /**
  * What the run offers (Resume, Restart, Stop, Clean), whichever it does, with the notice of the last one: the body of
- * the rail's ⋯ menu for the open run. Undefined when it offers none of them.
+ * the ⋯ menu under the open run's list row. Undefined when it offers none of them.
  */
 export function runControls(actions: RunActions | undefined, ui: UiState): SafeHtml | undefined {
   if (
