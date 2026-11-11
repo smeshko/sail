@@ -25,6 +25,10 @@
 // prints a line starting `sail watch: sail changed (`, and exits 6, so launchd starts the new code. Its runs carry on,
 // and the next watcher adopts them. Without `--service` a watcher keeps running through a change.
 //
+// `sail watch --install [<workflow>...]`, `--install --all`, `--uninstall [--all]` and `--restart` run the watcher as a
+// login service, a launchd agent (macOS only): see `watch-service.ts`. At most one of the three is taken, and none of
+// them starts a watcher in this process.
+//
 // A second command waits up to 15 s for the watcher to take its command. One it hasn't taken by then stays in the
 // inbox, which a watcher stopped meanwhile empties at its next start, and the command exits 0 saying so. The set it
 // prints is read back from the queue event streams: each workflow whose last `watch:*` event of the live watcher's pid
@@ -67,7 +71,9 @@ import { EXIT_OK, EXIT_RESTART, type ExitCode } from '../exit-codes';
 import type { Command, Io, Parsed } from '../index';
 import { repositoryEntry } from '../registration';
 import { type ReadVersion, sailVersion, watchSailChange } from '../sail-change';
+import type { ServiceDeps } from '../service';
 import { at, findProject, refuseAs } from './run-workflow';
+import { serviceCommand } from './watch-service';
 
 /** What the commands run on: the system's unless a test hands its own. */
 export interface WatchDeps {
@@ -89,6 +95,8 @@ export interface WatchDeps {
   sailVersion?: ReadVersion;
   /** How often a `--service` watcher reads it: 60 000 ms by default. */
   sailVersionEveryMs?: number;
+  /** What `--install`, `--uninstall` and `--restart` run on: the system's launchd unless a test hands its own. */
+  service?: Partial<ServiceDeps>;
 }
 
 /** The environment without its unset variables, for the runs the watcher spawns. */
@@ -195,6 +203,8 @@ export function watchCommand(deps: WatchDeps = {}): Command {
     const command = 'sail watch';
     const refuse = refuseAs(io, command);
     const isAlive = deps.isAlive ?? processIsAlive;
+    const serviced = await serviceCommand(deps, args, io, isAlive);
+    if (serviced !== undefined) return serviced;
     const key = args.values['release-hold'];
     if (typeof key === 'string') {
       if (args.positionals.length > 0) return refuse('--release-hold takes no workflow');

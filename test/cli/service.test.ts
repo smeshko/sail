@@ -14,6 +14,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  agentEnvironment,
   DASHBOARD_LABEL,
   installAgent,
   installedWatchers,
@@ -24,6 +25,7 @@ import {
   renderPlist,
   restartAgent,
   type ServiceDeps,
+  serviceDeps,
   systemLaunchctl,
   uninstallAgent,
   watcherLabel,
@@ -194,4 +196,25 @@ test('the system runner reports a launchctl that is not on the PATH as exit 127'
   const result = await systemLaunchctl({ PATH: temp() })(['print']);
   expect(result.code).toBe(127);
   expect(result.stderr).toContain('launchctl');
+});
+
+test("the agent's environment is this Bun's directory then the shell's PATH, plus SAIL_HOME when set, and nothing else", () => {
+  const env = { PATH: '/usr/bin', SAIL_HOME: '/m', LINEAR_API_KEY: 'secret-marker', HOME: '/h' };
+  const got = agentEnvironment(env);
+  expect(Object.keys(got).sort()).toEqual(['PATH', 'SAIL_HOME']);
+  expect(got.PATH?.endsWith(':/usr/bin')).toBe(true);
+  expect(got.SAIL_HOME).toBe('/m');
+  expect(Object.keys(agentEnvironment({ PATH: '/usr/bin', SAIL_HOME: '' }))).toEqual(['PATH']);
+});
+
+test('the service deps default to the environment HOME and this sail, and take overrides', () => {
+  const deps = serviceDeps({ HOME: '/h' });
+  expect(deps.home).toBe('/h');
+  expect(deps.sail.slice(1, 2)).toEqual(['--no-env-file']);
+  expect(deps.sail[2]?.endsWith('src/cli/main.ts')).toBe(true);
+  expect(serviceDeps({ HOME: '/h' }, { home: '/x', platform: 'linux', uid: 7 })).toMatchObject({
+    home: '/x',
+    platform: 'linux',
+    uid: 7,
+  });
 });

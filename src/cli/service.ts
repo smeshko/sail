@@ -3,7 +3,9 @@
 // the commands decide what to install. A test injects the platform and the `launchctl` runner, so none reaches the
 // machine's own launchd.
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { PACKAGE_ROOT } from '../engine/typecheck';
 
 export const DASHBOARD_LABEL = 'sail.dashboard';
 const WATCHER_PREFIX = 'sail.watcher.';
@@ -182,4 +184,24 @@ export function installedWatchers(home: string): string[] {
     .filter((file) => file.startsWith(WATCHER_PREFIX) && file.endsWith('.plist'))
     .map((file) => file.slice(WATCHER_PREFIX.length, -'.plist'.length))
     .sort();
+}
+
+/** The system's deps for a command run in `env`, with `overrides` for what a test injects. */
+export function serviceDeps(
+  env: Readonly<Record<string, string | undefined>>,
+  overrides: Partial<ServiceDeps> = {},
+): ServiceDeps {
+  return {
+    platform: overrides.platform ?? process.platform,
+    uid: overrides.uid ?? process.getuid?.() ?? 0,
+    launchctl: overrides.launchctl ?? systemLaunchctl(env),
+    home: overrides.home ?? env.HOME ?? homedir(),
+    sail: overrides.sail ?? [process.execPath, '--no-env-file', join(PACKAGE_ROOT, 'src', 'cli', 'main.ts')],
+  };
+}
+
+/** The environment an agent runs with: a `PATH` that finds this Bun and the installing shell's tools, and `SAIL_HOME`. */
+export function agentEnvironment(env: Readonly<Record<string, string | undefined>>): Record<string, string> {
+  const path = [dirname(process.execPath), ...(env.PATH === undefined || env.PATH === '' ? [] : [env.PATH])].join(':');
+  return { PATH: path, ...(env.SAIL_HOME === undefined || env.SAIL_HOME === '' ? {} : { SAIL_HOME: env.SAIL_HOME }) };
 }

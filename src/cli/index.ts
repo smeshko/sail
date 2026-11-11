@@ -61,6 +61,8 @@ Usage:
   sail stage run <stage-dir> [--bind name=value]...          Run one stage in isolation
   sail dashboard [--port <n>]                                Serve every repository's runs and queues on localhost
   sail watch [<workflow>...]                                 Watch these workflows, or every watched one: start this repository's watcher, or add them to it
+  sail watch --install [<workflow>...] | --install --all    Run this repository's watcher, or every registered repository's, as a login service (macOS)
+  sail watch --uninstall [--all]                             Unload that login service and delete its plist
   sail watch --release-hold <harness>                        Release the usage-limit hold on a harness key, such as claude-code or pi:openai-codex, on every watcher
   sail unwatch [<workflow>...]                               Stop watching them, or every watched one. Their runs keep running: sail stop ends one. The watcher exits when it watches none
   sail queue ls|poll <workflow>                              List a watched workflow's queue, or have its watcher poll it now
@@ -283,6 +285,10 @@ const commands = new Map<string, CommandSpec>([
         'release-hold': { type: 'string' },
         // The installed login service's: it also stops itself, exiting 6, once sail's code changes. Not in USAGE.
         service: { type: 'boolean' },
+        install: { type: 'boolean' },
+        uninstall: { type: 'boolean' },
+        restart: { type: 'boolean' },
+        all: { type: 'boolean' },
       },
       positionals: Number.POSITIVE_INFINITY,
       command: watch,
