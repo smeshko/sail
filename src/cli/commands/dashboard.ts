@@ -12,6 +12,7 @@
 // code 3.
 
 import { existsSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { startDashboard } from '../../dashboard/server';
 import { systemTimers, type Timers } from '../../watch/poll';
 import { machineDir, registryDir as registryDirOf } from '../../watch/registry';
@@ -43,14 +44,12 @@ function portOf(value: string): number | undefined {
 }
 
 /** Whether nothing serves on 127.0.0.1:`port` now: it binds the port and lets it go. */
-export async function portFree(port: number): Promise<boolean> {
-  try {
-    const server = Bun.serve({ hostname: '127.0.0.1', port, fetch: () => new Response() });
-    await server.stop(true);
-    return true;
-  } catch {
-    return false;
-  }
+export function portFree(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const server = createServer();
+    server.once('error', () => resolve(false));
+    server.listen(port, '127.0.0.1', () => server.close(() => resolve(true)));
+  });
 }
 
 /** What the command runs on: the system's unless a test hands its own. */
@@ -138,7 +137,7 @@ export function dashboardCommand(deps: DashboardDeps = {}) {
       });
       if (args.values.service === true) {
         stopChange = watchSailChange({
-          read: deps.sailVersion ?? (() => sailVersion()),
+          read: deps.sailVersion ?? sailVersion,
           everyMs: deps.sailVersionEveryMs ?? 60_000,
           timers: deps.timers ?? systemTimers,
           onChange(before, after) {

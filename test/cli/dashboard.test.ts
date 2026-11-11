@@ -217,6 +217,17 @@ test('sail dashboard --install on a port in use exits 3 naming it and writes not
   }
 });
 
+test('portFree is false for a port another process holds and true once it lets the port go', async () => {
+  const holder = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('held') });
+  const port = holder.port as number;
+  try {
+    expect(await portFree(port)).toBe(false);
+  } finally {
+    await holder.stop(true);
+  }
+  expect(await portFree(port)).toBe(true);
+});
+
 test('sail dashboard --restart kickstarts the agent and prints that it restarted; with none installed it exits 3 and launchctl sees nothing', async () => {
   const s = service();
   const none = await s.sail({ restart: true });
