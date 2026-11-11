@@ -402,6 +402,26 @@ test("a click on a child of a data-action element is delegated once, with the el
   expect(got).toEqual([['open', { action: 'open', repo: 'alpha', run: 'FAKE-2', key: 'implement#1' }]]);
 });
 
+test('a mouse button going down is told the region it lands in, or none, and setKeys marks the keyed pane on the root (ADW-535)', () => {
+  const fake = fakeWindow();
+  const row = element();
+  const card = element();
+  fake.elements.list = element({ contains: (other) => other === row });
+  fake.elements.main = element({ contains: (other) => other === card });
+  const host = browserHost(fake.win);
+  const got: (string | undefined)[] = [];
+  host.onPress((region) => got.push(region));
+  fake.fire('mousedown', { target: row });
+  fake.fire('mousedown', { target: card });
+  fake.fire('mousedown', { target: element() });
+  fake.fire('mousedown', { target: 'not an element' });
+  expect(got).toEqual(['list', 'main', undefined, undefined]);
+  host.setKeys('centre');
+  expect(fake.root.dataset.keys).toBe('centre');
+  host.setKeys(undefined);
+  expect(fake.root.dataset.keys).toBe('none');
+});
+
 test('scrollToEnd scrolls the element holding a region to its height, and does nothing for a region with no element or no parent', () => {
   const fake = fakeWindow();
   const box = element({ scrollTop: 0, scrollHeight: 900 });
@@ -516,6 +536,82 @@ test("render writes a region by id, keys say whether they were typed in an input
   expect(body?.styles['--ins-w']).toBe('240px');
   fake.fire('mousedown', { target: element(), clientX: 0 });
   expect(fake.listeners.mousemove).toHaveLength(1);
+});
+
+/** A host over a window `width` wide, its inspector open or not, and a drag of `side`'s handle by `by` pixels. */
+function columns(width: number, inspector: boolean) {
+  const fake = fakeWindow();
+  fake.win.innerWidth = width;
+  const host = browserHost(fake.win);
+  host.setInspector(inspector, false);
+  const drag = (side: 'left' | 'right', by: number) => {
+    fake.fire('mousedown', { target: element({ dataset: { resize: side } }), clientX: 600 });
+    fake.fire('mousemove', { target: null, clientX: 600 + by });
+    fake.fire('mouseup', { target: null });
+  };
+  const resize = (next: number) => {
+    fake.win.innerWidth = next;
+    for (const listener of fake.windowListeners.resize ?? []) listener();
+  };
+  return { fake, host, drag, resize, styles: fake.elements.body?.styles ?? {} };
+}
+
+test('from 1100px a drag stops where the centre keeps its 320px floor beside the other column and both handles (ADW-536)', () => {
+  // 1120 - (180 sidebar + 5) - 5 - 320: a 640px inspector drag stops at 610px.
+  const inspector = columns(1120, true);
+  inspector.drag('right', -280);
+  expect(inspector.styles['--ins-w']).toBe('610px');
+  // 1120 - (360 inspector + 5) - 5 - 320: a 480px sidebar drag stops at 430px.
+  const sidebar = columns(1120, true);
+  sidebar.drag('left', 300);
+  expect(sidebar.styles['--side-w']).toBe('430px');
+  // At 1280px the default sidebar leaves the inspector its whole 640px.
+  const wide = columns(1280, true);
+  wide.drag('right', -400);
+  expect(wide.styles['--ins-w']).toBe('640px');
+});
+
+test('a closed inspector, or one under 1100px that lies over the centre, takes no room from the sidebar, and its own drag keeps its fixed maximum (ADW-536)', () => {
+  // 1120 - 5 - 320 leaves the sidebar its whole 480px.
+  const closed = columns(1120, false);
+  closed.drag('left', 300);
+  expect(closed.styles['--side-w']).toBe('480px');
+  // At 820px the open inspector is no column: the sidebar gets 820 - 5 - 320 = 495, so its 480px, and the inspector 640.
+  const under = columns(820, true);
+  under.drag('left', 300);
+  under.drag('right', -400);
+  expect([under.styles['--side-w'], under.styles['--ins-w']]).toEqual(['480px', '640px']);
+  // 805 - 325 is still 480; at 804 the sidebar's clamp alone takes it to 479.
+  under.resize(805);
+  expect(under.styles['--side-w']).toBe('480px');
+  under.resize(804);
+  expect(under.styles['--side-w']).toBe('479px');
+  // Under 800px the sidebar is no column either, and a resize leaves both widths.
+  under.resize(600);
+  expect([under.styles['--side-w'], under.styles['--ins-w']]).toEqual(['479px', '640px']);
+});
+
+test('narrowing the window after a drag clamps the dragged widths again, the inspector first, and an inspector that opens fits beside a wide sidebar (ADW-536)', () => {
+  const { drag, resize, styles } = columns(1600, true);
+  drag('left', 300);
+  drag('right', -400);
+  expect([styles['--side-w'], styles['--ins-w']]).toEqual(['480px', '640px']);
+  // The inspector first: 1300 - 485 - 5 - 320 = 490, and the sidebar keeps 480 beside it. The sidebar first would have
+  // given 1300 - 645 - 5 - 320 = 330 and left the inspector 635.
+  resize(1300);
+  expect([styles['--side-w'], styles['--ins-w']]).toEqual(['480px', '490px']);
+  // At 1100 the inspector gives way to 1100 - 485 - 5 - 320 = 290, and the sidebar keeps 480.
+  resize(1100);
+  expect([styles['--side-w'], styles['--ins-w']]).toEqual(['480px', '290px']);
+  // Widening again restores nothing: the widths are what the clamp left.
+  resize(1600);
+  expect([styles['--side-w'], styles['--ins-w']]).toEqual(['480px', '290px']);
+  // A sidebar dragged wide beside a closed inspector: the inspector opening at 1120 takes 1120 - 485 - 5 - 320 = 310.
+  const opening = columns(1120, false);
+  opening.drag('left', 300);
+  opening.host.setInspector(true, false);
+  opening.drag('right', -400);
+  expect([opening.styles['--side-w'], opening.styles['--ins-w']]).toEqual(['480px', '310px']);
 });
 
 test("render keeps an opened tool call's input box scrolled across a redraw", () => {

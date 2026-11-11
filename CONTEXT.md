@@ -669,6 +669,10 @@ _Avoid_: rail, nav, menu
 The one component every dashboard view draws its rows on: a column of fixed width (340px from 800px up) beside the centre, whether or not a row is open, so opening or closing one moves nothing. Folding groups, one line per row in one narrow form, a keyboard cursor and a filter field. A clicked row opens its run or queue in the centre, and so does the view's first row (the first that opens something, in a group not folded) when the view is chosen or the page loads. History's head carries two more controls, a status and a workflow, and the count of the Selection.
 _Avoid_: table, grid, feed
 
+**Keyed pane**:
+The pane `j`, `k`, the arrows and `Enter` drive while the list and an open run or queue both show, from 800px up: the list, whose cursor walks its rows, or the centre, whose cursor walks the stage cards. `w` gives the keys to the other pane, each cursor keeping its place; a click in a pane gives them to it, and opening a row, by `Enter` or a click, gives them to the centre. A view opened with its first row starts with them in the list, so moving the list's cursor leaves the open run as it is until `Enter`. The keyed pane is topped by a line in the focus colour, and only its cursor is drawn. Under 800px, or with nothing open, the keys drive what shows. Tab stays the browser's.
+_Avoid_: focus (the focused subject's word), active pane
+
 **Selection**:
 The History rows a person marked with `x`, counted in the list's head, for the one action that takes several, Clean. A row a filter hides is not in it, and a change of view or `Escape` empties it.
 _Avoid_: multi-select, checked rows

@@ -28,6 +28,9 @@ function dropSelectionRead(store: Store) {
 
 export type Action = (store: Store, data: Record<string, string>) => void;
 
+/** The clicks that open a run or queue in the centre, and so give it the keys: a list row's, or a link to a run. */
+const OPENS = new Set(['select-run', 'select-queue', 'open']);
+
 /**
  * Applies a change to what the list shows, selecting the first row left when it dropped the open row. The centre and
  * the URL follow it without a history entry: the replace here is what the push at the end of `dispatch` finds written.
@@ -141,6 +144,8 @@ export const actions: Record<string, Action> = {
     if (!(VIEWS as readonly string[]).includes(data.view ?? '')) return;
     store.ui.view = data.view as ViewName;
     store.deselected = false;
+    // The view opens with its first row, and the keys walk its list (ADW-535).
+    store.ui.pane = 'list';
     store.ui.listFilter = '';
     delete store.ui.historyStatus;
     delete store.ui.historyWorkflow;
@@ -346,5 +351,10 @@ export function dispatch(store: Store, action: string, data: Record<string, stri
   if (shuts || shutsRun) store.mark('main', 'list');
   if (acts) store.actor.act(action, data);
   else actions[action]?.(store, data);
+  // The centre takes the keys even from a click on the row open already, which draws nothing else.
+  if (OPENS.has(action) && ui.pane !== 'centre') {
+    ui.pane = 'centre';
+    store.mark();
+  }
   syncUrl(store, true);
 }

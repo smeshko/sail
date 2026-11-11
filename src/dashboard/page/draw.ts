@@ -19,6 +19,7 @@ import {
   centreCard,
   centreRun,
   inspectorOpen,
+  keyedPane,
   listed,
   opened,
   openQueue,
@@ -140,6 +141,12 @@ export function flush(store: Store): void {
   if (detail !== store.detail) {
     store.detail = detail;
     host.setDetail(detail);
+  }
+  // The keyed pane, which the page marks while both panes show (ADW-535).
+  const pane = keyedPane(store);
+  if ((pane ?? 'none') !== store.keyed) {
+    store.keyed = pane ?? 'none';
+    host.setKeys(pane);
   }
   // The inspector's room: open with a selected card of the run the centre shows, or pinned.
   const inspector = `${inspectorOpen(store)} ${ui.pinned}`;

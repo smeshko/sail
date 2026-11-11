@@ -15,7 +15,7 @@ import { type QueueStream, queueId } from './queue-view';
 import type { RunModel } from './run-model';
 import { savedFolded, savedHidden, savedTheme, storedCleared } from './saved';
 import type { CallOutput } from './timeline-view';
-import { initialUi, type UiState } from './ui-state';
+import { initialUi, type Pane, type UiState } from './ui-state';
 
 export const FLUSH_MS = 100;
 
@@ -75,6 +75,8 @@ export interface Store {
   revealOpen: boolean;
   /** Whether the host was last told a run or queue is open beside the list. */
   detail: boolean | undefined;
+  /** What the host was last told of the keyed pane: `none` while only one pane shows. */
+  keyed: string | undefined;
   /** What the host was last told about the inspector: whether it is open and whether it is pinned. */
   inspector: string | undefined;
   /** What the URL asks to open, until the first index: then it is opened, or dropped when its run isn't listed. */
@@ -152,6 +154,7 @@ export function createStore(host: PageHost): Store {
     deselected: false,
     revealOpen: false,
     detail: undefined,
+    keyed: undefined,
     inspector: undefined,
     start: host.start(),
     url: undefined,
@@ -211,6 +214,19 @@ export const listed = (store: Store) =>
 
 /** The run the centre shows: the open run, unless a queue is open in its place. */
 export const centreRun = (store: Store) => (openQueue(store) === undefined ? store.run : undefined);
+
+/** Whether a run or queue is open beside the list. */
+export const detailOpen = (store: Store) => store.run !== undefined || store.ui.queue !== undefined;
+
+/**
+ * The keyed pane, while the list and an open run or queue are both on screen: from 800px up, with one open. Undefined
+ * when only one pane shows, under 800px or with nothing open: the keys then drive what shows, as they always did.
+ */
+export const keyedPane = (store: Store): Pane | undefined =>
+  store.host.narrow() || !detailOpen(store) ? undefined : store.ui.pane;
+
+/** The pane the keys drive: the keyed pane, else the open run or queue, else the list. */
+export const drivenPane = (store: Store): Pane => keyedPane(store) ?? (detailOpen(store) ? 'centre' : 'list');
 
 /** The selected card, while the centre shows its run. */
 export const centreCard = (store: Store) => (centreRun(store) === undefined ? undefined : selected(store));
