@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-theme="dark" data-inspector="open" data-detail="closed">
+<html lang="en" data-theme="dark" data-inspector="closed" data-pinned="false" data-detail="closed" data-sidebar="closed">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -180,18 +180,12 @@
       }
       .body {
         display: grid;
-        grid-template-columns: var(--side-w, 180px) 5px 1fr 5px var(--ins-w, 360px);
+        grid-template-columns: var(--side-w, 180px) 5px minmax(0, 1fr);
         overflow: hidden;
       }
-      :root[data-inspector="closed"] .body {
-        grid-template-columns: var(--side-w, 180px) 5px 1fr;
-      }
-      /* a run or queue open beside the list: the list keeps --list-w and the run view takes the rest */
+      /* a run or queue open beside the list: the run view keeps 320px and the list gives way first */
       :root[data-detail="open"] .body {
-        grid-template-columns: var(--side-w, 180px) 5px var(--list-w, 340px) 1fr 5px var(--ins-w, 360px);
-      }
-      :root[data-detail="open"][data-inspector="closed"] .body {
-        grid-template-columns: var(--side-w, 180px) 5px var(--list-w, 340px) 1fr;
+        grid-template-columns: var(--side-w, 180px) 5px minmax(0, var(--list-w, 340px)) minmax(320px, 1fr);
       }
       .resize-handle {
         cursor: col-resize;
@@ -221,6 +215,11 @@
         height: 19px;
         border-radius: 5px;
         background: linear-gradient(135deg, #4c8dff, #34d399);
+      }
+      .sidebar-btn,
+      .back,
+      .ins-close {
+        display: none;
       }
       .spacer {
         flex: 1;
@@ -569,6 +568,27 @@
         font-family: var(--mono);
         font-size: 10.5px;
         color: var(--fg-4);
+      }
+      .lrow.picked {
+        background: var(--panel-2);
+        box-shadow: inset 2px 0 0 var(--fg-3);
+      }
+      .lh-sel {
+        font-family: var(--mono);
+        font-size: 10.5px;
+        color: var(--fg-2);
+      }
+      .list-s {
+        flex: 0 1 auto;
+        min-width: 0;
+        max-width: 110px;
+        padding: 2px 4px;
+        font-family: var(--mono);
+        font-size: 11.5px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: var(--panel-2);
+        color: var(--fg-2);
       }
       .list-f {
         flex: 1 1 100px;
@@ -923,6 +943,10 @@
         background: var(--panel-2);
         color: var(--fg);
       }
+      :root[data-pinned="true"] [data-action="toggle-inspector"] {
+        border-color: var(--err);
+        color: var(--fg);
+      }
       .in-failed,
       .in-error {
         border-left-color: var(--err);
@@ -1176,6 +1200,192 @@
         font-family: var(--mono);
         font-size: 11px;
         opacity: 0.7;
+      }
+      .menu:empty {
+        display: none;
+      }
+      .cmdk-back {
+        position: fixed;
+        inset: 0;
+        z-index: 60;
+        background: rgba(0, 0, 0, 0.4);
+        border: 0;
+        cursor: default;
+      }
+      .cmdk {
+        position: fixed;
+        z-index: 61;
+        top: 13vh;
+        left: 50%;
+        transform: translateX(-50%);
+        width: min(750px, 92vw);
+        max-height: 70vh;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: var(--panel);
+        color: var(--fg);
+        padding: 8px;
+        font-family: var(--sans);
+        font-size: 15px;
+        box-shadow:
+          0 28px 72px rgba(0, 0, 0, 0.3),
+          0 2px 10px rgba(0, 0, 0, 0.12);
+      }
+      .cmdk.ctx {
+        transform: none;
+        width: min(300px, 92vw);
+        border-radius: 10px;
+        padding: 6px;
+        font-size: 13px;
+        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.24);
+      }
+      .cmdk-subj {
+        align-self: flex-start;
+        max-width: calc(100% - 16px);
+        margin: 8px 8px 0;
+        padding: 4px 10px;
+        border-radius: 8px;
+        background: var(--hover);
+        color: var(--fg-2);
+        font-size: 13px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .cmdk.ctx .cmdk-subj {
+        margin: 2px 2px 4px;
+        max-width: 100%;
+        font-size: 12px;
+      }
+      .cmdk-in {
+        margin: 0;
+        padding: 16px 12px 14px;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        color: var(--fg);
+        font: inherit;
+        font-size: 17px;
+      }
+      .cmdk-in:focus-visible {
+        outline: none;
+      }
+      .cmdk-in::placeholder {
+        color: var(--fg-4);
+      }
+      .cmdk-step,
+      .cmdk-grp {
+        padding: 16px 12px 8px;
+        color: var(--fg-3);
+        font-size: 13px;
+      }
+      .cmdk-step::first-letter,
+      .cmdk-grp::first-letter {
+        text-transform: uppercase;
+      }
+      .cmdk-line {
+        padding: 2px 12px;
+        color: var(--fg-2);
+        font-size: 13px;
+      }
+      .cmdk-err {
+        padding: 4px 12px;
+        color: var(--del);
+        font-size: 13px;
+      }
+      .cmdk-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex: none;
+        width: 100%;
+        min-height: 44px;
+        text-align: left;
+        border: 0;
+        border-radius: 8px;
+        background: transparent;
+        color: var(--fg);
+        font: inherit;
+        padding: 0 12px;
+      }
+      .cmdk.ctx .cmdk-row {
+        min-height: 32px;
+        padding: 0 8px;
+        gap: 8px;
+        border-radius: 6px;
+      }
+      .cmdk-row:hover {
+        background: var(--panel-2);
+      }
+      .cmdk-row.sel {
+        background: var(--hover);
+      }
+      .cmdk-row:disabled {
+        color: var(--fg-4);
+        cursor: default;
+        background: transparent;
+      }
+      .cmdk-ico {
+        order: -1;
+        flex: none;
+        width: 16px;
+        height: 16px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.5;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        color: var(--fg-2);
+      }
+      .cmdk-row:disabled .cmdk-ico {
+        color: var(--fg-4);
+      }
+      .cmdk-label {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .cmdk-row:disabled .cmdk-label {
+        flex: 0 1 auto;
+      }
+      .cmdk-hint,
+      .cmdk-why {
+        color: var(--fg-3);
+        font-size: 13px;
+        white-space: nowrap;
+      }
+      .cmdk-row:disabled .cmdk-why {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        color: var(--fg-4);
+      }
+      .cmdk-row:disabled .cmdk-why::before {
+        content: "· ";
+      }
+      .cmdk-row kbd {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 24px;
+        height: 24px;
+        padding: 0 6px;
+        border: 1px solid var(--line-2);
+        border-radius: 5px;
+        background: var(--panel);
+        color: var(--fg-2);
+        font-family: var(--sans);
+        font-size: 12px;
+        text-transform: uppercase;
+      }
+      .cmdk-row:disabled kbd {
+        opacity: 0.5;
       }
       .toasts {
         position: fixed;
@@ -1851,16 +2061,93 @@
       :root[data-inspector="closed"] .resize-right {
         display: none;
       }
+      /* from 1100px the open inspector is a column of the grid */
+      @media (min-width: 1100px) {
+        :root[data-inspector="open"] .body {
+          grid-template-columns: var(--side-w, 180px) 5px minmax(0, 1fr) 5px var(--ins-w, 360px);
+        }
+        :root[data-detail="open"][data-inspector="open"] .body {
+          grid-template-columns: var(--side-w, 180px) 5px minmax(0, var(--list-w, 340px)) minmax(320px, 1fr) 5px var(--ins-w, 360px);
+        }
+      }
+      /* under it the open inspector lies over the right of the centre and takes no column */
+      @media (max-width: 1099px) {
+        .resize-right {
+          display: none;
+        }
+        .inspector {
+          position: fixed;
+          top: 46px;
+          right: 0;
+          bottom: 26px;
+          width: min(var(--ins-w, 360px), 100vw);
+          z-index: 15;
+          box-shadow: -12px 0 32px rgba(0, 0, 0, 0.35);
+        }
+        .ins-close {
+          display: inline-flex;
+          position: absolute;
+          top: 7px;
+          right: 8px;
+          z-index: 1;
+        }
+        .inspector .ins-h {
+          padding-right: 44px;
+        }
+      }
+      /* under 800px the page is one column: the list, or the open run or queue with a way back */
+      @media (max-width: 799px) {
+        .body,
+        :root[data-detail="open"] .body {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .resize-handle {
+          display: none;
+        }
+        .side {
+          display: none;
+        }
+        :root[data-sidebar="open"] .side {
+          display: block;
+          position: fixed;
+          top: 46px;
+          left: 0;
+          bottom: 26px;
+          width: min(260px, 80vw);
+          z-index: 30;
+          background: var(--panel);
+          box-shadow: 12px 0 32px rgba(0, 0, 0, 0.35);
+        }
+        :root[data-detail="open"] .list {
+          display: none;
+        }
+        .sidebar-btn {
+          display: inline-flex;
+        }
+        :root[data-detail="open"] .back {
+          display: inline-flex;
+          align-self: flex-start;
+          margin: 8px 12px 0;
+        }
+        .brand-t {
+          display: none;
+        }
+        .status {
+          overflow: hidden;
+          white-space: nowrap;
+        }
+      }
     </style>
   </head>
   <body>
     <div class="shell">
       <header class="top">
-        <div class="brand"><i></i>sail dashboard</div>
+        <button class="btn sidebar-btn" type="button" data-action="toggle-sidebar" aria-label="sidebar" title="sidebar">☰</button>
+        <div class="brand"><i></i><span class="brand-t">sail dashboard</span></div>
         <div class="spacer"></div>
         <div id="link"></div>
         <button class="btn" type="button" data-action="toggle-theme" aria-label="switch theme" title="theme">◐</button>
-        <button class="btn" type="button" data-action="toggle-inspector" aria-label="toggle inspector" title="inspector (i)">⇥</button>
+        <button class="btn" type="button" data-action="toggle-inspector" aria-label="pin inspector" title="pin the inspector (i)">⇥</button>
       </header>
       <div class="body" id="body">
         <nav class="side">
@@ -1871,10 +2158,12 @@
           <div id="list"></div>
         </section>
         <main class="main">
+          <button class="btn back" type="button" data-action="close-detail" title="back to the list (Esc)">‹ list</button>
           <div id="main"></div>
         </main>
         <div class="resize-handle resize-right" data-resize="right"></div>
         <aside class="inspector">
+          <button class="btn ins-close" type="button" data-action="close-inspector" aria-label="close inspector" title="close the inspector (Esc)">✕</button>
           <div class="inspector-b" id="inspector"></div>
         </aside>
       </div>
@@ -1882,6 +2171,7 @@
       <aside class="drawer" id="drawer"></aside>
       <!-- biome-ignore lint/a11y/noRedundantRoles: older browsers and the review read the role off the element -->
       <dialog id="dialog" class="dlg" role="dialog" aria-modal="true" aria-labelledby="dialog-title"></dialog>
+      <div id="menu" class="menu"></div>
       <div id="toasts" class="toasts" aria-live="polite"></div>
     </div>
     <script type="module" id="sail-page"></script>

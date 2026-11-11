@@ -92,9 +92,13 @@ test("a row's menu floats: .r-menu is absolute inside a relative .run (ADW-516)"
   expect(body('.r-menu')).toContain('top: 100%');
 });
 
+test('the page starts with the inspector closed and unpinned (ADW-528)', () => {
+  expect(html).toContain('data-inspector="closed" data-pinned="false"');
+});
+
 test('the theme and inspector buttons carry an aria-label beside their title (ADW-508)', () => {
   expect(html).toContain('data-action="toggle-theme" aria-label="switch theme" title="theme"');
-  expect(html).toContain('data-action="toggle-inspector" aria-label="toggle inspector" title="inspector (i)"');
+  expect(html).toContain('data-action="toggle-inspector" aria-label="pin inspector" title="pin the inspector (i)"');
 });
 
 test('--focus is at least 3:1 on every surface in each theme block (ADW-508)', () => {
@@ -110,11 +114,14 @@ test('--focus is at least 3:1 on every surface in each theme block (ADW-508)', (
   expect(low).toEqual([]);
 });
 
-test('one :focus-visible rule draws a 2px --focus outline, and no declaration removes an outline (ADW-508)', () => {
+test('one :focus-visible rule draws a 2px --focus outline, and no declaration removes an outline but the menu field (ADW-508)', () => {
   const ring = rules().filter(([sel]) => sel === ':focus-visible');
   expect(ring).toHaveLength(1);
   expect(ring[0]?.[1]).toContain('outline: 2px solid var(--focus);');
-  expect(style).not.toMatch(/outline(-width)?:\s*(none|0)\b/);
+  // The command menu's field is the one exception: it is the only thing its dialog focuses, and its caret shows it.
+  const field = /\.cmdk-in:focus-visible \{\s*outline: none;\s*\}/;
+  expect(style).toMatch(field);
+  expect(style.replace(field, '')).not.toMatch(/outline(-width)?:\s*(none|0)\b/);
 });
 
 test('buttons, selects, text inputs and role=button have a 24px minimum height in one rule (ADW-508)', () => {
@@ -154,15 +161,86 @@ const declarationsOf = (selector: string): string =>
     .map(([, body]) => body)
     .join('\n');
 
+/** The body of the `@media` block whose query is `query`, up to its balanced closing brace. */
+const mediaBlock = (query: string): string => {
+  const open = style.indexOf(`@media (${query}) {`);
+  if (open < 0) return '';
+  const start = style.indexOf('{', open) + 1;
+  let depth = 1;
+  let at = start;
+  while (depth > 0 && at < style.length) {
+    if (style[at] === '{') depth++;
+    else if (style[at] === '}') depth--;
+    at++;
+  }
+  return style.slice(start, at - 1);
+};
+/** The declarations of the rules inside `block` that have `selector` among theirs, joined. */
+const inBlock = (block: string, selector: string): string =>
+  [...block.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+    .filter(([, selectors]) =>
+      (selectors as string)
+        .split(',')
+        .map((each) => each.trim())
+        .includes(selector),
+    )
+    .map(([, , body]) => body)
+    .join('\n');
+
 test('the sidebar is 180px wide by default, and the list beside a run is 340px (ADW-522)', () => {
-  expect(declarationsOf('.body')).toContain('var(--side-w, 180px) 5px 1fr 5px var(--ins-w, 360px)');
+  expect(declarationsOf('.body')).toContain('var(--side-w, 180px) 5px minmax(0, 1fr)');
   expect(declarationsOf(':root[data-detail="open"] .body')).toContain(
-    'var(--side-w, 180px) 5px var(--list-w, 340px) 1fr 5px var(--ins-w, 360px)',
-  );
-  expect(declarationsOf(':root[data-detail="open"][data-inspector="closed"] .body')).toContain(
-    'var(--side-w, 180px) 5px var(--list-w, 340px) 1fr;',
+    'var(--side-w, 180px) 5px minmax(0, var(--list-w, 340px)) minmax(320px, 1fr)',
   );
   expect(declarationsOf(':root:not([data-detail="open"]) .main')).toContain('display: none');
+});
+
+test('the inspector has a grid track only from 1100px, and under it is a fixed panel no wider than the window (ADW-528)', () => {
+  expect(declarationsOf('.body')).not.toContain('--ins-w');
+  expect(declarationsOf(':root[data-detail="open"] .body')).not.toContain('--ins-w');
+  const wide = mediaBlock('min-width: 1100px');
+  expect(inBlock(wide, ':root[data-inspector="open"] .body')).toContain('5px var(--ins-w, 360px);');
+  expect(inBlock(wide, ':root[data-detail="open"][data-inspector="open"] .body')).toContain('5px var(--ins-w, 360px);');
+  const narrow = mediaBlock('max-width: 1099px');
+  expect(inBlock(narrow, '.inspector')).toContain('position: fixed');
+  expect(inBlock(narrow, '.inspector')).toContain('width: min(var(--ins-w, 360px), 100vw)');
+  expect(inBlock(narrow, '.resize-right')).toContain('display: none');
+  expect([...style.matchAll(/@media \(((?:min|max)-width[^)]*)\)/g)].map((m) => m[1])).toEqual([
+    'min-width: 1100px',
+    'max-width: 1099px',
+    'max-width: 799px',
+  ]);
+});
+
+test('under 1100px the inspector carries a close button over its head, and from 1100px it is hidden (review R2) (ADW-528)', () => {
+  const aside = /<aside class="inspector">([\s\S]*?)<\/aside>/.exec(html)?.[1] ?? '';
+  expect(aside).toMatch(/<button[^>]*class="btn ins-close"[^>]*data-action="close-inspector"/);
+  expect(declarationsOf('.ins-close')).toContain('display: none');
+  const narrow = mediaBlock('max-width: 1099px');
+  expect(inBlock(narrow, '.ins-close')).toContain('display: inline-flex');
+  expect(inBlock(narrow, '.ins-close')).toContain('position: absolute');
+});
+
+test('beside the list the run view keeps 320px and the list gives way first (ADW-528)', () => {
+  const grid = declarationsOf(':root[data-detail="open"] .body');
+  expect(grid).toContain('minmax(0, var(--list-w, 340px)) minmax(320px, 1fr)');
+});
+
+test('under 800px the page is one column: the sidebar folds, the list hides behind an open detail, and the back button shows (ADW-528)', () => {
+  expect(html).toMatch(/<header class="top">\s*<button[^>]*data-action="toggle-sidebar"/);
+  const main = /<main class="main">([\s\S]*?)<\/main>/.exec(html)?.[1] ?? '';
+  expect(main.indexOf('data-action="close-detail"')).toBeGreaterThan(-1);
+  expect(main.indexOf('data-action="close-detail"')).toBeLessThan(main.indexOf('id="main"'));
+  expect(declarationsOf('.sidebar-btn')).toContain('display: none');
+  expect(declarationsOf('.back')).toContain('display: none');
+  const narrow = mediaBlock('max-width: 799px');
+  expect(inBlock(narrow, '.body')).toContain('grid-template-columns: minmax(0, 1fr)');
+  expect(inBlock(narrow, ':root[data-detail="open"] .body')).toContain('grid-template-columns: minmax(0, 1fr)');
+  expect(inBlock(narrow, '.side')).toContain('display: none');
+  expect(inBlock(narrow, ':root[data-sidebar="open"] .side')).toContain('display: block');
+  expect(inBlock(narrow, ':root[data-detail="open"] .list')).toContain('display: none');
+  expect(inBlock(narrow, '.sidebar-btn')).toContain('display: inline-flex');
+  expect(inBlock(narrow, ':root[data-detail="open"] .back')).toContain('display: inline-flex');
 });
 
 test('no sidebar or problem rule keeps its text on one line, so labels wrap rather than clip (ADW-522)', () => {

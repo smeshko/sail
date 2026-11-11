@@ -5,6 +5,7 @@
 import type { RunActions } from '../actions';
 import type { IndexRepo } from '../files';
 import { type Actor, inertActor } from './act';
+import type { OfferSource, Subject } from './action-registry';
 import { attention, identity } from './attention';
 import type { PageHost, Region } from './host';
 import { queuePanels } from './index-model';
@@ -55,6 +56,10 @@ export interface Store {
   offers: RunActions | undefined;
   /** What the open run's status and queue item were when its actions were read. */
   offersFor: string | undefined;
+  /** What a run that is not the open one offers, read for the command menu: its repository, its id and its offers. */
+  subjectOffers: { repo: string; runId: string; offers: RunActions | undefined } | undefined;
+  /** Bumped on every read of a subject's offers: only the latest is kept. */
+  subjectOffersRead: number;
   /** Carries the registry's actions out: `boot()` wires it, with the effects only the shell can perform. */
   actor: Actor;
   /** The needs-attention identities a person cleared, and the identities of the Inbox rows last drawn. */
@@ -66,6 +71,8 @@ export interface Store {
   revealList: boolean;
   /** Whether the host was last told a run or queue is open beside the list. */
   detail: boolean | undefined;
+  /** What the host was last told about the inspector: whether it is open and whether it is pinned. */
+  inspector: string | undefined;
   /** What the URL asks to open, until the first index: then it is opened, or dropped when its run isn't listed. */
   start: Record<string, string> | undefined;
   /** The query last written to the URL, `undefined` until one is. */
@@ -79,6 +86,8 @@ export interface Store {
   outputRead: number;
   docRead: number;
   offersRead: number;
+  /** The latest read of the offers of a selection's runs: a read that is not the latest, or that a change of the selection outran, is dropped. */
+  selectionRead: number;
   lastLogRead: number;
   lastOutputRead: number;
   flushTimer: number | undefined;
@@ -100,6 +109,8 @@ export interface Store {
   /** What each region was last written with, and the regions whose fields the shell has just given up. */
   readonly written: Map<Region, string>;
   readonly fresh: Set<Region>;
+  /** Whether the command menu's field or the menu itself is to take the focus once the menu is drawn. */
+  menuFocus: boolean;
   /** Draws the dirty regions: the draw loop sets it. */
   flush: () => void;
   mark: (...regions: Region[]) => void;
@@ -114,7 +125,6 @@ export function createStore(host: PageHost): Store {
   const asked = host.start().view;
   if ((VIEWS as readonly string[]).includes(asked ?? '')) ui.view = asked as ViewName;
   const cleared = new Set<string>(storedCleared(host));
-  host.setInspector(ui.inspector);
   const store: Store = {
     host,
     ui,
@@ -128,12 +138,15 @@ export function createStore(host: PageHost): Store {
     doc: undefined,
     offers: undefined,
     offersFor: undefined,
+    subjectOffers: undefined,
+    subjectOffersRead: 0,
     actor: inertActor(),
     cleared,
     drawn: [],
     cursorPending: false,
     revealList: false,
     detail: undefined,
+    inspector: undefined,
     start: host.start(),
     url: undefined,
     stopped: false,
@@ -143,6 +156,7 @@ export function createStore(host: PageHost): Store {
     outputRead: 0,
     docRead: 0,
     offersRead: 0,
+    selectionRead: 0,
     lastLogRead: Number.NEGATIVE_INFINITY,
     lastOutputRead: Number.NEGATIVE_INFINITY,
     flushTimer: undefined,
@@ -159,6 +173,7 @@ export function createStore(host: PageHost): Store {
     dirty: new Set(),
     written: new Map(),
     fresh: new Set(),
+    menuFocus: false,
     flush: () => {
       store.flushTimer = undefined;
     },
@@ -187,3 +202,25 @@ export const opened = (store: Store) => (store.ui.timeline ? selected(store) : u
 
 export const listed = (store: Store) =>
   store.index === undefined ? [] : attention(store.index).filter((item) => !store.cleared.has(identity(item)));
+
+/** The run the centre shows: the open run, unless a queue is open in its place. */
+export const centreRun = (store: Store) => (openQueue(store) === undefined ? store.run : undefined);
+
+/** The selected card, while the centre shows its run. */
+export const centreCard = (store: Store) => (centreRun(store) === undefined ? undefined : selected(store));
+
+/** Whether the inspector takes its room: it is pinned, or the centre shows a run with a selected card. */
+export const inspectorOpen = (store: Store) => store.ui.pinned || centreCard(store) !== undefined;
+
+/**
+ * What the offers say for `subject`: the open run's offers for the open run, and a run that is not open its own, once
+ * they were read (`readSubjectOffers`), else none.
+ */
+export function sourceFor(store: Store, subject?: Subject): OfferSource {
+  const index = store.index ?? [];
+  if (subject?.kind !== 'run' || (store.run?.repo === subject.repo && store.run.runId === subject.runId))
+    return { run: store.offers, index };
+  const read = store.subjectOffers;
+  const own = read?.repo === subject.repo && read.runId === subject.runId ? read.offers : undefined;
+  return { run: own, index };
+}

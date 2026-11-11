@@ -10,6 +10,7 @@ import {
   type OfferSource,
   refusal,
   type Subject,
+  severalHead,
   subjectName,
   subjectOf,
   underwayId,
@@ -454,4 +455,61 @@ test('actionOf finds an entry by id in a registry given, and none that is not th
   expect(actionOf('stop-run')?.id).toBe('stop-run');
   expect(actionOf('nope')).toBeUndefined();
   expect(actionOf('stop-run', [])).toBeUndefined();
+});
+
+test("clean of several opens one dialog with a line per run that goes and a skips line per run that can't", () => {
+  const runOf = (runId: string): Subject => ({ kind: 'run', repo: 'alpha', runId });
+  const several = def('clean-run').several;
+  expect(
+    several?.dialog(
+      [
+        { subject: runOf('R-a'), offers: runActions },
+        {
+          subject: runOf('R-b'),
+          offers: { clean: { enabled: false, why: 'ticket:FAKE-9 names it' } } as unknown as RunActions,
+        },
+        { subject: runOf('R-c'), offers: { why: 'run R-c completed: there is nothing to start again' } },
+        { subject: runOf('R-d'), offers: undefined },
+      ],
+      source(),
+    ),
+  ).toEqual({
+    title: 'clean 4 runs',
+    lines: [
+      'R-a: removes its worktree, its branch; run directory → /m/failed-runs/x',
+      'skips R-b: ticket:FAKE-9 names it',
+      'skips R-c: run R-c completed: there is nothing to start again',
+      'skips R-d: what it offers could not be read',
+    ],
+    verb: 'clean',
+  });
+  expect(
+    several?.dialog(
+      [{ subject: runOf('R-e'), offers: { clean: { ...on, removes: [] } } as unknown as RunActions }],
+      source(),
+    ),
+  ).toEqual({ title: 'clean 1 run', lines: ['R-e: removes nothing'], verb: 'clean' });
+  expect(severalHead(def('clean-run'), 3)).toBe('clean 3 runs');
+  expect(severalHead(def('clean-run'), 1)).toBe('clean 1 run');
+  expect(def('stop-run').several).toBeUndefined();
+});
+
+test('a move says its rows from the waiting neighbours', () => {
+  const move = actionOf('move-item');
+  const items = (states: string[]) =>
+    states.map((state, at) => ({ dedupKey: `ticket:FAKE-${at}`, state, attempts: 0 }));
+  const source = (states: string[]): OfferSource => ({
+    index: [{ name: 'alpha', queues: [{ workflow: 'wf', queue: { items: items(states) } }] }],
+  });
+  const at = (n: number): Subject => ({ ...ITEM, item: `ticket:FAKE-${n}` });
+  const rows = (n: number, states: string[]) => move?.variants?.(at(n), source(states));
+  const all = ['queued', 'queued', 'queued', 'parked'];
+  expect(rows(1, all)).toEqual([
+    { label: 'move up', data: { dir: 'up', target: 'ticket:FAKE-0' } },
+    { label: 'move down', data: { dir: 'down', target: 'ticket:FAKE-2' } },
+  ]);
+  expect(rows(0, all)).toEqual([{ label: 'move down', data: { dir: 'down', target: 'ticket:FAKE-1' } }]);
+  expect(rows(2, all)).toEqual([{ label: 'move up', data: { dir: 'up', target: 'ticket:FAKE-1' } }]);
+  expect(rows(3, all)).toEqual([]);
+  expect(move?.variants?.(WORKFLOW, source(all))).toEqual([]);
 });

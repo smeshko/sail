@@ -30,6 +30,8 @@ interface Rig {
   open: { repo: string; runId: string } | undefined;
   stopped: boolean;
   run: RunActions | undefined;
+  /** The offers of runs that are not the open one, by run id, as the shell reads them. */
+  others: Record<string, RunActions>;
   registry: ActionDef[];
 }
 
@@ -50,6 +52,7 @@ function rig(run?: RunActions, index: IndexRepo[] = []): Rig {
     open: { repo: 'alpha', runId: 'R1' } as Rig['open'],
     stopped: false,
     run,
+    others: {} as Record<string, RunActions>,
     registry: [...ACTIONS],
   };
   const actor = createActor({
@@ -68,7 +71,10 @@ function rig(run?: RunActions, index: IndexRepo[] = []): Rig {
       redrawDialog: (html) => state.redraws.push(html),
     },
     ui: state.ui,
-    source: () => ({ run: state.run, index }),
+    source: (subject) => ({
+      run: subject?.kind === 'run' && subject.runId !== state.open?.runId ? state.others[subject.runId] : state.run,
+      index,
+    }),
     openRun: () => state.open,
     effects: {
       reopen: (repo, runId, keepMenu) => state.effects.push(`reopen ${repo}/${runId}${keepMenu ? ' keep' : ''}`),
@@ -155,6 +161,15 @@ test('a restart confirmed without a change posts the offer stage', () => {
   r.actor.act('restart-run', {});
   r.actor.confirm();
   expect(r.posts).toEqual([{ path: '/api/repos/alpha/runs/R1/restart', body: { stage: 'tests' } }]);
+});
+
+test('a stage the command menu has asked is not asked again: the dialog draws no field and confirm posts it', () => {
+  const r = rig(RESTART);
+  r.actor.act('restart-run', {}, { stage: 'spec' });
+  expect(r.ui.dialog?.lines).toEqual(['runs again: s', 'budget $10.00', 'starts a new run seeded from R1']);
+  expect(r.dialogs[0]).not.toContain('<select');
+  r.actor.confirm();
+  expect(r.posts).toEqual([{ path: '/api/repos/alpha/runs/R1/restart', body: { stage: 'spec' } }]);
 });
 
 const NEEDS_RAISE = 'give the dollars to raise the budget by: at least 0.01';
@@ -337,6 +352,7 @@ test('the same action on another run opens its own dialog, and a dialog for a ru
   const r = rig(RESTART);
   r.actor.act('stop-run', {});
   r.actor.cancel();
+  r.others.R2 = { stop: on } as unknown as RunActions;
   r.actor.act('stop-run', { repo: 'alpha', run: 'R2' });
   expect(r.actor.dialogFor()).toEqual({ kind: 'run', repo: 'alpha', runId: 'R2' });
   r.actor.forget('run');
@@ -785,4 +801,135 @@ test('the inert actor, the store holds until the shell wires the real one, does 
   expect(actor.keep('run')).toBeUndefined();
   expect(actor.forget('run')).toBeUndefined();
   expect([actor.dialogFor(), actor.confirm(), actor.cancel()]).toEqual([undefined, undefined, undefined]);
+});
+
+const runOf = (runId: string, repo = 'alpha') => ({ kind: 'run', repo, runId }) as const;
+const cleanable = (...removes: string[]) =>
+  ({ clean: { ...on, removes, archive: `/m/${removes[0] ?? 'x'}` } }) as unknown as RunActions;
+const refused = { clean: { enabled: false, why: 'ticket:FAKE-9 names the run' } } as unknown as RunActions;
+
+test("confirming a clean of several posts each run's clean in order, one toast per answer, and a refusal stops no other run", async () => {
+  const r = rig(undefined);
+  r.open = { repo: 'alpha', runId: 'R2' };
+  r.actor.actSeveral('clean-run', [
+    { subject: runOf('R1'), offers: cleanable('a') },
+    { subject: runOf('R3'), offers: refused },
+    { subject: runOf('R2'), offers: cleanable('b') },
+    { subject: runOf('R4'), offers: cleanable('c') },
+  ]);
+  expect(r.posts).toEqual([]);
+  expect(r.ui.dialog?.title).toBe('clean 4 runs');
+  expect(r.ui.dialog?.lines).toEqual([
+    'R1: removes a; run directory → /m/a',
+    'skips R3: ticket:FAKE-9 names the run',
+    'R2: removes b; run directory → /m/b',
+    'R4: removes c; run directory → /m/c',
+  ]);
+  expect(r.actor.dialogFor()).toEqual({ kind: 'none' });
+  r.actor.confirm();
+  r.actor.confirm();
+  expect(r.posts).toEqual([{ path: '/api/repos/alpha/runs/R1/clean', body: {} }]);
+  expect(r.ui.underway['run:alpha/R1']).toBe('cleaning…');
+  await r.answer(409, { error: 'ticket:FAKE-1 names it' });
+  expect(r.posts.map((p) => p.path)).toEqual(['/api/repos/alpha/runs/R1/clean', '/api/repos/alpha/runs/R2/clean']);
+  expect(r.ui.underway).toEqual({ 'run:alpha/R2': 'cleaning…' });
+  await r.answer(200, { message: 'cleaned R2' });
+  expect(r.effects).toEqual(['leave']);
+  await r.answer(200, { message: 'cleaned R4' });
+  expect(r.posts.map((p) => p.path)).toEqual([
+    '/api/repos/alpha/runs/R1/clean',
+    '/api/repos/alpha/runs/R2/clean',
+    '/api/repos/alpha/runs/R4/clean',
+  ]);
+  expect(r.toasts).toEqual([
+    'bad clean R1: ticket:FAKE-1 names it',
+    'ok clean R2: cleaned R2',
+    'ok clean R4: cleaned R4',
+  ]);
+  expect(r.ui.underway).toEqual({});
+});
+
+test('a run cleaned from a selection that is not the open one only toasts', async () => {
+  const r = rig(undefined);
+  r.actor.actSeveral('clean-run', [{ subject: runOf('R9'), offers: cleanable('a') }]);
+  r.actor.confirm();
+  await r.answer(200, { message: 'cleaned R9' });
+  expect([r.effects, r.toasts]).toEqual([[], ['ok clean R9: cleaned R9']]);
+});
+
+test('a selection with no run to clean opens no dialog and toasts the reasons', () => {
+  const r = rig(undefined);
+  r.actor.actSeveral('clean-run', [
+    { subject: runOf('R1'), offers: refused },
+    { subject: runOf('R2'), offers: { why: 'run R2 completed' } },
+    { subject: runOf('R3'), offers: undefined },
+  ]);
+  expect([r.posts, r.dialogs, r.actor.dialogFor()]).toEqual([[], [], undefined]);
+  expect(r.toasts).toEqual([
+    'bad clean 3 runs: R1: ticket:FAKE-9 names the run; R2: run R2 completed; R3: what it offers could not be read',
+  ]);
+});
+
+test('cancelling the dialog of a clean of several posts nothing, and an unknown action or one with no several form is ignored', () => {
+  const r = rig(undefined);
+  r.actor.actSeveral('clean-run', [{ subject: runOf('R1'), offers: cleanable('a') }]);
+  r.actor.cancel();
+  r.actor.confirm();
+  expect([r.posts, r.actor.dialogFor()]).toEqual([[], undefined]);
+  r.actor.actSeveral('no-such-action', [{ subject: runOf('R1'), offers: cleanable('a') }]);
+  r.actor.actSeveral('stop-run', [{ subject: runOf('R1'), offers: cleanable('a') }]);
+  expect([r.dialogs.filter((d) => d !== 'closed').length, r.toasts]).toEqual([1, []]);
+});
+
+test('a clean of several while a run request is out opens no dialog, toasts why and says it took nothing (review R3)', async () => {
+  const r = rig(undefined);
+  expect(r.actor.actSeveral('clean-run', [{ subject: runOf('R1'), offers: cleanable('a') }])).toBe(true);
+  r.actor.confirm();
+  expect(r.posts).toHaveLength(1);
+  expect(r.actor.actSeveral('clean-run', [{ subject: runOf('R2'), offers: cleanable('b') }])).toBe(false);
+  expect([r.actor.dialogFor(), r.posts.length]).toEqual([undefined, 1]);
+  expect(r.toasts).toEqual(['bad clean 1 run: another run action is under way: try again once it is answered']);
+  await r.answer(200, { message: 'cleaned R1' });
+  expect(r.actor.actSeveral('clean-run', [{ subject: runOf('R2'), offers: cleanable('b') }])).toBe(true);
+  expect(r.actor.dialogFor()).toEqual({ kind: 'none' });
+});
+
+test('values given with the act are read before the page fields', async () => {
+  const r = rig(RESTART);
+  r.fields.raise = '9';
+  r.actor.act('resume-run', {}, { raise: '2' });
+  expect(r.ui.dialog?.lines).toEqual(['spent $1.00 of $2.00', 'raises the budget by $2.00']);
+  r.actor.confirm();
+  expect(r.posts).toEqual([{ path: '/api/repos/alpha/runs/R1/resume', body: { raise: { usd: 2 } } }]);
+});
+
+test('a run that is not open is acted on with its own offers', () => {
+  const r = rig(RESTART);
+  const other = { repo: 'alpha', run: 'R2' };
+  r.actor.act('clean-run', other);
+  expect([r.ui.dialog, r.dialogs]).toEqual([undefined, []]);
+  r.others.R2 = { clean: { ...on, removes: ['b'], archive: '/y' } } as unknown as RunActions;
+  r.actor.act('clean-run', other);
+  expect(r.ui.dialog).toEqual({ title: 'clean R2', lines: ['removes b', 'run directory → /y'], verb: 'clean' });
+  r.actor.confirm();
+  expect(r.posts).toEqual([{ path: '/api/repos/alpha/runs/R2/clean', body: {} }]);
+});
+
+test('a Restart or Resume of a run that is not open opens the run it started or resumed, and a stop or clean of one leaves the open run', async () => {
+  const r = rig(RESTART);
+  r.others.R2 = RESTART;
+  const other = { repo: 'alpha', run: 'R2' };
+  r.actor.act('restart-run', other);
+  r.actor.confirm();
+  await r.answer(200, { runId: 'R3' });
+  r.actor.act('resume-run', other, { raise: '2' });
+  r.actor.confirm();
+  await r.answer(200, {});
+  r.actor.act('stop-run', other);
+  r.actor.confirm();
+  await r.answer(200, { message: 'stopped' });
+  r.actor.act('clean-run', other);
+  r.actor.confirm();
+  await r.answer(200, {});
+  expect(r.effects).toEqual(['open alpha/R3', 'open alpha/R2']);
 });

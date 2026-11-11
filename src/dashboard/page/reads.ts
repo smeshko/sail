@@ -2,9 +2,12 @@
 // drawer and what the open run offers. Each read drops its answer when the selection has moved on or a newer read of
 // the same kind has been asked for, and a running call's log and output are read again at most once a second.
 import type { RunActions } from '../actions';
+import type { Subject } from './action-registry';
 import { isMarkdown } from './drawer-view';
-import { statusOf } from './index-model';
+import type { Region } from './host';
+import { listRepos, statusOf } from './index-model';
 import { logTarget } from './inspector-view';
+import { selectedRows, shownGroups } from './list-model';
 import type { OpenRun, Store } from './store';
 import { outputKey, scriptId } from './timeline-view';
 import type { InspectorTab } from './ui-state';
@@ -197,6 +200,15 @@ export function offerSignature(store: Store, open: OpenRun) {
   return `${item === undefined ? '' : statusOf(item)}|${queued.join(',')}`;
 }
 
+/**
+ * Marks what draws offers: the list, the regions `also` names (the open run's view header draws its offers in `main`),
+ * and the command menu while it is open, which draws its rows from them.
+ */
+export function markOffers(store: Store, ...also: Region[]): void {
+  if (store.ui.menu === undefined) store.mark('list', ...also);
+  else store.mark('list', ...also, 'menu');
+}
+
 export function readOffers(store: Store) {
   const { host } = store;
   const open = store.run;
@@ -213,7 +225,73 @@ export function readOffers(store: Store) {
         // An answer that isn't JSON offers nothing.
       }
     }
-    store.mark('list', 'main');
+    markOffers(store, 'main');
+  });
+}
+
+/**
+ * Reads what `subject` offers when it is a run that is not the open one, into `store.subjectOffers`, dropping an answer
+ * a newer read replaced. The open run's offers are `store.offers`, and any other subject's are the index's.
+ */
+export function readSubjectOffers(store: Store, subject: Subject): void {
+  if (subject.kind !== 'run') return;
+  if (store.run?.repo === subject.repo && store.run.runId === subject.runId) return;
+  const asked = ++store.subjectOffersRead;
+  const { repo, runId } = subject;
+  store.subjectOffers = { repo, runId, offers: undefined };
+  void store.host.get(`/api/repos/${enc(repo)}/runs/${enc(runId)}/actions`).then((answer) => {
+    if (asked !== store.subjectOffersRead || store.stopped) return;
+    let offers: RunActions | undefined;
+    if (answer.status === 200) {
+      try {
+        offers = JSON.parse(answer.body) as RunActions;
+      } catch {
+        // An answer that isn't JSON offers nothing.
+      }
+    }
+    store.subjectOffers = { repo, runId, offers };
+    markOffers(store);
+  });
+}
+
+/**
+ * Clean over the selection: reads the actions of each selected run the list shows, together, while the head says
+ * `checking n runs…`, then hands what they offer to the actor, which asks once. A read that a later one or a change of
+ * the selection outran, a filter that changed which selected rows show included, is dropped and keeps the marks.
+ */
+export function cleanSelected(store: Store) {
+  const { ui, host } = store;
+  /** The selected rows the list shows now, in order. */
+  const shown = () =>
+    selectedRows(shownGroups(ui.view, listRepos(store.index ?? [], host.now()), ui, host.now()), ui.listSelected);
+  const idsOf = (each: readonly { id: string }[]) => each.map((row) => row.id).join('\n');
+  const rows = shown();
+  const ids = idsOf(rows);
+  if (rows.length === 0) return;
+  const asked = ++store.selectionRead;
+  ui.underway.selection = `checking ${rows.length} ${rows.length === 1 ? 'run' : 'runs'}…`;
+  store.mark('list');
+  const reads = rows.map(async (row) => {
+    const subject = { kind: 'run', repo: row.repo, runId: row.run.runId } as const;
+    const answer = await host.get(`/api/repos/${enc(row.repo)}/runs/${enc(row.run.runId)}/actions`);
+    let offers: RunActions | undefined;
+    if (answer.status === 200) {
+      try {
+        offers = JSON.parse(answer.body) as RunActions;
+      } catch {
+        // An answer that isn't JSON offers nothing.
+      }
+    }
+    return { subject, offers };
+  });
+  void Promise.all(reads).then((runs) => {
+    if (asked !== store.selectionRead || store.stopped) return;
+    delete ui.underway.selection;
+    // A mark, an unmark or a filter that changed the shown selection meanwhile outran the read: it asks nothing.
+    if (idsOf(shown()) !== ids) return store.mark('list');
+    // A selection the actor took nothing of, as while a run request is out, stays marked for another clean.
+    if (store.actor.actSeveral('clean-run', runs)) ui.listSelected = [];
+    store.mark('list');
   });
 }
 

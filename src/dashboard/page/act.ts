@@ -25,7 +25,10 @@ import {
   actionOf,
   type OfferSource,
   type Param,
+  type SeveralRun,
   type Subject,
+  severalHead,
+  severalPlan,
   subjectName,
   subjectOf,
   underwayId,
@@ -34,6 +37,8 @@ import {
 import { type DialogAsk, renderDialog, renderDialogBody } from './dialog-view';
 import type { PageHost, Region } from './host';
 import type { UiState } from './ui-state';
+
+type Data = Readonly<Record<string, string>>;
 
 export interface ActorEffects {
   /** Reads the run again, keeping its ⋯ menu open when `keepMenu`. */
@@ -47,13 +52,14 @@ export interface ActorEffects {
   /** Puts a toast on the stack. */
   toast(kind: 'ok' | 'bad', head: string, text: string, undo?: () => void): void;
   /** The local actions' effects, by the name their entry's `run` gives: the text of their toast and what undoes them. */
-  local: Record<string, (data: Readonly<Record<string, string>>) => { text: string; undo: () => void } | undefined>;
+  local: Record<string, (data: Data) => { text: string; undo: () => void } | undefined>;
 }
 
 export interface ActorDeps {
   host: Pick<PageHost, 'post' | 'value' | 'openDialog' | 'closeDialog' | 'dialogValue' | 'redrawDialog'>;
   ui: UiState;
-  source(): OfferSource;
+  /** What the offers say for `subject`: a run that is not open has its own. */
+  source(subject?: Subject): OfferSource;
   openRun(): { repo: string; runId: string } | undefined;
   effects: ActorEffects;
   mark(...regions: Region[]): void;
@@ -64,7 +70,12 @@ export interface ActorDeps {
 
 export interface Actor {
   /** Carries out action `id` for the subject `data` names. */
-  act(id: string, data: Readonly<Record<string, string>>): void;
+  act(id: string, data: Data, values?: Values): void;
+  /**
+   * Carries out `id` over `runs`: one dialog listing each, then a request per run that can, in order. False when it took
+   * nothing: a run request is still out, which a red toast says, or the action has no several form.
+   */
+  actSeveral(id: string, runs: readonly SeveralRun[]): boolean;
   /** Reads the drawn parameters of the actions shown in `place` into the drafts, before a draw. */
   keep(place: 'run' | 'queue', subject?: Subject): void;
   /** Forgets what a run's actions hold: an open dialog for it and the drafts. */
@@ -83,6 +94,7 @@ export interface Actor {
 export function inertActor(): Actor {
   return {
     act: () => {},
+    actSeveral: () => false,
     keep: () => {},
     forget: () => {},
     dialogFor: () => undefined,
@@ -112,8 +124,11 @@ export function createActor(deps: ActorDeps): Actor {
   };
 
   /** What the page holds for `param`: its field, else its draft, else the choice it starts at. */
-  function typed(def: ActionDef, param: Param, data: Readonly<Record<string, string>>): string | undefined {
+  function typed(def: ActionDef, param: Param, data: Data, asked: Values | undefined): string | undefined {
     if (param.given !== undefined) return data[param.name];
+    // A value the caller has already asked is the one given: no field the page draws takes its place.
+    const given = asked?.[param.name];
+    if (given !== undefined) return given;
     const drafts = draftsOf(def.drafts ?? def.id);
     let value = host.value(param.dom) ?? drafts[param.name];
     if (value === undefined && param.type === 'choice') value = param.initial;
@@ -121,10 +136,10 @@ export function createActor(deps: ActorDeps): Actor {
     return value;
   }
 
-  function read(def: ActionDef, subject: Subject, data: Readonly<Record<string, string>>): Values {
+  function read(def: ActionDef, subject: Subject, data: Data, asked: Values | undefined): Values {
     const values: Record<string, string> = {};
-    for (const param of def.params(subject, deps.source())) {
-      const value = typed(def, param, data);
+    for (const param of def.params(subject, deps.source(subject))) {
+      const value = typed(def, param, data, asked);
       if (value !== undefined) values[param.name] = value;
     }
     return values;
@@ -162,7 +177,13 @@ export function createActor(deps: ActorDeps): Actor {
     const open = deps.openRun();
     const runEffect = effect !== undefined && effect !== 'took';
     const stillOpen = subject.kind === 'run' && open?.repo === subject.repo && open.runId === subject.runId;
-    if (!(runEffect && !stillOpen)) {
+    if (runEffect && !stillOpen) {
+      // A run acted on that is not open: a Restart opens the run it started and a Resume (a reopen that keeps no menu)
+      // opens the run; a stop's reopen and a clean's leave are the open run's alone.
+      if (typeof effect === 'object' && subject.kind === 'run') effects.open(subject.repo, effect.open);
+      else if (effect === 'reopen' && answer.keepMenu !== true && subject.kind === 'run')
+        effects.open(subject.repo, subject.runId);
+    } else {
       if (effect === 'reopen' && subject.kind === 'run')
         effects.reopen(subject.repo, subject.runId, answer.keepMenu === true);
       else if (effect === 'leave') effects.leave();
@@ -171,7 +192,7 @@ export function createActor(deps: ActorDeps): Actor {
         // A change that took empties the text typed for it. One with no text of its own, such as a poll or a drop,
         // leaves every field as it is typed.
         const texts = def
-          .params(subject, deps.source())
+          .params(subject, deps.source(subject))
           .filter((param) => param.type === 'text' && param.given === undefined);
         if (texts.length > 0) {
           const drafts = draftsOf(def.drafts ?? def.id);
@@ -186,14 +207,48 @@ export function createActor(deps: ActorDeps): Actor {
     if (effect === 'leave') mark('sidebar', 'inspector', 'status');
   }
 
-  function send(def: ActionDef, subject: Subject, request: { path: string; body: unknown }, undo: Undo | undefined) {
+  function send(def: ActionDef, subject: Subject, request: { path: string; body: unknown }, undo?: Undo) {
     if (subject.kind === 'run') runsOut++;
     if (def.underway !== undefined) ui.underway[underwayId(def, subject)] = def.underway;
     mark('list', 'main');
-    void host.post(request.path, request.body).then(({ status, body }) => finish(def, subject, status, body, undo));
+    return host.post(request.path, request.body).then(({ status, body }) => finish(def, subject, status, body, undo));
   }
 
-  function act(id: string, data: Readonly<Record<string, string>>) {
+  /**
+   * One dialog listing what the server says each run does, whose confirm sends each run that can once the one before
+   * is answered. A selection with none that can opens no dialog: a red toast says why.
+   */
+  function actSeveral(id: string, runs: readonly SeveralRun[]): boolean {
+    const def = actionOf(id, registry);
+    if (def?.several === undefined) return false;
+    mark('list', 'main');
+    const head = severalHead(def, runs.length);
+    if (runsOut > 0) {
+      effects.toast('bad', head, 'another run action is under way: try again once it is answered');
+      return false;
+    }
+    const { view, goes, requests } = severalPlan(def, def.several, runs, deps.source().index);
+    if (goes === 0) {
+      effects.toast('bad', head, view.lines.map((line) => line.replace(/^skips /, '')).join('; '));
+      return true;
+    }
+    dialog = {
+      subject: { kind: 'none' },
+      submit: () => () => {
+        const sendFrom = (at: number) => {
+          const next = requests[at];
+          if (next === undefined || deps.stopped()) return;
+          void send(def, next.subject, next.request).then(() => sendFrom(at + 1));
+        };
+        sendFrom(0);
+      },
+    };
+    ui.dialog = view;
+    host.openDialog(renderDialog(view).value);
+    return true;
+  }
+
+  function act(id: string, data: Data, asked?: Values) {
     const def = actionOf(id, registry);
     if (def === undefined) return;
     const subject = subjectOf(def.appliesTo, data, deps.openRun());
@@ -204,18 +259,21 @@ export function createActor(deps: ActorDeps): Actor {
       if (done !== undefined) effects.toast('ok', headOf(def, subject), done.text, done.undo);
       return;
     }
-    const source = deps.source();
+    const source = deps.source(subject);
     const available = def.available(subject, source);
     if (!available.offered) return;
     if (!available.enabled && def.holdsDisabled === true) return;
+    // A parameter the dialog asks is asked there, unless the caller (the command menu) has asked it already.
     const asking = def.tier === 'confirmed' && def.dialog !== undefined;
     const params = def.params(subject, source);
-    const asked = asking ? params.filter((param) => param.ask === 'dialog') : [];
-    if (asked.length > 0 && def.dialog !== undefined) {
-      askInDialog(def, def.dialog.bind(def), subject, source, asked, data);
+    const inDialog = asking
+      ? params.filter((param) => param.ask === 'dialog' && asked?.[param.name] === undefined)
+      : [];
+    if (inDialog.length > 0 && def.dialog !== undefined) {
+      askInDialog(def, def.dialog.bind(def), subject, source, inDialog, data, asked);
       return;
     }
-    const values = read(def, subject, data);
+    const values = read(def, subject, data, asked);
     const request = def.request?.(subject, values, source);
     if (request === undefined) return;
     if ('invalid' in request) {
@@ -243,12 +301,13 @@ export function createActor(deps: ActorDeps): Actor {
     subject: Subject,
     source: OfferSource,
     asked: Param[],
-    data: Readonly<Record<string, string>>,
+    data: Data,
+    given: Values | undefined,
   ) {
     const placed: Record<string, string> = {};
     for (const param of def.params(subject, source)) {
-      if (param.ask === 'dialog') continue;
-      const value = typed(def, param, data);
+      if (asked.some((one) => one.name === param.name)) continue;
+      const value = typed(def, param, data, given);
       if (value !== undefined) placed[param.name] = value;
     }
     const undo = def.undo?.(subject, source);
@@ -301,6 +360,7 @@ export function createActor(deps: ActorDeps): Actor {
 
   return {
     act,
+    actSeveral,
     dialogFor: () => dialog?.subject,
     confirm() {
       // The dialog is cleared first, so the click a browser makes of Enter on its focused button finds nothing to do.
@@ -309,9 +369,7 @@ export function createActor(deps: ActorDeps): Actor {
       closeDialog();
       submitted?.();
     },
-    cancel() {
-      closeDialog();
-    },
+    cancel: closeDialog,
     changed() {
       dialog?.changed?.();
     },

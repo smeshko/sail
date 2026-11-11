@@ -103,7 +103,23 @@ async function bootHeadless(dashboard: Dashboard, search = '') {
       listener({ target: { innerHTML: '', dataset, parentElement: null } satisfies ElementLike });
     }
   };
-  return { ids, text, click, history, posted };
+  /** A key with Cmd or Ctrl held when `mod`, on the page's body. */
+  const press = (key: string, mod = false) => {
+    for (const listener of listeners.keydown ?? []) {
+      listener({
+        key,
+        metaKey: mod,
+        target: { innerHTML: '', dataset: {}, parentElement: null, tagName: 'BODY' } satisfies ElementLike,
+      });
+    }
+  };
+  /** Types `value` into the field `name`. */
+  const type = (name: string, value: string) => {
+    for (const listener of listeners.input ?? []) {
+      listener({ target: { innerHTML: '', dataset: {}, parentElement: null, name, value } satisfies ElementLike });
+    }
+  };
+  return { ids, text, click, press, type, history, posted };
 }
 
 test("the real bundle boots headless: both repositories, the golden run's eight cards and its $1.35 once its row is clicked, then FAKE-2's denial on the permissions tab", async () => {
@@ -136,7 +152,9 @@ test("the real bundle boots headless: both repositories, the golden run's eight 
   );
   expect(page.text('main')).toContain('<button class="btn" disabled');
   expect(page.text('list')).toContain('watcher not running');
+  expect(page.text('status')).toBe('');
   page.click({ action: 'open', repo: 'alpha', run: FAKE_2_ID, key: 'implement#1', tab: 'permissions' });
+  expect(await until(() => page.text('status').includes('calls <b>'))).toBe(true);
   expect(await until(() => page.text('inspector').includes('<code>git push --force origin HEAD</code>'))).toBe(true);
   expect(page.text('inspector')).toContain('<dt>rule</dt><dd>commands</dd>');
   expect(page.text('main')).toContain(`<span class="d-agent">${FAKE_2_ID} · ticket-to-pr@1</span>`);
@@ -263,6 +281,63 @@ test('undoable tier: on the real bundle, clear-attention empties the Inbox and d
   page.click({ action: 'undo-toast', toast: id });
   expect(await until(() => count() === '3')).toBe(true);
   expect(page.text('toasts')).not.toContain('toast ok');
+  expect(page.posted).toEqual([]);
+}, 30_000);
+
+test('on the real bundle, Cmd+K draws the command menu with the open run as its subject, and Escape empties it', async () => {
+  m = seedFixtures();
+  const leasesDir = join(m.root, 'leases');
+  const started = startDashboard({
+    registryDir: m.registryDir,
+    port: 0,
+    followPollMs: 20,
+    indexPollMs: 50,
+    leasesDir,
+    ports: fakeClonePorts(leasesDir),
+  });
+  if ('refused' in started) throw new Error(started.refused);
+  server = started;
+  const page = await bootHeadless(server);
+  expect(page.ids).toContain('menu');
+  expect(await until(() => page.text('sidebar').includes('<span class="nm">alpha</span>'))).toBe(true);
+  page.click({ action: 'open', repo: 'alpha', run: FAKE_2_ID });
+  expect(await until(() => page.text('main').includes(`${FAKE_2_ID} · ticket-to-pr@1`))).toBe(true);
+  page.press('k', true);
+  expect(await until(() => page.text('menu').includes('class="cmdk"'))).toBe(true);
+  expect(page.text('menu')).toContain('<div class="cmdk-subj">FAKE-2 · Print the version with --version</div>');
+  expect(await until(() => page.text('menu').includes('<span class="cmdk-label">clean</span>'))).toBe(true);
+  page.press('Escape');
+  expect(await until(() => page.text('menu') === '')).toBe(true);
+  expect(page.posted).toEqual([]);
+}, 30_000);
+
+test('on the real bundle and server, restart from the menu lists the stages and ends in the dialog, with no POST before the confirm', async () => {
+  m = seedFixtures();
+  const leasesDir = join(m.root, 'leases');
+  const started = startDashboard({
+    registryDir: m.registryDir,
+    port: 0,
+    followPollMs: 20,
+    indexPollMs: 50,
+    leasesDir,
+    ports: fakeClonePorts(leasesDir),
+  });
+  if ('refused' in started) throw new Error(started.refused);
+  server = started;
+  const page = await bootHeadless(server);
+  expect(await until(() => page.text('sidebar').includes('<span class="nm">alpha</span>'))).toBe(true);
+  page.click({ action: 'open', repo: 'alpha', run: FAKE_2_ID });
+  expect(await until(() => page.text('main').includes(`${FAKE_2_ID} · ticket-to-pr@1`))).toBe(true);
+  page.press('k', true);
+  expect(await until(() => page.text('menu').includes('<span class="cmdk-label">restart</span>'))).toBe(true);
+  page.type('menu-query', 'restart');
+  page.press('Enter');
+  expect(await until(() => page.text('menu').includes('<div class="cmdk-step">from</div>'))).toBe(true);
+  expect((page.text('menu').match(/class="cmdk-row/g) ?? []).length).toBeGreaterThan(1);
+  page.press('Enter');
+  expect(await until(() => page.text('dialog').includes(`<h2 id="dialog-title">restart ${FAKE_2_ID}</h2>`))).toBe(true);
+  expect(page.text('dialog')).toContain('autofocus>restart</button>');
+  expect(await until(() => page.text('menu') === '')).toBe(true);
   expect(page.posted).toEqual([]);
 }, 30_000);
 

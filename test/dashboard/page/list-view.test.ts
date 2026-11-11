@@ -43,7 +43,7 @@ const repos: ListRepo[] = [
       offers: { watch: { enabled: true }, unwatch: { enabled: true }, workflows: {} },
     },
   ),
-  repo('beta', [run('b-done', 'completed', '2026-10-01T06:00:00Z', { title: 'Done work' })], {
+  repo('beta', [run('b-done', 'completed', '2026-09-30T06:00:00Z', { title: 'Done work' })], {
     offers: { watch: { enabled: true }, workflows: {} },
   }),
 ];
@@ -68,14 +68,14 @@ test('the Active list is headed Active with its count, then waiting on you and r
 
 test('a run row holds its status, id, title, repository › workflow, duration, cost and stop reason, and a problem inside the row', () => {
   const markup = draw('active');
-  const row = markup.match(/<div class="run lrow" data-row="run:alpha\/a-run">.*?<\/button>/s)?.[0] ?? '';
+  const row = markup.match(/<div class="run lrow" data-row="run:alpha\/a-run"[^>]*>.*?<\/button>/s)?.[0] ?? '';
   expect(row).toContain(
     '<span class="st p-run"></span><span class="r-id">ADW-1</span><span class="r-title">Fix the parser</span><span class="r-wf">alpha › flow</span>',
   );
   expect(row).toContain('<span class="r-el">1m 5s</span><span class="r-cost">$1.50</span>');
-  const susp = markup.match(/data-row="run:alpha\/a-susp">.*?<\/button>/s)?.[0] ?? '';
+  const susp = markup.match(/data-row="run:alpha\/a-susp"[^>]*>.*?<\/button>/s)?.[0] ?? '';
   expect(susp).toContain('<span class="why">usage_limit</span>');
-  const bad = markup.match(/data-row="run:alpha\/a-bad">.*?<\/button>/s)?.[0] ?? '';
+  const bad = markup.match(/data-row="run:alpha\/a-bad"[^>]*>.*?<\/button>/s)?.[0] ?? '';
   expect(bad).toContain('<span class="r-problem">run.json is not a run header</span>');
 });
 
@@ -109,7 +109,9 @@ test('the open run draws its ⋯ menu under its row with the run controls, and t
     { repo: 'alpha', runId: 'a-run', runMenu: { runId: 'a-run', at: 'row' as const }, listCursor: 'run:alpha/a-run' },
     offers,
   );
-  expect(markup).toContain('class="run lrow sel cur" data-row="run:alpha/a-run"');
+  expect(markup).toContain(
+    'class="run lrow sel cur" data-row="run:alpha/a-run" data-subject="run" data-repo="alpha" data-run="a-run"',
+  );
   expect(markup).toContain(
     'data-action="run-menu" data-repo="alpha" data-run="a-run" aria-label="actions for a-run" aria-expanded="true"',
   );
@@ -143,9 +145,11 @@ test('a completed run has no ⋯', () => {
   expect(draw('history')).toContain('data-action="run-menu" data-repo="alpha" data-run="a-fail"');
 });
 
-test('History lists failed then done and Queues one row per queue under its repository, with Watch all on each header row', () => {
+test('History lists one group per start day and Queues one row per queue under its repository, with Watch all on each header row', () => {
   const history = draw('history');
-  expect(heads(history)).toEqual(['history:failed failed 1', 'history:done done 1']);
+  expect(heads(history)).toEqual(['history:2026-10-01 Today 1', 'history:2026-09-30 Yesterday 1']);
+  expect(history).not.toContain('history:failed');
+  expect(history).not.toContain('history:done');
   const queues = draw('queues');
   expect(queues).toContain('<span class="lh-t">Queues</span><span class="c">1</span>');
   expect(queues.match(/data-action="select-queue" data-queue="alpha\/flow"/g)).toHaveLength(1);
@@ -289,6 +293,52 @@ test('each run status draws its own pill colour in its row (review R11)', () => 
   ]);
 });
 
+test("History's head holds a status and a workflow control and the count reads n of m; Active and Queues hold neither", () => {
+  const history = draw('history');
+  expect(history).toContain(
+    '<select class="list-s" name="list-status" aria-label="filter by status"><option value="" selected>any status</option><option value="failed">failed</option><option value="completed">done</option></select>',
+  );
+  expect(history).toContain(
+    '<select class="list-s" name="list-workflow" aria-label="filter by workflow"><option value="" selected>any workflow</option><option value="flow">flow</option></select>',
+  );
+  expect(history).toContain('<span class="lh-t">History</span><span class="c">2</span>');
+  const failed = draw('history', { historyStatus: 'failed' });
+  expect(failed).toContain('<option value="failed" selected>failed</option>');
+  expect(failed).toContain('<span class="c">1 of 2</span>');
+  expect(failed).not.toContain('data-row="run:beta/b-done"');
+  const wf = draw('history', { historyWorkflow: 'flow' });
+  expect(wf).toContain('<option value="flow" selected>flow</option>');
+  expect(wf).toContain('<span class="c">2 of 2</span>');
+  const gone = draw('history', { historyWorkflow: 'old' });
+  expect(gone).toContain('<option value="old" selected>old</option>');
+  expect(gone).toContain('nothing matches');
+  expect(gone).toContain('<span class="c">0 of 2</span>');
+  expect(draw('active')).not.toContain('<select');
+  expect(draw('queues')).not.toContain('<select');
+});
+
+test("a selected row is drawn picked and History's head counts the selection with a clear button", () => {
+  const none = draw('history');
+  expect(none).not.toContain('lh-sel');
+  expect(none).not.toContain('picked');
+  const one = draw('history', { listSelected: ['run:alpha/a-fail', 'run:gone/zz'] });
+  expect(one).toContain('<span class="lh-sel">1 selected</span>');
+  expect(one).toContain('<button class="btn" data-action="clear-selection">clear</button>');
+  expect(one).toContain('class="run lrow picked" data-row="run:alpha/a-fail" aria-selected="true"');
+  expect(one).not.toContain('data-row="run:beta/b-done" aria-selected');
+  expect(draw('active', { listSelected: ['run:alpha/a-run'] })).not.toContain('lh-sel');
+});
+
+test("the head's clean button is replaced by checking… while the selection's offers are read", () => {
+  const picked = { listSelected: ['run:alpha/a-fail'] };
+  expect(draw('history', picked)).toContain(
+    '<span class="lh-sel">1 selected</span><button class="btn" data-action="clean-selected">clean</button><button class="btn" data-action="clear-selection">clear</button>',
+  );
+  const busy = draw('history', { ...picked, underway: { selection: 'checking 1 run…' } });
+  expect(busy).toContain('<span class="busy">checking 1 run…</span>');
+  expect(busy).not.toContain('data-action="clean-selected"');
+});
+
 const inboxItems: AttentionItem[] = [
   {
     repo: 'alpha',
@@ -355,7 +405,7 @@ const queueRowOf = (queue: Queue, fields = {}, watch?: ListWorkflow['watch'], re
     ...(repoOffers === undefined ? {} : { offers: repoOffers }),
   });
   const markup = renderList('queues', [only], ui(fields), NOW).value;
-  const row = markup.match(/<div class="q-row[^"]*" data-row="queue:alpha\/flow">.*?<\/div><\/div>/s)?.[0] ?? '';
+  const row = markup.match(/<div class="q-row[^"]*" data-row="queue:alpha\/flow"[^>]*>.*?<\/div><\/div>/s)?.[0] ?? '';
   const open = row.match(/<button class="q-open".*?<\/button>/s)?.[0] ?? '';
   return { row, open, after: row.slice(row.indexOf(open) + open.length) };
 };
@@ -481,6 +531,8 @@ test('an unreadable queue row keeps its problem and buttons, with no counts or l
 
 test("the selected queue's row and the cursor's carry sel and cur on the div, which holds one select-queue button", () => {
   const { row } = queueRowOf({ waiting: 0 }, { queue: 'alpha/flow', listCursor: 'queue:alpha/flow' });
-  expect(row).toStartWith('<div class="q-row sel cur" data-row="queue:alpha/flow">');
+  expect(row).toStartWith(
+    '<div class="q-row sel cur" data-row="queue:alpha/flow" data-subject="workflow" data-repo="alpha" data-workflow="flow">',
+  );
   expect(row.match(/data-action="select-queue"/g)).toHaveLength(1);
 });
