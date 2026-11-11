@@ -1,6 +1,7 @@
 // The dashboard's case rule (CONTEXT.md, Case rule): case lives in the strings. Actions, their buttons, rows and
 // dialog titles are lowercase; headings, view names and step labels are sentence case; only the small labels the
-// stylesheet pins uppercase by CSS, and no rule transforms the first letter or capitalizes a word.
+// stylesheet pins uppercase by CSS, and no CSS rule transforms the first letter or capitalizes a word: the menu's
+// one render-time capital is sentence(), on a step label, its placeholder and a group heading.
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { ACTIONS } from '../../../src/dashboard/page/action-registry';

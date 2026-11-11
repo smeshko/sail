@@ -87,5 +87,5 @@ export function dayOf(iso: string | undefined, offsetMinutes: number): string | 
   return Number.isNaN(at) ? undefined : dayOfMs(at, offsetMinutes);
 }
 
-/** `text` with its first letter upper-cased: the case of a heading built from an action's words. */
+/** `text` with its first letter upper-cased: the Case rule's one render-time capital, for a heading built from an action's words. */
 export const sentence = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1);
