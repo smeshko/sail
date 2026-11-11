@@ -644,18 +644,29 @@ test('a POST to resume a suspended run starts `sail resume` with the raise, answ
   expect(JSON.parse(runs.body).map((run: { runId: string }) => run.runId)).not.toContain(`${FAKE_3_ID}.log`);
 });
 
-test('a POST to restart a failed run starts `sail run --from-run` under a minted id of its ticket and answers 202 with it once run.json exists', async () => {
+test('a POST to restart a failed run starts `sail run --from-run` under a minted id of its ticket and answers 202 with it once its STATUS reads', async () => {
   m = seedFixtures();
   const stub = stubSail(
-    `id=$(echo "$*" | sed 's/.*--run-id //')\nmkdir -p ".sail-runs/$id"\necho '{}' > ".sail-runs/$id/run.json"\nsleep 1`,
+    `id=$(echo "$*" | sed 's/.*--run-id //')\nmkdir -p ".sail-runs/$id"\necho '{}' > ".sail-runs/$id/run.json"\nsleep 0.5\nprintf 'running\\n' > ".sail-runs/$id/STATUS"\nsleep 1`,
   );
   const server = startWith(stub.cli);
   const response = await post(server, RESTART, startedBy('{"stage":"spec"}'));
   const { runId } = (await response.json()) as { runId: string };
   expect(response.status).toBe(202);
   expect(isRunIdOf('FAKE-2', runId)).toBe(true);
+  expect(readFileSync(join(m.alpha.clone, '.sail-runs', runId, 'STATUS'), 'utf8')).toBe('running\n');
   expect(stub.argv()).toEqual([`run --from-run ${FAKE_2_ID} --stage spec --continue --run-id ${runId}`]);
   expect(dashboardLogs(m.alpha)).toEqual([`${runId}.log`]);
+});
+
+test('a restart whose sail exits after run.json and before STATUS is 409 with the last line it printed', async () => {
+  m = seedFixtures();
+  const stub = stubSail(
+    `id=$(echo "$*" | sed 's/.*--run-id //')\nmkdir -p ".sail-runs/$id"\necho '{}' > ".sail-runs/$id/run.json"\necho 'sail: the run directory was not written' >&2\nexit 4`,
+  );
+  const server = startWith(stub.cli);
+  const response = await post(server, RESTART, startedBy('{"stage":"spec"}'));
+  expect([response.status, await response.json()]).toEqual([409, { error: 'sail: the run directory was not written' }]);
 });
 
 test('a start the sail refuses with exit code 3 is 409 with the last line it printed', async () => {

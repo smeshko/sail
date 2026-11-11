@@ -49,7 +49,9 @@
 //   run moved on meanwhile is dropped rather than run a second time.
 // - **A waiting item**: a ticket with a prerequisite that is not Done or Canceled (or one the source can't read) is
 //   held where it is, once it is eligible otherwise: it uses no slot, counts no attempt and is dropped for nothing. The
-//   item's `waitingOn` names the open prerequisites and `queue:waiting` says so when that list changes. The ticket is
+//   item's `waitingOn` names the open prerequisites and `queue:waiting` says so when that list changes. An item a failed
+//   ticket read left `failed` is queued again, its reason and retry time cleared, on the first read that finds a
+//   prerequisite still open. The ticket is
 //   read fresh once per poll interval, not on every tick, so the first re-read past the last prerequisite closing
 //   starts it and clears `waitingOn`. A forced item's first dispatch reads the ticket for this alone, and waits too. A
 //   workflow that declares `ignorePrerequisites` holds nothing here, and its run's start refuses nothing. The watcher

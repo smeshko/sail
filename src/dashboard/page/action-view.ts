@@ -19,6 +19,8 @@ export interface ControlOptions {
   title?: string;
   /** Carry the subject's `data-repo`, `data-workflow` and `data-item`. */
   data?: boolean;
+  /** More `data-*` the button carries, by name: `{ harness: 'k' }` is `data-harness="k"`. */
+  attrs?: Readonly<Record<string, string>>;
   /** Wrap the parameters and the button in a `span.act`. */
   wrap?: boolean;
 }
@@ -86,6 +88,6 @@ export function actionControl(
   return wrap(
     html`${params}<button class="${options.class ?? 'btn'}" data-action="${def.id}"${
       options.data === true ? dataOf(subject) : ''
-    }${options.title === undefined ? '' : html` title="${options.title}"`}>${label}</button>`,
+    }${Object.entries(options.attrs ?? {}).map(([name, value]) => html` data-${name}="${value}"`)}${options.title === undefined ? '' : html` title="${options.title}"`}>${label}</button>`,
   );
 }

@@ -24,7 +24,9 @@
 //    clone and passes the CLI's line and refusals through. A watch with no live watcher starts one, detached, its
 //    output in `.sail-runs/dashboard/watcher.log`, and answers 202 `{ message, pid }` once the registry records it; any
 //    other change logs to `watch-set.log` and answers 200 `{ message, workflows }`, 202 `{ waiting }` when the command
-//    is not taken yet, or 409 with the CLI's refusal.
+//    is not taken yet, or 409 with the CLI's refusal. A release of a usage-limit hold, POST to
+//    `/api/repos/<repo>/queues/<workflow>/release` (body `{ harnessKey }`), needs no watcher: it writes only `holds/` in
+//    the machine directory, as `sail watch --release-hold` does, and answers 200 `{ message }` with the line that prints.
 // 3. A WebSocket upgrade needs a same-origin `Origin`, or no `Origin` and the client header: browsers can't set headers
 //    on an upgrade, but always send `Origin`.
 // 4. A GET of exactly `/` is the page, which a navigation fetches with no header of its own. It holds no data: all it
@@ -49,6 +51,7 @@ import { newRunId } from '../engine/run-id';
 import { formatIssue } from '../engine/schemas';
 import { stoppedMessage, stopRun } from '../engine/stop';
 import type { TicketSource } from '../ports/ticket-source';
+import { releasedLine, releaseHold } from '../watch/holds';
 import { commandTaken, dropCommand, NOT_TAKEN } from '../watch/inbox';
 import { commandFor, itemLine, outcomeOf, streamMark } from '../watch/queue-commands';
 import { queueItemsNaming, startingRun } from '../watch/queue-store';
@@ -65,6 +68,8 @@ import { createIndexFeed, openQueueFollow, openRunStream, resolveTarget } from '
 
 export interface DashboardOptions {
   registryDir: string;
+  /** sail's machine directory, where a release of a hold is recorded: the registry's parent when left out. */
+  machineDir?: string;
   /** 0 picks a free port. */
   port: number;
   /** How often a run stream polls its events once caught up. 200 ms by default. */
@@ -105,6 +110,11 @@ const origins = (port: number) => [`127.0.0.1:${port}`, `localhost:${port}`];
 
 /** The one path a POST is served at: `/api/repos/<repo>/queues/<workflow>/move`. */
 const MOVE_PATH = /^\/api\/repos\/[^/]+\/queues\/[^/]+\/move$/;
+
+/** The path a release of a usage-limit hold is made at: `/api/repos/<repo>/queues/<workflow>/release`. */
+const RELEASE_PATH = /^\/api\/repos\/[^/]+\/queues\/[^/]+\/release$/;
+
+const ReleaseBody = z.strictObject({ harnessKey: z.string().min(1).max(100) });
 
 /** The paths a queue change is made at: `/api/repos/<repo>/queues/<workflow>/poll`, `…/add`, `…/requeue` and `…/drop`. */
 const QUEUE_OP_PATH = /^\/api\/repos\/[^/]+\/queues\/[^/]+\/(poll|add|requeue|drop)$/;
@@ -192,6 +202,20 @@ async function moveRoute(registryDir: string, segments: string[], request: Reque
     ...(before === undefined ? { after: target } : { before: target }),
   });
   return Response.json({ file }, { status: 202 });
+}
+
+/** A release of the usage-limit hold on a harness key, as `sail watch --release-hold` makes it: no watcher is needed. */
+async function releaseRoute(options: DashboardOptions, segments: string[], request: Request): Promise<Response> {
+  const [, , name = '', , workflow = ''] = segments;
+  const entry = findRepo(options.registryDir, name);
+  if (entry === undefined) return error(404, `no repository '${name}'`);
+  const dir = findQueueDir(entry, workflow);
+  if (typeof dir !== 'string') return error(404, dir.missing);
+  const parsed = await bodyOf(request, ReleaseBody, 'a release');
+  if (parsed instanceof Response) return parsed;
+  const { harnessKey } = parsed.body;
+  const held = releaseHold(options.machineDir ?? dirname(options.registryDir), harnessKey, new Date());
+  return Response.json({ message: releasedLine(harnessKey, held) });
 }
 
 /**
@@ -402,7 +426,7 @@ async function resumeRoute(starts: Starts, segments: string[], request: Request)
 
 /**
  * Starts `sail run --from-run <run> --stage <stage> --continue --run-id <minted>` for a failed run, detached in its
- * clone, under an id minted here so the answer can name the new run. Answers 202 `{ runId }` once its `run.json` exists.
+ * clone, under an id minted here so the answer can name the new run. Answers 202 `{ runId }` once its `STATUS` reads, which the run writes after its `run.json`.
  */
 async function restartRoute(starts: Starts, segments: string[], request: Request): Promise<Response> {
   const { options, underway } = starts;
@@ -435,7 +459,15 @@ async function restartRoute(starts: Starts, segments: string[], request: Request
     const log = join(runs, 'dashboard', `${minted}.log`);
     const args = ['run', '--from-run', runId, '--stage', stage, '--continue', '--run-id', minted];
     const spawned = spawnDetached(dirname(entry.sailDir), log, args, environmentOf(options), options.cli);
-    const opened = () => existsSync(join(runs, minted, RUN_HEADER_FILE));
+    const opened = () => {
+      if (!existsSync(join(runs, minted, RUN_HEADER_FILE))) return false;
+      try {
+        readStatus(join(runs, minted));
+        return true;
+      } catch {
+        return false;
+      }
+    };
     return await started(spawned, log, options.startWaitMs ?? 120_000, opened, runAnswers(minted));
   } finally {
     underway.delete(runId);
@@ -609,8 +641,8 @@ export function guard(request: Request, port: number): Response | undefined {
     const path = new URL(request.url).pathname;
     if (
       request.method !== 'POST' ||
-      ![MOVE_PATH, QUEUE_OP_PATH, RESUME_PATH, RESTART_PATH, STOP_PATH, CLEAN_PATH, WATCH_PATH].some((each) =>
-        each.test(path),
+      ![MOVE_PATH, QUEUE_OP_PATH, RELEASE_PATH, RESUME_PATH, RESTART_PATH, STOP_PATH, CLEAN_PATH, WATCH_PATH].some(
+        (each) => each.test(path),
       )
     ) {
       return error(
@@ -783,6 +815,7 @@ export function startDashboard(options: DashboardOptions): Dashboard | { refused
             self.timeout(request, 0);
             return queueOpRoute(options, segments, request);
           }
+          if (RELEASE_PATH.test(path)) return releaseRoute(options, segments, request);
           return moveRoute(registryDir, segments, request);
         }
         return route(options, segments, url);

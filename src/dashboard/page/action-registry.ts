@@ -1,5 +1,5 @@
 // The page's actions, defined once: each thing a person can have done from the page (stop, stop now, resume, restart,
-// clean, drop, requeue, move, poll, add, add skipping its checks, watch, unwatch, all clear) with its id and label, the subject it applies to, its
+// clean, drop, requeue, move, poll, release a usage-limit hold, add, add skipping its checks, watch, unwatch, all clear) with its id and label, the subject it applies to, its
 // availability from the server's offers, its parameters, its tier, its request and what its answer means. Pure: it
 // holds no host, no state and no storage, so `act.ts` carries any entry out and `action-view.ts` draws any entry, and an
 // entry added here needs nothing else. This is the only page module that names a POST endpoint.
@@ -581,6 +581,24 @@ export const ACTIONS: readonly ActionDef[] = [
     request: (subject) => ({ path: queuePath(subject, '/poll'), body: {} }),
     underway: 'polling…',
     answer: queueAnswer('poll'),
+  },
+  {
+    id: 'release-hold',
+    label: () => 'release',
+    appliesTo: ['workflow'],
+    tier: 'confirmed',
+    place: 'queue',
+    // The hold is the machine's, not the watcher's: a release needs no watcher, so no offer gates it.
+    params: () => [{ name: 'harness', dom: 'harness', type: 'text', given: 'data' }],
+    available: () => ({ offered: true, enabled: true }),
+    underway: 'releasing…',
+    dialog: (_subject, values) => ({
+      title: `release the usage-limit hold on ${values.harness ?? ''}`,
+      lines: [`releasing ends every watcher's hold on ${values.harness ?? ''}, and dispatch resumes`],
+      verb: 'release',
+    }),
+    request: (subject, values) => ({ path: queuePath(subject, '/release'), body: { harnessKey: values.harness } }),
+    answer: queueAnswer('release'),
   },
   {
     id: 'add-ticket',

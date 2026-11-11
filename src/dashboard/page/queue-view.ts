@@ -6,10 +6,12 @@
 // neighbour, and a ⋯ on any item but a running one, which opens its menu: requeue, on a parked item or a failed one
 // whose run has ended, and drop, which opens the confirmation dialog. One menu is open at a time. The answer to any of
 // them, a refusal or that the watcher has not taken it yet, is a toast, and while a request is out the header or the
-// item's row reads the word under way. While the workflow isn't watched, or its watcher isn't running, which the index
-// says from the live watcher, every one of those controls is drawn disabled and the server's reason shows beside the
-// poll button. An item whose run the list shows opens it. A waiting item shows its priority. A held item shows
-// when its hold ends and why, and its hold's events name it. An item that waits on its ticket's prerequisites names them.
+// item's row reads the word under way. A queue held on the usage limit of a harness key also offers a release of that
+// hold, confirmed in the dialog: it needs no watcher. While the workflow isn't watched, or its watcher isn't running,
+// which the index says from the live watcher, every one of those controls is drawn disabled and the server's reason
+// shows beside the poll button. An item whose run the list shows opens it. A waiting item shows its priority. A held
+// item shows when its hold ends and why, and its hold's events name it. An item that waits on its ticket's
+// prerequisites names them.
 import type { QueueEvent } from '../../events/types';
 import type { QueueItemState } from '../../watch/queue-store';
 import type { RepoOffers } from '../offers';
@@ -124,6 +126,21 @@ function itemMenu(panel: QueuePanel, item: PanelItem, ui: UiState, why: string |
   return html`<span class="qmore">${toggle}<span class="qmenu">${buttons}</span></span>`;
 }
 
+/**
+ * The release of the usage-limit hold on `key`, drawn after the held chip: a `release` button, which opens the
+ * confirmation dialog. The hold is the machine's, so it needs no watcher.
+ */
+function releaseControl(panel: QueuePanel, key: string, ui: UiState): SafeHtml | '' {
+  const def = actionOf('release-hold');
+  if (def === undefined) return '';
+  const subject: Subject = { kind: 'workflow', repo: panel.repo, workflow: panel.workflow };
+  return actionControl(def, subject, ui.act, panelSource(panel), {
+    data: true,
+    attrs: { harness: key },
+    title: `release the usage-limit hold on ${key}`,
+  });
+}
+
 /** The field to add a ticket by its key, as typed so far, and the two buttons that add it, the second skipping its checks. */
 function addForm(panel: QueuePanel, ui: UiState, why: string | undefined): SafeHtml {
   const typed = ui.act.drafts['add-ticket'];
@@ -227,7 +244,7 @@ function panelView(
   }${paused === undefined ? '' : html`<span class="warnchip">paused: ${paused.port} ${paused.adapter}: ${paused.message}</span>`}${
     held === undefined
       ? ''
-      : html`<span class="warnchip">held${held.until === undefined ? '' : html` until ${clock(held.until, ui.tz)}`}: ${held.reason}</span>`
+      : html`<span class="warnchip">held${held.until === undefined ? '' : html` until ${clock(held.until, ui.tz)}`}: ${held.reason}</span>${held.harnessKey === undefined ? '' : releaseControl(panel, held.harnessKey, ui)}`
   }${
     !queueOffered(panel, 'poll-queue')
       ? ''
