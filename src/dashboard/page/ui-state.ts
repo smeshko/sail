@@ -35,6 +35,33 @@ export interface FocusState {
   open?: { subject: Subject; at: number };
 }
 
+/**
+ * One step the command menu asks: the `at`-th parameter of an action for a subject, with what the earlier steps took,
+ * or the choice of the queue an action without a subject is done to.
+ */
+export type MenuStep =
+  | {
+      action: string;
+      subject: Subject;
+      data: Record<string, string>;
+      values: Record<string, string>;
+      at: number;
+    }
+  | { pick: 'queue'; action: string };
+
+/** The command menu while it is open: the subject frozen at the open, what is typed, the highlighted row and the steps. */
+export interface MenuState {
+  mode: 'full' | 'context';
+  subject?: Subject;
+  query: string;
+  /** The highlighted row, by its place in the rows drawn. */
+  at: number;
+  steps: MenuStep[];
+  error?: string;
+  /** Where a right-click opened it, in the page's pixels. */
+  point?: { x: number; y: number };
+}
+
 export interface UiState {
   repo?: string;
   runId?: string;
@@ -85,6 +112,8 @@ export interface UiState {
   dialog?: DialogView;
   /** The toasts on the stack, oldest first. */
   toasts: Toast[];
+  /** The command menu, while it is open. */
+  menu?: MenuState;
   /** The subject each source of the focus holds. */
   focus: FocusState;
   /** What a subject reads while a request for it is out, by the id `underwayId()` gives: `stopping…`. */
