@@ -133,6 +133,83 @@ describe('audit 2: rows say what they are (ADW-543)', () => {
   });
 });
 
+describe("a run's row leads with its title, its ID under it (ADW-550)", () => {
+  const rowOf = (extra: Partial<ListRun>, status = 'running', fields = {}) => {
+    const view = status === 'completed' || status === 'failed' ? 'history' : 'active';
+    const list = [repo('alpha', [run('r-1', status, '2026-10-01T10:00:00Z', { durationMs: 65_000, ...extra })])];
+    const markup = renderList(view, list, ui(fields), NOW, undefined as never).value;
+    return markup.match(/<div class="run lrow.*?<\/button>/s)?.[0] ?? '';
+  };
+  const inner = (row: string) => row.slice(row.indexOf('<span class="r-line">'), -'</button>'.length);
+
+  test("a ticket's run: the title on the first line with the duration, the ticket key alone on the second", () => {
+    expect(inner(rowOf({ ticketKey: 'ADW-1', title: 'Fix the parser' }))).toBe(
+      '<span class="r-line"><span class="st p-run"></span><span class="r-title">Fix the parser</span><span class="r-el">1m 5s</span></span><span class="r-sub"><span class="r-id">ADW-1</span></span>',
+    );
+  });
+
+  test("a pull request's run shows the pull request's title, with PR #n under it and the whole title in its tooltip", () => {
+    const row = rowOf({ pr: 305, title: 'feat(dashboard): the command menu is a listbox' });
+    expect(inner(row)).toBe(
+      '<span class="r-line"><span class="st p-run"></span><span class="r-title">feat(dashboard): the command menu is a listbox</span><span class="r-el">1m 5s</span></span><span class="r-sub"><span class="r-id">PR #305</span></span>',
+    );
+    expect(row).toContain('title="r-1 · feat(dashboard): the command menu is a listbox"');
+  });
+
+  test('a run with no title leads with its ID on the first line and has no second line', () => {
+    const row = rowOf({ pr: 305 });
+    expect(inner(row)).toBe(
+      '<span class="r-line"><span class="st p-run"></span><span class="r-title">PR #305</span><span class="r-el">1m 5s</span></span>',
+    );
+    expect(inner(rowOf({ ticketKey: 'COACH-180' }))).toContain('<span class="r-title">COACH-180</span>');
+    expect(inner(rowOf({}))).toContain('<span class="r-title">r-1</span>');
+    expect(row).not.toContain('r-sub');
+    expect(row).not.toContain('r-id');
+    expect(row).not.toContain('<span class="r-title"></span>');
+  });
+
+  test('the stalled mark and the stop reason sit at the right of the second line, and of the one line of a run with no title', () => {
+    expect(inner(rowOf({ ticketKey: 'ADW-1', title: 'T', stalled: 'spec#1' }))).toBe(
+      '<span class="r-line"><span class="st p-run"></span><span class="r-title">T</span><span class="r-el">1m 5s</span></span><span class="r-sub"><span class="r-id">ADW-1</span><span class="stalled">stalled spec#1</span></span>',
+    );
+    expect(inner(rowOf({ ticketKey: 'ADW-1', title: 'T', stopReason: 'stage_error' }, 'failed'))).toBe(
+      '<span class="r-line"><span class="st p-fail"></span><span class="r-title">T</span><span class="r-el">1m 5s</span></span><span class="r-sub"><span class="r-id">ADW-1</span><span class="why fail">stage_error</span></span>',
+    );
+    expect(inner(rowOf({ ticketKey: 'ADW-1', stalled: 'spec#1' }))).toBe(
+      '<span class="r-line"><span class="st p-run"></span><span class="r-title">ADW-1</span><span class="stalled">stalled spec#1</span><span class="r-el">1m 5s</span></span>',
+    );
+    expect(inner(rowOf({ ticketKey: 'ADW-1', stopReason: 'usage_limit' }, 'suspended'))).toBe(
+      '<span class="r-line"><span class="st p-warn"></span><span class="r-title">ADW-1</span><span class="r-el">1m 5s</span><span class="why">usage_limit</span></span>',
+    );
+  });
+
+  test("an unreadable run's problem goes under its two lines, and a picked row's tick leads its first", () => {
+    expect(inner(rowOf({ ticketKey: 'ADW-1', title: 'T', problem: 'summary.json is not a summary' }, 'unknown'))).toBe(
+      '<span class="r-line"><span class="st p-skip"></span><span class="r-title">T</span><span class="r-el">1m 5s</span></span><span class="r-sub"><span class="r-id">ADW-1</span></span><span class="r-problem" title="summary.json is not a summary">summary.json is not a summary</span>',
+    );
+    const picked = rowOf({ ticketKey: 'ADW-1', title: 'T' }, 'completed', { listSelected: ['run:alpha/r-1'] });
+    expect(picked).toContain('<div class="run lrow picked" data-row="run:alpha/r-1" aria-selected="true"');
+    expect(inner(picked)).toStartWith(
+      '<span class="r-line"><span class="r-tick" aria-hidden="true">✓</span><span class="st p-pass"></span><span class="r-title">T</span>',
+    );
+  });
+
+  test('the open row and the cursor are drawn on a two-line row as on any other, with its ⋯ beside it', () => {
+    const list = [repo('alpha', [run('r-1', 'running', '2026-10-01T10:00:00Z', { ticketKey: 'ADW-1', title: 'T' })])];
+    const markup = renderList(
+      'active',
+      list,
+      ui({ repo: 'alpha', runId: 'r-1', listCursor: 'run:alpha/r-1' }),
+      NOW,
+      undefined as never,
+    ).value;
+    expect(markup).toContain('<div class="run lrow sel cur" data-row="run:alpha/r-1"');
+    expect(markup).toContain(
+      '<span class="r-sub"><span class="r-id">ADW-1</span></span></button><button class="r-more" type="button" data-action="run-menu"',
+    );
+  });
+});
+
 test('the Active list is headed Active with its count, then waiting on you and running with theirs', () => {
   const markup = draw('active');
   expect(markup).toContain('<span class="lh-t">Active</span><span class="c">3</span>');
@@ -145,7 +222,7 @@ test('a run row holds its status, id, title, repository › workflow, duration, 
   const markup = draw('active');
   const row = markup.match(/<div class="run lrow" data-row="run:alpha\/a-run"[^>]*>.*?<\/button>/s)?.[0] ?? '';
   expect(row).toContain(
-    '<span class="st p-run"></span><span class="r-id">ADW-1</span><span class="r-title">Fix the parser</span><span class="r-el">1m 5s</span>',
+    '<span class="r-line"><span class="st p-run"></span><span class="r-title">Fix the parser</span><span class="r-el">1m 5s</span></span><span class="r-sub"><span class="r-id">ADW-1</span></span>',
   );
   expect(row).not.toContain('r-wf');
   expect(row).not.toContain('r-cost');
@@ -271,7 +348,9 @@ test("while a watch request is out a repository's watch buttons read the word un
 
 test('while a request for a run is out its row reads the word under way in place of the status dot', () => {
   const markup = draw('active', { underway: { 'run:alpha/a-run': 'stopping…' } });
-  expect(markup).toContain('<span class="r-line"><span class="busy">stopping…</span><span class="r-id">ADW-1</span>');
+  expect(markup).toContain(
+    '<span class="r-line"><span class="busy">stopping…</span><span class="r-title">Fix the parser</span>',
+  );
   expect(draw('active')).not.toContain('busy');
 });
 
@@ -314,7 +393,9 @@ test('a pull-request run reads PR #<n>, with its run id leading the title in its
     NOW,
     undefined as never,
   ).value;
-  expect(markup).toContain('<span class="r-id">PR #12</span>');
+  expect(markup).toContain(
+    '<span class="r-title">Fix it</span><span class="r-el">—</span></span><span class="r-sub"><span class="r-id">PR #12</span></span>',
+  );
   expect(markup).toContain(`title="${id} · Fix it"`);
   expect(markup).not.toContain('ADW-9');
 });

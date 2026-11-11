@@ -327,7 +327,8 @@ test('row, group and head heights are set once, in custom properties the fit tes
   expect(declarationsOf(':root')).toMatch(/--row-h:\s*28px/);
   expect(declarationsOf(':root')).toMatch(/--group-h:\s*28px/);
   expect(declarationsOf(':root')).toMatch(/--list-head-h:\s*40px/);
-  expect(declarationsOf('.run')).toContain('min-height: var(--row-h)');
+  expect(declarationsOf(':root')).toMatch(/--run-h:\s*44px/);
+  expect(declarationsOf('.run')).toContain('min-height: var(--run-h)');
   expect(declarationsOf('.lgh')).toContain('min-height: var(--group-h)');
   expect(declarationsOf('.list-h')).toContain('min-height: var(--list-head-h)');
 });

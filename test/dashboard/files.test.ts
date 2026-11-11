@@ -1,10 +1,19 @@
 // What the dashboard reads: repositories from the registry, their runs, and a call's files, every path built from a
 // registry entry and checked to stay inside its run directory. Each refusal first finds what it should, so a resolver
 // that refuses everything fails too.
-import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { appendFileSync, cpSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { callFile, findRepo, findRunDir, index, readSummary, repos, runItems } from '../../src/dashboard/files';
+import {
+  callFile,
+  findRepo,
+  findRunDir,
+  index,
+  intakeTitle,
+  readSummary,
+  repos,
+  runItems,
+} from '../../src/dashboard/files';
 import { readEvents } from '../../src/events/consumers/ndjson';
 import {
   appendEvent,
@@ -53,6 +62,74 @@ test('two registered clones are listed side by side, each with its run, its stat
 });
 
 const WATCH_ONLY = { watch: { enabled: true }, start: { enabled: true, workflows: [] }, workflows: {} };
+
+describe("a run's title from its intake (ADW-550)", () => {
+  const out = () => join(m.alpha.runDir, '00-intake', 'call-1', 'out');
+  /** Makes alpha's run one started from pull request 12, as its header and summary name it, with the intake's `pr.json`. */
+  const asPullRequest = (pr: string) => {
+    const source = { kind: 'pr', number: 12, headSha: 'ab78cf54098a7c45d1b70f4240cf1013784d4036', via: 'watch' };
+    const header = golden('run.json');
+    writeFileSync(join(m.alpha.runDir, 'run.json'), JSON.stringify({ ...header, source: { ...source, forced: [] } }));
+    const { ticket: _, ...summary } = golden('summary.json');
+    writeFileSync(join(m.alpha.runDir, 'summary.json'), JSON.stringify({ ...summary, source }));
+    rmSync(join(out(), 'ticket.json'));
+    writeFileSync(join(out(), 'pr.json'), pr);
+  };
+
+  test("a pull-request run, whose summary names no ticket, is listed with the title of its intake's pr.json", () => {
+    asPullRequest(JSON.stringify({ number: 12, title: 'feat: shout the greeting', body: 'long' }));
+    const [item] = runItems(entryOf(m.alpha));
+    expect(item?.problem).toBeUndefined();
+    expect(item?.summary?.ticket).toBeUndefined();
+    expect(item?.source).toMatchObject({ kind: 'pr', number: 12 });
+    expect(item?.title).toBe('feat: shout the greeting');
+    // the ticket run beside it names its ticket in its summary, so nothing more is read for it
+    expect(runItems(entryOf(m.beta))).toEqual([goldenItem()]);
+  });
+
+  test('a ticket run whose summary names no ticket, as a seeded run, is listed with the title of its ticket.json', () => {
+    const { ticket, ...summary } = golden('summary.json');
+    writeFileSync(join(m.alpha.runDir, 'summary.json'), JSON.stringify(summary));
+    const [item] = runItems(entryOf(m.alpha));
+    expect(item?.summary?.ticket).toBeUndefined();
+    expect(item?.title).toBe(ticket.title);
+  });
+
+  test.each([
+    ['not JSON yet', '{"title": "half'],
+    ['null', 'null'],
+    ['no title', '{"number": 12}'],
+    ['a title that is not text', '{"title": 12}'],
+    ['a blank title', '{"title": "  "}'],
+  ])('a pr.json that is %s gives no title, and the run is still listed', (_, text) => {
+    asPullRequest(text);
+    const [item] = runItems(entryOf(m.alpha));
+    expect([item?.runId, item?.source?.kind, item?.problem]).toEqual([GOLDEN_RUN_ID, 'pr', undefined]);
+    expect(item && 'title' in item).toBe(false);
+  });
+
+  test('a run with no pr.json has no title until the file is written, and a title once read is not read again', () => {
+    asPullRequest('{"title": "first"}');
+    rmSync(join(out(), 'pr.json'));
+    expect(intakeTitle(m.alpha.runDir, 'pr')).toBeUndefined();
+    writeFileSync(join(out(), 'pr.json'), '{"title": "first"}');
+    expect(intakeTitle(m.alpha.runDir, 'pr')).toBe('first');
+    writeFileSync(join(out(), 'pr.json'), '{"title": "second"}');
+    expect(intakeTitle(m.alpha.runDir, 'pr')).toBe('first');
+  });
+
+  test('a pr.json that links out of the run gives no title, where the same file inside it gives one', () => {
+    asPullRequest('{"title": "inside"}');
+    const outside = join(m.root, 'outside.json');
+    writeFileSync(outside, '{"title": "outside"}');
+    rmSync(join(out(), 'pr.json'));
+    symlinkSync(outside, join(out(), 'pr.json'));
+    expect(intakeTitle(m.alpha.runDir, 'pr')).toBeUndefined();
+    rmSync(join(out(), 'pr.json'));
+    writeFileSync(join(out(), 'pr.json'), '{"title": "inside"}');
+    expect(intakeTitle(m.alpha.runDir, 'pr')).toBe('inside');
+  });
+});
 
 test('a clone whose .sail/ was deleted is listed with a problem and no runs, beside the one that still has its run', () => {
   rmSync(m.alpha.sailDir, { recursive: true });
@@ -270,10 +347,12 @@ test.each([
     const [item] = runItems(entryOf(m.alpha));
     expect(item?.summary).toBeNull();
     expect(item?.problem).toContain('summary.json is not a sail.summary.v1');
+    // Its title is then the one its intake wrote, so its row still says what it is (ADW-550).
     expect({ ...item, summary: undefined, problem: undefined }).toEqual({
       ...goldenItem(),
       summary: undefined,
       problem: undefined,
+      title: golden('summary.json').ticket.title,
     });
     expect(runItems(entryOf(m.beta))).toEqual([goldenItem()]);
   },

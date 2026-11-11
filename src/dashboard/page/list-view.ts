@@ -6,8 +6,10 @@
 // in Queues one per repository, and the Inbox's one group each of runs, parked items and problems, whose rows lead with
 // what they are about, then what happened and its detail, open their run (at its last call in error) or queue, the view
 // staying Inbox, and carry a ✕ that dismisses them. A run's row is a `div` holding two sibling buttons: its own, which
-// opens the run and shows on one line its status, id, title, stalled mark, duration and stop reason (amber, and red on
-// a failed run), with a problem under it, two lines at most, its paths relative to the clone, and a ⋯ of its own that
+// opens the run and shows on two lines, at one fixed height (`--run-h`), its status, title and duration, then, smaller
+// and quieter, its ID (its ticket key or `PR #n`) and at the right its stalled mark or its stop reason (amber, and red
+// on a failed run); a run with no title leads with its ID on the one line, which then holds them all, at the same
+// height; with a problem under them, two lines at most, its paths relative to the clone, and a ⋯ of its own that
 // opens the run and a menu of what it offers: Resume, Restart, Stop and Clean. The menu is drawn inside its row and
 // floats over the rows under it, pushing none down. A queue's row is a `div` holding its open button and, beside it,
 // poll, watch and unwatch from the registry. The button names the live watcher's watch state, what waits, runs, failed
@@ -118,23 +120,33 @@ const cur = (id: string, ui: UiState) => (ui.listCursor === id ? ' cur' : '');
 const problemLine = (problem: string): SafeHtml =>
   html`<span class="r-problem" title="${problem}">${fromClone(problem)}</span>`;
 
+/**
+ * A run's row: its title, then its ID under it with what stopped or stalls it; a run with no title leads with its ID,
+ * on one line.
+ */
 function runRow(row: RunRow, ui: UiState, offers: RunActions | undefined): SafeHtml {
   const { repo, run } = row;
   const picked = ui.listSelected.includes(row.id);
   const tip = tooltipOf(run);
-  return html`<div class="run lrow${isOpen(repo, run, ui) ? ' sel' : ''}${picked ? ' picked' : ''}${cur(row.id, ui)}" data-row="${row.id}"${picked ? html` aria-selected="true"` : ''}${subjectAttrs({ kind: 'run', repo, runId: run.runId })}><button class="r-open"${
-    tip === undefined ? '' : html` title="${tip}"`
-  } data-action="select-run" data-repo="${repo}" data-run="${run.runId}"><span class="r-line">${
-    picked ? html`<span class="r-tick" aria-hidden="true">✓</span>` : ''
-  }${statusMark(repo, run, ui)}<span class="r-id">${runLabel(run)}</span><span class="r-title">${run.title}</span>${
+  const stalled =
     run.status === 'running' && run.stalled !== undefined
       ? html`<span class="stalled">stalled ${run.stalled}</span>`
-      : ''
-  }<span class="r-el">${duration(run.durationMs)}</span>${
+      : '';
+  const why =
     run.stopReason === undefined
       ? ''
-      : html`<span class="why${run.status === 'failed' ? ' fail' : ''}">${run.stopReason}</span>`
-  }</span>${run.problem === undefined ? '' : problemLine(run.problem)}</button>${more(repo, run, ui)}${runMenu(repo, run, ui, offers)}</div>`;
+      : html`<span class="why${run.status === 'failed' ? ' fail' : ''}">${run.stopReason}</span>`;
+  const lead = html`${picked ? html`<span class="r-tick" aria-hidden="true">✓</span>` : ''}${statusMark(repo, run, ui)}`;
+  const elapsed = html`<span class="r-el">${duration(run.durationMs)}</span>`;
+  const lines =
+    run.title === undefined
+      ? html`<span class="r-line">${lead}<span class="r-title">${runLabel(run)}</span>${stalled}${elapsed}${why}</span>`
+      : html`<span class="r-line">${lead}<span class="r-title">${run.title}</span>${elapsed}</span><span class="r-sub"><span class="r-id">${runLabel(run)}</span>${stalled}${why}</span>`;
+  return html`<div class="run lrow${isOpen(repo, run, ui) ? ' sel' : ''}${picked ? ' picked' : ''}${cur(row.id, ui)}" data-row="${row.id}"${picked ? html` aria-selected="true"` : ''}${subjectAttrs({ kind: 'run', repo, runId: run.runId })}><button class="r-open"${
+    tip === undefined ? '' : html` title="${tip}"`
+  } data-action="select-run" data-repo="${repo}" data-run="${run.runId}">${lines}${
+    run.problem === undefined ? '' : problemLine(run.problem)
+  }</button>${more(repo, run, ui)}${runMenu(repo, run, ui, offers)}</div>`;
 }
 
 /** The ` · ` free chips of a queue's row: its pause and its hold, in the words its queue view uses. */

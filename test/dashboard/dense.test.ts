@@ -17,6 +17,8 @@ const px = (name: string): number => {
   return Number(value);
 };
 const ROW = px('--row-h');
+/** A run's row: two lines, its title and its ID (ADW-550). */
+const RUN = px('--run-h');
 const GROUP = px('--group-h');
 const HEAD = px('--list-head-h');
 /** The window's height between the top bar and the status bar: 900 less 46 and 26. */
@@ -34,8 +36,8 @@ test('dense-active.html holds 8 run rows in two groups, and its head, groups and
   const rows = count(active, /data-row="run:/g);
   const groups = count(active, /data-action="toggle-list-group"/g);
   expect([rows, groups]).toEqual([8, 2]);
-  const height = HEAD + groups * GROUP + rows * ROW + 3 * LINE;
-  expect(height).toBe(40 + 2 * 28 + 8 * 28 + 48);
+  const height = HEAD + groups * GROUP + rows * RUN + 3 * LINE;
+  expect(height).toBe(40 + 2 * 28 + 8 * 44 + 48);
   expect(height).toBeLessThanOrEqual(SPACE);
 });
 
