@@ -580,6 +580,22 @@
         border-color: var(--warn);
         color: var(--fg);
       }
+      .wf-watch {
+        flex: 0 0 auto;
+        font-family: var(--mono);
+        font-size: 10px;
+        color: var(--fg-4);
+        white-space: nowrap;
+      }
+      .wf-watch.on {
+        color: var(--ok);
+      }
+      .wf-watch.down {
+        color: var(--warn);
+      }
+      .qadd .txt[disabled] {
+        opacity: 0.5;
+      }
       .qbadge {
         flex: 0 0 auto;
         padding: 0 5px;
@@ -591,6 +607,10 @@
       .qbadge.warn {
         color: var(--warn);
         border-color: var(--warn);
+      }
+      .qbadge.bad {
+        color: var(--del);
+        border-color: var(--del);
       }
       .qbadge.idle {
         color: var(--fg-4);
@@ -752,6 +772,14 @@
       .q-row .n {
         margin-left: auto;
         color: var(--warn);
+      }
+      .q-row {
+        flex-wrap: wrap;
+      }
+      .q-row .r-problem {
+        flex-basis: 100%;
+        overflow-wrap: anywhere;
+        text-align: left;
       }
       /* needs attention: a button in the top bar, and the pane it opens */
       .att-btn {

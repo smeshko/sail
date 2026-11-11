@@ -9,6 +9,7 @@ import { callFile, findRepo, findRunDir, index } from '../../../src/dashboard/fi
 import { boot, CLEARED_KEY, FILTER_KEY, type Page, RAIL_KEY, THEME_KEY } from '../../../src/dashboard/page/app';
 import { attention, identity } from '../../../src/dashboard/page/attention';
 import { browserHost, type ConnectHandlers, type PageHost, type Region } from '../../../src/dashboard/page/host';
+import type { QueueWatch } from '../../../src/dashboard/watch-state';
 import { readEvents } from '../../../src/events/consumers/ndjson';
 import {
   FAKE_2_ID,
@@ -238,7 +239,28 @@ afterEach(() => {
 
 /** Lets the reads' promises settle. */
 const settle = () => Bun.sleep(0);
-const indexMessage = () => ({ kind: 'index', repos: index(m.registryDir) });
+/**
+ * `offers` as the server gives them for `watch`: each enabled while the workflow is watched, else disabled with its
+ * reason, since the server says both from the one live watcher.
+ */
+function offersFor<T>(offers: T, watch: QueueWatch): T {
+  const offer = watch.state === 'watched' ? { enabled: true } : { enabled: false, why: watch.why };
+  const each = (value: unknown): unknown =>
+    value !== null && typeof value === 'object'
+      ? 'enabled' in value
+        ? { ...offer }
+        : Object.fromEntries(Object.entries(value).map(([key, inner]) => [key, each(inner)]))
+      : value;
+  return each(offers) as T;
+}
+/** The index as the server sends it; the queues are watched, as `index()` gives them for a live watcher that watches them, unless `watch` says otherwise. */
+const indexMessage = (watch: QueueWatch = { state: 'watched' }) => ({
+  kind: 'index',
+  repos: index(m.registryDir).map((repo) => ({
+    ...repo,
+    queues: repo.queues.map((queue) => ({ ...queue, watch, offers: offersFor(queue.offers, watch) })),
+  })),
+});
 const replay = (socket: FakeSocket | undefined, dir: string, end = true) => {
   for (const event of readEvents(dir)) host.push(socket, { kind: 'event', event });
   if (end) host.push(socket, { kind: 'end' });
@@ -500,7 +522,7 @@ test('a run socket closed without end reconnects after 2 s into a fresh model, o
   expect([again === queue, again?.query]).toEqual([false, queue?.query]);
   host.click({ action: 'select-queue', queue: `beta/${QUEUE_WORKFLOW}` });
   host.advance(100);
-  expect(host.regions.main).toContain('<span class="pill p-skip">unknown</span>');
+  expect(host.regions.main).toContain('<span class="pill p-pass">watched</span>');
 });
 
 test('a run stream that sends an error and closes is not reopened, keeps its cards and its error, and clicking the run opens it again from empty (ADW-209)', () => {
@@ -639,9 +661,10 @@ test("with no queue the rail has no queue row and no queue socket opens; with be
     event: { seq: 99, ts: '2026-09-24T11:09:00.000Z', type: 'watch:removed', workflow: QUEUE_WORKFLOW },
   });
   host.advance(100);
-  expect([host.renders, host.regions.main?.includes('<span class="pill p-skip">not watched</span>')]).toEqual([
-    ['main'],
+  // The pill is the live watcher's word, which only the index carries: the queue's own watch:removed changes nothing.
+  expect([host.regions.main?.includes('<span class="pill p-pass">watched</span>'), host.regions.main]).toEqual([
     true,
+    expect.not.stringContaining('not watched'),
   ]);
   rmSync(join(m.beta.clone, '.sail-runs', 'queue'), { recursive: true });
   host.push(host.open('index')[0], indexMessage());
@@ -671,7 +694,7 @@ test('a queue stream that sends an error and closes is not reopened and shows it
   host.advance(100);
   expect(queueSockets()).toHaveLength(2);
   expect(host.regions.main).not.toContain('code bad');
-  expect(host.regions.main).toContain('<span class="pill p-skip">unknown</span>');
+  expect(host.regions.main).toContain('<span class="pill p-pass">watched</span>');
   host.click({ action: 'select-queue', queue });
   expect(queueSockets()).toHaveLength(2);
 });
@@ -2007,6 +2030,10 @@ function bootWatching(workflows?: string[]) {
       ? {
           ...repo,
           watching: { pid: 4242, workflows },
+          queues: repo.queues.map((queue) => ({
+            ...queue,
+            watch: workflows.includes(queue.workflow) ? { state: 'watched' as const } : queue.watch,
+          })),
           // What the server then offers: unwatch for what is watched, and for the whole set while it holds any.
           offers: {
             watch: { enabled: true },
@@ -2231,4 +2258,29 @@ describe('all clear', () => {
       page?.stop();
     }
   });
+});
+
+test('an index that turns the open queue to watcher not running redraws main with the disabled poll, shuts the open menu and the armed drop, and a poll posts nothing', async () => {
+  page = boot(host);
+  host.push(host.open('index')[0], indexMessage());
+  host.click({ action: 'select-queue', queue: `beta/${QUEUE_WORKFLOW}` });
+  host.advance(100);
+  host.click({ action: 'item-menu', item: 'ticket:FAKE-6' });
+  host.click({ action: 'drop-item', repo: 'beta', workflow: QUEUE_WORKFLOW, item: 'ticket:FAKE-6' });
+  host.advance(100);
+  expect([page.ui.itemMenu, armedDrop()]).toEqual(['ticket:FAKE-6', 'ticket:FAKE-6']);
+  host.renders = [];
+  const why = "no watcher is running for 'beta': sail watch ticket-to-pr first";
+  host.push(host.open('index')[0], indexMessage({ state: 'watcher not running', why }));
+  host.advance(100);
+  expect(host.renders).toContain('main');
+  expect(host.regions.main).toContain(
+    `<button class="btn" disabled title="no watcher is running for &#39;beta&#39;: sail watch ticket-to-pr first">poll</button>`,
+  );
+  expect(host.regions.main).toContain('<span class="pill p-skip">watcher not running</span>');
+  expect([page.ui.itemMenu, armedDrop()]).toEqual([undefined, undefined]);
+  const posts = host.posts.length;
+  host.click({ action: 'poll-queue', repo: 'beta', workflow: QUEUE_WORKFLOW });
+  await settle();
+  expect(host.posts.length).toBe(posts);
 });

@@ -65,8 +65,9 @@ test("a result.json whose errors hold null and whose consumed and files hold unp
     workflow: 'w',
     items: [],
     counts: { queued: 0, dispatched: 0, failed: 0, parked: 0, done: 0 },
+    watch: { state: 'watcher not running' as const, why: unprintable() as string },
   };
-  expect(() => renderQueue(panel, { recent: [event], watch: 'unknown' }, initialUi(0), 0)).not.toThrow();
+  expect(() => renderQueue(panel, { recent: [event] }, initialUi(0), 0)).not.toThrow();
 });
 
 function random(seed: number) {

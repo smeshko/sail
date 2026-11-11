@@ -32,8 +32,10 @@ test('the committed dashboard views are what the fixtures render now', async () 
   expect(await renderDashboardViews(fresh)).toEqual([
     'rail.html',
     'rail-repos.html',
+    'rail-queue-problem.html',
     'attention.html',
     'queue.html',
+    'queue-watched.html',
     'run-golden.html',
     'run-fake-2.html',
     'rail-menu-fake-2.html',
