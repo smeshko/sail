@@ -101,7 +101,23 @@ class FakeHost implements PageHost {
   }
   closeDialog() {
     this.dialog = undefined;
+    this.dialogFields = {};
     this.dialogCloses++;
+  }
+  /** The values of the dialog's fields, by name, and how many times the dialog was drawn again. */
+  dialogFields: Record<string, string> = {};
+  dialogRedraws = 0;
+  dialogValue(name: string) {
+    return this.dialogFields[name];
+  }
+  /** Draws `html` into the dialog's `#dialog-body`, as the browser host does, leaving its buttons. */
+  redrawDialog(html: string) {
+    const body = /<div id="dialog-body">[\s\S]*<\/div>(?=<div class="dlg-acts">)/;
+    this.dialog =
+      this.dialog !== undefined && body.test(this.dialog)
+        ? this.dialog.replace(body, () => `<div id="dialog-body">${html}</div>`)
+        : html;
+    this.dialogRedraws++;
   }
   /** The reads of a run's actions: answered at once, and kept apart from the reads of its calls. */
   actionReads: string[] = [];
@@ -1286,10 +1302,8 @@ test('a tick that changes no markup writes no region and scrolls nothing, and on
   expect(host.scrolls).toEqual(['main']);
   host.renders = [];
   host.scrolls = [];
-  // A value typed between two unchanged ticks is still read by the draw whose write is skipped.
-  host.fields.now = 'on';
   host.advance(2500);
-  expect([host.renders, host.scrolls, page.ui.act.drafts['stop-run']?.now]).toEqual([[], [], 'on']);
+  expect([host.renders, host.scrolls]).toEqual([[], []]);
   host.advance(60_000);
   expect(host.renders).toContain('main');
   expect(host.renders).toContain('list');
@@ -1986,13 +2000,15 @@ const GOLDEN_PATH = `/api/repos/alpha/runs/${GOLDEN_RUN_ID}`;
 const FAKE_2_PATH = `/api/repos/alpha/runs/${FAKE_2_ID}`;
 const FAKE_3_PATH = `/api/repos/beta/runs/${FAKE_3_ID}`;
 const buttons = (region: string | undefined) =>
-  [...(region ?? '').matchAll(/<button class="btn"( disabled)? ?(?:data-action="(\w+-run)")?>([^<]*)<\/button>/g)].map(
-    ([, disabled, action, label]) => [label, action, disabled === undefined ? '' : 'disabled'],
-  );
+  [
+    ...(region ?? '').matchAll(
+      /<button class="btn"( disabled)? ?(?:data-action="(\w+-run(?:-now)?)")?>([^<]*)<\/button>/g,
+    ),
+  ].map(([, disabled, action, label]) => [label, action, disabled === undefined ? '' : 'disabled']);
 
 /** The lines of the dialog open now, and its primary button's verb. */
 const dialogLines = () => [...(host.dialog ?? '').matchAll(/<li>([^<]*)<\/li>/g)].map(([, line]) => line);
-const dialogVerb = () => host.dialog?.match(/data-action="dialog-confirm" autofocus>([^<]*)<\/button>/)?.[1];
+const dialogVerb = () => host.dialog?.match(/data-action="dialog-confirm"(?: autofocus)?>([^<]*)<\/button>/)?.[1];
 /** The subject of the dialog open now: its title, or undefined when none is open. */
 const dialogTitle = () => host.dialog?.match(/<h2 id="dialog-title">([^<]*)<\/h2>/)?.[1];
 
@@ -2025,11 +2041,12 @@ test("a failed run's view offers Restart with its stages and the failed one chos
     ['restart', 'restart-run', ''],
     ['clean', 'clean-run', ''],
   ]);
-  expect(host.regions.list).toContain(
-    '<option value="implement" title="implement#1 and everything after it, in loop fix from iteration 1" selected>',
-  );
+  expect(host.regions.list).not.toContain('name="stage"');
   host.click({ action: 'restart-run' });
   host.advance(100);
+  expect(host.dialog).toContain(
+    '<option value="implement" title="implement#1 and everything after it, in loop fix from iteration 1" selected>',
+  );
   expect([host.posts, dialogTitle(), dialogVerb()]).toEqual([[], `restart ${FAKE_2_ID}`, 'restart']);
   expect(dialogLines()).toEqual([
     'runs again: implement#1 and everything after it, in loop fix from iteration 1',
@@ -2050,21 +2067,24 @@ test("a failed run's view offers Restart with its stages and the failed one chos
   ]);
   expect(toasts()).toEqual([`ok restart ${FAKE_2_ID}: started ${NEW_ID}`]);
 });
-test('a stage chosen in the list is the one the restart dialog names and its confirm posts', async () => {
+test('a stage chosen in the restart dialog is the one its runs again line names and its confirm posts', async () => {
   await openOffering('alpha', FAKE_2_ID, fake2Dir(m));
-  host.fields.stage = 'spec';
   host.click({ action: 'restart-run' });
-  expect(dialogLines()[0]).toBe('runs again: spec#1 and everything after it');
+  expect(dialogLines()[0]).toBe('runs again: implement#1 and everything after it, in loop fix from iteration 1');
+  host.dialogFields.stage = 'spec';
+  host.click({ action: 'dialog-change' });
+  expect([host.dialogRedraws, dialogLines()[0]]).toEqual([1, 'runs again: spec#1 and everything after it']);
   host.click({ action: 'dialog-cancel' });
-  host.fields.stage = 'implement';
   host.click({ action: 'restart-run' });
   expect([host.posts, dialogLines()[0]]).toEqual([
     [],
     'runs again: implement#1 and everything after it, in loop fix from iteration 1',
   ]);
+  host.dialogFields.stage = 'spec';
+  host.click({ action: 'dialog-change' });
   host.click({ action: 'dialog-confirm' });
   await settle();
-  expect(host.posts).toEqual([{ path: `${FAKE_2_PATH}/restart`, body: { stage: 'implement' } }]);
+  expect(host.posts).toEqual([{ path: `${FAKE_2_PATH}/restart`, body: { stage: 'spec' } }]);
 });
 test("a refusal is a red toast in the dashboard's words that stays until dismissed, and a request that got no answer says so", async () => {
   await openOffering('alpha', FAKE_2_ID, fake2Dir(m));
@@ -2145,21 +2165,28 @@ test("a run's ⋯ opens the run and its menu under its row, reading what it offe
   expect(host.regions.list).toContain(`<div class="r-menu"><span class="act-why">run ${GOLDEN_RUN_ID} completed`);
 });
 
-test('a suspended run over its dollars offers Resume with a raise field and no Restart; with no raise typed a click is a red toast, and with one the dialog reads the raise and its confirm posts it and reads the run again', async () => {
+test('a suspended run over its dollars offers Resume and no Restart; its dialog asks the raise, keeps open with the refusal while none is typed, and posts the raise it reads and reads the run again', async () => {
   settleQueue();
   await openOffering('beta', FAKE_3_ID, m.beta.runDir);
-  expect(host.regions.list).toContain('name="raise"');
+  expect(host.regions.list).not.toContain('name="raise"');
   expect(buttons(host.regions.list).filter(([, action]) => action?.endsWith('-run'))).toEqual([
     ['resume', 'resume-run', ''],
     ['stop', 'stop-run', ''],
   ]);
   host.click({ action: 'resume-run' });
   host.advance(100);
-  expect([host.posts, host.dialog]).toEqual([[], undefined]);
-  expect(toasts()).toEqual([`bad resume ${FAKE_3_ID}: give the dollars to raise the budget by: at least 0.01`]);
-  host.fields.raise = '5';
-  host.click({ action: 'resume-run' });
-  host.advance(100);
+  expect([dialogTitle(), dialogLines(), dialogVerb(), host.posts]).toEqual([
+    `resume ${FAKE_3_ID}`,
+    ['spent $1.06 of $1.00'],
+    'resume',
+    [],
+  ]);
+  expect(host.dialog).toContain('name="raise"');
+  host.click({ action: 'dialog-confirm' });
+  expect([host.posts, toasts(), host.dialogCloses]).toEqual([[], [], 0]);
+  expect(host.dialog).toContain('give the dollars to raise the budget by: at least 0.01');
+  host.dialogFields.raise = '5';
+  host.click({ action: 'dialog-change' });
   expect([dialogTitle(), dialogLines(), dialogVerb()]).toEqual([
     `resume ${FAKE_3_ID}`,
     ['spent $1.06 of $1.00', 'raises the budget by $5.00'],
@@ -2209,27 +2236,21 @@ test("the open run's actions are read again when the index shows its status chan
   expect(host.actionReads).toHaveLength(3);
 });
 
-test("a stage chosen and a raise typed on one run don't carry over to the next opened, which defaults to its own failed stage (review R7)", async () => {
+test("a stage chosen in one run's dialog doesn't carry over to the next opened, whose dialog starts at its own failed stage (review R7)", async () => {
   await openOffering('alpha', FAKE_2_ID, fake2Dir(m));
-  host.fields = { stage: 'spec', raise: '7' };
   host.click({ action: 'restart-run' });
-  host.advance(100);
-  expect(page?.ui.act.drafts['restart-run']?.stage).toBe('spec');
-  // The first draw after the switch still finds the fields of the run left behind.
+  host.dialogFields.stage = 'spec';
+  host.click({ action: 'dialog-change' });
+  expect(dialogLines()[0]).toBe('runs again: spec#1 and everything after it');
   host.click({ action: 'select-run', repo: 'alpha', run: GOLDEN_RUN_ID });
   host.advance(100);
-  expect([page?.ui.act.drafts['restart-run']?.stage, page?.ui.act.drafts['resume-run']?.raise]).toEqual([
-    undefined,
-    undefined,
-  ]);
-  host.fields = {};
+  expect([host.dialog, page?.ui.act.drafts]).toEqual([undefined, {}]);
   host.click({ action: 'run-menu', repo: 'alpha', run: FAKE_2_ID });
   replay(host.open('run=')[0], fake2Dir(m));
   await settle();
   host.advance(100);
-  expect(host.regions.list).toContain(
-    '<option value="implement" title="implement#1 and everything after it, in loop fix from iteration 1" selected>',
-  );
+  host.click({ action: 'restart-run' });
+  expect(dialogLines()[0]).toBe('runs again: implement#1 and everything after it, in loop fix from iteration 1');
 });
 
 /** The beta queue open in the centre with its stream replayed, and the posts and renders cleared. */
@@ -2271,7 +2292,7 @@ test('a poll click posts an empty body to the queue poll route; a 200 toasts its
   expect(host.regions.toasts).toContain('role="alert"');
 });
 
-test('the add form shows once the queue stream has polled tickets; add posts the typed key and force, an empty key posts nothing, and the key is kept across a draw (ADW-460)', async () => {
+test('the add form shows once the queue stream has polled tickets, with add and add, skipping its checks and no box; add posts the typed key, an empty key posts nothing, and the key is kept across a draw (ADW-460)', async () => {
   page = boot(host);
   firstIndex();
   const [socket] = host.open('queue=');
@@ -2281,22 +2302,45 @@ test('the add form shows once the queue stream has polled tickets; add posts the
   for (const event of readEvents(queueDirOf(m))) host.push(socket, { kind: 'queue-event', event });
   host.advance(100);
   expect(host.regions.main).toContain('name="add-ticket"');
+  expect(host.regions.main).toContain('data-action="add-ticket-force"');
+  expect(host.regions.main).not.toContain('type="checkbox"');
   host.click({ action: 'add-ticket', ...BETA });
+  host.click({ action: 'add-ticket-force', ...BETA });
   await settle();
-  expect(host.posts).toEqual([]);
+  expect([host.posts, host.dialog]).toEqual([[], undefined]);
   host.fields['add-ticket'] = '  FAKE-9 ';
-  host.fields['add-force'] = 'on';
   host.postAnswer = { status: 200, body: JSON.stringify({ message: 'sail queue: queued ticket:FAKE-9 Nine' }) };
   host.click({ action: 'add-ticket', ...BETA });
   await settle();
   host.advance(100);
-  expect(host.posts).toEqual([{ path: `${QUEUE_PATH}/add`, body: { ticketKey: 'FAKE-9', force: true } }]);
+  expect(host.posts).toEqual([{ path: `${QUEUE_PATH}/add`, body: { ticketKey: 'FAKE-9' } }]);
   expect(toasts()).toEqual([`ok add beta / ${QUEUE_WORKFLOW}: sail queue: queued ticket:FAKE-9 Nine`]);
   expect(host.regions.main).toContain('value=""');
-  host.fields['add-force'] = '';
-  host.click({ action: 'add-ticket', ...BETA });
+  host.fields['add-ticket'] = 'FAKE-10';
+  host.click({ action: 'add-ticket-force', ...BETA });
+  expect([host.posts.length, dialogTitle()]).toEqual([1, 'add FAKE-10, skipping its checks']);
+  host.click({ action: 'dialog-confirm' });
   await settle();
-  expect(host.posts[1]).toEqual({ path: `${QUEUE_PATH}/add`, body: { ticketKey: 'FAKE-9' } });
+  expect(host.posts[1]).toEqual({ path: `${QUEUE_PATH}/add`, body: { ticketKey: 'FAKE-10', force: true } });
+});
+
+test("a skipping add's dialog closes with nothing sent when its workflow stops being watched", () => {
+  page = boot(host);
+  host.push(host.open('index')[0], indexMessage());
+  host.click({ action: 'select-queue', queue: `beta/${QUEUE_WORKFLOW}` });
+  host.advance(100);
+  host.fields['add-ticket'] = 'FAKE-10';
+  host.click({ action: 'add-ticket-force', ...BETA });
+  expect(dialogTitle()).toBe('add FAKE-10, skipping its checks');
+  host.push(
+    host.open('index')[0],
+    indexMessage({
+      state: 'watcher not running',
+      why: "no watcher is running for 'beta': sail watch ticket-to-pr first",
+    }),
+  );
+  host.advance(100);
+  expect([host.dialog, host.posts]).toEqual([undefined, []]);
 });
 
 test('the first click on drop opens the dialog and posts nothing; its title names the item, its lines what goes, its button the verb (ADW-514)', () => {
@@ -2493,24 +2537,33 @@ test('Stop opens the dialog on a first click and posts nothing; its confirm post
   expect(host.regions.list).not.toContain('stopping…');
   expect(host.actionReads.filter((path) => path === `${FAKE_3_PATH}/actions`).length).toBeGreaterThan(1);
 });
-test('with Stop now ticked, the dialog says so and the post is { now: true }', async () => {
+test('the run menu offers stop and stop now as two buttons; Stop now opens its own dialog and the post is { now: true }', async () => {
   settleQueue();
   await openOffering('beta', FAKE_3_ID, m.beta.runDir);
-  host.fields.now = 'on';
-  host.click({ action: 'stop-run' });
-  expect(dialogLines()[0]).toBe('ends its running call now');
+  expect(buttons(host.regions.list).filter(([, action]) => action?.startsWith('stop-run'))).toEqual([
+    ['stop', 'stop-run', ''],
+    ['stop now', 'stop-run-now', ''],
+  ]);
+  expect(host.regions.list).not.toContain('type="checkbox"');
+  host.click({ action: 'stop-run-now' });
+  expect([dialogTitle(), dialogLines()[0], dialogVerb(), host.posts]).toEqual([
+    `stop ${FAKE_3_ID} now`,
+    'ends its running call now',
+    'stop now',
+    [],
+  ]);
   host.postAnswer = { status: 202, body: JSON.stringify({ message: 'run X ends its running call now (pid 7)' }) };
   host.click({ action: 'dialog-confirm' });
   await settle();
   expect(host.posts).toEqual([{ path: `${FAKE_3_PATH}/stop`, body: { now: true } }]);
 });
-test('ticking Stop now only records the tick: no dialog opens and nothing is posted', async () => {
+test('the dispatch of the removed stop-now action does nothing', async () => {
   settleQueue();
   await openOffering('beta', FAKE_3_ID, m.beta.runDir);
   host.fields.now = 'on';
   host.click({ action: 'stop-now' });
   host.advance(100);
-  expect([page?.ui.act.drafts['stop-run'], host.dialog, host.posts]).toEqual([{ now: 'on' }, undefined, []]);
+  expect([page?.ui.act.drafts, host.dialog, host.posts]).toEqual([{}, undefined, []]);
 });
 const domHost = () => {
   const dom = new DomHost(m);
@@ -2518,47 +2571,28 @@ const domHost = () => {
   return dom;
 };
 
-test("a raise typed in the list's run menu is read from the list and posted with the resume", async () => {
+test("the list's run menu holds no raise field, and a raise typed in the dialog is read at confirm and posted with the resume", async () => {
   settleQueue();
   const dom = domHost();
   await openOffering('beta', FAKE_3_ID, m.beta.runDir);
-  dom.field('list', 'raise').value = '5';
+  expect(host.regions.list).not.toContain('name="raise"');
   host.click({ action: 'resume-run' });
   host.advance(100);
-  expect(dialogLines()).toEqual(['spent $1.06 of $1.00', 'raises the budget by $5.00']);
-  expect(toasts()).toEqual([]);
-  expect(host.regions.list).toContain('name="raise" min="0.01" step="any" value="5"');
+  dom.dialogFields.raise = '5';
   host.click({ action: 'dialog-confirm' });
   await settle();
+  expect(toasts().at(-1)).toBe(`ok resume ${FAKE_3_ID}: resumed`);
   expect(host.posts).toEqual([{ path: `${FAKE_3_PATH}/resume`, body: { raise: { usd: 5 } } }]);
 });
 
-test("a stage chosen in the list's run menu is read from the list, named in the dialog and posted with the restart", async () => {
-  const dom = domHost();
+test("the list's run menu holds no stage choice, and the stage is asked in the dialog", async () => {
   await openOffering('alpha', FAKE_2_ID, fake2Dir(m));
-  dom.field('list', 'stage').value = 'spec';
+  expect(host.regions.list).not.toContain('<select name="stage"');
   host.click({ action: 'restart-run' });
   host.advance(100);
-  expect(dialogLines()[0]).toBe('runs again: spec#1 and everything after it');
-  host.click({ action: 'dialog-confirm' });
-  await settle();
-  expect(host.posts).toEqual([{ path: `${FAKE_2_PATH}/restart`, body: { stage: 'spec' } }]);
+  expect(host.dialog).toContain('<select name="stage" autofocus>');
 });
 
-test("stop now ticked in the list's run menu is read from the list, stays ticked across the draw, and posts { now: true }", async () => {
-  settleQueue();
-  const dom = domHost();
-  await openOffering('beta', FAKE_3_ID, m.beta.runDir);
-  dom.field('list', 'now').checked = true;
-  host.click({ action: 'stop-now' });
-  host.click({ action: 'stop-run' });
-  host.advance(100);
-  expect(dialogLines()[0]).toBe('ends its running call now');
-  expect(dom.field('list', 'now').checked).toBe(true);
-  host.click({ action: 'dialog-confirm' });
-  await settle();
-  expect(host.posts).toEqual([{ path: `${FAKE_3_PATH}/stop`, body: { now: true } }]);
-});
 test('Clean opens the dialog with what it removes and where the run directory goes, posts {} on confirm, and leaves the run for the index with the cleaned line as a toast', async () => {
   await openOffering('alpha', FAKE_2_ID, fake2Dir(m));
   host.click({ action: 'clean-run' });

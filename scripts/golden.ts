@@ -385,6 +385,23 @@ export async function renderDashboardViews(outDir: string): Promise<string[]> {
         const state: MenuState = { mode: 'full', subject: { kind: 'run', repo, runId }, query: '', at: 0, steps: [] };
         views['menu-fake-2.html'] = renderMenu(state, menuRows(state, { run: offers, index: repos }, repos, VIEWS_NOW));
       }
+      // The dialog a restart of the failed run opens: the stage is asked in it, at the offer's choice.
+      if (name === 'fake-2' && offers?.restart !== undefined) {
+        const subject = { kind: 'run', repo, runId } as const;
+        const restart = actionOf('restart-run');
+        const source = { run: offers, index: [] };
+        const view = restart?.dialog?.(subject, {}, source);
+        if (restart === undefined || view === undefined) throw new Error('restart-run has no dialog');
+        const fields = restart.params(subject, source);
+        views['dialog-restart.html'] = renderDialog(view, {
+          fields,
+          values: Object.fromEntries(
+            fields.flatMap((param) =>
+              param.type === 'choice' && param.initial !== undefined ? [[param.name, param.initial]] : [],
+            ),
+          ),
+        });
+      }
     }
     // One toast of each kind: a success, one with an Undo, and a refusal.
     views['toasts.html'] = renderToasts([

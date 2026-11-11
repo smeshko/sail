@@ -99,6 +99,7 @@ test('for a run subject the rows are exactly its offered actions: a disabled one
     ['resume', false, undefined],
     ['restart', false, undefined],
     ['stop', true, 'no watcher is running'],
+    ['stop now', true, 'no watcher is running'],
     ['clean', false, undefined],
   ]);
   expect(labels(subjectRows(RUN, source({ clean: on } as unknown as RunActions)))).toEqual(['clean']);
@@ -218,16 +219,11 @@ test('a resume step is a number field that shows what was spent, and the raise a
   ]);
 });
 
-test('an add step asks the ticket key as a text field, then force as no or yes', () => {
+test('an add step asks the ticket key as a text field, and asks nothing after it', () => {
   const key = stepOf(step('add-ticket', QUEUE, 0), source());
   expect(key.label).toBe('ticket key');
   expect(key.field).toEqual({ type: 'text', placeholder: 'ticket key' });
-  const force = stepOf(step('add-ticket', QUEUE, 1, { ticket: 'FAKE-9' }), source());
-  expect(force.label).toBe('force');
-  expect(force.rows.map((row) => [row.label, row.run])).toEqual([
-    ['no', { value: '' }],
-    ['yes', { value: 'on' }],
-  ]);
+  expect(stepOf(step('add-ticket', QUEUE, 1, { ticket: 'FAKE-9' }), source()).rows).toEqual([]);
 });
 
 test('the queue step lists each queue that offers the action, and a step with no such parameter is empty', () => {

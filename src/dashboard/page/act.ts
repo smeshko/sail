@@ -13,6 +13,10 @@
 // - While a request is out, `ui.underway` holds the word its subject's row reads in place of its status.
 // - What was typed for a parameter is read from the page (`host.value()`), else from its draft, and kept in
 //   `ui.act.drafts`, which a draw reads back first (`keep`) so a typed field survives it.
+// - A parameter an action asks in its dialog (`ask: 'dialog'`) is no draft: its value lives in the open dialog, from the
+//   parameter's initial choice, is read from the dialog's field (`host.dialogValue()`) at a change and at confirm, and
+//   goes when the dialog closes. Such an action's request is built at confirm: one the registry calls invalid keeps the
+//   dialog open, drawn again with the refusal beside the field, and no toast. A change draws the dialog's lines again.
 
 import {
   ACTIONS,
@@ -27,7 +31,7 @@ import {
   underwayId,
   type Values,
 } from './action-registry';
-import { renderDialog } from './dialog-view';
+import { type DialogAsk, renderDialog, renderDialogBody } from './dialog-view';
 import type { PageHost, Region } from './host';
 import type { UiState } from './ui-state';
 
@@ -47,7 +51,7 @@ export interface ActorEffects {
 }
 
 export interface ActorDeps {
-  host: Pick<PageHost, 'post' | 'value' | 'openDialog' | 'closeDialog'>;
+  host: Pick<PageHost, 'post' | 'value' | 'openDialog' | 'closeDialog' | 'dialogValue' | 'redrawDialog'>;
   ui: UiState;
   /** What the offers say for `subject`: a run that is not open has its own. */
   source(subject?: Subject): OfferSource;
@@ -72,9 +76,9 @@ export interface Actor {
   confirm(): void;
   /** Closes the open dialog and sends nothing. */
   cancel(): void;
+  /** A field of the open dialog changed: reads its fields and draws its lines again. */
+  changed(): void;
 }
-
-const tickOf = (value: string) => (value === '' ? '' : 'on');
 
 /** An actor that does nothing, until the shell wires the real one. */
 export function inertActor(): Actor {
@@ -85,6 +89,7 @@ export function inertActor(): Actor {
     dialogFor: () => undefined,
     confirm: () => {},
     cancel: () => {},
+    changed: () => {},
   };
 }
 
@@ -96,8 +101,11 @@ export function createActor(deps: ActorDeps): Actor {
   const stale = new Set<string>();
   /** How many run actions' requests are out: until each is answered, another run action is ignored. */
   let runsOut = 0;
-  /** The confirmation dialog open: who it is for, and what its confirm sends. */
-  let dialog: { subject: Subject; send(): void } | undefined;
+  /**
+   * The confirmation dialog open: who it is for, and what its confirm does: `submit()` answers what to send once the
+   * dialog closes, nothing, or 'keep' when it stays open. `changed()` draws it again, for a dialog that asks fields.
+   */
+  let dialog: { subject: Subject; submit(): (() => void) | 'keep' | undefined; changed?: () => void } | undefined;
 
   const draftsOf = (id: string) => {
     state.drafts[id] ??= {};
@@ -115,10 +123,9 @@ export function createActor(deps: ActorDeps): Actor {
     // A value the caller has already asked is the one given: no field the page draws takes its place.
     const given = asked?.[param.name];
     if (given !== undefined) return given;
-    const drafts = draftsOf(def.id);
+    const drafts = draftsOf(def.drafts ?? def.id);
     let value = host.value(param.dom) ?? drafts[param.name];
-    if (value === undefined && param.type === 'choice' && param.tick !== true) value = param.initial;
-    if (value !== undefined && param.type === 'choice' && param.tick === true) value = tickOf(value);
+    if (value === undefined && param.type === 'choice') value = param.initial;
     if (value !== undefined) drafts[param.name] = value;
     return value;
   }
@@ -175,13 +182,13 @@ export function createActor(deps: ActorDeps): Actor {
       else if (effect === 'leave') effects.leave();
       else if (typeof effect === 'object' && subject.kind === 'run') effects.open(subject.repo, effect.open);
       else if (effect === 'took') {
-        // A change that took empties the text typed for it, and keeps what was ticked. One with no text of its own,
-        // such as a poll or a drop, leaves every field as it is typed.
+        // A change that took empties the text typed for it. One with no text of its own, such as a poll or a drop,
+        // leaves every field as it is typed.
         const texts = def
           .params(subject, deps.source(subject))
           .filter((param) => param.type === 'text' && param.given === undefined);
         if (texts.length > 0) {
-          const drafts = draftsOf(def.id);
+          const drafts = draftsOf(def.drafts ?? def.id);
           for (const param of texts) delete drafts[param.name];
           stale.add(def.place === 'run' ? 'run' : 'queue');
           effects.took();
@@ -215,6 +222,16 @@ export function createActor(deps: ActorDeps): Actor {
     const available = def.available(subject, source);
     if (!available.offered) return;
     if (!available.enabled && def.holdsDisabled === true) return;
+    // A parameter the dialog asks is asked there, unless the caller (the command menu) has asked it already.
+    const asking = def.tier === 'confirmed' && def.dialog !== undefined;
+    const params = def.params(subject, source);
+    const inDialog = asking
+      ? params.filter((param) => param.ask === 'dialog' && asked?.[param.name] === undefined)
+      : [];
+    if (inDialog.length > 0 && def.dialog !== undefined) {
+      askInDialog(def, def.dialog.bind(def), subject, source, inDialog, data, asked);
+      return;
+    }
     const values = read(def, subject, data, asked);
     const request = def.request?.(subject, values, source);
     if (request === undefined) return;
@@ -226,7 +243,7 @@ export function createActor(deps: ActorDeps): Actor {
     const undo = def.undo?.(subject, source);
     if (def.tier === 'confirmed' && def.dialog !== undefined) {
       const view = def.dialog(subject, values, source);
-      dialog = { subject, send: () => send(def, subject, request, undo) };
+      dialog = { subject, submit: () => () => send(def, subject, request, undo) };
       ui.dialog = view;
       host.openDialog(renderDialog(view).value);
       // What was typed for its parameters is kept in the drafts, and drawn again.
@@ -236,13 +253,68 @@ export function createActor(deps: ActorDeps): Actor {
     send(def, subject, request, undo);
   }
 
+  /** Opens the dialog of `def`, which asks `asked` in it: the request is built from what the dialog holds at confirm. */
+  function askInDialog(
+    def: ActionDef,
+    dialogOf: NonNullable<ActionDef['dialog']>,
+    subject: Subject,
+    source: OfferSource,
+    asked: Param[],
+    data: Readonly<Record<string, string>>,
+    given: Values | undefined,
+  ) {
+    const placed: Record<string, string> = {};
+    for (const param of def.params(subject, source)) {
+      if (asked.some((one) => one.name === param.name)) continue;
+      const value = typed(def, param, data, given);
+      if (value !== undefined) placed[param.name] = value;
+    }
+    const undo = def.undo?.(subject, source);
+    const values: Record<string, string> = { ...placed };
+    for (const param of asked)
+      if (param.type === 'choice' && param.initial !== undefined) values[param.name] = param.initial;
+    let error: string | undefined;
+    const readFields = () => {
+      for (const param of asked) {
+        const value = host.dialogValue(param.dom) ?? values[param.name];
+        if (value !== undefined) values[param.name] = value;
+      }
+    };
+    const draw = (fresh: boolean) => {
+      const view = dialogOf(subject, values, source);
+      ui.dialog = view;
+      const ask = { fields: asked, values, error } satisfies DialogAsk;
+      if (fresh) host.openDialog(renderDialog(view, ask).value);
+      else host.redrawDialog(renderDialogBody(view, ask).value);
+    };
+    dialog = {
+      subject,
+      changed: () => {
+        readFields();
+        error = undefined;
+        draw(false);
+      },
+      submit: () => {
+        readFields();
+        const request = def.request?.(subject, values, source);
+        if (request === undefined) return undefined;
+        if ('invalid' in request) {
+          error = request.invalid;
+          draw(false);
+          return 'keep';
+        }
+        return () => send(def, subject, request, undo);
+      },
+    };
+    draw(true);
+    mark('list', 'main');
+  }
+
   function closeDialog() {
-    if (dialog === undefined) return undefined;
-    const { send: confirmed } = dialog;
+    if (dialog === undefined) return;
     dialog = undefined;
     delete ui.dialog;
     host.closeDialog();
-    return confirmed;
   }
 
   return {
@@ -250,10 +322,16 @@ export function createActor(deps: ActorDeps): Actor {
     dialogFor: () => dialog?.subject,
     confirm() {
       // The dialog is cleared first, so the click a browser makes of Enter on its focused button finds nothing to do.
-      closeDialog()?.();
+      const submitted = dialog?.submit();
+      if (submitted === 'keep') return;
+      closeDialog();
+      submitted?.();
     },
     cancel() {
       closeDialog();
+    },
+    changed() {
+      dialog?.changed?.();
     },
     keep(place, subject) {
       if (stale.delete(place)) return;
@@ -265,10 +343,10 @@ export function createActor(deps: ActorDeps): Actor {
       for (const def of registry) {
         if (def.run !== undefined || def.place !== place) continue;
         for (const param of def.params(where, source)) {
-          if (param.given !== undefined) continue;
+          if (param.given !== undefined || param.ask === 'dialog') continue;
           const value = host.value(param.dom);
           if (value === undefined) continue;
-          draftsOf(def.id)[param.name] = param.type === 'choice' && param.tick === true ? tickOf(value) : value;
+          draftsOf(def.drafts ?? def.id)[param.name] = value;
         }
       }
     },

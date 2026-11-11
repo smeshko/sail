@@ -148,13 +148,6 @@ export const actions: Record<string, Action> = {
     else store.ui.itemMenu = data.item;
     store.mark('main');
   },
-  // Ticking Stop now only records the tick: the dialog reads it at the click.
-  'stop-now': (store) => {
-    store.ui.act.drafts['stop-run'] = {
-      ...store.ui.act.drafts['stop-run'],
-      now: store.host.value('now') === 'on' ? 'on' : '',
-    };
-  },
   // A run's ⋯ opens it and its menu under its row; on the open menu's run, it shuts the menu.
   'run-menu': (store, data) => {
     const { repo, run: runId } = data;
@@ -226,6 +219,8 @@ export const actions: Record<string, Action> = {
   'menu-close': (store) => closeMenu(store),
   'dialog-confirm': (store) => store.actor.confirm(),
   'dialog-cancel': (store) => store.actor.cancel(),
+  // A field of the dialog changed: its lines follow it.
+  'dialog-change': (store) => store.actor.changed(),
   'dismiss-toast': (store, data) => dismissToast(store, Number(data.toast)),
   'undo-toast': (store, data) => undoToast(store, Number(data.toast)),
 };
@@ -237,9 +232,9 @@ export function dispatch(store: Store, action: string, data: Record<string, stri
   // item's confirmed action, whose dialog opens over it, and the dialog's own buttons. A run's menu shuts on any click
   // but a run action, a run's ⋯, which handles its own, and the dialog's buttons.
   const acts = def !== undefined;
-  const runAction = action === 'stop-now' || (def?.appliesTo.includes('run') ?? false);
+  const runAction = def?.appliesTo.includes('run') ?? false;
   const confirming = def?.appliesTo.includes('item') === true && def.tier === 'confirmed';
-  const dialogClick = action === 'dialog-confirm' || action === 'dialog-cancel';
+  const dialogClick = action === 'dialog-confirm' || action === 'dialog-cancel' || action === 'dialog-change';
   const shuts = ui.itemMenu !== undefined && action !== 'item-menu' && !confirming && !dialogClick;
   const shutsRun = ui.runMenu !== undefined && !runAction && action !== 'run-menu' && !dialogClick;
   if (shuts) delete ui.itemMenu;

@@ -6,7 +6,7 @@
 // - A row's place is `ui.menu.at`, the one a person moved to. A row that is missing or disabled once the offers arrive
 //   is skipped for the first enabled row (`highlighted()`), so a read that lands late can't leave the highlight on it.
 // - Enter on a row that is disabled does nothing.
-// - An action whose parameters its click doesn't give asks them as steps, one for each, in the menu: a choice or a tick
+// - An action whose parameters its click doesn't give asks them as steps, one for each, in the menu: a choice
 //   lists its options, a number or a text is typed in the field. After the last, the registry's `request()` decides:
 //   `invalid` shows its words and keeps the step, nothing to send keeps it too, else the menu closes and the actor is
 //   handed the action with the values asked, which opens the confirmation dialog for a confirmed one. Escape goes back

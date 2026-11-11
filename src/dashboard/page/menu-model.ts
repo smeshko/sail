@@ -39,7 +39,7 @@ export interface MenuRow {
 export interface StepModel {
   /** What is asked: `from`, `raise $`, `ticket key`, `queue`. */
   label: string;
-  /** The field the step draws: none for a choice or a tick. */
+  /** The field the step draws: none for a choice. */
   field?: { type: 'number' | 'text'; placeholder?: string; min?: number };
   lines: string[];
   rows: MenuRow[];
@@ -208,8 +208,7 @@ const stepRow = (label: string, run: MenuRun, hint?: string): MenuRow => ({
 
 /**
  * The step: what it asks, the lines the action's dialog gives for the values so far (with `typed` as the value of a typed
- * step's parameter), and its rows. A choice lists its options, starting on its initial one; a tick lists `no` and `yes`;
- * the queue to pick lists each queue that offers the action.
+ * step's parameter), and its rows. A choice lists its options, starting on its initial one; the queue to pick lists each queue that offers the action.
  */
 export function stepOf(step: MenuStep, source: OfferSource, typed = ''): StepModel {
   if ('pick' in step) {
@@ -238,9 +237,6 @@ export function stepOf(step: MenuStep, source: OfferSource, typed = ''): StepMod
   const values = { ...step.values, [param.name]: typed };
   const lines = def.dialog?.(step.subject, values, source).lines ?? [];
   const label = param.label ?? param.name;
-  if (param.type === 'choice' && param.tick === true) {
-    return { label, lines, rows: [stepRow('no', { value: '' }), stepRow('yes', { value: 'on' })], start: 0 };
-  }
   if (param.type === 'choice') {
     const rows = param.options.map((option) => stepRow(option.value, { value: option.value }, option.title));
     const start = rows.findIndex((row) => 'value' in row.run && row.run.value === param.initial);

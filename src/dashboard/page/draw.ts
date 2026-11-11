@@ -34,7 +34,7 @@ export function regions(store: Store): Record<Region, () => string> {
     },
     list: () => {
       if (store.index === undefined) return html`<div class="qempty">connecting…</div>`.value;
-      // A raise typed and a stage chosen in the open run's menu survive the draw, but not a switch of run.
+      // What the open run's menu holds survives the draw, but not a switch of run.
       store.actor.keep('run');
       return renderList(ui.view, listRepos(store.index, host.now()), ui, host.now(), store.offers).value;
     },
@@ -52,9 +52,12 @@ export function regions(store: Store): Record<Region, () => string> {
         // What was typed in the add field survives the draw, but not an add that took.
         store.actor.keep('queue', { kind: 'workflow', repo: panel.repo, workflow: panel.workflow });
         // A drop dialog whose item can't be dropped now (it runs, or is gone) closes with nothing sent, and its menu shuts.
-        // So do both while the workflow isn't watched: the controls are disabled then.
+        // So do both while the workflow isn't watched, and so does a dialog of the workflow's own (an add skipping its
+        // checks): the controls are disabled then.
         const unwatched = panel.watch.state !== 'watched';
         const asked = store.actor.dialogFor();
+        if (asked?.kind === 'workflow' && asked.repo === panel.repo && asked.workflow === panel.workflow && unwatched)
+          store.actor.cancel();
         if (asked?.kind === 'item' && asked.repo === panel.repo && asked.workflow === panel.workflow) {
           const target = panel.items.find((each) => each.dedupKey === asked.item);
           if (unwatched || target === undefined || !offeredDrop(panel, target)) store.actor.cancel();
