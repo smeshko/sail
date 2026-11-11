@@ -666,7 +666,7 @@ The dashboard's navigation column, 180px wide and never growing with activity: I
 _Avoid_: rail, nav, menu
 
 **List**:
-The one component every dashboard view draws its rows on: a column of fixed width (340px from 800px up) beside the centre, whether or not a row is open, so opening or closing one moves nothing. Folding groups, one line per row in one narrow form, a keyboard cursor and a filter field. A clicked row opens its run or queue in the centre, and so does the view's first row (the first that opens something, in a group not folded) when the view is chosen or the page loads; the cursor goes to the row opened. History's head carries a second line of two more controls, a status and a workflow, which the count of the Selection takes while rows are selected.
+The one component every dashboard view draws its rows on: a column of fixed width (340px from 800px up) beside the centre, whether or not a row is open, so opening or closing one moves nothing. Folding groups, one line per row in one narrow form, a keyboard cursor and a filter field. A run's row alone is two lines at one fixed height: its title, then its ticket key or `PR #n`, smaller and quieter, with its stalled mark or stop reason at the right; a run with no title leads with that ID on one line. A clicked row opens its run or queue in the centre, and so does the view's first row (the first that opens something, in a group not folded) when the view is chosen or the page loads; the cursor goes to the row opened. History's head carries a second line of two more controls, a status and a workflow, which the count of the Selection takes while rows are selected.
 _Avoid_: table, grid, feed
 
 **Keyed pane**:

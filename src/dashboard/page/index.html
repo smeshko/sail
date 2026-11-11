@@ -71,6 +71,7 @@
       }
       :root {
         --row-h: 28px;
+        --run-h: 44px;
         --group-h: 28px;
         --list-head-h: 40px;
         --ok: #34d399;
@@ -189,7 +190,8 @@
         z-index: 10;
         transition: background 0.15s;
       }
-      .resize-handle:hover {
+      .resize-handle:hover,
+      .resize-handle:focus-visible {
         background: var(--line-2);
       }
       .top {
@@ -640,8 +642,8 @@
       .r-tick {
         position: absolute;
         top: 0;
-        left: 1px;
-        line-height: var(--row-h);
+        left: -9px;
+        line-height: 20px;
         font-family: var(--sans);
         font-size: 9px;
         font-weight: 700;
@@ -785,7 +787,7 @@
         align-items: flex-start;
         gap: 6px;
         width: 100%;
-        min-height: var(--row-h);
+        min-height: var(--run-h);
         padding: 0 12px 0 10px;
         font-family: var(--mono);
         font-size: 11.5px;
@@ -871,6 +873,39 @@
         color: var(--del);
         overflow-wrap: anywhere;
         white-space: normal;
+      }
+      /* a run's row: two lines at one height, its title then its ID, so a title that arrives moves no row */
+      .run .r-open {
+        min-height: var(--run-h);
+        padding: 5px 0;
+      }
+      .run .r-line {
+        position: relative;
+        min-height: 20px;
+      }
+      .r-sub {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+        height: 14px;
+        padding-left: 14px;
+        line-height: 14px;
+        white-space: nowrap;
+      }
+      .r-sub > * {
+        min-width: 0;
+      }
+      .r-sub .r-id {
+        flex: 1 1 auto;
+        font-size: 10.5px;
+        color: var(--fg-3);
+      }
+      .run .r-title {
+        color: var(--fg);
+      }
+      .run .r-problem {
+        margin: 2px 0 0;
       }
       .r-more {
         flex: 0 0 auto;
@@ -1453,9 +1488,13 @@
           radial-gradient(farthest-side at 50% 100%, var(--line-2), transparent) center bottom / 100% 10px no-repeat
             scroll;
       }
-      .cmdk-rows {
+      .cmdk-rows,
+      .cmdk-group {
         display: flex;
         flex-direction: column;
+      }
+      .cmdk-group {
+        flex-shrink: 0;
       }
       .cmdk-subj {
         align-self: flex-start;
@@ -2573,25 +2612,27 @@
         <button id="pin-inspector" class="btn" type="button" data-action="toggle-inspector" aria-label="pin inspector" aria-pressed="false" title="pin the inspector (i)">⇥</button>
       </header>
       <div class="body" id="body">
-        <nav class="side">
+        <nav class="side" aria-label="sidebar">
           <div id="sidebar"></div>
         </nav>
-        <div class="resize-handle" data-resize="left"></div>
-        <section class="list">
+        <!-- biome-ignore lint/a11y/useSemanticElements: a focusable separator with a value is the window splitter, which no <hr> is -->
+        <div class="resize-handle" id="resize-left" data-resize="left" role="separator" aria-orientation="vertical" aria-label="sidebar width" aria-valuenow="180" aria-valuemin="140" aria-valuemax="480" tabindex="0"></div>
+        <section class="list" aria-label="list">
           <div id="list"></div>
         </section>
         <main class="main">
           <button class="btn back" type="button" data-action="close-detail" title="back to the list (Esc)">‹ list</button>
           <div id="main"></div>
         </main>
-        <div class="resize-handle resize-right" data-resize="right"></div>
-        <aside class="inspector">
+        <!-- biome-ignore lint/a11y/useSemanticElements: a focusable separator with a value is the window splitter, which no <hr> is -->
+        <div class="resize-handle resize-right" id="resize-right" data-resize="right" role="separator" aria-orientation="vertical" aria-label="inspector width" aria-valuenow="360" aria-valuemin="240" aria-valuemax="640" tabindex="0"></div>
+        <aside class="inspector" aria-label="inspector">
           <button class="btn ins-close" type="button" data-action="close-inspector" aria-label="close inspector" title="close the inspector (Esc)">✕</button>
           <div class="inspector-b" id="inspector"></div>
         </aside>
       </div>
       <footer class="status" id="status"></footer>
-      <aside class="drawer" id="drawer"></aside>
+      <aside class="drawer" id="drawer" aria-label="file"></aside>
       <!-- biome-ignore lint/a11y/noRedundantRoles: older browsers and the review read the role off the element -->
       <dialog id="dialog" class="dlg" role="dialog" aria-modal="true" aria-labelledby="dialog-title"></dialog>
       <div id="menu" class="menu"></div>

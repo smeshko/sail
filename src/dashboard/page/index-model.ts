@@ -94,7 +94,25 @@ export function newestFirst<T extends { runId: string; startedAt?: string | unde
 const byName = <T extends { name: string }>(repos: readonly T[]): T[] =>
   [...repos].sort((a, b) => (a.name < b.name ? -1 : Number(a.name > b.name)));
 
-function listRun(run: RunItem, now: number): ListRun {
+/** The first of `titles` that says something. */
+const firstTitle = (...titles: (string | undefined)[]) =>
+  titles.find((title) => title !== undefined && title.trim() !== '');
+
+/** The title of each queue item that started a run, by that run's id. */
+const queuedTitles = (repo: IndexRepo): Map<string, string> =>
+  new Map(
+    repo.queues.flatMap((view) =>
+      (view.queue?.items ?? []).flatMap((item) =>
+        item.runId === undefined ? [] : [[item.runId, item.title] as const],
+      ),
+    ),
+  );
+
+/**
+ * A run as the list shows it. Its title is its ticket's from the summary, else the one its intake wrote, as a
+ * pull-request run's and a seeded run's is, else that of the queue item that started it, known before the intake ends.
+ */
+function listRun(run: RunItem, now: number, queued: ReadonlyMap<string, string>): ListRun {
   const status = statusOf(run);
   const row: ListRun = { runId: run.runId, status };
   const { summary } = run;
@@ -114,7 +132,7 @@ function listRun(run: RunItem, now: number): ListRun {
     workflow: run.workflow ?? summary?.workflow,
     ticketKey,
     pr,
-    title: summary?.ticket?.title,
+    title: firstTitle(summary?.ticket?.title, run.title, queued.get(run.runId)),
     stopReason,
     startedAt,
     durationMs,
@@ -175,7 +193,8 @@ function workflows(repo: IndexRepo, runs: readonly ListRun[]): ListWorkflow[] {
 /** The list's repositories: every repository by name, each with its runs newest first, also by workflow. `now` is ms since the epoch. */
 export function listRepos(index: readonly IndexRepo[], now: number): ListRepo[] {
   return byName(index).map((repo) => {
-    const runs = newestFirst(repo.runs.map((run) => listRun(run, now)));
+    const queued = queuedTitles(repo);
+    const runs = newestFirst(repo.runs.map((run) => listRun(run, now, queued)));
     const entry: ListRepo = {
       name: repo.name,
       remote: repo.remote,

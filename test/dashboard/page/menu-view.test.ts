@@ -63,17 +63,17 @@ test('the full menu draws the head, a field, one row per row with the highlight,
   expect(markup).toContain('<div class="cmdk-subj">run R1</div>');
   expect(markup).toContain('<input class="cmdk-in" name="menu-query" type="text" value=""');
   expect(markup).toContain(
-    '<button class="cmdk-row sel" type="button" data-action="menu-run" data-row="1"><span class="cmdk-label">clean</span><kbd>C</kbd><svg class="cmdk-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4"/></svg></button>',
+    '<button class="cmdk-row sel" type="button" role="option" id="cmdk-opt-1" aria-selected="true" data-action="menu-run" data-row="1"><span class="cmdk-label">clean</span><kbd>C</kbd><svg class="cmdk-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4"/></svg></button>',
   );
   expect(markup).toContain(
-    '<div class="cmdk-grp">go to</div><button class="cmdk-row" type="button" data-action="menu-run" data-row="2"><span class="cmdk-label">R1</span><span class="cmdk-hint">run</span>',
+    '<div class="cmdk-grp" id="cmdk-grp-goto" role="presentation">go to</div><button class="cmdk-row" type="button" role="option" id="cmdk-opt-2" aria-selected="false" data-action="menu-run" data-row="2"><span class="cmdk-label">R1</span><span class="cmdk-hint">run</span>',
   );
-  expect(markup).toContain('<div class="cmdk-grp">general</div>');
+  expect(markup).toContain('<div class="cmdk-grp" id="cmdk-grp-general" role="presentation">general</div>');
   expect(markup).toContain('<button class="cmdk-back" type="button" data-action="menu-close"');
   expect(markup.match(/class="cmdk-row[ "]/g)).toHaveLength(4);
   // The rows scroll in their own box, after the chip and the field, which stay (ADW-542).
   expect(markup).toMatch(
-    /<div class="cmdk-subj">.*<input class="cmdk-in".*<div class="cmdk-rows" data-scroll="menu-rows"><button class="cmdk-row"/,
+    /<div class="cmdk-subj">.*<input class="cmdk-in".*<div class="cmdk-rows" id="cmdk-rows" data-scroll="menu-rows"[^>]*><button class="cmdk-row"/,
   );
 });
 
@@ -101,7 +101,7 @@ test('a disabled row is disabled and says why, and no head means no subject line
     rows: [row('stop', { disabled: true, why: 'it already ended' })],
   }).value;
   expect(markup).toContain(
-    'data-row="0" disabled><span class="cmdk-label">stop</span><span class="cmdk-why">it already ended</span>',
+    'data-row="0" disabled aria-disabled="true"><span class="cmdk-label">stop</span><span class="cmdk-why">it already ended</span>',
   );
   expect(markup).not.toContain('cmdk-subj');
 });
@@ -165,4 +165,104 @@ test('a row leads with the icon of what it runs, and an arrow when it has none o
   expect(iconOf({ repo: 'a' })).toBe('folder');
   expect(iconOf({ queue: { repo: 'a', workflow: 'w' } })).toBe('list');
   expect(iconOf({ value: 'spec' })).toBe('arrow');
+});
+
+describe('the command menu is a combobox over a listbox of options (ADW-547)', () => {
+  const full: MenuModel = {
+    head: 'run R1',
+    rows: [
+      row('stop'),
+      row('clean', { disabled: true, why: 'it is running' }),
+      row('Inbox', { group: 'goto' }),
+      row('Active', { group: 'goto' }),
+      row('switch theme', { group: 'general' }),
+    ],
+  };
+  const selected = (markup: string) => [...markup.matchAll(/<button[^>]*aria-selected="true"[^>]*>/g)].map((m) => m[0]);
+
+  test('the field is a combobox that controls the listbox and names the highlighted row, for the first row and a later one', () => {
+    for (const at of [0, 3]) {
+      const markup = renderMenu(state({ at }), full).value;
+      expect(markup).toContain(
+        `role="combobox" aria-controls="cmdk-rows" aria-autocomplete="list" aria-expanded="true" aria-activedescendant="cmdk-opt-${at}"`,
+      );
+      expect(markup).toContain('<div class="cmdk-rows" id="cmdk-rows" data-scroll="menu-rows" role="listbox"');
+      const picked = selected(markup);
+      expect(picked).toHaveLength(1);
+      expect(picked[0]).toContain(`id="cmdk-opt-${at}"`);
+      expect(markup.match(/role="option"/g)).toHaveLength(5);
+      expect(markup.match(/aria-selected="false"/g)).toHaveLength(4);
+      expect(new Set(markup.match(/id="cmdk-opt-\d"/g)).size).toBe(5);
+    }
+  });
+
+  test('go to and general rows sit in a group their heading labels; subject rows are the listbox own children', () => {
+    const markup = renderMenu(state(), full).value;
+    expect(markup).toContain(
+      '<div class="cmdk-group" role="group" aria-labelledby="cmdk-grp-goto"><div class="cmdk-grp" id="cmdk-grp-goto" role="presentation">go to</div><button class="cmdk-row" type="button" role="option" id="cmdk-opt-2"',
+    );
+    expect(markup).toContain(
+      '<div class="cmdk-group" role="group" aria-labelledby="cmdk-grp-general"><div class="cmdk-grp" id="cmdk-grp-general" role="presentation">general</div><button class="cmdk-row" type="button" role="option" id="cmdk-opt-4"',
+    );
+    expect(markup).toMatch(
+      /aria-label="commands"><button class="cmdk-row[^"]*" type="button" role="option" id="cmdk-opt-0"/,
+    );
+    expect(markup.match(/class="cmdk-group"/g)).toHaveLength(2);
+  });
+
+  test('a disabled row is an option with aria-disabled and its reason', () => {
+    const markup = renderMenu(state(), full).value;
+    expect(markup).toMatch(
+      /id="cmdk-opt-1"[^>]* disabled aria-disabled="true"><span class="cmdk-label">clean<\/span>.*<span class="cmdk-why">it is running<\/span>/,
+    );
+    expect(markup.match(/aria-disabled/g)).toHaveLength(1);
+  });
+
+  test('context mode and a choice step draw no input, and the listbox takes the focus and names the highlighted row', () => {
+    const context = renderMenu(state({ mode: 'context', at: 1 }), full).value;
+    expect(context).not.toContain('<input');
+    expect(context).toContain('role="listbox" aria-label="commands" tabindex="-1" aria-activedescendant="cmdk-opt-1"');
+    const choice = renderMenu(state({ at: 0 }), {
+      rows: [row('spec')],
+      step: { label: 'from', lines: [], rows: [row('spec')], start: 0 },
+    }).value;
+    expect(choice).toContain('role="listbox" aria-label="commands" tabindex="-1" aria-activedescendant="cmdk-opt-0"');
+  });
+
+  test('the full menu with a field never makes the listbox focusable', () => {
+    expect(renderMenu(state(), full).value).not.toContain('tabindex="-1" aria-activedescendant');
+  });
+
+  test('a number step field, and a text field with no rows under it, are no combobox', () => {
+    const number = renderMenu(state(), {
+      rows: [],
+      step: { label: 'raise $', field: { type: 'number' }, lines: [], rows: [], start: 0 },
+    }).value;
+    const text = renderMenu(state(), {
+      rows: [],
+      step: { label: 'name', field: { type: 'text' }, lines: [], rows: [], start: 0 },
+    }).value;
+    for (const markup of [number, text]) {
+      expect(markup).not.toContain('role="combobox"');
+      expect(markup).not.toContain('aria-controls');
+      expect(markup).not.toContain('aria-activedescendant');
+    }
+    expect(number).toContain('<div class="cmdk-rows" id="cmdk-rows" data-scroll="menu-rows"></div>');
+  });
+
+  test('a text step field with rows under it is a combobox', () => {
+    const markup = renderMenu(state({ at: 0 }), {
+      rows: [row('a')],
+      step: { label: 'name', field: { type: 'text' }, lines: [], rows: [row('a')], start: 0 },
+    }).value;
+    expect(markup).toContain('role="combobox" aria-controls="cmdk-rows"');
+    expect(markup).toContain('aria-activedescendant="cmdk-opt-0"');
+  });
+
+  test('a menu with no rows has a box with no role, and its field says it is collapsed with nothing highlighted', () => {
+    const markup = renderMenu(state({ at: 0 }), { rows: [] }).value;
+    expect(markup).toContain('<div class="cmdk-rows" id="cmdk-rows" data-scroll="menu-rows"></div>');
+    expect(markup).toContain('aria-expanded="false"');
+    expect(markup).not.toContain('aria-activedescendant');
+  });
 });
