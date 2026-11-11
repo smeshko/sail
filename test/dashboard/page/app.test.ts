@@ -1700,7 +1700,7 @@ const QUEUE_PATH = `/api/repos/beta/queues/${QUEUE_WORKFLOW}`;
 
 test('a poll click posts an empty body to the queue poll route; a 200 toasts its message, a 202 its waiting line, a 409 its error, and no answer says so (ADW-460)', async () => {
   openBetaQueue();
-  const notices: (string | undefined)[] = [];
+  const answers: (string | undefined)[] = [];
   for (const answer of [
     { status: 200, body: JSON.stringify({ message: 'sail queue: polled ticket-to-pr' }) },
     { status: 202, body: JSON.stringify({ waiting: 'the watcher has not taken the command yet' }) },
@@ -1711,11 +1711,11 @@ test('a poll click posts an empty body to the queue poll route; a 200 toasts its
     host.click({ action: 'poll-queue', ...BETA });
     await settle();
     host.advance(100);
-    notices.push(toasts().at(-1));
+    answers.push(toasts().at(-1));
   }
   expect(host.posts).toEqual(Array(4).fill({ path: `${QUEUE_PATH}/poll`, body: {} }));
   const head = `poll beta / ${QUEUE_WORKFLOW}`;
-  expect(notices).toEqual([
+  expect(answers).toEqual([
     `ok ${head}: sail queue: polled ticket-to-pr`,
     `ok ${head}: the watcher has not taken the command yet`,
     `bad ${head}: no watcher is running for 'beta'`,
@@ -2140,7 +2140,7 @@ test('Watch all posts an empty list at once, and Unwatch all posts one at once a
 
 test('a 202 toasts its waiting line, a 409 the CLI refusal, and no answer says so', async () => {
   bootWatching();
-  const notices: (string | undefined)[] = [];
+  const answers: (string | undefined)[] = [];
   for (const answer of [
     { status: 202, body: JSON.stringify({ message: 'the watcher of beta (pid 7) starts', pid: 7 }) },
     { status: 202, body: JSON.stringify({ waiting: 'the watcher has not taken the command yet' }) },
@@ -2150,9 +2150,9 @@ test('a 202 toasts its waiting line, a 409 the CLI refusal, and no answer says s
     host.postAnswer = answer;
     watchClick('watch');
     await settle();
-    notices.push(watchToasts().at(-1));
+    answers.push(watchToasts().at(-1));
   }
-  expect(notices).toEqual([
+  expect(answers).toEqual([
     'ok watch all beta: the watcher of beta (pid 7) starts',
     'ok watch all beta: the watcher has not taken the command yet',
     'bad watch all beta: sail watch: no workflow declares a watch',

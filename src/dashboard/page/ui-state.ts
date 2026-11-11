@@ -16,11 +16,7 @@ export type TimelineFilter = (typeof FILTERS)[number];
 export const THEMES = ['dark', 'light', 'system'] as const;
 export type Theme = (typeof THEMES)[number];
 
-/**
- * Carrying an action out, for every action alike: the one pending, which a first click of a confirmed action arms
- * (`sent: false`) and a second sends (`sent: true`, until its answer), the last result of each place, for what, so one
- * place's answer leaves another's, and what was typed for each action's parameters, kept across a draw.
- */
+/** Carrying an action out, for every action alike: what was typed for each action's parameters, kept across a draw. */
 export interface ActState {
   drafts: Record<string, Record<string, string>>;
 }
@@ -67,7 +63,7 @@ export interface UiState {
   follow: boolean;
   /** The clock's offset east of UTC, in minutes: times are shown at it. */
   tz: number;
-  /** The action being carried out, the last result of each place and the parameters typed. */
+  /** The parameters typed for each action. */
   act: ActState;
   /** The confirmation dialog open now, if any. */
   dialog?: DialogView;

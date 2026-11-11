@@ -10,7 +10,6 @@ import {
   type OfferSource,
   refusal,
   type Subject,
-  sameSubject,
   subjectName,
   subjectOf,
   underwayId,
@@ -393,9 +392,6 @@ test('subjectOf takes the first kind a click names, the open run when none is na
   expect(subjectOf(['workflow', 'repo'], { repo: 'a' })).toEqual({ kind: 'repo', repo: 'a' });
   expect(subjectOf(['workflow', 'repo'], {})).toBeUndefined();
   expect(subjectOf(['none'], {})).toEqual({ kind: 'none' });
-  expect(sameSubject(RUN, { ...RUN })).toBe(true);
-  expect(sameSubject(RUN, { ...RUN, runId: 'other' })).toBe(false);
-  expect(sameSubject(RUN, REPO)).toBe(false);
 });
 
 test('actionOf finds an entry by id in a registry given, and none that is not there', () => {

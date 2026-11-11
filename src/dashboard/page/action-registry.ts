@@ -63,11 +63,6 @@ export function subjectOf(
   return undefined;
 }
 
-/** Whether `a` and `b` are the same thing: the same kind, and every field the same. */
-export function sameSubject(a: Subject, b: Subject): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
-}
-
 interface ParamBase {
   /** The key of its value in `values` and in a click's `data-*` when `given`. */
   name: string;
