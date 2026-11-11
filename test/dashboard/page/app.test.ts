@@ -746,7 +746,7 @@ test("with no queue the list has no queue row and no queue socket opens; with be
   host.click({ action: 'select-view', view: 'queues' });
   host.advance(100);
   expect(host.regions.list).toContain(
-    `<button class="q-row" data-row="queue:beta/${QUEUE_WORKFLOW}" title="polled 7d ago" data-action="select-queue"`,
+    `<div class="q-row" data-row="queue:beta/${QUEUE_WORKFLOW}"><button class="q-open" data-action="select-queue"`,
   );
   host.renders = [];
   for (const event of readEvents(queueDirOf(m))) host.push(sockets[0], { kind: 'queue-event', event });
@@ -782,7 +782,7 @@ test("with no queue the list has no queue row and no queue socket opens; with be
   host.advance(100);
   expect(host.regions.main).toContain('<span class="c-ref">ticket:FAKE-4</span>');
   expect(host.regions.list).toContain(
-    `<button class="q-row sel" data-row="queue:beta/${QUEUE_WORKFLOW}" title="polled 7d ago" data-action="select-queue"`,
+    `<div class="q-row sel" data-row="queue:beta/${QUEUE_WORKFLOW}"><button class="q-open" data-action="select-queue"`,
   );
   expect(host.regions.list).not.toMatch(/<div class="run[^"]* sel">/);
   host.renders = [];

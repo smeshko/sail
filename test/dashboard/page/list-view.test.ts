@@ -1,7 +1,7 @@
 // The list, drawn from hand-made repositories: its head and counts, its groups and rows, the run menu under a row, the
 // folded group, and the Queues view's watch buttons.
 import { expect, test } from 'bun:test';
-import type { ListRepo, ListRun } from '../../../src/dashboard/page/index-model';
+import type { ListRepo, ListRun, ListWorkflow } from '../../../src/dashboard/page/index-model';
 import { renderList } from '../../../src/dashboard/page/list-view';
 import { initialUi, pillOf } from '../../../src/dashboard/page/ui-state';
 
@@ -286,4 +286,142 @@ test('each run status draws its own pill colour in its row (review R11)', () => 
     'p-pend',
     'p-skip',
   ]);
+});
+
+// A queue's row: counts, last poll, pause, hold and the buttons beside its open button.
+type Queue = NonNullable<ListWorkflow['queue']>;
+const queueRowOf = (queue: Queue, fields = {}, watch?: ListWorkflow['watch'], repoOffers?: ListRepo['offers']) => {
+  const only = repo('alpha', [], {
+    workflows: [{ name: 'flow', runs: [], queue, ...(watch === undefined ? {} : { watch }) }],
+    ...(repoOffers === undefined ? {} : { offers: repoOffers }),
+  });
+  const markup = renderList('queues', [only], ui(fields), NOW).value;
+  const row = markup.match(/<div class="q-row[^"]*" data-row="queue:alpha\/flow">.*?<\/div><\/div>/s)?.[0] ?? '';
+  const open = row.match(/<button class="q-open".*?<\/button>/s)?.[0] ?? '';
+  return { row, open, after: row.slice(row.indexOf(open) + open.length) };
+};
+const POLL_OFFERS = { poll: { enabled: true }, add: { enabled: true }, items: {} };
+
+test('a queue row draws waiting always and running, failed and parked only above 0', () => {
+  const { open } = queueRowOf({ waiting: 3, running: 1, parked: 2 });
+  expect(open).toContain('<span class="n">3 waiting</span>');
+  expect(open).toContain('<span class="q-c running">1 running</span>');
+  expect(open).toContain('<span class="q-c parked">2 parked</span>');
+  expect(open).not.toContain('failed');
+  const bare = queueRowOf({ waiting: 0 }).open;
+  expect(bare).toContain('0 waiting');
+  expect(bare).not.toMatch(/running|failed|parked/);
+});
+
+test('a queue row says when it was polled, or never, as text and not as a title', () => {
+  const polled = queueRowOf({ waiting: 1, lastPolledAt: '2026-10-01T11:56:00.000Z' }).row;
+  expect(polled).toContain('<span class="q-polled">polled 4m ago</span>');
+  const never = queueRowOf({ waiting: 1 }).row;
+  expect(never).toContain('<span class="q-polled">never polled</span>');
+  expect(polled).not.toContain('title="polled');
+  expect(never).not.toContain('title="polled');
+});
+
+test('a queue row shows its pause and its hold with or without a time, escaping the message', () => {
+  const both = queueRowOf({
+    waiting: 0,
+    paused: { port: 'ticketSource', adapter: 'linear', message: '503 <b>' },
+    held: { until: '2026-10-01T12:00:00.000Z', reason: 'usage limit' },
+  }).open;
+  expect(both).toContain('<span class="warnchip">paused: ticketSource linear: 503 &lt;b&gt;</span>');
+  expect(both).toContain('<span class="warnchip">held until 12:00:00: usage limit</span>');
+  expect(queueRowOf({ waiting: 0, held: { reason: 'needs a newer sail' } }).open).toContain(
+    '<span class="warnchip">held: needs a newer sail</span>',
+  );
+});
+
+test("a queue row carries poll and unwatch after its open button, with the workflow's repo and name", () => {
+  const { open, after } = queueRowOf(
+    { waiting: 1, offers: POLL_OFFERS },
+    {},
+    { state: 'watched' },
+    { watch: { enabled: true }, workflows: { flow: { unwatch: { enabled: true } } } },
+  );
+  expect(open).toContain('data-action="select-queue" data-queue="alpha/flow"');
+  expect(open).not.toContain('data-action="poll-queue"');
+  expect(open).not.toContain('title=');
+  expect(after).toContain('data-action="poll-queue" data-repo="alpha" data-workflow="flow"');
+  expect(after).toContain('data-action="unwatch" data-repo="alpha" data-workflow="flow"');
+});
+
+test("a queue row's poll is disabled with the server's reason as its title when the workflow isn't watched", () => {
+  const why = "no watcher is running for 'alpha': sail watch flow first";
+  const { after } = queueRowOf(
+    { waiting: 1, offers: { ...POLL_OFFERS, poll: { enabled: false, why } } },
+    {},
+    { state: 'watcher not running', why },
+    { watch: { enabled: true }, workflows: { flow: { watch: { enabled: true } } } },
+  );
+  expect(after).toContain(
+    '<button class="wf-act" disabled title="no watcher is running for &#39;alpha&#39;: sail watch flow first">poll</button>',
+  );
+  expect(after).not.toContain('data-action="poll-queue"');
+  expect(after).toContain('data-action="watch" data-repo="alpha" data-workflow="flow"');
+});
+
+test('a queue row with no queue offers has no poll, and a watched one with an unwatch offer has unwatch', () => {
+  const { after } = queueRowOf(
+    { waiting: 0 },
+    {},
+    { state: 'watched' },
+    {
+      watch: { enabled: true },
+      workflows: { flow: { unwatch: { enabled: true } } },
+    },
+  );
+  expect(after).not.toContain('poll');
+  expect(after).toContain('data-action="unwatch"');
+});
+
+test('while a poll or a watch request is out the row reads the word under way in place of its buttons', () => {
+  const repoOffers = { watch: { enabled: true }, workflows: { flow: { unwatch: { enabled: true } } } };
+  const polling = queueRowOf(
+    { waiting: 0, offers: POLL_OFFERS },
+    { underway: { 'queue:alpha/flow': 'polling…' } },
+    { state: 'watched' },
+    repoOffers,
+  );
+  expect(polling.after).toContain('<span class="busy">polling…</span>');
+  expect(polling.after).not.toContain('data-action="poll-queue"');
+  expect(polling.after).toContain('data-action="unwatch"');
+  const watching = queueRowOf(
+    { waiting: 0, offers: POLL_OFFERS },
+    { underway: { 'watch:alpha/flow': 'unwatching…' } },
+    { state: 'watched' },
+    repoOffers,
+  );
+  expect(watching.after).toContain('<span class="busy">unwatching…</span>');
+  expect(watching.after).not.toContain('data-action="unwatch"');
+  expect(watching.after).toContain('data-action="poll-queue"');
+});
+
+test('an unreadable queue row keeps its problem and buttons, with no counts or last poll', () => {
+  const { row, open, after } = queueRowOf(
+    { problem: "queue.json can't be read", offers: POLL_OFFERS },
+    {},
+    { state: 'watched' },
+    {
+      watch: { enabled: true },
+      workflows: { flow: { unwatch: { enabled: true } } },
+    },
+  );
+  expect(row).toContain('class="q-row bad"');
+  expect(open).toContain(
+    '<span class="n">unreadable</span><span class="r-problem">queue.json can&#39;t be read</span>',
+  );
+  expect(row).not.toContain('polled');
+  expect(row).not.toContain('waiting');
+  expect(after).toContain('data-action="poll-queue"');
+  expect(after).toContain('data-action="unwatch"');
+});
+
+test("the selected queue's row and the cursor's carry sel and cur on the div, which holds one select-queue button", () => {
+  const { row } = queueRowOf({ waiting: 0 }, { queue: 'alpha/flow', listCursor: 'queue:alpha/flow' });
+  expect(row).toStartWith('<div class="q-row sel cur" data-row="queue:alpha/flow">');
+  expect(row.match(/data-action="select-queue"/g)).toHaveLength(1);
 });
