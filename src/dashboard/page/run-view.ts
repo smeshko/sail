@@ -4,13 +4,14 @@
 // summary in the index when there is one, and from the cards otherwise. The Resume, Restart, Stop or Clean a run offers
 // are drawn in the run view's view header, by `runHeaderActions`: a button for each the run's status has (Stop while it runs,
 // Resume while suspended, Restart and Clean once failed) and the rest behind a ⋯, Rebuild among them. `runControls` is the one component both
-// that ⋯ menu and the list row's ⋯ menu are drawn with.
+// that ⋯ menu and the list row's ⋯ menu are drawn with. A run whose files can't be read says so under its view header,
+// with why and the Rebuild it offers. A stop reason is amber, as a suspension is, and red only on a failed run.
 import type { Summary } from '../../events/summary';
 import type { RunActions } from '../actions';
 import { ACTIONS, type ActionDef, type OfferSource, type Subject } from './action-registry';
 import { actionControl } from './action-view';
 import { runCommands } from './commands';
-import { cost, duration, percent, tokens } from './format';
+import { cost, duration, fromClone, percent, tokens } from './format';
 import { html, type SafeHtml, safeHref, text } from './html';
 import { elapsedMs, type PendingCard, type RunModel, type StageCard } from './run-model';
 import { pillOf, type UiState } from './ui-state';
@@ -184,13 +185,33 @@ export function runHeaderActions(
   return html`<span class="h-acts">${drawn}${more}</span>`;
 }
 
-/** The run view. `now` is ms since the epoch, for the running cards' durations. */
+/** The banner of a run whose files can't be read: why, and the Rebuild it offers, drawn from the registry. */
+function unreadable(problem: string, runId: string, offers: RunActions | undefined, ui: UiState): SafeHtml {
+  const rebuild = ACTIONS.find((def) => def.id === 'rebuild-run');
+  const control =
+    rebuild === undefined || offers === undefined
+      ? ''
+      : actionControl(
+          rebuild,
+          runSubject(ui, runId),
+          ui.act,
+          { run: offers, index: [] },
+          { honourDisabled: true, wrap: true },
+        );
+  return html`<div class="d-problem"><div class="d-problem-t"><b>this run can't be read</b>${control}</div><div class="d-problem-w" title="${problem}">${fromClone(problem)}</div></div>`;
+}
+
+/**
+ * The run view. `now` is ms since the epoch, for the running cards' durations. `problem` is why the run's files can't be
+ * read, as the index says.
+ */
 export function renderRun(
   model: RunModel,
   summary: Summary | null | undefined,
   ui: UiState,
   now: number,
   offers?: RunActions,
+  problem?: string,
 ): SafeHtml {
   const runId = model.runId ?? summary?.runId ?? ui.runId ?? '';
   const status = model.end?.status ?? (model.runId === undefined ? summary?.status : 'running');
@@ -201,10 +222,13 @@ export function renderRun(
   return html`<div class="d-h run-h">${
     ticket === undefined ? '' : html`<span class="d-title">${ticket.ticketKey}</span> ${link(ticket.url, ticket.title)}`
   }<span class="pill ${pillOf(status)}">${status ?? 'unknown'}</span>${
-    stopReason === undefined ? '' : html`<span class="warnchip">${stopReason}</span>`
+    stopReason === undefined
+      ? ''
+      : html`<span class="${status === 'failed' ? 'pill p-fail' : 'warnchip'}">${stopReason}</span>`
   }<span class="d-agent">${runId}${model.workflow === undefined ? '' : html` · ${model.workflow}`}${
     model.fromRun === undefined ? '' : html` · seeded from ${model.fromRun}`
   }</span>${runHeaderActions(status, runId, offers, ui)}</div>
+${problem === undefined ? '' : unreadable(problem, runId, offers, ui)}
 ${model.end?.message === undefined ? '' : html`<div class="d-msg">${model.end.message}</div>`}
 <div class="run-b">
 ${totals(model, summary, now)}

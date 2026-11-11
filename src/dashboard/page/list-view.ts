@@ -1,26 +1,27 @@
 // The list: the one component every view draws its rows on, in the centre. A head names the view with its count, which
-// reads `n of m` while the filter field narrows it, and carries the field itself; History's head also carries a status
-// and a workflow control, which narrow it the same way, and, while History rows are selected, their count and a clear
-// button, and `clean all failed` while a listed repository offers it; a selected row is drawn `picked`. Under it,
-// folding groups: Active's `waiting on you` and `running`, History's days, and in Queues one per repository, and the Inbox's one group each of runs, parked items and problems, whose rows
-// open their run (at its last call in error) or queue, the view staying Inbox, and carry a ✕ that dismisses them. A
-// run's row is a `div` holding two sibling buttons: its own, which opens the run and shows on one line
-// its status, id, title, stalled mark, duration and stop reason, with a problem wrapping
-// inside it, and a ⋯ of its own that opens the run and a menu of what it offers: Resume,
-// Restart, Stop and Clean. The menu is drawn inside its row and floats over the rows under it, pushing none down. A
-// queue's row is a `div` holding its open button and, beside it, poll, watch and unwatch from the registry. The button
-// names the live watcher's watch state, what waits, runs, failed and is parked (a zero count left out), when the queue
-// was last polled, and a pause and a hold; a queue that can't be read shows its problem in place of its counts. A
-// Queues group's header row also carries
-// the Watch all and Unwatch all the repository offers, drawn from the registry, and its problem; each runs at once, its
-// answer is a toast, and while its request is out the buttons read the word under way, as a run's row reads it in place
-// of its status. A folded group draws its header alone.
+// reads `n of m` while the filter field narrows it, and carries the field itself, on one line; History's head carries a
+// second line of a status and a workflow control, which narrow it the same way, and `clean all failed` while a listed
+// repository offers it, a line that, while History rows are selected, holds their count and a clean and a clear button
+// instead; a selected row is drawn `picked`, with a tick. Under it, folding groups: Active's `waiting on you` and `running`, History's days, and
+// in Queues one per repository, and the Inbox's one group each of runs, parked items and problems, whose rows lead with
+// what they are about, then what happened and its detail, open their run (at its last call in error) or queue, the view
+// staying Inbox, and carry a ✕ that dismisses them. A run's row is a `div` holding two sibling buttons: its own, which
+// opens the run and shows on one line its status, id, title, stalled mark, duration and stop reason (amber, and red on
+// a failed run), with a problem under it, two lines at most, its paths relative to the clone, and a ⋯ of its own that
+// opens the run and a menu of what it offers: Resume, Restart, Stop and Clean. The menu is drawn inside its row and
+// floats over the rows under it, pushing none down. A queue's row is a `div` holding its open button and, beside it,
+// poll, watch and unwatch from the registry. The button names the live watcher's watch state, what waits, runs, failed
+// and is parked (a zero count left out), when the queue was last polled, and a pause and a hold; a queue that can't be
+// read shows its problem in place of its counts. A Queues group's header row, one line however long its repository's
+// name, also carries the Watch all and Unwatch all the repository offers, drawn from the registry, and its problem; each
+// runs at once, its answer is a toast, and while its request is out the buttons read the word under way, as a run's row
+// reads it in place of its status. A folded group draws its header alone.
 import type { RunActions } from '../actions';
 import type { RepoOffers } from '../offers';
 import { ACTIONS, actionOf, type OfferSource, type Subject } from './action-registry';
 import { actionControl, subjectAttrs } from './action-view';
 import { type AttentionItem, identity } from './attention';
-import { ago, clock, duration } from './format';
+import { ago, duration, fromClone } from './format';
 import { html, type SafeHtml } from './html';
 import type { ListRepo, ListRun } from './index-model';
 import { withKey } from './keymap';
@@ -37,7 +38,7 @@ import {
   shownGroups,
   type ViewName,
 } from './list-model';
-import { queueId } from './queue-view';
+import { heldText, pausedText, queueId } from './queue-view';
 import { runControls } from './run-view';
 import { pillOf, type UiState } from './ui-state';
 
@@ -113,28 +114,34 @@ function statusMark(repo: string, run: ListRun, ui: UiState): SafeHtml {
 
 const cur = (id: string, ui: UiState) => (ui.listCursor === id ? ' cur' : '');
 
+/** A problem under its row: its paths relative to the clone, two lines at most, the whole of it in its tooltip. */
+const problemLine = (problem: string): SafeHtml =>
+  html`<span class="r-problem" title="${problem}">${fromClone(problem)}</span>`;
+
 function runRow(row: RunRow, ui: UiState, offers: RunActions | undefined): SafeHtml {
   const { repo, run } = row;
   const picked = ui.listSelected.includes(row.id);
   const tip = tooltipOf(run);
   return html`<div class="run lrow${isOpen(repo, run, ui) ? ' sel' : ''}${picked ? ' picked' : ''}${cur(row.id, ui)}" data-row="${row.id}"${picked ? html` aria-selected="true"` : ''}${subjectAttrs({ kind: 'run', repo, runId: run.runId })}><button class="r-open"${
     tip === undefined ? '' : html` title="${tip}"`
-  } data-action="select-run" data-repo="${repo}" data-run="${run.runId}"><span class="r-line">${statusMark(repo, run, ui)}<span class="r-id">${runLabel(run)}</span><span class="r-title">${run.title}</span>${
+  } data-action="select-run" data-repo="${repo}" data-run="${run.runId}"><span class="r-line">${
+    picked ? html`<span class="r-tick" aria-hidden="true">✓</span>` : ''
+  }${statusMark(repo, run, ui)}<span class="r-id">${runLabel(run)}</span><span class="r-title">${run.title}</span>${
     run.status === 'running' && run.stalled !== undefined
       ? html`<span class="stalled">stalled ${run.stalled}</span>`
       : ''
   }<span class="r-el">${duration(run.durationMs)}</span>${
-    run.stopReason === undefined ? '' : html`<span class="why">${run.stopReason}</span>`
-  }</span>${run.problem === undefined ? '' : html`<span class="r-problem">${run.problem}</span>`}</button>${more(repo, run, ui)}${runMenu(repo, run, ui, offers)}</div>`;
+    run.stopReason === undefined
+      ? ''
+      : html`<span class="why${run.status === 'failed' ? ' fail' : ''}">${run.stopReason}</span>`
+  }</span>${run.problem === undefined ? '' : problemLine(run.problem)}</button>${more(repo, run, ui)}${runMenu(repo, run, ui, offers)}</div>`;
 }
 
 /** The ` · ` free chips of a queue's row: its pause and its hold, in the words its queue view uses. */
 function queueChips(row: QueueRow, ui: UiState): SafeHtml {
   const { paused, held } = row;
-  return html`${paused === undefined ? '' : html`<span class="warnchip">paused: ${paused.port} ${paused.adapter}: ${paused.message}</span>`}${
-    held === undefined
-      ? ''
-      : html`<span class="warnchip">held${held.until === undefined ? '' : html` until ${clock(held.until, ui.tz)}`}: ${held.reason}</span>`
+  return html`${paused === undefined ? '' : html`<span class="warnchip">${pausedText(paused)}</span>`}${
+    held === undefined ? '' : html`<span class="warnchip">${heldText(held, ui.tz)}</span>`
   }`;
 }
 
@@ -163,7 +170,7 @@ function queueRow(row: QueueRow, ui: UiState, now: number, repoOffers: RepoOffer
   // A queue that can't be read has nothing to count: its problem wraps inside its row in place of the counts.
   const body =
     row.problem !== undefined
-      ? html`${name}<span class="n">unreadable</span><span class="r-problem">${row.problem}</span>`
+      ? html`${name}<span class="n">unreadable</span>${problemLine(row.problem)}`
       : html`${name}<span class="n">${row.waiting} waiting</span>${(['running', 'failed', 'parked'] as const).map(
           (state) => (row[state] === undefined ? '' : html`<span class="q-c ${state}">${row[state]} ${state}</span>`),
         )}<span class="q-polled">${row.lastPolledAt === undefined ? 'never polled' : `polled ${ago(row.lastPolledAt, now)}`}</span>${queueChips(row, ui)}`;
@@ -176,11 +183,12 @@ function attentionRow(row: AttentionRow, ui: UiState): SafeHtml {
   const { opens } = item;
   const queue = item.workflow === undefined ? undefined : queueId(row.repo, item.workflow);
   const sel = opens === undefined ? queue !== undefined && ui.queue === queue : isOpenRun(opens.repo, opens.runId, ui);
-  const body = html`<span class="r-line"><b class="r-title">${item.title}</b>${
+  // It leads with what it is about, quiet as a list row's ID, then what happened, then the detail, each cut short.
+  const body = html`<span class="r-line"><span class="r-id">${item.about}</span><b class="r-title">${item.title}</b>${
     item.detail === '' || item.kind === 'problem'
       ? ''
       : html`<span class="r-detail" title="${item.detail}">${item.detail}</span>`
-  }</span>${item.kind === 'problem' ? html`<span class="r-problem">${item.detail}</span>` : ''}`;
+  }</span>${item.kind === 'problem' ? problemLine(item.detail) : ''}`;
   const open =
     opens !== undefined
       ? html`<button class="r-open" data-action="open" data-repo="${opens.repo}" data-run="${opens.runId}"${
@@ -209,7 +217,7 @@ const rowOf = (
 function repoHeader(group: ListGroup, repo: ListRepo, open: boolean, ui: UiState): SafeHtml {
   return html`<div class="lgrp-row${cur(group.id, ui)}"${subjectAttrs({ kind: 'repo', repo: repo.name })}><button class="lgh${open ? ' open' : ''}"${
     repo.remote === null ? '' : html` title="${repo.remote}"`
-  } data-action="toggle-list-group" data-group="${group.id}" aria-expanded="${open ? 'true' : 'false'}"><span class="lcaret">›</span><span class="nm">${group.label}</span><span class="c">${group.rows.length}</span></button>${watchButtons(repo.name, repo.offers, ui)}</div>${
+  } data-action="toggle-list-group" data-group="${group.id}" aria-expanded="${open ? 'true' : 'false'}"><span class="lcaret">›</span><span class="nm" title="${group.label}">${group.label}</span><span class="c">${group.rows.length}</span></button>${watchButtons(repo.name, repo.offers, ui)}</div>${
     repo.problem === undefined ? '' : html`<div class="lgrp-p">${repo.problem}</div>`
   }`;
 }
@@ -290,7 +298,17 @@ export function renderList(
     view === 'inbox' && total(shown) > 0
       ? html`<button class="btn" type="button" data-action="clear-attention" title="${withKey('dismiss all', actionOf('clear-attention')?.key)}">all clear</button>`
       : '';
-  const head = html`<div class="list-h"><span class="lh-t">${VIEW_LABELS[view]}</span><span class="c">${count}</span>${clear}<input class="list-f" name="list-filter" type="search" value="${ui.listFilter}" placeholder="filter (/)" aria-label="filter the list" autocomplete="off" spellcheck="false">${view === 'history' ? historyControls(repos, ui) : ''}${view === 'history' ? cleanFailed(repos, ui) : ''}${view === 'history' ? selectionHead(selectedRows(shown, ui.listSelected).length, ui.underway.selection) : ''}</div>`;
+  // One row of the view's name, count and filter field; History's controls on a second, which the Selection's count and
+  // buttons take while rows are selected, so the head never grows a third. The count in the first says what the
+  // filters narrow meanwhile.
+  const picked = view === 'history' ? selectedRows(shown, ui.listSelected).length : 0;
+  const controls =
+    view !== 'history'
+      ? ''
+      : picked > 0
+        ? html`<div class="lh-row lh-ctl">${selectionHead(picked, ui.underway.selection)}</div>`
+        : html`<div class="lh-row lh-ctl">${historyControls(repos, ui)}<span class="lh-end">${cleanFailed(repos, ui)}</span></div>`;
+  const head = html`<div class="list-h"><div class="lh-row"><span class="lh-t">${VIEW_LABELS[view]}</span><span class="c">${count}</span>${clear}<input class="list-f" name="list-filter" type="search" value="${ui.listFilter}" placeholder="filter (/)" aria-label="filter the list" autocomplete="off" spellcheck="false"></div>${controls}</div>`;
   const empty =
     repos.length === 0
       ? 'no repository is registered yet: run sail watch in one'

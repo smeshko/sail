@@ -43,6 +43,16 @@ export function clock(iso: string | undefined, offsetMinutes: number): string {
   return `${two(local.getUTCHours())}:${two(local.getUTCMinutes())}:${two(local.getUTCSeconds())}`;
 }
 
+/** `HH:MM` of `iso` at `offsetMinutes` east of UTC: `clock` without its seconds. */
+export const minute = (iso: string | undefined, offsetMinutes: number): string => clock(iso, offsetMinutes).slice(0, 5);
+
+/**
+ * `text` with each absolute path into a clone cut to the part from its `.sail/` or `.sail-runs/` on: the path relative to
+ * the clone, which is what tells a person which file it is.
+ */
+export const fromClone = (text: string): string =>
+  text.replace(/(?:\/[^\s/"']+)+\/(?=\.sail(?:-runs)?(?:\/|\s|$))/g, '');
+
 /** How long before `now` (ms since the epoch) `iso` was: `12s ago`, `4m ago`, `3h ago`, `2d ago`, or `in 5m`. */
 export function ago(iso: string | undefined, now: number): string {
   const at = typeof iso === 'string' ? Date.parse(iso) : Number.NaN;

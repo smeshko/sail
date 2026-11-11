@@ -1,5 +1,5 @@
 // The queue panel, drawn: each watched workflow's items by state, its polling, its watch state from the live watcher, and a parked item's requeue and drop buttons. With no queue anywhere it draws nothing, which hides the panel.
-import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { index } from '../../../src/dashboard/files';
@@ -46,6 +46,41 @@ const queueEvents = (): QueueEvent[] =>
     .split('\n')
     .map((line) => JSON.parse(line));
 
+describe('audit 2: rows say what they are (ADW-543)', () => {
+  test("a queue that can't be read draws its problem in place of its counts, its items and its add field", () => {
+    const [panel] = watchedPanels();
+    if (panel === undefined) throw new Error('beta has no queue');
+    const stream = { recent: [], polls: 'ticket' as const };
+    const bad = renderQueue(
+      withOffers({ ...panel, items: [], problem: 'queue.json is no <b>JSON</b>' }),
+      stream,
+      initialUi(0),
+      NOW,
+    ).value;
+    expect(bad).toContain(
+      `<div class="qproblem"><div class="qproblem-t">this queue can't be read</div><div class="code bad">queue.json is no &lt;b&gt;JSON&lt;/b&gt;</div></div>`,
+    );
+    expect(bad).not.toContain('statebar');
+    expect(bad).not.toContain('the queue is empty');
+    expect(bad).not.toContain('qadd');
+    const good = renderQueue(withOffers(panel), stream, initialUi(0), NOW).value;
+    expect(good).toContain('<div class="statebar">');
+    expect(good).toContain('<div class="qadd"');
+  });
+
+  test("an item's sub-line leaves out the state its box is headed with, and the word under way leads it while a request is out", () => {
+    const [panel] = watchedPanels();
+    if (panel === undefined) throw new Error('beta has no queue');
+    const markup = renderQueue(panel, undefined, initialUi(0), NOW).value;
+    const subs = [...markup.matchAll(/<span class="c-sub">([^<]*)/g)].map(([, sub]) => sub);
+    expect(subs.every((sub) => /^\d+ attempts?/.test(sub ?? ''))).toBe(true);
+    const busy = { ...initialUi(0), underway: { [`item:beta/${QUEUE_WORKFLOW}/ticket:FAKE-5`]: 'requeuing…' } };
+    expect(renderQueue(panel, undefined, busy, NOW).value).toContain(
+      '<span class="c-sub"><span class="busy">requeuing…</span> · 0 attempts',
+    );
+  });
+});
+
 test("beta's queue view lists running first, shows its header, its four items each in the box of its state, its recent events folded, FAKE-6's reason with its requeue and drop commands, its polling, and watched", () => {
   const events = queueEvents();
   const id = queueId('beta', QUEUE_WORKFLOW);
@@ -82,7 +117,7 @@ test("beta's queue view lists running first, shows its header, its four items ea
     '<span class="nm">beta / ticket-to-pr</span><span class="pill p-pass">watched</span><span class="dt">label sail · polled 5m ago · 0 failed polls</span>',
   );
   expect(markup).toContain(
-    'parked · 2 attempts · <span class="why">stage_error: implement#1 ended in error: harness: the session ended before it submitted a result</span>',
+    '<span class="c-sub">2 attempts · <span class="why">stage_error: implement#1 ended in error: harness: the session ended before it submitted a result</span>',
   );
   expect(markup).not.toContain('sail queue');
   expect(markup).not.toContain('data-action="copy"');
@@ -164,9 +199,9 @@ test('a held queue shows a held until chip with its reason, and queue:held and q
   const queue = { ...(panel.queue as NonNullable<typeof panel.queue>), held };
   const ui = initialUi(0);
   const markup = renderQueue({ ...panel, queue }, undefined, ui, NOW).value;
-  expect(markup).toContain('<span class="warnchip">held until 14:20:00: spec#1 hit the usage limit</span>');
+  expect(markup).toContain('<span class="warnchip">held until 14:20 — spec#1 hit the usage limit</span>');
   expect(renderQueue({ ...panel, queue }, undefined, initialUi(120), NOW).value).toContain(
-    '<span class="warnchip">held until 16:20:00: spec#1 hit the usage limit</span>',
+    '<span class="warnchip">held until 16:20 — spec#1 hit the usage limit</span>',
   );
   expect(renderQueue(panel, undefined, ui, NOW).value).not.toContain('held until');
   const at = { seq: 20, ts: '2026-09-24T12:00:00.000Z', workflow: QUEUE_WORKFLOW };
@@ -208,7 +243,7 @@ function waiting() {
 /** The rows of the waiting box, each as its key and the buttons it has. */
 function waitingRows(markup: string) {
   return [...markup.matchAll(/<div class="qrow2[^"]*"[^>]*>((?:(?!<\/div>).)*)<\/div>/gs)]
-    .filter(([, row]) => row?.includes('data-dir=') || row?.includes('>queued ·'))
+    .filter(([, row]) => row?.includes('data-dir=') || row?.includes('<i class="queued">'))
     .map(([, row]) => ({
       key: /class="c-ref">([^<]+)</.exec(row ?? '')?.[1],
       buttons: [
@@ -226,9 +261,9 @@ test('a waiting item shows priority <name> unless it is none, and moved once mov
       ([, key, sub]) => `${key}: ${sub}`,
     ),
   ).toEqual([
-    'ticket:FAKE-5: queued · 0 attempts · priority urgent',
-    'ticket:FAKE-7: queued · 0 attempts',
-    'ticket:FAKE-8: queued · 0 attempts · moved',
+    'ticket:FAKE-5: 0 attempts · priority urgent',
+    'ticket:FAKE-7: 0 attempts',
+    'ticket:FAKE-8: 0 attempts · moved',
   ]);
 });
 
@@ -295,7 +330,7 @@ test("a held item's row shows held until its time and its reason, and its queue:
   };
   const items = panel.items.map((item) => (item.dedupKey === 'ticket:FAKE-3' ? { ...item, held } : item));
   const markup = renderQueue({ ...panel, items }, undefined, initialUi(0), NOW).value;
-  expect(markup).toContain(' · held until 11:01:00 · <span class="why">publish#1 could not reach a provider</span>');
+  expect(markup).toContain(' · held until 11:01 · <span class="why">publish#1 could not reach a provider</span>');
   expect(renderQueue(panel, undefined, initialUi(0), NOW).value).not.toContain('held until');
   const at = { seq: 20, ts: '2026-09-24T12:00:00.000Z', workflow: QUEUE_WORKFLOW };
   expect(
@@ -325,7 +360,7 @@ test('an untimed hold shows a held: chip with its reason, and its queue:held a h
   const queue = { ...(panel.queue as NonNullable<typeof panel.queue>), held };
   const markup = renderQueue({ ...panel, queue }, undefined, initialUi(0), NOW).value;
   expect(markup).toContain(
-    '<span class="warnchip">held: definitions at abc1234 need a newer sail: pull /work/clone</span>',
+    '<span class="warnchip">held — definitions at abc1234 need a newer sail: pull /work/clone</span>',
   );
   expect(markup).not.toContain('held until');
   const at = { seq: 20, ts: '2026-09-24T12:00:00.000Z', workflow: QUEUE_WORKFLOW };
@@ -597,7 +632,7 @@ const heldPanel = (held: Record<string, unknown>) => {
 test('a hold that records a harness key draws a release button for it after the held chip', () => {
   const markup = renderQueue(heldPanel({ ...HELD, harnessKey: 'claude-code' }), undefined, initialUi(0), NOW).value;
   expect(markup).toContain(
-    '<span class="warnchip">held until 14:20:00: claude-code hit the usage limit</span><button class="btn" data-action="release-hold" data-repo="beta" data-workflow="ticket-to-pr" data-harness="claude-code" title="release the usage-limit hold on claude-code">release</button>',
+    '<span class="warnchip">held until 14:20 — claude-code hit the usage limit</span><button class="btn" data-action="release-hold" data-repo="beta" data-workflow="ticket-to-pr" data-harness="claude-code" title="release the usage-limit hold on claude-code">release</button>',
   );
 });
 
@@ -609,10 +644,10 @@ test('a key is escaped in the release button', () => {
 
 test('a hold with no harness key, timed or not, draws no release button', () => {
   const timed = renderQueue(heldPanel(HELD), undefined, initialUi(0), NOW).value;
-  expect(timed).toContain('held until 14:20:00');
+  expect(timed).toContain('held until 14:20 —');
   expect(timed).not.toContain('release-hold');
   const { until: _until, ...untimed } = HELD;
   const plain = renderQueue(heldPanel({ ...untimed, sail: 'abc' }), undefined, initialUi(0), NOW).value;
-  expect(plain).toContain('held: claude-code hit the usage limit');
+  expect(plain).toContain('held — claude-code hit the usage limit');
   expect(plain).not.toContain('release-hold');
 });

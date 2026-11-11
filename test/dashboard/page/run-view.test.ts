@@ -1,7 +1,7 @@
 // The run view, drawn from the run model and the summary the index carries: the header, the totals against the
 // budget, one stage card per call grouped by loop iteration, the pending cards, the PR and the
 // CLI commands. The status bar line is drawn from the same model.
-import { expect, test } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { CleanOffer, RestartOffer, ResumeOffer, StopOffer } from '../../../src/dashboard/actions';
@@ -34,6 +34,40 @@ function groups(markup: string): string[] {
       return `${header}: ${[...keys, ...pending].join(' ')}`;
     });
 }
+
+describe('audit 2: rows say what they are (ADW-543)', () => {
+  const PROBLEM = '/tmp/x/beta/.sail-runs/r/summary.json is not a sail.summary.v1';
+
+  test("a run that can't be read says so under its view header, with why and the Rebuild it offers", () => {
+    const model = foldRun(readEvents(FAKE_3));
+    const offers = { rebuild: { enabled: true, problem: PROBLEM } };
+    const markup = renderRun(model, summaryOf(FAKE_3), initialUi(0), NOW, offers, PROBLEM).value;
+    expect(markup).toContain(
+      `<div class="d-problem"><div class="d-problem-t"><b>this run can't be read</b><span class="act"><button class="btn" data-action="rebuild-run">rebuild</button></span></div><div class="d-problem-w" title="${PROBLEM}">.sail-runs/r/summary.json is not a sail.summary.v1</div></div>`,
+    );
+    const unread = renderRun(model, summaryOf(FAKE_3), initialUi(0), NOW, undefined, PROBLEM).value;
+    expect(unread).toContain("<b>this run can't be read</b></div>");
+    expect(renderRun(model, summaryOf(FAKE_3), initialUi(0), NOW, offers).value).not.toContain('d-problem');
+  });
+
+  test('a stop reason is an amber chip on a suspended run and a red pill only on a failed one', () => {
+    expect(renderRun(foldRun(readEvents(FAKE_3)), summaryOf(FAKE_3), initialUi(0), NOW).value).toContain(
+      '<span class="warnchip">budget_exceeded</span>',
+    );
+    expect(renderRun(foldRun(readEvents(FAKE_2)), summaryOf(FAKE_2), initialUi(0), NOW).value).toContain(
+      '<span class="pill p-fail">stage_error</span>',
+    );
+  });
+
+  test('a pending card is drawn with a dashed border and colours, never faded with opacity', () => {
+    const html = readFileSync(join(PAGE, 'index.html'), 'utf8');
+    const rule = (selector: string) =>
+      new RegExp(`\\n\\s*${selector.replace(/[.]/g, '\\.')} \\{([^}]*)\\}`).exec(html)?.[1] ?? '';
+    expect(rule('.card.pending')).toContain('border-style: dashed');
+    expect(rule('.card.pending')).not.toContain('opacity');
+    expect(html).not.toMatch(/\.qrow2\.done \{[^}]*opacity/);
+  });
+});
 
 test("the golden run's eight cards are grouped: intake and spec, then fix's iteration 1 and iteration 2, then publish", () => {
   const markup = renderRun(foldRun(readEvents(GOLDEN_RUN)), summaryOf(GOLDEN_RUN), initialUi(0), NOW).value;
