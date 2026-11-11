@@ -35,24 +35,16 @@ test("a running run's stalled steps add no item", () => {
 const FAKE_2_MESSAGE = 'implement#1 ended in error: harness: the session ended before it submitted a result';
 const PARKED = 'stage_error: implement#1 ended in error: harness: the session ended before it submitted a result';
 
-test("attention lists, across both repositories, FAKE-2's failure and error, FAKE-3's error, and FAKE-6 parked, and nothing of the golden run", () => {
+test("attention lists one row per run: FAKE-2's failure with its error joined, FAKE-3's error, and FAKE-6 parked, and nothing of the golden run", () => {
   const items = attention(index(m.registryDir));
   expect(items).toEqual([
     {
       repo: 'alpha',
       runId: FAKE_2_ID,
+      key: 'implement#1',
       kind: 'failed',
       title: 'failed: stage_error',
-      detail: `FAKE-2 Print the version with --version · ${FAKE_2_MESSAGE}`,
-      opens: { repo: 'alpha', runId: FAKE_2_ID },
-    },
-    {
-      repo: 'alpha',
-      runId: FAKE_2_ID,
-      key: 'implement#1',
-      kind: 'error',
-      title: 'implement#1 ended in error',
-      detail: '',
+      detail: `FAKE-2 Print the version with --version · ${FAKE_2_MESSAGE} · 1 denial`,
       opens: { repo: 'alpha', runId: FAKE_2_ID, key: 'implement#1' },
     },
     {
@@ -75,28 +67,89 @@ test("attention lists, across both repositories, FAKE-2's failure and error, FAK
   expect(items.some((item) => item.runId === GOLDEN_RUN_ID)).toBe(false);
 });
 
-test('a run with denials adds no item', () => {
+const runOf = (repos: ReturnType<typeof index>, repo: string, runId: string) =>
+  repos.find((r) => r.name === repo)?.runs.find((r) => r.runId === runId);
+
+test('a run with denials and no failure or error adds no item, and denials only join a row that exists', () => {
   const repos = index(m.registryDir);
-  const run = repos.find((repo) => repo.name === 'alpha')?.runs.find((each) => each.runId === FAKE_2_ID);
-  const calls = run?.summary?.calls ?? [];
+  const calls = runOf(repos, 'alpha', FAKE_2_ID)?.summary?.calls ?? [];
   expect(calls.map((call) => [call.key, call.denials])).toEqual([
     ['intake#1', undefined],
     ['spec#1', 0],
     ['implement#1', 1],
   ]);
   for (const call of calls) if (call.key === 'spec#1') call.denials = 4;
-  expect(attention(repos).map((item) => item.title)).not.toContain('5 denials');
-  expect(attention(repos).map((item) => item.title)).not.toContain('1 denial');
+  const items = attention(repos);
+  expect(items).toHaveLength(3);
+  expect(items[0]?.detail.endsWith(' · 5 denials')).toBe(true);
+  const golden = runOf(repos, 'alpha', GOLDEN_RUN_ID)?.summary?.calls ?? [];
+  for (const call of golden) call.denials = 3;
+  expect(attention(repos)).toHaveLength(3);
 });
 
-test('a failed run without a message keeps the ticket as its detail', () => {
+test('a failed run with two calls in error is one item opening the last, naming the other', () => {
   const repos = index(m.registryDir);
-  const failed = repos.find((r) => r.name === 'alpha')?.runs.find((r) => r.runId === FAKE_2_ID)?.summary;
+  for (const call of runOf(repos, 'alpha', FAKE_2_ID)?.summary?.calls ?? [])
+    if (call.key === 'spec#1') call.outcome = 'error';
+  const items = attention(repos).filter((item) => item.runId === FAKE_2_ID);
+  expect(items).toHaveLength(1);
+  expect(items[0]?.key).toBe('implement#1');
+  expect(items[0]?.opens?.key).toBe('implement#1');
+  expect(items[0]?.detail).toContain('also in error: spec#1');
+});
+
+test('a run that is not failed with two calls in error is one error item opening its last', () => {
+  const repos = index(m.registryDir);
+  const calls = runOf(repos, 'beta', FAKE_3_ID)?.summary?.calls ?? [];
+  const earlier = calls.find((call) => call.key !== 'implement#1');
+  if (!earlier) throw new Error('missing earlier call');
+  earlier.outcome = 'error';
+  earlier.summary = 'earlier trouble';
+  for (const call of calls) if (call.key === 'implement#1') call.summary = 'boom';
+  const items = attention(repos).filter((item) => item.runId === FAKE_3_ID);
+  expect(items).toEqual([
+    {
+      repo: 'beta',
+      runId: FAKE_3_ID,
+      key: 'implement#1',
+      kind: 'error',
+      title: 'implement#1 ended in error',
+      detail: `boom · also in error: ${earlier.key}`,
+      opens: { repo: 'beta', runId: FAKE_3_ID, key: 'implement#1' },
+    },
+  ]);
+});
+
+test('a failed run with no call in error is one item with no key, opening the run alone', () => {
+  const repos = index(m.registryDir);
+  for (const call of runOf(repos, 'alpha', FAKE_2_ID)?.summary?.calls ?? []) {
+    call.outcome = 'done';
+    call.denials = 0;
+  }
+  const items = attention(repos).filter((item) => item.runId === FAKE_2_ID);
+  expect(items).toHaveLength(1);
+  expect(items[0]?.kind).toBe('failed');
+  expect('key' in (items[0] ?? {})).toBe(false);
+  expect(items[0]?.opens).toEqual({ repo: 'alpha', runId: FAKE_2_ID });
+});
+
+test("the joined item's identity changes when another call errors, and is equal across two reads", () => {
+  const repos = index(m.registryDir);
+  const before = identity(attention(repos)[0] as AttentionItem);
+  expect(identity(attention(repos)[0] as AttentionItem)).toBe(before);
+  for (const call of runOf(repos, 'alpha', FAKE_2_ID)?.summary?.calls ?? [])
+    if (call.key === 'spec#1') call.outcome = 'error';
+  expect(identity(attention(repos)[0] as AttentionItem)).not.toBe(before);
+});
+
+test('a failed run without a message keeps the ticket and its denials as its detail', () => {
+  const repos = index(m.registryDir);
+  const failed = runOf(repos, 'alpha', FAKE_2_ID)?.summary;
   if (failed) Reflect.deleteProperty(failed, 'message');
   const details = attention(repos)
     .filter((item) => item.kind === 'failed')
     .map((item) => item.detail);
-  expect(details).toEqual(['FAKE-2 Print the version with --version']);
+  expect(details).toEqual(['FAKE-2 Print the version with --version · 1 denial']);
 });
 
 test('a suspended run adds no item', () => {
@@ -113,14 +166,13 @@ test('a failed run without a ticket has its message alone as its detail', () => 
   const details = attention(repos)
     .filter((item) => item.kind === 'failed')
     .map((item) => item.detail);
-  expect(details).toEqual([FAKE_2_MESSAGE]);
+  expect(details).toEqual([`${FAKE_2_MESSAGE} · 1 denial`]);
 });
 
 test("without beta's queue/ the parked item is gone, and the rest stays", () => {
   rmSync(join(m.beta.clone, '.sail-runs', 'queue'), { recursive: true });
   expect(attention(index(m.registryDir)).map((item) => `${item.repo} ${item.kind}`)).toEqual([
     'alpha failed',
-    'alpha error',
     'beta error',
   ]);
 });
