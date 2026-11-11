@@ -3,8 +3,8 @@
 // from that repository: it copies the repository's `.sail/`, `.sail-runs/` and `.git/` into its own, and seeds there.
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { EXIT_OK } from '../../src/cli/exit-codes';
-import { copyFixture } from './fixture';
+import { EXIT_FAILED, EXIT_OK } from '../../src/cli/exit-codes';
+import { copyFixture, edit } from './fixture';
 import { runCaptured } from './run-captured';
 import { copyRun } from './stub-workflow';
 import { type TempRepo, withTempRepo } from './temp-repo';
@@ -95,4 +95,37 @@ export function cutJournal(runDir: string, count: number): void {
   const path = join(runDir, 'journal.ndjson');
   const lines = readFileSync(path, 'utf8').split('\n').slice(0, count);
   writeFileSync(path, `${lines.join('\n')}\n`);
+}
+
+const OPEN_SCRIPT = 'workflows/ticket-to-pr/stages/publish/open.sh';
+const PUSH = 'sail port codehost push "$branch" >/dev/null\n';
+
+/**
+ * Makes a copy's `open` step leave what a push leaves in the repository, a remote-tracking ref reaching the head, since
+ * the fake code host's push writes no git ref; with `fail`, it then exits 1, so the run fails after its push.
+ */
+export function markPushed(sailDir: string, options: { fail: boolean }): void {
+  edit(
+    sailDir,
+    OPEN_SCRIPT,
+    PUSH,
+    `${PUSH}git update-ref "refs/remotes/origin/$branch" HEAD\n${options.fail ? 'exit 1\n' : ''}`,
+  );
+}
+
+/**
+ * A source that pushed its branch and then failed: `sail FAKE-1` on a copy of the fixture whose `open` step fails after
+ * its push. It answers with the run's id and directory, its base, and the commit it pushed.
+ */
+export async function pushedSource(
+  repo: TempRepo,
+): Promise<{ runId: string; dir: string; base: string; head: string }> {
+  copyFixture(repo.dir);
+  markPushed(join(repo.dir, '.sail'), { fail: true });
+  const ran = await runCaptured(['FAKE-1'], repo.dir, { env: repo.env });
+  if (ran.code !== EXIT_FAILED) throw new Error(`the pushed source run exited ${ran.code}: ${ran.stderr}`);
+  const [runId = ''] = runIds(repo.dir);
+  const dir = join(repo.dir, '.sail-runs', runId);
+  const base: string = JSON.parse(readFileSync(join(dir, 'run.json'), 'utf8')).repository.baseSha;
+  return { runId, dir, base, head: repo.git('rev-parse', `refs/remotes/origin/${SOURCE_BRANCH}`) };
 }

@@ -313,8 +313,9 @@ export function carriedHead(
 
 /**
  * Points `runRef(runId)` in `repo` at the `HEAD` of the run's workspace, when that is a commit other than the base
- * `run.json` records and no remote-tracking ref reaches: a run that never pushed its branch has nothing else reaching its commits once the worktree goes,
- * and git's gc deletes them. The adapter compares against the run's record, since a workspace is released by a process
+ * `run.json` records, pushed or not: a run that never pushed its branch has nothing else reaching its commits once the
+ * worktree goes, and git's gc deletes them, and a remote branch can be deleted or moved, while a seeded run carries from
+ * this ref. The adapter compares against the run's record, since a workspace is released by a process
  * that may never have made it. A workspace with no recorded base is a start's refused before `run.json`, which ran no
  * step, and a link is never looked into, since its `HEAD` is another checkout's. It gives the ref and the commit, or
  * what failed when the ref couldn't be written.
@@ -329,13 +330,6 @@ function keepHead(
   if (base === undefined || isLink(run.runDir) || isLink(path)) return undefined;
   const head = workspaceHead(path, env);
   if (head === undefined || head === base) return undefined;
-  // A head a remote-tracking ref reaches was pushed, as a pull request's head is: the remote keeps it already.
-  const pushed = gitSync(
-    path,
-    ['for-each-ref', '--contains', head, '--count=1', '--format=%(refname)', 'refs/remotes'],
-    env,
-  );
-  if (pushed.code === 0 && pushed.stdout.trim() !== '') return undefined;
   const ref = runRef(run.runId);
   const wrote = gitSync(repo, ['update-ref', ref, head], env);
   if (wrote.code !== 0) return { failed: `its commits at ${head} were not kept at ${ref}: ${wrote.stderr}` };
