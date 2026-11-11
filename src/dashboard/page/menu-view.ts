@@ -106,7 +106,7 @@ export function renderMenu(state: MenuState, model: MenuModel): SafeHtml {
   });
   return html`<button class="cmdk-back" type="button" data-action="menu-close" aria-label="close the command menu" tabindex="-1"></button><div class="cmdk${state.mode === 'context' ? ' ctx' : ''}" role="dialog" aria-label="command menu" tabindex="-1"${style}>${
     model.head === undefined ? '' : html`<div class="cmdk-subj">${model.head}</div>`
-  }${model.step === undefined ? '' : html`<div class="cmdk-step">${model.step.label}</div>${model.step.lines.map((line) => html`<div class="cmdk-line">${line}</div>`)}`}${field(state, model)}${
+  }${model.why === undefined ? '' : html`<div class="cmdk-note">${model.why}</div>`}${model.step === undefined ? '' : html`<div class="cmdk-step">${model.step.label}</div>${model.step.lines.map((line) => html`<div class="cmdk-line">${line}</div>`)}`}${field(state, model)}${
     state.error === undefined ? '' : html`<div class="cmdk-err">${state.error}</div>`
   }${rows}</div>`;
 }

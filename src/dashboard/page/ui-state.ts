@@ -109,7 +109,7 @@ export interface UiState {
   theme: Theme;
   /** Whether the inspector is pinned open: it opens with a selected card without it. */
   pinned: boolean;
-  /** Whether the folded sidebar (under 800px) is open over the page. */
+  /** Whether the folded sidebar (under 900px) is open over the page. */
   sidebar: boolean;
   /** The card under the keyboard's cursor, by its place in the run view. */
   cursor: number;

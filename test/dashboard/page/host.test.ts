@@ -562,62 +562,62 @@ function columns(width: number, inspector: boolean) {
   return { fake, host, drag, resize, styles: fake.elements.body?.styles ?? {} };
 }
 
-test('from 1100px a drag stops where the centre keeps its 320px floor beside the other column and both handles (ADW-536)', () => {
-  // 1120 - (180 sidebar + 5) - 5 - 320: a 640px inspector drag stops at 610px.
-  const inspector = columns(1120, true);
+test('from 1210px a drag stops where the list keeps its 340px and the centre its 320px floor beside the other column and both handles (ADW-536, ADW-544)', () => {
+  // 1400 - (180 sidebar + 5) - 5 - 340 - 320: a 640px inspector drag stops at 550px.
+  const inspector = columns(1400, true);
   inspector.drag('right', -280);
-  expect(inspector.styles['--ins-w']).toBe('610px');
-  // 1120 - (360 inspector + 5) - 5 - 320: a 480px sidebar drag stops at 430px.
-  const sidebar = columns(1120, true);
+  expect(inspector.styles['--ins-w']).toBe('550px');
+  // 1400 - (360 inspector + 5) - 5 - 340 - 320: a 480px sidebar drag stops at 370px.
+  const sidebar = columns(1400, true);
   sidebar.drag('left', 300);
-  expect(sidebar.styles['--side-w']).toBe('430px');
-  // At 1280px the default sidebar leaves the inspector its whole 640px.
-  const wide = columns(1280, true);
+  expect(sidebar.styles['--side-w']).toBe('370px');
+  // At 1600px the default sidebar leaves the inspector its whole 640px.
+  const wide = columns(1600, true);
   wide.drag('right', -400);
   expect(wide.styles['--ins-w']).toBe('640px');
 });
 
-test('a closed inspector, or one under 1100px that lies over the centre, takes no room from the sidebar, and its own drag keeps its fixed maximum (ADW-536)', () => {
-  // 1120 - 5 - 320 leaves the sidebar its whole 480px.
-  const closed = columns(1120, false);
+test('a closed inspector, or one under 1210px that lies over the centre, takes no room from the sidebar, and its own drag keeps its fixed maximum (ADW-536, ADW-544)', () => {
+  // 1200 - 5 - 340 - 320 leaves the sidebar its whole 480px.
+  const closed = columns(1200, false);
   closed.drag('left', 300);
   expect(closed.styles['--side-w']).toBe('480px');
-  // At 820px the open inspector is no column: the sidebar gets 820 - 5 - 320 = 495, so its 480px, and the inspector 640.
-  const under = columns(820, true);
+  // At 1150px the open inspector is no column: the sidebar gets 1150 - 5 - 340 - 320 = 485, so its 480px, and the inspector 640.
+  const under = columns(1150, true);
   under.drag('left', 300);
   under.drag('right', -400);
   expect([under.styles['--side-w'], under.styles['--ins-w']]).toEqual(['480px', '640px']);
-  // 805 - 325 is still 480; at 804 the sidebar's clamp alone takes it to 479.
-  under.resize(805);
+  // 1145 - 665 is still 480; at 1144 the sidebar's clamp alone takes it to 479.
+  under.resize(1145);
   expect(under.styles['--side-w']).toBe('480px');
-  under.resize(804);
+  under.resize(1144);
   expect(under.styles['--side-w']).toBe('479px');
-  // Under 800px the sidebar is no column either, and a resize leaves both widths.
-  under.resize(600);
+  // Under 900px the sidebar is folded and no column either, and a resize leaves both widths.
+  under.resize(850);
   expect([under.styles['--side-w'], under.styles['--ins-w']]).toEqual(['479px', '640px']);
 });
 
-test('narrowing the window after a drag clamps the dragged widths again, the inspector first, and an inspector that opens fits beside a wide sidebar (ADW-536)', () => {
-  const { drag, resize, styles } = columns(1600, true);
+test('narrowing the window after a drag clamps the dragged widths again, the inspector first, and an inspector that opens fits beside a wide sidebar (ADW-536, ADW-544)', () => {
+  const { drag, resize, styles } = columns(1800, true);
   drag('left', 300);
   drag('right', -400);
   expect([styles['--side-w'], styles['--ins-w']]).toEqual(['480px', '640px']);
-  // The inspector first: 1300 - 485 - 5 - 320 = 490, and the sidebar keeps 480 beside it. The sidebar first would have
-  // given 1300 - 645 - 5 - 320 = 330 and left the inspector 635.
-  resize(1300);
-  expect([styles['--side-w'], styles['--ins-w']]).toEqual(['480px', '490px']);
-  // At 1100 the inspector gives way to 1100 - 485 - 5 - 320 = 290, and the sidebar keeps 480.
-  resize(1100);
-  expect([styles['--side-w'], styles['--ins-w']]).toEqual(['480px', '290px']);
+  // The inspector first: 1500 - 485 - 5 - 340 - 320 = 350, and the sidebar keeps 480 beside it. The sidebar first would
+  // have given 1500 - 645 - 5 - 340 - 320 = 190 and left the inspector 640.
+  resize(1500);
+  expect([styles['--side-w'], styles['--ins-w']]).toEqual(['480px', '350px']);
+  // At 1250 the inspector gives way to its 240px minimum, and the sidebar to 1250 - 245 - 5 - 340 - 320 = 340.
+  resize(1250);
+  expect([styles['--side-w'], styles['--ins-w']]).toEqual(['340px', '240px']);
   // Widening again restores nothing: the widths are what the clamp left.
-  resize(1600);
-  expect([styles['--side-w'], styles['--ins-w']]).toEqual(['480px', '290px']);
-  // A sidebar dragged wide beside a closed inspector: the inspector opening at 1120 takes 1120 - 485 - 5 - 320 = 310.
-  const opening = columns(1120, false);
+  resize(1800);
+  expect([styles['--side-w'], styles['--ins-w']]).toEqual(['340px', '240px']);
+  // A sidebar dragged wide beside a closed inspector: the inspector opening at 1500 takes 1500 - 485 - 5 - 340 - 320 = 350.
+  const opening = columns(1500, false);
   opening.drag('left', 300);
   opening.host.setInspector(true, false);
   opening.drag('right', -400);
-  expect([opening.styles['--side-w'], opening.styles['--ins-w']]).toEqual(['480px', '310px']);
+  expect([opening.styles['--side-w'], opening.styles['--ins-w']]).toEqual(['480px', '350px']);
 });
 
 test("render keeps an opened tool call's input box scrolled across a redraw", () => {

@@ -245,9 +245,10 @@ export const inspectorOpen = (store: Store) => store.ui.pinned || centreCard(sto
  */
 export function sourceFor(store: Store, subject?: Subject): OfferSource {
   const index = store.index ?? [];
+  const rest = { view: store.ui.view, ...(store.ui.start === undefined ? {} : { start: store.ui.start }) };
   if (subject?.kind !== 'run' || (store.run?.repo === subject.repo && store.run.runId === subject.runId))
-    return { run: store.offers, index, ...(store.ui.start === undefined ? {} : { start: store.ui.start }) };
+    return { run: store.offers, index, ...rest };
   const read = store.subjectOffers;
   const own = read?.repo === subject.repo && read.runId === subject.runId ? read.offers : undefined;
-  return { run: own, index, ...(store.ui.start === undefined ? {} : { start: store.ui.start }) };
+  return { run: own, index, ...rest };
 }
