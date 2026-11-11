@@ -105,10 +105,19 @@ class FakeHost implements PageHost {
   }
   /** The reads of a run's actions: answered at once, and kept apart from the reads of its calls. */
   actionReads: string[] = [];
+  /** When set, a run's actions wait for `releaseActions()`, as a slow answer lands after the page's flush. */
+  holdActions = false;
+  private heldActions: (() => void)[] = [];
+  releaseActions() {
+    for (const release of this.heldActions.splice(0)) release();
+  }
   get(path: string) {
     if (path.endsWith('/actions')) {
       this.actionReads.push(path);
-      return this.actionsAnswer(path);
+      if (!this.holdActions) return this.actionsAnswer(path);
+      return new Promise<{ status: number; body: string }>((done) => {
+        this.heldActions.push(() => done(this.actionsAnswer(path)));
+      });
     }
     return new Promise<{ status: number; body: string }>((done) => {
       const read = { path, resolve: () => done(this.answer(path)) };
@@ -3349,6 +3358,35 @@ test('the row right-clicked is the subject while another is open, and Enter on d
   expect([dialogTitle(), host.posts, cmdk()]).toEqual(['drop ticket:FAKE-6', [], '']);
   host.press('Enter');
   expect(host.posts).toEqual([{ path: `${QUEUE_PATH}/drop`, body: { dedupKey: 'ticket:FAKE-6' } }]);
+});
+
+test('the menu redraws when its subject’s offers land after it is drawn: a run that is not open', async () => {
+  bootIndexed();
+  host.holdActions = true;
+  host.point('context', FAKE_2_ROW, { x: 0, y: 0 });
+  await settle();
+  host.advance(100);
+  expect(menuHead()).toBe(`run ${FAKE_2_ID}`);
+  expect(menuLabels()).not.toContain('clean');
+  host.releaseActions();
+  await settle();
+  await settle();
+  host.advance(100);
+  expect(menuLabels()).toContain('clean');
+});
+
+test('the menu redraws when the open run’s offers land after it is drawn', async () => {
+  host.holdActions = true;
+  await openRunPage(FAKE_2_ID);
+  cmdK();
+  await settle();
+  host.advance(100);
+  expect(menuLabels()).not.toContain('clean');
+  host.releaseActions();
+  await settle();
+  await settle();
+  host.advance(100);
+  expect(menuLabels()).toContain('clean');
 });
 
 test('a right-click off every row is the browser’s: nothing opens and it is not taken', () => {

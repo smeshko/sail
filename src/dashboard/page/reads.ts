@@ -196,6 +196,12 @@ export function offerSignature(store: Store, open: OpenRun) {
   return `${item === undefined ? '' : statusOf(item)}|${queued.join(',')}`;
 }
 
+/** Marks what draws offers: the list, and the command menu while it is open, which draws its rows from them. */
+export function markOffers(store: Store): void {
+  if (store.ui.menu === undefined) store.mark('list');
+  else store.mark('list', 'menu');
+}
+
 export function readOffers(store: Store) {
   const { host } = store;
   const open = store.run;
@@ -212,7 +218,7 @@ export function readOffers(store: Store) {
         // An answer that isn't JSON offers nothing.
       }
     }
-    store.mark('list');
+    markOffers(store);
   });
 }
 
@@ -237,7 +243,7 @@ export function readSubjectOffers(store: Store, subject: Subject): void {
       }
     }
     store.subjectOffers = { repo, runId, offers };
-    store.mark('list');
+    markOffers(store);
   });
 }
 
