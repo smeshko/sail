@@ -269,15 +269,22 @@ function everyQueueRow(label: string, id: string, run: MenuRun, source: OfferSou
 export function generalRows(source: OfferSource): MenuRow[] {
   const none: Subject = { kind: 'none' };
   return [
-    ...ACTIONS.filter((def) => def.appliesTo.includes('none')).map(
-      (def): MenuRow => ({
-        group: 'general',
-        label: def.label(none),
-        ...(def.key === undefined ? {} : { key: def.key }),
-        disabled: false,
-        run: { act: def.id, subject: none, data: {} },
-      }),
-    ),
+    // A local action is always there; one that asks the server is there while its offers give it.
+    ...ACTIONS.filter((def) => def.appliesTo.includes('none')).flatMap((def): MenuRow[] => {
+      const available = def.run === undefined ? def.available(none, source) : undefined;
+      if (available !== undefined && !available.offered) return [];
+      const disabled = available !== undefined && !available.enabled;
+      return [
+        {
+          group: 'general',
+          label: def.label(none),
+          ...(def.key === undefined ? {} : { key: def.key }),
+          ...(disabled && available?.why !== undefined ? { why: available.why } : {}),
+          disabled,
+          run: { act: def.id, subject: none, data: {} },
+        },
+      ];
+    }),
     ...everyQueueRow('add a ticket…', 'add-ticket', { pick: 'add-ticket' }, source),
     ...everyQueueRow('poll every queue', 'poll-queue', { pollAll: true }, source),
     { group: 'general', label: 'switch theme', disabled: false, run: { view: 'toggle-theme' } },

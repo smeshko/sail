@@ -167,7 +167,7 @@ export function index(registryDir: string): IndexRepo[] {
         ...repo,
         runs,
         queues,
-        offers: repoOffers(repo, queues, watching.watching?.workflows ?? []),
+        offers: repoOffers(repo, queues, watching.watching?.workflows ?? [], runs),
         ...watching,
       };
     } catch (error) {

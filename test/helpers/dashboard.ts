@@ -23,10 +23,13 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createFakeTicketSource } from '../../src/adapters/fake/ticket-source';
 import { createFakeWorkspace } from '../../src/adapters/fake/workspace';
 import type { ResolveClonePorts } from '../../src/dashboard/clone-ports';
 import { providerRelay, type ResolvedAdapters } from '../../src/engine/adapters';
+import type { ProjectConfig } from '../../src/engine/config';
 import type { CodeHost } from '../../src/ports/code-host';
+import type { TicketSource } from '../../src/ports/ticket-source';
 import { copyGoldenRun, GOLDEN_RUN, GOLDEN_RUN_ID } from './golden-run';
 
 export { GOLDEN_RUN, GOLDEN_RUN_ID };
@@ -257,6 +260,8 @@ export function fakeClonePorts(
     branches?: { local: boolean; remote: boolean };
     codeHost?: Pick<CodeHost, 'pullRequestFrom'>;
     calls?: string[];
+    /** The ticket source a clean resets tickets through: a fake whose tickets FAKE-1 to FAKE-5 are In Progress by default. */
+    ticketSource?: TicketSource;
   } = {},
 ): ResolveClonePorts {
   return async () => {
@@ -280,8 +285,39 @@ export function fakeClonePorts(
     };
     const adapters = { ports: { workspace }, relay: providerRelay() } as unknown as ResolvedAdapters<'workspace'>;
     const codeHost = (more.codeHost ?? { pullRequestFrom: async () => undefined }) as CodeHost;
-    return { adapters, codeHost: async () => codeHost };
+    let tickets = more.ticketSource;
+    const ticketSource = async () => {
+      tickets ??= fakeTickets(leasesDir);
+      return tickets;
+    };
+    return { adapters, config: CONFIG, codeHost: async () => codeHost, ticketSource };
   };
+}
+
+/** The config the fake clones' ports hand out: enough for a queue command's checks, which read no more of it. */
+const CONFIG = { name: 'fake', sail: '*', adapters: {}, models: {}, budgets: {} } as unknown as ProjectConfig;
+
+/** A fake ticket source beside `leasesDir` whose tickets FAKE-1 to FAKE-5 are In Progress, so a clean resets them. */
+export function fakeTickets(leasesDir: string): TicketSource {
+  const dir = join(leasesDir, '..', 'tickets');
+  mkdirSync(dir, { recursive: true });
+  const seed = join(dir, 'tickets.json');
+  writeFileSync(
+    seed,
+    JSON.stringify({
+      tickets: [1, 2, 3, 4, 5].map((n) => ({
+        ticketKey: `FAKE-${n}`,
+        title: `Ticket FAKE-${n}`,
+        description: '',
+        state: { type: 'started', name: 'In Progress' },
+        labels: ['sail', 'ticket-to-pr'],
+        comments: [],
+        links: [],
+        attachments: [],
+      })),
+    }),
+  );
+  return createFakeTicketSource({ seed, state: join(dir, 'state.json') });
 }
 
 /**

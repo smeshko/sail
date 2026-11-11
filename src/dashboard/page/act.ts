@@ -177,6 +177,7 @@ export function createActor(deps: ActorDeps): Actor {
     const open = deps.openRun();
     const runEffect = effect !== undefined && effect !== 'took';
     const stillOpen = subject.kind === 'run' && open?.repo === subject.repo && open.runId === subject.runId;
+    const openIsGone = (answer.gone ?? []).some((gone) => gone.repo === open?.repo && gone.runId === open.runId);
     if (runEffect && !stillOpen) {
       // A run acted on that is not open: a Restart opens the run it started and a Resume (a reopen that keeps no menu)
       // opens the run; a stop's reopen and a clean's leave are the open run's alone.
@@ -186,7 +187,7 @@ export function createActor(deps: ActorDeps): Actor {
     } else {
       if (effect === 'reopen' && subject.kind === 'run')
         effects.reopen(subject.repo, subject.runId, answer.keepMenu === true);
-      else if (effect === 'leave') effects.leave();
+      else if (effect === 'leave' || openIsGone) effects.leave();
       else if (typeof effect === 'object' && subject.kind === 'run') effects.open(subject.repo, effect.open);
       else if (effect === 'took') {
         // A change that took empties the text typed for it. One with no text of its own, such as a poll or a drop,
@@ -204,7 +205,7 @@ export function createActor(deps: ActorDeps): Actor {
     }
     say(def, subject, status, answer, undo === undefined ? undefined : () => reverse(subject, undo));
     mark('list', 'main');
-    if (effect === 'leave') mark('sidebar', 'inspector', 'status');
+    if (effect === 'leave' || openIsGone) mark('sidebar', 'inspector', 'status');
   }
 
   function send(def: ActionDef, subject: Subject, request: { path: string; body: unknown }, undo?: Undo) {

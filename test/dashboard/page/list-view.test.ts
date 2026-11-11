@@ -546,3 +546,38 @@ test("the selected queue's row and the cursor's carry sel and cur on the div, wh
   );
   expect(row.match(/data-action="select-queue"/g)).toHaveLength(1);
 });
+
+const failing = (name: string, ids: string[]): ListRepo =>
+  repo(name, [], {
+    offers: {
+      watch: { enabled: true },
+      workflows: {},
+      clean: { enabled: true, runs: ids.map((runId) => ({ runId })) },
+    },
+  });
+const drawHistory = (list: ListRepo[], fields = {}) => renderList('history', list, ui(fields), NOW).value;
+const CLEAN_BUTTON = /<button class="btn" data-action="clean-failed"([^>]*)>clean all failed<\/button>/;
+
+test("History's head draws clean all failed for every repository with no filter, and for the repository alone with one", () => {
+  const list = [failing('alpha', ['A-1']), failing('beta', ['B-1'])];
+  const all = CLEAN_BUTTON.exec(drawHistory(list));
+  expect(all?.[1]).toBe('');
+  const one = CLEAN_BUTTON.exec(drawHistory(list, { repoFilter: 'beta' }));
+  expect(one?.[1]).toBe(' data-repo="beta"');
+});
+
+test("History's head draws no clean all failed when no listed repository offers it, or the filtered one doesn't", () => {
+  expect(drawHistory([repo('alpha', []), repo('beta', [])])).not.toContain('clean-failed');
+  const list = [failing('alpha', ['A-1']), repo('beta', [])];
+  expect(drawHistory(list, { repoFilter: 'beta' })).not.toContain('clean-failed');
+  expect(renderList('active', list, ui(), NOW).value).not.toContain('clean-failed');
+});
+
+test('while a clean of every failed run is out, the word under way takes the clean all failed button place', () => {
+  const list = [failing('alpha', ['A-1'])];
+  const markup = drawHistory(list, { underway: { 'clean:*': 'cleaning…' } });
+  expect(markup).toContain('<span class="busy">cleaning…</span>');
+  expect(markup).not.toContain('clean all failed');
+  const scoped = drawHistory(list, { repoFilter: 'alpha', underway: { 'clean:*': 'cleaning…' } });
+  expect(scoped).toContain('clean all failed');
+});

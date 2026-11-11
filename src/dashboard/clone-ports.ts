@@ -1,16 +1,22 @@
 // The ports a run's stop and clean need in a registered clone, resolved from that clone's `project.yaml` as `sail stop`
-// and `sail clean` resolve them: the Workspace port at once, and the code host only when asked for, so a clean of a run
-// with no branch on the remote needs no code host credentials. Resolving can fail on the config or a credential, and
+// and `sail clean` resolve them: the Workspace port at once, and the code host and ticket source only when asked for, so
+// a clean of a run with no branch on the remote, or of no ticket, needs no credentials. Resolving can fail on the config or a credential, and
 // then the answer is the formatted issues.
 import { BUILTINS } from '../adapters/index';
 import { type ResolvedAdapters, resolveAdapters } from '../engine/adapters';
-import { readConfig } from '../engine/config';
+import { type ProjectConfig, readConfig } from '../engine/config';
 import { formatIssue } from '../engine/schemas';
 import type { CodeHost } from '../ports/code-host';
+import type { TicketSource } from '../ports/ticket-source';
+import { lazyPorts } from '../watch/clean-runs';
 import type { RegistryEntry } from '../watch/registry';
 
 export interface ClonePorts {
   adapters: ResolvedAdapters<'workspace'>;
+  /** The clone's config, which a queue command is checked against. */
+  config: ProjectConfig;
+  /** The clone's ticket source, resolved on the first call. */
+  ticketSource: () => Promise<TicketSource | { refused: string }>;
   /** The clone's code host, resolved on the first call. */
   codeHost: () => Promise<CodeHost | { refused: string }>;
 }
@@ -35,20 +41,6 @@ export async function clonePorts(
     ports: ['workspace'],
   });
   if ('issues' in adapters) return { refused: adapters.issues.map(formatIssue).join('; ') };
-  let host: Promise<CodeHost | { refused: string }> | undefined;
-  const codeHost = (): Promise<CodeHost | { refused: string }> => {
-    host ??= (async () => {
-      const resolved = await resolveAdapters({
-        sailDir,
-        config,
-        builtins: BUILTINS,
-        env: environment,
-        ports: ['codeHost'],
-      });
-      if ('issues' in resolved) return { refused: resolved.issues.map(formatIssue).join('; ') };
-      return resolved.ports.codeHost;
-    })();
-    return host;
-  };
-  return { adapters, codeHost };
+  const { codeHost, ticketSource } = lazyPorts({ sailDir, config, env: environment });
+  return { adapters, config, codeHost, ticketSource };
 }
