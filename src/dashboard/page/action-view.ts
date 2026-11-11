@@ -5,15 +5,7 @@
 // - Not offered, nothing is drawn.
 // - An offer that is disabled is drawn disabled, with its `why`, only where the caller asks (`honourDisabled`): the run
 //   menu does, and the queue and the watch set draw enabled, with the server's refusal coming with the POST.
-// - While the pending action is this one on this subject and unsent, the button is `armed` and reads its confirm label.
-import {
-  type ActionDef,
-  type OfferSource,
-  type Param,
-  type Subject,
-  sameSubject,
-  type Values,
-} from './action-registry';
+import type { ActionDef, OfferSource, Param, Subject, Values } from './action-registry';
 import { html, type SafeHtml } from './html';
 import type { ActState } from './ui-state';
 
@@ -88,14 +80,11 @@ export function actionControl(
       html`<button class="btn" disabled>${def.label(subject)}</button><span class="act-why">${available.why}</span>`,
     );
   }
-  const { pending } = act;
-  const armed =
-    pending !== undefined && !pending.sent && pending.id === def.id && sameSubject(pending.subject, subject);
   const values = act.drafts[def.id] ?? {};
-  const label = armed && def.confirm !== undefined ? def.confirm(subject, values, source) : def.label(subject);
+  const label = def.label(subject);
   const params = def.params(subject, source).map((param) => field(param, values));
   return wrap(
-    html`${params}<button class="${options.class ?? 'btn'}${armed ? ' armed' : ''}" data-action="${def.id}"${
+    html`${params}<button class="${options.class ?? 'btn'}" data-action="${def.id}"${
       options.data === true ? dataOf(subject) : ''
     }${options.title === undefined ? '' : html` title="${options.title}"`}>${label}</button>`,
   );

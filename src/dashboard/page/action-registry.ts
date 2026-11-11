@@ -94,7 +94,7 @@ export type Param = ParamBase &
     | { type: 'text'; placeholder?: string }
   );
 
-/** `instant` is sent at once, `confirmed` after a second click, `undoable` at once with a way back (no action uses it yet). */
+/** `instant` is sent at once, `undoable` at once with a way back, `confirmed` after the confirmation dialog. */
 export type Tier = 'instant' | 'undoable' | 'confirmed';
 
 export type Values = Readonly<Record<string, string>>;
@@ -102,6 +102,8 @@ export type Values = Readonly<Record<string, string>>;
 /** What a repository of the index offers: its queues' offers and its own. */
 export interface OfferedRepo {
   name: string;
+  /** The workflows its watcher watches, for what Unwatch all undoes. */
+  watching?: { workflows: readonly string[] } | undefined;
   queues: readonly {
     workflow: string;
     offers?: OfferedQueue['offers'] | undefined;
@@ -143,12 +145,12 @@ export interface ActionDef {
   place: 'run' | 'queue' | 'repo' | 'rail';
   params(subject: Subject, source: OfferSource): Param[];
   available(subject: Subject, source: OfferSource): Availability;
-  /** The armed button's label. */
-  confirm?(subject: Subject, values: Values, source: OfferSource): string;
-  /** The confirmation dialog a confirmed action opens in place of arming: its title, a line per consequence, its verb. */
+  /** The confirmation dialog a confirmed action opens: its title, a line per consequence, its verb. */
   dialog?(subject: Subject, values: Values, source: OfferSource): DialogView;
   /** What its subject's row reads, in place of its status, while its request is out. */
   underway?: string;
+  /** What reverses an undoable action once it took, read from the source at the click: the request, and the action whose answer it gets. */
+  undo?(subject: Subject, source: OfferSource): { action: string; path: string; body: unknown } | undefined;
   /** What to post, `{ invalid }` for a value it can't send, or nothing when there is nothing to send. */
   request?(
     subject: Subject,
@@ -348,12 +350,18 @@ function watchAction(op: 'watch' | 'unwatch', path: string): ActionDef {
     id: op,
     label: (subject) => (subject.kind === 'repo' ? `${op} all` : op),
     appliesTo: ['workflow', 'repo'],
-    tier: op === 'unwatch' ? 'confirmed' : 'instant',
+    tier: op === 'unwatch' ? 'undoable' : 'instant',
     place: 'repo',
     params: () => [],
     available: watchOffer(op),
     ...(op === 'unwatch'
-      ? { confirm: (subject: Subject) => `${subject.kind === 'repo' ? 'unwatch all' : 'unwatch'}? click again` }
+      ? {
+          undo: (subject: Subject, source: OfferSource) => {
+            const repo = source.index.find((each) => each.name === REPO(subject));
+            const workflows = subject.kind === 'workflow' ? [subject.workflow] : [...(repo?.watching?.workflows ?? [])];
+            return { action: 'watch', path: `/api/repos/${enc(REPO(subject))}/watch`, body: { workflows } };
+          },
+        }
       : {}),
     underway: op === 'watch' ? 'watching…' : 'unwatching…',
     request: (subject) => ({
@@ -603,7 +611,7 @@ export const ACTIONS: readonly ActionDef[] = [
     id: 'clear-attention',
     label: () => 'all clear',
     appliesTo: ['none'],
-    tier: 'instant',
+    tier: 'undoable',
     place: 'rail',
     params: () => [],
     available: () => ({ offered: true, enabled: true }),

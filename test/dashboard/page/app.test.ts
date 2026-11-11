@@ -1449,16 +1449,9 @@ const GOLDEN_PATH = `/api/repos/alpha/runs/${GOLDEN_RUN_ID}`;
 const FAKE_2_PATH = `/api/repos/alpha/runs/${FAKE_2_ID}`;
 const FAKE_3_PATH = `/api/repos/beta/runs/${FAKE_3_ID}`;
 const buttons = (region: string | undefined) =>
-  [
-    ...(region ?? '').matchAll(
-      /<button class="btn( armed)?"( disabled)? ?(?:data-action="(\w+-run)")?>([^<]*)<\/button>/g,
-    ),
-  ].map(([, armed, disabled, action, label]) => [
-    label,
-    action,
-    armed === undefined ? '' : 'armed',
-    disabled === undefined ? '' : 'disabled',
-  ]);
+  [...(region ?? '').matchAll(/<button class="btn"( disabled)? ?(?:data-action="(\w+-run)")?>([^<]*)<\/button>/g)].map(
+    ([, disabled, action, label]) => [label, action, disabled === undefined ? '' : 'disabled'],
+  );
 
 /** The lines of the dialog open now, and its primary button's verb. */
 const dialogLines = () => [...(host.dialog ?? '').matchAll(/<li>([^<]*)<\/li>/g)].map(([, line]) => line);
@@ -1487,8 +1480,8 @@ test("a failed run's view offers Restart with its stages and the failed one chos
   await openOffering('alpha', FAKE_2_ID, fake2Dir(m));
   expect(host.actionReads).toEqual([`${GOLDEN_PATH}/actions`, `${FAKE_2_PATH}/actions`]);
   expect(buttons(host.regions.rail).filter(([, action]) => action?.endsWith('-run'))).toEqual([
-    ['restart', 'restart-run', '', ''],
-    ['clean', 'clean-run', '', ''],
+    ['restart', 'restart-run', ''],
+    ['clean', 'clean-run', ''],
   ]);
   expect(host.regions.rail).toContain(
     '<option value="implement" title="implement#1 and everything after it, in loop fix from iteration 1" selected>',
@@ -1614,8 +1607,8 @@ test('a suspended run over its dollars offers Resume with a raise field and no R
   await openOffering('beta', FAKE_3_ID, m.beta.runDir);
   expect(host.regions.rail).toContain('name="raise"');
   expect(buttons(host.regions.rail).filter(([, action]) => action?.endsWith('-run'))).toEqual([
-    ['resume', 'resume-run', '', ''],
-    ['stop', 'stop-run', '', ''],
+    ['resume', 'resume-run', ''],
+    ['stop', 'stop-run', ''],
   ]);
   host.click({ action: 'resume-run' });
   host.advance(100);
@@ -2075,17 +2068,6 @@ const watchClick = (op: string, workflow?: string) =>
   host.click({ action: op, repo: 'beta', ...(workflow === undefined ? {} : { workflow }) });
 /** What watch and unwatch answered, as toasts. */
 const watchToasts = () => toasts();
-/** The unwatch a first click has armed: the repository, or `<repository>/<workflow>`. */
-const armedWatch = () => {
-  const pending = page?.ui.act.pending;
-  if (pending?.id !== 'unwatch' || pending.sent) return undefined;
-  const { subject } = pending;
-  return subject.kind === 'workflow'
-    ? `${subject.repo}/${subject.workflow}`
-    : 'repo' in subject
-      ? subject.repo
-      : undefined;
-};
 
 test('a Watch click posts the workflow to the repository watch route at once, and says it is watching until the answer', async () => {
   bootWatching();
@@ -2102,35 +2084,58 @@ test('a Watch click posts the workflow to the repository watch route at once, an
   expect(host.regions.rail).not.toContain('<div class="lgrp-p">sail watch: it watches ticket-to-pr</div>');
 });
 
-test('an Unwatch click arms and posts nothing, another action disarms it, and the second click posts the workflow to the unwatch route', async () => {
+test('an Unwatch click posts the workflow to the unwatch route at once, with no dialog and no armed button', async () => {
   bootWatching([QUEUE_WORKFLOW]);
   host.click({ action: 'toggle-group', group: 'beta' });
   host.click({ action: 'toggle-group', group: `beta/${QUEUE_WORKFLOW}` });
-  watchClick('unwatch', QUEUE_WORKFLOW);
   host.advance(100);
-  expect([host.posts, armedWatch()]).toEqual([[], `beta/${QUEUE_WORKFLOW}`]);
-  expect(host.regions.rail).toContain('unwatch? click again');
-  host.click({ action: 'toggle-group', group: 'alpha' });
-  host.advance(100);
-  expect(armedWatch()).toBeUndefined();
-  expect(host.regions.rail).not.toContain('click again');
-  watchClick('unwatch', QUEUE_WORKFLOW);
-  expect(host.posts).toEqual([]);
+  expect(host.regions.rail).toContain(
+    'data-action="unwatch" data-repo="beta" data-workflow="ticket-to-pr">unwatch</button>',
+  );
   host.postAnswer = { status: 200, body: JSON.stringify({ message: 'sail unwatch: done' }) };
   watchClick('unwatch', QUEUE_WORKFLOW);
   expect(host.posts).toEqual([{ path: '/api/repos/beta/unwatch', body: { workflows: [QUEUE_WORKFLOW] } }]);
-  expect([armedWatch(), page?.ui.underway]).toEqual([undefined, { [`watch:beta/${QUEUE_WORKFLOW}`]: 'unwatching…' }]);
+  expect([host.dialog, page?.ui.underway]).toEqual([undefined, { [`watch:beta/${QUEUE_WORKFLOW}`]: 'unwatching…' }]);
+  host.advance(100);
+  expect(host.regions.rail).not.toContain('armed');
+  expect(host.regions.rail).not.toContain('click again');
 });
 
-test('Watch all posts an empty list at once, and Unwatch all posts one on its second click', async () => {
+test('an Unwatch toast has an undo that posts the watch with the same body and takes the toast away; the undo toast is drawn at 7,999 ms and gone at 8,000 ms', async () => {
+  bootWatching([QUEUE_WORKFLOW]);
+  host.postAnswer = { status: 200, body: JSON.stringify({ message: 'sail unwatch: done' }) };
+  watchClick('unwatch', QUEUE_WORKFLOW);
+  await settle();
+  host.advance(100);
+  expect(host.regions.toasts).toContain('data-action="undo-toast" data-toast="1">undo</button>');
+  host.advance(7_899);
+  host.advance(0);
+  expect(page?.ui.toasts.map((each) => each.id)).toEqual([1]);
+  host.advance(1);
+  expect(page?.ui.toasts).toEqual([]);
+  // The same again, taken by the undo.
+  watchClick('unwatch', QUEUE_WORKFLOW);
+  await settle();
+  host.postAnswer = { status: 200, body: JSON.stringify({ message: 'sail watch: it watches ticket-to-pr' }) };
+  host.click({ action: 'undo-toast', toast: '2' });
+  expect(host.posts.at(-1)).toEqual({ path: '/api/repos/beta/watch', body: { workflows: [QUEUE_WORKFLOW] } });
+  expect(page?.ui.toasts).toEqual([]);
+  await settle();
+  expect(toasts()).toEqual([`ok watch beta / ${QUEUE_WORKFLOW}: sail watch: it watches ticket-to-pr`]);
+});
+
+test('Watch all posts an empty list at once, and Unwatch all posts one at once and undoes with the workflows watched before the click', async () => {
   bootWatching([QUEUE_WORKFLOW]);
   watchClick('watch');
   expect(host.posts).toEqual([{ path: '/api/repos/beta/watch', body: { workflows: [] } }]);
+  await settle();
   host.posts.length = 0;
-  watchClick('unwatch');
-  expect([host.posts, armedWatch()]).toEqual([[], 'beta']);
+  host.postAnswer = { status: 200, body: JSON.stringify({ message: 'sail unwatch: all' }) };
   watchClick('unwatch');
   expect(host.posts).toEqual([{ path: '/api/repos/beta/unwatch', body: { workflows: [] } }]);
+  await settle();
+  host.click({ action: 'undo-toast', toast: String(page?.ui.toasts.at(-1)?.id) });
+  expect(host.posts.at(-1)).toEqual({ path: '/api/repos/beta/watch', body: { workflows: [QUEUE_WORKFLOW] } });
   await settle();
 });
 
@@ -2187,6 +2192,26 @@ describe('all clear', () => {
     expect(host.regions.attention).not.toContain('all clear');
     expect(host.posts).toEqual([]);
     expect(host.regions.rail).toContain(`data-run="${FAKE_2_ID}"`);
+  });
+
+  test('all clear answers in a toast with an undo, which lists the same items again and takes only its own identities out of storage', async () => {
+    bootOpen();
+    const other = 'another tab: a cleared thing';
+    host.storage.set(CLEARED_KEY, JSON.stringify([other]));
+    host.click({ action: 'clear-attention' });
+    host.advance(100);
+    expect(toasts()).toEqual(['ok all clear: 4 hidden']);
+    expect(page?.ui.toasts[0]?.undo).toBe(true);
+    expect(badge()).toBeUndefined();
+    const saved: string[] = JSON.parse(host.storage.get(CLEARED_KEY) ?? '[]');
+    expect(saved).toContain(other);
+    expect(saved).toHaveLength(5);
+    host.click({ action: 'undo-toast', toast: '1' });
+    host.advance(100);
+    expect(badge()).toBe('4');
+    expect(JSON.parse(host.storage.get(CLEARED_KEY) ?? '[]')).toEqual([other]);
+    expect(page?.ui.toasts).toEqual([]);
+    expect(host.posts).toEqual([]);
   });
 
   test('the clear survives a reboot over the same storage', () => {

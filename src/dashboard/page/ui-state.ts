@@ -1,10 +1,8 @@
 // What a person has chosen on the page, which every view reads: the open run, card and tab, whether the card's timeline
 // is open, which of its tool calls and which kinds of its entries it hides, the queue open in its place with its folded
 // sections, the rail's open sections and opened groups, whether needs attention is open, the theme, the offset their
-// clock is at, and the file open in the drawer. `act` is the one state of carrying an action out: the pending action on
-// its subject, the last result and the parameters typed. It holds nothing about the runs themselves.
+// clock is at, and the file open in the drawer. `act` is the one state of carrying an action out: the parameters typed. It holds nothing about the runs themselves.
 
-import type { Subject } from './action-registry';
 import type { DialogView } from './dialog-view';
 import type { Toast } from './toasts';
 
@@ -24,7 +22,6 @@ export type Theme = (typeof THEMES)[number];
  * place's answer leaves another's, and what was typed for each action's parameters, kept across a draw.
  */
 export interface ActState {
-  pending?: { id: string; subject: Subject; values: Record<string, string>; sent: boolean };
   drafts: Record<string, Record<string, string>>;
 }
 

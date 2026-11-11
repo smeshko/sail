@@ -263,7 +263,6 @@ export function onIndex(store: Store, text: string, onStart: (asked: Record<stri
   }
   if (store.run !== undefined) followAgain(store, store.run, true);
   if (store.run !== undefined && offerSignature(store, store.run) !== store.offersFor) {
-    store.actor.disarm();
     // A dialog open for the run asks of what the run offered before: it closes with nothing sent.
     if (store.actor.dialogFor()?.kind === 'run') store.actor.cancel();
     readOffers(store);

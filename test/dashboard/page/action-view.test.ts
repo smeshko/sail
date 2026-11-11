@@ -1,4 +1,4 @@
-// Drawing any action of the registry: an enabled button, an armed one with its confirm label, a disabled one with its
+// Drawing any action of the registry: an enabled button, a disabled one with its
 // why, nothing when not offered, and the parameters each kind draws.
 import { expect, test } from 'bun:test';
 import { ACTIONS, type ActionDef, type OfferSource, type Subject } from '../../../src/dashboard/page/action-registry';
@@ -28,19 +28,15 @@ const made = (state: 'on' | 'off' | 'absent'): ActionDef => ({
           enabled: state === 'on',
           ...(state === 'off' ? { why: 'not now' } : {}),
         },
-  confirm: (_, values) => `confirm poke ${values.note ?? ''}`,
 });
 
-test('a made-up entry is drawn enabled, armed, disabled and not at all', () => {
+test('a made-up entry is drawn enabled with what was typed, disabled and not at all', () => {
   expect(actionControl(made('on'), RUN, idle, NOTHING).toString()).toBe(
     '<label class="lbl">note <input class="txt" type="text" name="note" value=""></label><label class="lbl">times <input class="num" type="number" name="times" min="1" step="any" value=""></label><button class="btn" data-action="poke">poke</button>',
   );
-  const armed: ActState = {
-    drafts: { poke: { note: 'a<b', times: '3' } },
-    pending: { id: 'poke', subject: RUN, values: {}, sent: false },
-  };
-  expect(actionControl(made('on'), RUN, armed, NOTHING, { wrap: true }).toString()).toBe(
-    '<span class="act"><label class="lbl">note <input class="txt" type="text" name="note" value="a&lt;b"></label><label class="lbl">times <input class="num" type="number" name="times" min="1" step="any" value="3"></label><button class="btn armed" data-action="poke">confirm poke a&lt;b</button></span>',
+  const typed: ActState = { drafts: { poke: { note: 'a<b', times: '3' } } };
+  expect(actionControl(made('on'), RUN, typed, NOTHING, { wrap: true }).toString()).toBe(
+    '<span class="act"><label class="lbl">note <input class="txt" type="text" name="note" value="a&lt;b"></label><label class="lbl">times <input class="num" type="number" name="times" min="1" step="any" value="3"></label><button class="btn" data-action="poke">poke</button></span>',
   );
   expect(actionControl(made('off'), RUN, idle, NOTHING, { honourDisabled: true, wrap: true }).toString()).toBe(
     '<span class="act"><button class="btn" disabled>poke</button><span class="act-why">not now</span></span>',
@@ -49,18 +45,6 @@ test('a made-up entry is drawn enabled, armed, disabled and not at all', () => {
     '<button class="btn" data-action="poke">poke</button>',
   );
   expect(actionControl(made('absent'), RUN, idle, NOTHING).toString()).toBe('');
-});
-
-test('only a pending action that is unsent, this one, on this subject, is armed', () => {
-  const pending = (fields: Partial<NonNullable<ActState['pending']>>): ActState => ({
-    drafts: {},
-    pending: { id: 'poke', subject: RUN, values: {}, sent: false, ...fields },
-  });
-  const drawn = (act: ActState) => actionControl(made('on'), RUN, act, NOTHING).toString();
-  expect(drawn(pending({}))).toContain('class="btn armed"');
-  expect(drawn(pending({ sent: true }))).not.toContain('armed');
-  expect(drawn(pending({ id: 'other' }))).not.toContain('armed');
-  expect(drawn(pending({ subject: { ...RUN, runId: 'R2' } }))).not.toContain('armed');
 });
 
 test("a button carries its subject's data, its class and its title when asked", () => {
@@ -88,12 +72,9 @@ test("a button carries its subject's data, its class and its title when asked", 
   expect(actionControl(drop, item, idle, source, { data: true, title: 'drop ticket:FAKE-5' }).toString()).toBe(
     '<button class="btn" data-action="drop-item" data-repo="a&quot;" data-workflow="wf" data-item="ticket:FAKE-5" title="drop ticket:FAKE-5">drop</button>',
   );
-  const armed: ActState = {
-    drafts: {},
-    pending: { id: 'drop-item', subject: item, values: {}, sent: false },
-  };
-  expect(actionControl(drop, item, armed, source, { class: 'wf-act' }).toString()).toBe(
-    '<button class="wf-act armed" data-action="drop-item">drop</button>',
+  // A confirmed action's button is never armed: its dialog confirms it.
+  expect(actionControl(drop, item, idle, source, { class: 'wf-act' }).toString()).toBe(
+    '<button class="wf-act" data-action="drop-item">drop</button>',
   );
 });
 

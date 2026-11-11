@@ -3,7 +3,6 @@
 // workflows closing when asked unless they hold it, and every run a delegated `select-run` action.
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { index } from '../../../src/dashboard/files';
-import type { Subject } from '../../../src/dashboard/page/action-registry';
 import { type RailRepo, type RailRun, railRepos } from '../../../src/dashboard/page/index-model';
 import { renderRail } from '../../../src/dashboard/page/rail-view';
 import { initialUi, pillOf } from '../../../src/dashboard/page/ui-state';
@@ -249,8 +248,8 @@ test('a run selected from the running block is marked sel', () => {
   expect(liveRows(markup)).toEqual([`alpha ${RUNNING_ID} *`, `beta ${FAKE_3_ID}`]);
 });
 
-const button = (repo: string, op: string, text: string, workflow?: string, armed = false) =>
-  `<button class="wf-act${armed ? ' armed' : ''}" data-action="${op}" data-repo="${repo}"${
+const button = (repo: string, op: string, text: string, workflow?: string) =>
+  `<button class="wf-act" data-action="${op}" data-repo="${repo}"${
     workflow === undefined ? '' : ` data-workflow="${workflow}"`
   }>${text}</button>`;
 
@@ -308,17 +307,12 @@ test('a watched workflow draws unwatch, an unwatched one with a queue draws watc
   expect(gamma(undefined)).not.toContain('unwatch all');
 });
 
-test('an armed unwatch reads unwatch? click again, and an armed unwatch all unwatch all? click again, and nothing else is armed', () => {
-  const arm = (subject: Subject) => ({
-    act: { drafts: {}, results: {}, pending: { id: 'unwatch', subject, values: {}, sent: false } },
-  });
-  const one = gamma(['flow'], arm({ kind: 'workflow', repo: 'gamma', workflow: 'flow' }));
-  expect(one).toContain(button('gamma', 'unwatch', 'unwatch? click again', 'flow', true));
-  expect(one).toContain(button('gamma', 'unwatch', 'unwatch all'));
-  const all = gamma(['flow'], arm({ kind: 'repo', repo: 'gamma' }));
-  expect(all).toContain(button('gamma', 'unwatch', 'unwatch all? click again', undefined, true));
-  expect(all).toContain(button('gamma', 'unwatch', 'unwatch', 'flow'));
-  expect(all.match(/armed/g)).toHaveLength(1);
+test('unwatch and unwatch all read their own words and are never armed: a first click runs them', () => {
+  const markup = gamma(['flow']);
+  expect(markup).toContain(button('gamma', 'unwatch', 'unwatch', 'flow'));
+  expect(markup).toContain(button('gamma', 'unwatch', 'unwatch all'));
+  expect(markup).not.toContain('armed');
+  expect(markup).not.toContain('click again');
 });
 
 test("while a watch request is out a workflow's or repository's watch buttons read the word under way, and a repository's header shows no answer", () => {

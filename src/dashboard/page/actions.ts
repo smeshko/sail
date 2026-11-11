@@ -1,6 +1,6 @@
 // What each view `data-action` does, as one function of the store apiece, and `dispatch()`, the delegated click's rule.
 // An action of the registry (`action-registry.ts`) is carried out by the actor (`act.ts`), which drops any confirmation
-// but its own; a click on anything else drops an armed one. An item's menu and a run's menu shut by the rules below. No
+// but its own. An item's menu and a run's menu shut by the rules below. No
 // action opens a socket: what needs one goes through `streams.ts`, and what posts goes through the actor.
 
 import { actionOf } from './action-registry';
@@ -144,7 +144,6 @@ export const actions: Record<string, Action> = {
       store.run.runId === runId
     ) {
       delete store.ui.runMenu;
-      store.actor.disarm();
       store.mark('rail');
       return;
     }
@@ -206,23 +205,18 @@ export const actions: Record<string, Action> = {
 export function dispatch(store: Store, action: string, data: Record<string, string>) {
   const { ui } = store;
   const def = actionOf(action);
-  // A registry action is carried out by the actor, which drops any confirmation but its own. A click on anything else
-  // drops it, and `stop-now` keeps it: ticking the box redraws an armed Stop. An item's menu shuts on any click but its
-  // ⋯, which toggles it, and the confirmed action of an item that arms. A run's menu shuts on any click but a run
-  // action and a run's ⋯, which handles its own.
+  // A registry action is carried out by the actor. An item's menu shuts on any click but its ⋯, which toggles it, an
+  // item's confirmed action, whose dialog opens over it, and the dialog's own buttons. A run's menu shuts on any click
+  // but a run action, a run's ⋯, which handles its own, and the dialog's buttons.
   const acts = def !== undefined;
   const runAction = action === 'stop-now' || (def?.appliesTo.includes('run') ?? false);
-  const arming =
-    def?.appliesTo.includes('item') === true &&
-    def.tier === 'confirmed' &&
-    (def.dialog !== undefined || !store.actor.armed(action, data));
+  const confirming = def?.appliesTo.includes('item') === true && def.tier === 'confirmed';
   const dialogClick = action === 'dialog-confirm' || action === 'dialog-cancel';
-  const shuts = ui.itemMenu !== undefined && action !== 'item-menu' && !arming && !dialogClick;
+  const shuts = ui.itemMenu !== undefined && action !== 'item-menu' && !confirming && !dialogClick;
   const shutsRun = ui.runMenu !== undefined && !runAction && action !== 'run-menu' && !dialogClick;
-  const disarmed = !acts && action !== 'stop-now' && store.actor.disarm();
   if (shuts) delete ui.itemMenu;
   if (shutsRun) delete ui.runMenu;
-  if (disarmed || shuts || shutsRun) store.mark('main', 'rail');
+  if (shuts || shutsRun) store.mark('main', 'rail');
   if (acts) store.actor.act(action, data);
   else actions[action]?.(store, data);
 }

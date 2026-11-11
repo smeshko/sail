@@ -37,7 +37,7 @@ test('the page has a modal dialog labelled by its title', async () => {
   expect(html).toContain(
     '<dialog id="dialog" class="dlg" role="dialog" aria-modal="true" aria-labelledby="dialog-title"></dialog>',
   );
-  expect(html).not.toContain('.qmenu .btn.armed');
+  expect(html).not.toContain('.armed');
 });
 
 test('the page has a toasts region announced politely', async () => {

@@ -82,9 +82,11 @@ test('ACTIONS has exactly the twelve ids, each with a label, appliesTo, a tier a
     'stop-run',
     'clean-run',
     'drop-item',
-    'unwatch',
   ]);
-  expect(ACTIONS.some((each) => each.tier === 'undoable')).toBe(false);
+  expect(ACTIONS.filter((each) => each.tier === 'undoable').map((each) => each.id)).toEqual([
+    'unwatch',
+    'clear-attention',
+  ]);
 });
 
 test('every entry posts what its handler posted', () => {
@@ -269,15 +271,43 @@ test('a confirmed run action opens a dialog naming the run and each consequence,
   });
 });
 
-test('the drop dialog names the item and its queue, and an unwatch keeps its second-click label until ADW-514 finishes', () => {
+test('the drop dialog names the item and its queue', () => {
   expect(def('drop-item').dialog?.(ITEM, {}, source())).toEqual({
     title: 'drop ticket:FAKE-5',
     lines: ["removes ticket:FAKE-5 from alpha / wf's queue"],
     verb: 'drop',
   });
   expect(def('drop-item').dialog?.(WORKFLOW, {}, source())).toEqual({ title: 'drop', lines: [], verb: 'drop' });
-  expect(def('unwatch').confirm?.(WORKFLOW, {}, source())).toBe('unwatch? click again');
-  expect(def('unwatch').confirm?.(REPO, {}, source())).toBe('unwatch all? click again');
+});
+
+test('every confirmed action has a dialog, and unwatch and all clear are the undoable ones', () => {
+  for (const each of ACTIONS)
+    expect([each.id, typeof each.dialog]).toEqual([each.id, each.tier === 'confirmed' ? 'function' : 'undefined']);
+  expect(ACTIONS.filter((each) => each.tier === 'undoable').map((each) => each.id)).toEqual([
+    'unwatch',
+    'clear-attention',
+  ]);
+  expect(ACTIONS.filter((each) => each.tier === 'confirmed').map((each) => each.id)).toEqual([
+    'resume-run',
+    'restart-run',
+    'stop-run',
+    'clean-run',
+    'drop-item',
+  ]);
+});
+
+test('an unwatch of a workflow undoes with a watch of it, and of a repository with a watch of what the index lists as watched', () => {
+  const watching = [
+    { name: 'alpha', runs: [], queues: [], watching: { pid: 1, workflows: ['wf', 'other'] } },
+  ] as unknown as IndexRepo[];
+  const undo = (subject: Subject) => def('unwatch').undo?.(subject, source({ index: watching }));
+  expect(undo(WORKFLOW)).toEqual({ action: 'watch', path: '/api/repos/alpha/watch', body: { workflows: ['wf'] } });
+  expect(undo(REPO)).toEqual({ action: 'watch', path: '/api/repos/alpha/watch', body: { workflows: ['wf', 'other'] } });
+  expect(def('unwatch').undo?.(REPO, source())).toEqual({
+    action: 'watch',
+    path: '/api/repos/alpha/watch',
+    body: { workflows: [] },
+  });
 });
 
 test('available() reads a run action from the open run, an item from its queue, a queue from its offers and watch from the repository', () => {

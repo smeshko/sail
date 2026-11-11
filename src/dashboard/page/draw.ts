@@ -18,7 +18,7 @@ import { renderToasts } from './toast-view';
 /** How often a running time is drawn again. */
 export const TICK_MS = 1000;
 
-/** What each region is drawn from, field-keeping and armed-drop rules included. */
+/** What each region is drawn from, field-keeping and open-dialog rules included. */
 export function regions(store: Store): Record<Region, () => string> {
   const { ui, host } = store;
   return {

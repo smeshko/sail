@@ -5,8 +5,8 @@
 // that status's finished runs, so a long tail of them never buries live work. Whatever is folded, the open run's row
 // and the open queue's workflow stay in sight under it, so the selection is never hidden. A workflow's header also
 // carries its Watch or Unwatch, and an opened repository a row with Watch all and, while its watch set isn't empty,
-// Unwatch all; an Unwatch armed by a first click reads `click again`. The answer to the last change shows under the
-// repository's header. A run's row is a `div` holding two sibling buttons: its own, which opens the run, and, but on
+// Unwatch all; each runs at once, its answer is a toast, and while its request is out the buttons read the word under way.
+// A run's row is a `div` holding two sibling buttons: its own, which opens the run, and, but on
 // a completed run, a ⋯ of its own that opens the run and, under the row, a menu of what it offers: Resume, Restart,
 // Stop and Clean.
 import type { RunActions } from '../actions';
@@ -173,7 +173,7 @@ const watchSource = (repo: string, offers: RepoOffers | undefined): OfferSource 
 
 /**
  * The watch or unwatch button each offered, drawn from the registry, for a workflow, or for the whole repository when
- * `workflow` is left out. An armed unwatch asks for its second click.
+ * `workflow` is left out. While a request for it is out, the word under way takes their place.
  */
 function watchButtons(repo: string, offers: RepoOffers | undefined, ui: UiState, workflow?: string): SafeHtml {
   const subject: Subject = workflow === undefined ? { kind: 'repo', repo } : { kind: 'workflow', repo, workflow };

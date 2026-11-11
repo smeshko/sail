@@ -55,9 +55,22 @@ export function boot(host: PageHost): Page {
       toast: (kind, head, text, undo) => toast(store, kind, head, text, undo),
       local: {
         'clear-attention': () => {
-          store.cleared = new Set([...storedCleared(host), ...store.cleared, ...store.drawn]);
+          const before = new Set([...storedCleared(host), ...store.cleared]);
+          const added = new Set(store.drawn.filter((each) => !before.has(each)));
+          store.cleared = new Set([...before, ...store.drawn]);
           saveCleared(host, store.cleared);
           store.mark('attention');
+          if (added.size === 0) return undefined;
+          return {
+            text: `${added.size} hidden`,
+            // Undo lists the same items again: exactly the identities this click added leave the stored set, and an
+            // identity another tab saved since stays.
+            undo: () => {
+              store.cleared = new Set([...storedCleared(host), ...store.cleared].filter((each) => !added.has(each)));
+              saveCleared(host, store.cleared);
+              store.mark('attention');
+            },
+          };
         },
       },
     },
