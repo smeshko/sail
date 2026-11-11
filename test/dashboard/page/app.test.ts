@@ -377,11 +377,12 @@ test("a URL naming FAKE-2's implement#1 and its permissions tab opens them on th
   );
 });
 
-test('a URL naming a run no repository lists opens the newest run instead', () => {
+test('a URL naming a run no repository lists opens no run and leaves the list alone in the centre (review R12)', () => {
   host.startAt = { repo: 'alpha', run: 'FAKE-9-01M5PY0000000000000000000' };
   page = boot(host);
-  firstIndex();
-  expect(host.open('run=').map((socket) => socket.query)).toEqual([runQuery('alpha', GOLDEN_RUN_ID)]);
+  plainIndex();
+  host.advance(100);
+  expect([host.open('run='), page.ui.runId, host.details.at(-1) ?? false]).toEqual([[], undefined, false]);
 });
 
 test('the URL is read on the first index only: a run picked since stays open through the next index', () => {
