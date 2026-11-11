@@ -16,6 +16,7 @@ import {
   holdsDir,
   readHold,
   releasedAt,
+  releasedLine,
   releaseHold,
   writeHold,
 } from '../../src/watch/holds';
@@ -182,4 +183,11 @@ test('a hold read before the key was last released is not written back (review R
   expect(readHold(home, 'claude-code')).toBeUndefined();
   writeHold(home, 'claude-code', hold, NOW, NOW.getTime() + 60_000);
   expect(readHold(home, 'claude-code')?.runId).toBe('run-a');
+});
+
+test('releasedLine says a hold was released, or that none was there and the held runs resume on the next tick', () => {
+  expect(releasedLine('claude-code', true)).toBe('released the usage-limit hold on claude-code');
+  expect(releasedLine('pi:openai-codex', false)).toBe(
+    'no usage-limit hold on pi:openai-codex; its held runs resume on the next tick',
+  );
 });

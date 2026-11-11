@@ -29,6 +29,8 @@ const SPLIT = [
   'keys.ts',
   'focus.ts',
   'menu.ts',
+  'location.ts',
+  'navigate.ts',
   'app.ts',
 ];
 
@@ -53,9 +55,11 @@ function fakeHost(stored: Record<string, string>) {
     setTheme: () => {},
     setInspector: () => {},
     setDetail: () => {},
-    setParam: () => {},
     offset: () => 120,
     start: () => ({ run: 'r-1' }),
+    setUrl: () => {},
+    onNavigate: () => {},
+    href: () => '',
     later: (_fn: () => void, ms: number) => timers.push({ ms }),
     cancel: () => {},
   } as unknown as PageHost;
@@ -167,6 +171,7 @@ test("the shell's actions are exactly the page's view actions: every action of t
       'copy',
       'menu-run',
       'menu-close',
+      'copy-link',
       'dialog-confirm',
       'dialog-cancel',
       'dismiss-toast',

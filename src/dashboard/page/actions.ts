@@ -5,6 +5,7 @@
 
 import { actionOf } from './action-registry';
 import { VIEWS, type ViewName } from './list-model';
+import { syncUrl } from './location';
 import { closeMenu, runRow } from './menu';
 import { closeFile, openedOutputKeys, openFile, readLog, readOutput, selectCard } from './reads';
 import { FILTER_KEY, LIST_KEY, THEME_KEY } from './saved';
@@ -116,7 +117,6 @@ export const actions: Record<string, Action> = {
   'select-view': (store, data) => {
     if (!(VIEWS as readonly string[]).includes(data.view ?? '')) return;
     store.ui.view = data.view as ViewName;
-    store.host.setParam('view', store.ui.view);
     store.ui.listFilter = '';
     delete store.ui.listCursor;
     // The filter field gives up what was typed in it, so it reads as empty as the filter now is.
@@ -204,6 +204,15 @@ export const actions: Record<string, Action> = {
     store.ui.follow = !store.ui.follow;
     store.mark('main', 'inspector');
   },
+  // Copies the page's URL, and says in a toast whether the clipboard took it.
+  'copy-link': (store) => {
+    const { host } = store;
+    void host.copy(host.href()).then((copied) => {
+      if (store.stopped) return;
+      if (copied) toast(store, 'ok', 'copy link', 'link copied');
+      else toast(store, 'bad', 'copy link', 'the link could not be copied');
+    });
+  },
   copy: (store, data) => {
     const { text } = data;
     if (text === undefined) return;
@@ -238,4 +247,5 @@ export function dispatch(store: Store, action: string, data: Record<string, stri
   if (shuts || shutsRun) store.mark('main', 'list');
   if (acts) store.actor.act(action, data);
   else actions[action]?.(store, data);
+  syncUrl(store, true);
 }

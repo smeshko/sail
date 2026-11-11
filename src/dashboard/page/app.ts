@@ -8,15 +8,20 @@
 //   drawn by `action-view.ts`), the only module that posts; `keys.ts` does what a key asks. Enter and Space on
 //   a focused stage card arrive as its action, and on a focused button or link not at all.
 //
+// The page's URL names the view and the selection (`location.ts`, opened by `navigate.ts`, also on Back and forward),
+// and the top bar's Copy link copies it (`actions.ts`).
+//
 // The rules each module follows are in its own header.
 import { createActor } from './act';
-import { actions, dispatch } from './actions';
+import { dispatch } from './actions';
 import { startDraw } from './draw';
 import { setFocus, subjectFrom } from './focus';
 import type { PageHost } from './host';
 import { REGIONS } from './host';
 import { onKey } from './keys';
+import { syncUrl } from './location';
 import { menuInput, openMenu } from './menu';
+import { navigate, showView } from './navigate';
 import { stopReads } from './reads';
 import { saveCleared, storedCleared } from './saved';
 import { createStore, type Store, sourceFor } from './store';
@@ -52,8 +57,12 @@ export function boot(host: PageHost): Page {
         selectRun(store, repo, runId);
         // The menu the action was made from stays open on the run read again, with the answer.
         if (keepMenu && menu !== undefined) store.ui.runMenu = menu;
+        syncUrl(store, false);
       },
-      open: (repo, runId) => selectRun(store, repo, runId),
+      open: (repo, runId) => {
+        selectRun(store, repo, runId);
+        syncUrl(store, false);
+      },
       leave: () => closeRun(store),
       took: () => store.fresh.add('main'),
       toast: (kind, head, text, undo) => toast(store, kind, head, text, undo),
@@ -100,7 +109,20 @@ export function boot(host: PageHost): Page {
     if (name === 'list-filter') dispatch(store, 'list-filter', { value });
     if (name === 'menu-query') menuInput(store, value);
   });
-  openIndex(store, (asked) => actions.open?.(store, asked));
+  host.onNavigate((asked) => {
+    // Before the first index the entry's view is shown and its query is what the index opens; after it, what the entry
+    // names is opened, and the URL is only replaced where what is shown differs from it.
+    if (store.start !== undefined) {
+      store.start = asked;
+      showView(store, asked);
+      store.mark('list');
+      return;
+    }
+    navigate(store, asked, true);
+    store.url = new URLSearchParams(asked).toString();
+    syncUrl(store, false);
+  });
+  openIndex(store, (asked) => navigate(store, asked, false));
   store.mark(...REGIONS);
 
   return {

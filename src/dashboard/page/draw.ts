@@ -43,6 +43,9 @@ export function regions(store: Store): Record<Region, () => string> {
       store.drawn = items.map(identity);
       return renderAttention(items, ui.attention).value;
     },
+    link: () =>
+      html`<button class="btn" type="button" data-action="copy-link" aria-label="copy link" title="copy link">⧉</button>`
+        .value,
     main: () => {
       const panel = openQueue(store);
       if (panel !== undefined) {
@@ -55,6 +58,15 @@ export function regions(store: Store): Record<Region, () => string> {
         if (asked?.kind === 'item' && asked.repo === panel.repo && asked.workflow === panel.workflow) {
           const target = panel.items.find((each) => each.dedupKey === asked.item);
           if (unwatched || target === undefined || !offeredDrop(panel, target)) store.actor.cancel();
+        }
+        // A release dialog, the one a queue's banner opens, closes with nothing sent once its queue is held on a key no more.
+        if (
+          asked?.kind === 'workflow' &&
+          asked.repo === panel.repo &&
+          asked.workflow === panel.workflow &&
+          panel.queue?.held?.harnessKey === undefined
+        ) {
+          store.actor.cancel();
         }
         const menuItem = panel.items.find((item) => item.dedupKey === ui.itemMenu);
         if (unwatched || menuItem === undefined || !hasItemActions(panel, menuItem)) delete ui.itemMenu;

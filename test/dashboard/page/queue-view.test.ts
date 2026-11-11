@@ -537,3 +537,38 @@ test('a watched workflow reads watched, its controls are enabled, and no reason 
   expect(markup).not.toContain('act-why');
   expect(markup).not.toContain('disabled');
 });
+
+const HELD = {
+  until: '2026-09-24T14:20:00.000Z',
+  runId: 'r',
+  reason: 'claude-code hit the usage limit',
+  at: '2026-09-24T11:00:00.000Z',
+};
+const heldPanel = (held: Record<string, unknown>) => {
+  const [panel] = watchedPanels();
+  if (panel === undefined) throw new Error('beta has no queue');
+  return { ...panel, queue: { ...(panel.queue as NonNullable<typeof panel.queue>), held } } as QueuePanel;
+};
+
+test('a hold that records a harness key draws a release button for it after the held chip', () => {
+  const markup = renderQueue(heldPanel({ ...HELD, harnessKey: 'claude-code' }), undefined, initialUi(0), NOW).value;
+  expect(markup).toContain(
+    '<span class="warnchip">held until 14:20:00: claude-code hit the usage limit</span><button class="btn" data-action="release-hold" data-repo="beta" data-workflow="ticket-to-pr" data-harness="claude-code" title="release the usage-limit hold on claude-code">release</button>',
+  );
+});
+
+test('a key is escaped in the release button', () => {
+  const markup = renderQueue(heldPanel({ ...HELD, harnessKey: '"><b>' }), undefined, initialUi(0), NOW).value;
+  expect(markup).toContain('data-harness="&quot;&gt;&lt;b&gt;"');
+  expect(markup).not.toContain('<b>');
+});
+
+test('a hold with no harness key, timed or not, draws no release button', () => {
+  const timed = renderQueue(heldPanel(HELD), undefined, initialUi(0), NOW).value;
+  expect(timed).toContain('held until 14:20:00');
+  expect(timed).not.toContain('release-hold');
+  const { until: _until, ...untimed } = HELD;
+  const plain = renderQueue(heldPanel({ ...untimed, sail: 'abc' }), undefined, initialUi(0), NOW).value;
+  expect(plain).toContain('held: claude-code hit the usage limit');
+  expect(plain).not.toContain('release-hold');
+});

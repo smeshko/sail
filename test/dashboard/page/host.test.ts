@@ -234,7 +234,14 @@ function fakeWindow(
   const root = { dataset: {} as Record<string, string | undefined> };
   const stored = new Map<string, string>();
   const copied: string[] = [];
-  const replaced: { state: unknown; title: string; url: string }[] = [];
+  const windowListeners: Record<string, (() => void)[]> = {};
+  const history: { kind: string; data: unknown; unused: string; url: string }[] = [];
+  const location = {
+    host: '127.0.0.1:4100',
+    search: options.search ?? '',
+    pathname: '/',
+    href: 'http://127.0.0.1:4100/?repo=a',
+  };
   const win: BrowserWindow = {
     document: {
       getElementById: (id) => elements[id] ?? null,
@@ -249,11 +256,13 @@ function fakeWindow(
         return focus.active;
       },
     },
-    location: { host: '127.0.0.1:4100', pathname: '/dashboard', search: options.search ?? '' },
+    location,
+    addEventListener: (type, listener) => {
+      windowListeners[type] = [...(windowListeners[type] ?? []), listener];
+    },
     history: {
-      replaceState: (state, title, url) => {
-        replaced.push({ state, title, url });
-      },
+      pushState: (data, unused, url) => history.push({ kind: 'push', data, unused, url }),
+      replaceState: (data, unused, url) => history.push({ kind: 'replace', data, unused, url }),
     },
     async fetch(url, init) {
       fetched.push({
@@ -334,7 +343,9 @@ function fakeWindow(
     root,
     stored,
     copied,
-    replaced,
+    history,
+    location,
+    windowListeners,
     fire,
     listeners,
     focus,
@@ -1050,18 +1061,30 @@ describe('the list host members (ADW-522)', () => {
   });
 });
 
-describe('the URL parameters (ADW-522)', () => {
-  test('setParam rewrites the query through replaceState, keeping the other parameters and the path', () => {
-    const fake = fakeWindow({ search: '?repo=alpha&run=FAKE-2&view=active' });
-    browserHost(fake.win).setParam('view', 'history');
-    expect(fake.replaced).toEqual([{ state: null, title: '', url: '/dashboard?repo=alpha&run=FAKE-2&view=history' }]);
-  });
+test('setUrl pushes or replaces the history entry with the query, and writes the path for an empty one', () => {
+  const fake = fakeWindow();
+  const host = browserHost(fake.win);
+  host.setUrl('repo=a&run=b', true);
+  host.setUrl('repo=a', false);
+  host.setUrl('', false);
+  expect(fake.history).toEqual([
+    { kind: 'push', data: null, unused: '', url: '?repo=a&run=b' },
+    { kind: 'replace', data: null, unused: '', url: '?repo=a' },
+    { kind: 'replace', data: null, unused: '', url: '/' },
+  ]);
+});
 
-  test('setParam adds a parameter the URL lacks, and encodes its value', () => {
-    const fake = fakeWindow();
-    browserHost(fake.win).setParam('view', 'a b');
-    expect(fake.replaced.map((each) => each.url)).toEqual(['/dashboard?view=a+b']);
-  });
+test("href is the window's whole URL", () => {
+  expect(browserHost(fakeWindow().win).href()).toBe('http://127.0.0.1:4100/?repo=a');
+});
+
+test('onNavigate calls the handler with the query of a popstate, parsed as start() parses it', () => {
+  const fake = fakeWindow({ search: '?repo=beta' });
+  const asked: Record<string, string>[] = [];
+  browserHost(fake.win).onNavigate((query) => asked.push(query));
+  fake.location.search = '?repo=alpha&run=r';
+  for (const listener of fake.windowListeners.popstate ?? []) listener();
+  expect(asked).toEqual([{ repo: 'alpha', run: 'r' }]);
 });
 
 test('a mouseover is delegated to the nearest data-subject, and one outside any gives none', () => {

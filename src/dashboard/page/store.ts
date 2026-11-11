@@ -73,6 +73,8 @@ export interface Store {
   detail: boolean | undefined;
   /** What the URL asks to open, until the first index: then it is opened, or dropped when its run isn't listed. */
   start: Record<string, string> | undefined;
+  /** The query last written to the URL, `undefined` until one is. */
+  url: string | undefined;
   stopped: boolean;
   /** Bumped on every change of the selected call: a read made for an older one is dropped. */
   selection: number;
@@ -85,6 +87,8 @@ export interface Store {
   lastLogRead: number;
   lastOutputRead: number;
   flushTimer: number | undefined;
+  /** The toast that says a URL named what is not there, while it is up. */
+  missingToast: number | undefined;
   logTimer: number | undefined;
   outputTimer: number | undefined;
   tickTimer: number | undefined;
@@ -138,6 +142,7 @@ export function createStore(host: PageHost): Store {
     revealList: false,
     detail: undefined,
     start: host.start(),
+    url: undefined,
     stopped: false,
     selection: 0,
     resultRead: 0,
@@ -148,6 +153,7 @@ export function createStore(host: PageHost): Store {
     lastLogRead: Number.NEGATIVE_INFINITY,
     lastOutputRead: Number.NEGATIVE_INFINITY,
     flushTimer: undefined,
+    missingToast: undefined,
     logTimer: undefined,
     outputTimer: undefined,
     tickTimer: undefined,
