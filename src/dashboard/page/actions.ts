@@ -4,13 +4,14 @@
 // action opens a socket: what needs one goes through `streams.ts`, and what posts goes through the actor.
 
 import { actionOf } from './action-registry';
+import type { Region } from './host';
 import { listRepos } from './index-model';
 import { historyWorkflows, VIEWS, type ViewName } from './list-model';
 import { syncUrl } from './location';
 import { closeMenu, runRow } from './menu';
 import { cleanSelected, closeFile, openedOutputKeys, openFile, readLog, readOutput, selectCard } from './reads';
 import { FILTER_KEY, LIST_KEY, THEME_KEY } from './saved';
-import { selectFirst } from './selection';
+import { keepSelection, selectFirst } from './selection';
 import type { Store } from './store';
 import { closeDetail, reopenQueue, selectRun } from './streams';
 import { dismissToast, toast, undoToast } from './toast';
@@ -23,6 +24,16 @@ function dropSelectionRead(store: Store) {
 }
 
 export type Action = (store: Store, data: Record<string, string>) => void;
+
+/**
+ * Applies a change to what the list shows, selecting the first row left when it dropped the open row. The centre and
+ * the URL follow it without a history entry: the replace here is what the push at the end of `dispatch` finds written.
+ */
+function narrowList(store: Store, change: () => void, ...also: Region[]) {
+  keepSelection(store, change);
+  store.mark('list', 'main', ...also);
+  syncUrl(store, false);
+}
 
 /** Selects the card `by` places from the selected one. */
 export function step(store: Store, by: number) {
@@ -138,19 +149,27 @@ export const actions: Record<string, Action> = {
     selectFirst(store);
   },
   'filter-repo': (store, data) => {
-    if (data.repo === undefined) return;
-    if (store.ui.repoFilter === data.repo) delete store.ui.repoFilter;
-    else store.ui.repoFilter = data.repo;
-    // A workflow the narrowed repository has no finished run of is dropped, and the controls take the markup's values.
-    const { historyWorkflow } = store.ui;
-    if (
-      historyWorkflow !== undefined &&
-      !historyWorkflows(listRepos(store.index ?? [], store.host.now()), store.ui.repoFilter).includes(historyWorkflow)
-    ) {
-      delete store.ui.historyWorkflow;
-    }
-    store.fresh.add('list');
-    store.mark('sidebar', 'list', 'main');
+    const { repo } = data;
+    if (repo === undefined) return;
+    narrowList(
+      store,
+      () => {
+        if (store.ui.repoFilter === repo) delete store.ui.repoFilter;
+        else store.ui.repoFilter = repo;
+        // A workflow the narrowed repository has no finished run of is dropped, and the controls take the markup's values.
+        const { historyWorkflow } = store.ui;
+        if (
+          historyWorkflow !== undefined &&
+          !historyWorkflows(listRepos(store.index ?? [], store.host.now()), store.ui.repoFilter).includes(
+            historyWorkflow,
+          )
+        ) {
+          delete store.ui.historyWorkflow;
+        }
+        store.fresh.add('list');
+      },
+      'sidebar',
+    );
   },
   'toggle-list-group': (store, data) => {
     const group = data.group ?? '';
@@ -166,20 +185,24 @@ export const actions: Record<string, Action> = {
   },
   // What was typed in the list's filter field, which `onInput` delivers under the field's name.
   'list-filter': (store, data) => {
-    store.ui.listFilter = data.value ?? '';
-    store.mark('list');
+    narrowList(store, () => {
+      store.ui.listFilter = data.value ?? '';
+    });
   },
   // What was chosen in History's status and workflow controls; a value that is no status is ignored.
   'filter-status': (store, data) => {
-    if (data.value === 'failed' || data.value === 'completed') store.ui.historyStatus = data.value;
-    else if (data.value === '') delete store.ui.historyStatus;
-    else return;
-    store.mark('list');
+    if (data.value !== 'failed' && data.value !== 'completed' && data.value !== '') return;
+    const { value } = data;
+    narrowList(store, () => {
+      if (value === '') delete store.ui.historyStatus;
+      else store.ui.historyStatus = value;
+    });
   },
   'filter-workflow': (store, data) => {
-    if (data.value === undefined || data.value === '') delete store.ui.historyWorkflow;
-    else store.ui.historyWorkflow = data.value;
-    store.mark('list');
+    narrowList(store, () => {
+      if (data.value === undefined || data.value === '') delete store.ui.historyWorkflow;
+      else store.ui.historyWorkflow = data.value;
+    });
   },
   // `x` marks or unmarks a History run row, by its row id.
   'toggle-select': (store, data) => {

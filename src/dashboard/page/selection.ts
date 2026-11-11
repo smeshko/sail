@@ -61,6 +61,21 @@ export function openRow(store: Store, row: ListRow): void {
 const somethingOpen = (store: Store) => store.run !== undefined || openQueue(store) !== undefined;
 
 /**
+ * Applies `change` to what the list shows, then selects the first row left when the change dropped the open row from
+ * the list, or when nothing is open and a person has not closed it. A run the list never showed stays open.
+ */
+export function keepSelection(store: Store, change: () => void): void {
+  if (store.host.narrow()) {
+    change();
+    return;
+  }
+  const was = shownRows(store, true).some((row) => isOpenRow(store, row));
+  change();
+  const is = shownRows(store, true).some((row) => isOpenRow(store, row));
+  if ((was && !is) || (!somethingOpen(store) && !store.deselected)) selectFirst(store);
+}
+
+/**
  * Selects the first row of the view that opens something, unless it is open already; with none, closes what is open so
  * the empty state shows. Nothing is selected under 800px.
  */

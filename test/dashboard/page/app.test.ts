@@ -4858,3 +4858,104 @@ describe('a view opens with its first row selected (ADW-537)', () => {
     expect(selectedRow()).toBeUndefined();
   });
 });
+
+describe('a filter that drops the open row selects the first row left (ADW-537)', () => {
+  const FAKE_1 = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N';
+  const FAKE_4 = 'FAKE-4-01M348XP801GH3GKJT2MNM2NR9';
+  const pushes = () => host.urls.filter((write) => write.push).length;
+  /** History, whose first row FAKE-1 is open, its rows FAKE-1, FAKE-2 (failed) and FAKE-4 (beta). */
+  const onHistory = () => {
+    host.narrowed = false;
+    page = boot(host);
+    plainIndex();
+    host.press('4');
+    host.advance(100);
+    expect(page.ui.runId).toBe(FAKE_1);
+    return page;
+  };
+
+  test('a text filter that hides the open run opens the first row shown and adds no history entry', () => {
+    const open = onHistory();
+    const before = pushes();
+    host.type('list-filter', 'FAKE-4');
+    host.advance(100);
+    expect([open.ui.repo, open.ui.runId]).toEqual(['beta', FAKE_4]);
+    expect(host.regions.list).toContain(`data-row="run:beta/${FAKE_4}"`);
+    expect(pushes()).toBe(before);
+    expect(host.urls.at(-1)).toEqual({ query: `repo=beta&run=${FAKE_4}&view=history`, push: false });
+  });
+
+  test('a text filter that keeps the open run leaves it open and writes nothing', () => {
+    const open = onHistory();
+    const writes = host.urls.length;
+    host.type('list-filter', 'FAKE-1');
+    host.advance(100);
+    expect(open.ui.runId).toBe(FAKE_1);
+    expect(host.urls.length).toBe(writes);
+  });
+
+  test('a filter that hides every row shows the empty state, and widening it opens the first row', () => {
+    const open = onHistory();
+    const before = pushes();
+    host.type('list-filter', 'no such run');
+    host.advance(100);
+    expect(open.ui.runId).toBeUndefined();
+    expect(host.regions.main).toContain('No run selected');
+    host.type('list-filter', '');
+    host.advance(100);
+    expect(open.ui.runId).toBe(FAKE_1);
+    expect(pushes()).toBe(before);
+  });
+
+  test("History's status control and the sidebar's repository filter do the same", () => {
+    const open = onHistory();
+    const before = pushes();
+    host.type('list-status', 'failed');
+    host.advance(100);
+    expect(open.ui.runId).toBe(FAKE_2_ID);
+    host.type('list-status', '');
+    host.click({ action: 'filter-repo', repo: 'beta' });
+    host.advance(100);
+    expect([open.ui.repo, open.ui.runId]).toEqual(['beta', FAKE_4]);
+    expect(pushes()).toBe(before);
+  });
+
+  test("History's workflow control opens the first row of the workflow when the open run is of another", () => {
+    const open = onHistory();
+    const workflows = [...(host.regions.list ?? '').matchAll(/<option value="([^"]+)"/g)].map(([, value]) => value);
+    const repos = listRepos(index(m.registryDir), host.clock);
+    const ofRun = (runId: string) => repos.flatMap((repo) => repo.runs).find((run) => run.runId === runId)?.workflow;
+    const other = [FAKE_2_ID, FAKE_4].find(
+      (id) => ofRun(id)?.replace(/@\d+$/, '') !== ofRun(FAKE_1)?.replace(/@\d+$/, ''),
+    );
+    expect(other).toBeDefined();
+    if (other === undefined) return;
+    const workflow = (ofRun(other) ?? '').replace(/@\d+$/, '');
+    expect(workflows).toContain(workflow);
+    host.type('list-workflow', workflow);
+    host.advance(100);
+    expect(open.ui.runId).toBe(other);
+  });
+
+  test('after Escape no filter change opens a row', () => {
+    const open = onHistory();
+    host.press('Escape');
+    host.advance(100);
+    expect(open.ui.runId).toBeUndefined();
+    host.type('list-filter', 'FAKE-4');
+    host.advance(100);
+    expect(open.ui.runId).toBeUndefined();
+    host.type('list-status', 'failed');
+    host.advance(100);
+    expect(open.ui.runId).toBeUndefined();
+    expect(host.regions.main).toContain('No run selected');
+  });
+
+  test('a run opened from elsewhere that the list never showed stays open when a filter changes', () => {
+    const open = onHistory();
+    host.click({ action: 'select-run', repo: 'beta', run: FAKE_3_ID });
+    host.type('list-filter', 'FAKE-4');
+    host.advance(100);
+    expect(open.ui.runId).toBe(FAKE_3_ID);
+  });
+});

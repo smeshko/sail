@@ -3,7 +3,7 @@
 import { expect, test } from 'bun:test';
 import type { IndexRepo } from '../../../src/dashboard/files';
 import type { PageHost } from '../../../src/dashboard/page/host';
-import { selectFirst, shownRows } from '../../../src/dashboard/page/selection';
+import { keepSelection, selectFirst, shownRows } from '../../../src/dashboard/page/selection';
 import { createStore, type Store } from '../../../src/dashboard/page/store';
 
 const NOW = Date.parse('2026-10-01T12:00:00.000Z');
@@ -114,5 +114,61 @@ test('a narrow window selects nothing', () => {
   made.ui.view = 'active';
   selectFirst(made);
   expect(made.ui.runId).toBeUndefined();
+  expect(connects).toEqual([]);
+});
+
+const filtered = (made: Store, text: string) => () => {
+  made.ui.listFilter = text;
+};
+
+test('keepSelection keeps the open row when the change leaves it listed', () => {
+  const { store: made, connects } = store(live);
+  made.ui.view = 'active';
+  selectFirst(made);
+  keepSelection(made, filtered(made, 'a-new'));
+  expect(made.ui.runId).toBe('a-new');
+  expect(connects).toEqual(['run=alpha%2Fa-new']);
+});
+
+test('keepSelection opens the first row left when the change drops the open row', () => {
+  const { store: made } = store(live);
+  made.ui.view = 'active';
+  selectFirst(made);
+  keepSelection(made, filtered(made, 'a-old'));
+  expect(made.ui.runId).toBe('a-old');
+});
+
+test('keepSelection closes the open run when the change leaves no row, and opens the first row once rows return', () => {
+  const { store: made } = store(live);
+  made.ui.view = 'active';
+  selectFirst(made);
+  keepSelection(made, filtered(made, 'nothing'));
+  expect(made.ui.runId).toBeUndefined();
+  keepSelection(made, filtered(made, ''));
+  expect(made.ui.runId).toBe('a-new');
+});
+
+test('keepSelection selects nothing after a person closed the centre', () => {
+  const { store: made } = store(live);
+  made.ui.view = 'active';
+  made.deselected = true;
+  keepSelection(made, filtered(made, 'a-old'));
+  expect(made.ui.runId).toBeUndefined();
+});
+
+test('keepSelection leaves a run the list never showed open', () => {
+  const { store: made } = store(live);
+  made.ui.view = 'active';
+  selectFirst(made);
+  made.ui.view = 'history';
+  keepSelection(made, filtered(made, 'a-done'));
+  expect(made.ui.runId).toBe('a-new');
+});
+
+test('keepSelection only applies the change in a narrow window', () => {
+  const { store: made, connects } = store(live, true);
+  made.ui.view = 'active';
+  keepSelection(made, filtered(made, 'a-old'));
+  expect(made.ui.listFilter).toBe('a-old');
   expect(connects).toEqual([]);
 });
