@@ -4,7 +4,7 @@
 import { expect, test } from 'bun:test';
 import type { RunActions } from '../../../src/dashboard/actions';
 import type { IndexRepo } from '../../../src/dashboard/files';
-import { type Actor, createActor } from '../../../src/dashboard/page/act';
+import { type Actor, createActor, inertActor } from '../../../src/dashboard/page/act';
 import type { ActionDef, OfferSource } from '../../../src/dashboard/page/action-registry';
 import { ACTIONS } from '../../../src/dashboard/page/action-registry';
 import { actionControl, resultOf } from '../../../src/dashboard/page/action-view';
@@ -500,4 +500,14 @@ test('a run action is ignored until the run action out is answered, though an un
   r.actor.act('stop-run', {});
   r.actor.act('stop-run', {});
   expect(r.posts.at(-1)).toEqual({ path: '/api/repos/alpha/runs/R1/stop', body: { now: false } });
+});
+
+test('the inert actor, the store holds until the shell wires the real one, does nothing and finds nothing armed', () => {
+  const actor = inertActor();
+  expect(actor.act('stop-run', {})).toBeUndefined();
+  expect(actor.disarm()).toBe(false);
+  expect(actor.armed('stop-run', {})).toBe(false);
+  expect(actor.keep('run')).toBeUndefined();
+  expect(actor.forget('run')).toBeUndefined();
+  expect(actor.clearResult('run')).toBeUndefined();
 });
