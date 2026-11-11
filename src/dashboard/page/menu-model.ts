@@ -13,7 +13,7 @@ import {
   type Subject,
   subjectName,
 } from './action-registry';
-import { listRepos, queuePanels } from './index-model';
+import { listRepos, queuePanels, workflowOf } from './index-model';
 import type { MenuState, MenuStep } from './ui-state';
 
 export type MenuRun =
@@ -31,6 +31,12 @@ export interface MenuRow {
   hint?: string;
   key?: string;
   why?: string;
+  /** A run's go-to row: its pull request (`PR #12`), else its ticket key, else its run id, as the list's row leads. */
+  lead?: string;
+  /** A run's go-to row: the run's status, drawn as the list's dot. */
+  status?: string;
+  /** A run's go-to row: the run id's part after its last `-`, set only while another listed row reads the same. */
+  id?: string;
   disabled: boolean;
   run: MenuRun;
 }
@@ -177,10 +183,21 @@ export function gotoRows(query: string, index: readonly IndexRepo[], now: number
   type Found = { rank: Rank; row: MenuRow };
   const found: Found[] = [];
   const named: Found[] = [];
-  const add = (hint: string, label: string, keys: string[], titles: string[], subject: Subject, full = false) => {
+  const add = (
+    hint: string,
+    label: string,
+    keys: string[],
+    titles: string[],
+    subject: Subject,
+    full = false,
+    extra: Partial<MenuRow> = {},
+  ) => {
     const ranked = rank(query, keys, titles);
     if (ranked === undefined) return;
-    const entry: Found = { rank: ranked, row: { group: 'goto', label, hint, disabled: false, run: { goto: subject } } };
+    const entry: Found = {
+      rank: ranked,
+      row: { group: 'goto', label, hint, disabled: false, run: { goto: subject }, ...extra },
+    };
     found.push(entry);
     if (full) named.push(entry);
   };
@@ -190,12 +207,13 @@ export function gotoRows(query: string, index: readonly IndexRepo[], now: number
       const prKeys = run.pr === undefined ? [] : [`PR #${run.pr}`, `#${run.pr}`];
       const ticket = run.ticketKey === undefined ? [] : [run.ticketKey];
       add(
-        'run',
-        run.runId,
+        `${repo.name} › ${workflowOf(run)}`,
+        run.title ?? '',
         [run.runId, ...ticket, ...prKeys],
         [run.title ?? ''],
         { kind: 'run', repo: repo.name, runId: run.runId },
         [...ticket, ...prKeys].some((key) => key.toLowerCase() === needle),
+        { lead: run.pr === undefined ? (run.ticketKey ?? run.runId) : `PR #${run.pr}`, status: run.status },
       );
     }
   }
@@ -212,10 +230,18 @@ export function gotoRows(query: string, index: readonly IndexRepo[], now: number
       });
     }
   }
-  return (named.length > 0 ? named : found)
+  const rows = (named.length > 0 ? named : found)
     .sort((a, b) => a.rank.tier - b.rank.tier || a.rank.score - b.rank.score)
     .slice(0, 8)
     .map((each) => each.row);
+  // A run's row shows no run id; two rows that would read the same show the random part to tell them apart.
+  const reads = (row: MenuRow) => JSON.stringify([row.lead, row.label, row.hint]);
+  return rows.map((row) => {
+    if (row.lead === undefined || !('goto' in row.run) || row.run.goto.kind !== 'run') return row;
+    const runId = row.run.goto.runId;
+    const same = rows.some((other) => other !== row && reads(other) === reads(row));
+    return same ? { ...row, id: runId.slice(runId.lastIndexOf('-') + 1) } : row;
+  });
 }
 
 /** The queues of the index that offer `id`, with the offer: the repository, the workflow and its availability. */

@@ -87,6 +87,8 @@ const state = (fields: Partial<MenuState> = {}): MenuState => ({
   ...fields,
 });
 const labels = (rows: MenuRow[]) => rows.map((row) => row.label);
+const runIds = (rows: MenuRow[]) =>
+  rows.map((row) => ('goto' in row.run && row.run.goto.kind === 'run' ? row.run.goto.runId : row.hint));
 
 test('fuzzy matches a case-insensitive subsequence, scores a tighter match lower, and rejects the rest', () => {
   expect(fuzzy('REST', 'restart')).toBe(0);
@@ -160,8 +162,8 @@ test('adding and polling are left out where no queue offers them, and disabled w
 
 test('a query lists go-to rows for a run id, a run title, a queue, an item key, an item title and a repository', () => {
   const goto = (query: string) => gotoRows(query, index, NOW).map((row) => [row.hint, row.label]);
-  expect(goto('fake-1-r')).toEqual([['run', 'FAKE-1-RUN']]);
-  expect(goto('parser')).toEqual([['run', 'FAKE-1-RUN']]);
+  expect(goto('fake-1-r')).toEqual([['alpha › unknown', 'Fix the parser']]);
+  expect(goto('parser')).toEqual([['alpha › unknown', 'Fix the parser']]);
   expect(goto('ticket-to')).toEqual([['queue', 'beta / ticket-to-pr']]);
   expect(goto('FAKE-5')).toEqual([['item', 'ticket:FAKE-5']]);
   expect(goto('widget')).toEqual([['item', 'ticket:FAKE-5']]);
@@ -176,6 +178,45 @@ const ticketRun = (runId: string, key: string, title: string) => ({
   summary: { ticket: { title }, totals: { usage: {} } },
 });
 const runsIndex = (runs: unknown[]) => [{ name: 'alpha', remote: null, runs, queues: [] }] as unknown as IndexRepo[];
+
+test("a run's go-to row reads its key, title, status and repository › workflow", () => {
+  const run = {
+    ...ticketRun('FAKE-1-RUN', 'FAKE-1', 'Fix the parser'),
+    workflow: 'ticket-to-pr@3',
+    status: { status: 'failed' },
+  };
+  const pr = {
+    runId: 'P-1',
+    workflow: 'review',
+    source: { kind: 'pr', number: 12 },
+    summary: { totals: { usage: {} } },
+  };
+  const bare = { runId: 'BARE-1', summary: { totals: { usage: {} } } };
+  const rows = gotoRows('', runsIndex([run, pr, bare]), NOW);
+  expect(rows).toEqual([]);
+  const one = gotoRows('fake-1', runsIndex([run]), NOW)[0];
+  expect(one).toMatchObject({
+    lead: 'FAKE-1',
+    label: 'Fix the parser',
+    status: 'failed',
+    hint: 'alpha › ticket-to-pr',
+  });
+  expect(one?.id).toBeUndefined();
+  expect(gotoRows('p-1', runsIndex([pr]), NOW)[0]).toMatchObject({ lead: 'PR #12', label: '', hint: 'alpha › review' });
+  expect(gotoRows('bare', runsIndex([bare]), NOW)[0]).toMatchObject({ lead: 'BARE-1' });
+});
+
+test("a run's go-to row carries its random part only when another listed row reads the same", () => {
+  const twin = (id: string) => ticketRun(`FAKE-1-${id}`, 'FAKE-1', 'Fix the parser');
+  const rows = gotoRows(
+    'fake-1',
+    runsIndex([twin('AAA'), twin('BBB'), ticketRun('FAKE-1-CCC', 'FAKE-1', 'Other')]),
+    NOW,
+  );
+  const byLabel = (label: string) => rows.filter((row) => row.label === label).map((row) => row.id);
+  expect(byLabel('Fix the parser').sort()).toEqual(['AAA', 'BBB']);
+  expect(byLabel('Other')).toEqual([undefined]);
+});
 
 test('rank scores exact, prefix, whole title words and subsequence apart', () => {
   expect(rank('FAKE-1', ['fake-1'], [])).toEqual({ tier: 0, score: 0 });
@@ -209,7 +250,7 @@ test("a query that is a ticket key in full lists only that ticket's runs while a
     ticketRun('A-4', 'FAKE-62', 'Four'),
     ticketRun('A-5', 'FAKE-X6', 'Five'),
   ];
-  const ids = (query: string) => gotoRows(query, runsIndex(runs), NOW).map((row) => row.label);
+  const ids = (query: string) => runIds(gotoRows(query, runsIndex(runs), NOW));
   expect(ids('Fake-2')).toEqual(['A-2']);
   expect(ids('fake-23')).toEqual(['A-1']);
   expect(ids('fake-6')).toEqual(['A-4', 'A-5']);
@@ -218,24 +259,20 @@ test("a query that is a ticket key in full lists only that ticket's runs while a
   // A full key lists no item, queue or repository, even one that matches.
   const mixed = JSON.parse(JSON.stringify(index)) as IndexRepo[];
   (mixed[0] as unknown as { runs: unknown[] }).runs = [ticketRun('FAKE-5-R', 'FAKE-5', 'Mine')];
-  expect(gotoRows('FAKE-5', mixed, NOW).map((row) => row.hint)).toEqual(['run']);
+  expect(runIds(gotoRows('FAKE-5', mixed, NOW))).toEqual(['FAKE-5-R']);
 });
 
 test('a pull-request run is a full key by its number as the list shows it', () => {
   const pr = { runId: 'P-1', source: { kind: 'pr', number: 12 }, summary: { totals: { usage: {} } } };
-  expect(gotoRows('pr #12', runsIndex([pr]), NOW).map((row) => row.label)).toEqual(['P-1']);
-  expect(gotoRows('#12', runsIndex([pr, ticketRun('T-1', 'FAKE-1', 'x')]), NOW).map((row) => row.label)).toEqual([
-    'P-1',
-  ]);
+  expect(runIds(gotoRows('pr #12', runsIndex([pr]), NOW))).toEqual(['P-1']);
+  expect(runIds(gotoRows('#12', runsIndex([pr, ticketRun('T-1', 'FAKE-1', 'x')]), NOW))).toEqual(['P-1']);
 });
 
 test('equal rows keep the index order, and at most eight are listed', () => {
   const runs = Array.from({ length: 10 }, (_, at) => ticketRun(`Q-${at}`, `K-${at}`, 'Same words'));
   const rows = gotoRows('same words', runsIndex(runs), NOW);
   expect(rows).toHaveLength(8);
-  expect(rows.map((row) => row.label)).toEqual(
-    (listRepos(runsIndex(runs), NOW)[0]?.runs ?? []).slice(0, 8).map((run) => run.runId),
-  );
+  expect(runIds(rows)).toEqual((listRepos(runsIndex(runs), NOW)[0]?.runs ?? []).slice(0, 8).map((run) => run.runId));
 });
 
 test('a go-to row for an item goes to the item, and only the eight best are listed', () => {

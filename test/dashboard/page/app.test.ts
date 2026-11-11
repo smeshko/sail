@@ -3473,6 +3473,7 @@ test('an index that turns the open queue to watcher not running redraws main wit
 // The command menu (ADW-520): opened on Cmd+K over the focused subject, filtered, moved and run by key.
 const cmdk = () => host.regions.menu ?? '';
 const menuLabels = () => [...cmdk().matchAll(/<span class="cmdk-label">([^<]*)<\/span>/g)].map(([, label]) => label);
+const menuLeads = () => [...cmdk().matchAll(/<span class="cmdk-key">([^<]*)<\/span>/g)].map(([, lead]) => lead);
 const menuSel = () => cmdk().match(/class="cmdk-row sel"[^>]*><span class="cmdk-label">([^<]*)</)?.[1];
 const menuHead = () => cmdk().match(/<div class="cmdk-subj">([^<]*)<\/div>/)?.[1];
 const cmdK = () => host.press('k', false, undefined, true);
@@ -3574,7 +3575,8 @@ test('typing filters the rows within one flush and lists go-to rows, and the fie
   host.type('menu-query', FAKE_2_ID.slice(0, 8));
   host.advance(100);
   expect(cmdk()).toContain('<div class="cmdk-grp">go to</div>');
-  expect(menuLabels()).toContain(FAKE_2_ID);
+  expect(menuLeads()).toContain(FAKE_2_ID.replace(/-[^-]*$/, ''));
+  expect(cmdk()).not.toContain('cmdk-id');
 });
 
 test('ArrowDown and ArrowUp move the highlight over enabled rows only, and j typed in the menu moves no card cursor', async () => {
@@ -3603,12 +3605,12 @@ test('Enter on a go-to row opens a run, a queue or an item opens the queue, and 
     cmdK();
     host.type('menu-query', query);
     host.advance(100);
-    expect(menuLabels()[0]).toBe(row);
+    expect(menuLeads()[0] ?? menuLabels()[0]).toBe(row);
     host.press('Enter', true);
     host.advance(100);
     expect(cmdk()).toBe('');
   };
-  goTo(FAKE_3_ID.slice(0, 10), FAKE_3_ID);
+  goTo(FAKE_3_ID.slice(0, 10), FAKE_3_ID.replace(/-[^-]*$/, ''));
   expect(page?.store.run?.runId).toBe(FAKE_3_ID);
   expect(focused((page as Page).ui)).toEqual({ kind: 'run', repo: 'beta', runId: FAKE_3_ID });
   goTo('ticket:FAKE-5', 'ticket:FAKE-5');
