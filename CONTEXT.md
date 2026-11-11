@@ -669,6 +669,18 @@ _Avoid_: table, grid, feed
 The list of live runs: those that wait on a person, suspended or unreadable, first under `waiting on you`, then the running ones under `running`.
 _Avoid_: running block, live runs
 
+**Inbox**:
+The sidebar's first entry: it opens the needs attention pane, and its count is the pane's. It is no list view of its own.
+_Avoid_: alerts, notifications
+
+**History view**:
+The list of ended runs: the failed ones under `failed`, then the completed ones under `done`.
+_Avoid_: archive, past runs
+
+**Queues view**:
+The list of every workflow's queue: one group per repository, its header carrying the repository's watch buttons, and one row per queue under it. A queue's row opens its queue view beside the list.
+_Avoid_: queue list, watchers view
+
 **Stage card**:
 One call's card in the dashboard's run view, with its outcome, tries, duration, cost and denials, or a pending card for a roster stage the run hasn't called yet. Cards come from the run's events and its roster alone, so a new stage shows with no dashboard change.
 _Avoid_: tile, step card, job
