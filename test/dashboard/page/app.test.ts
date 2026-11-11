@@ -5380,16 +5380,16 @@ describe('a filter that drops the open row selects the first row left (ADW-537)'
     expect([open.ui.repo, open.ui.runId]).toEqual(['beta', FAKE_4]);
     expect(host.regions.list).toContain(`data-row="run:beta/${FAKE_4}"`);
     expect(pushes()).toBe(before);
-    expect(host.urls.at(-1)).toEqual({ query: `repo=beta&run=${FAKE_4}&view=history`, push: false });
+    expect(host.urls.at(-1)).toEqual({ query: `repo=beta&run=${FAKE_4}&view=history&q=FAKE-4`, push: false });
   });
 
-  test('a text filter that keeps the open run leaves it open and writes nothing', () => {
+  test('a text filter that keeps the open run leaves it open and replaces the entry with the text (ADW-546)', () => {
     const open = onHistory();
     const writes = host.urls.length;
     host.type('list-filter', 'FAKE-1');
     host.advance(100);
     expect(open.ui.runId).toBe(FAKE_1);
-    expect(host.urls.length).toBe(writes);
+    expect(host.urls.slice(writes)).toEqual([{ query: `repo=alpha&run=${FAKE_1}&view=history&q=FAKE-1`, push: false }]);
   });
 
   test('a filter that hides every row shows the empty state, and widening it opens the first row', () => {
@@ -5978,5 +5978,82 @@ describe('a key for every action, and the shortcut sheet (ADW-523)', () => {
     expect(page.store.cleared.size).toBeGreaterThan(before);
     press('z');
     expect(page.store.cleared.size).toBe(before);
+  });
+});
+
+describe("the list's filters are in the URL (ADW-546)", () => {
+  const FAKE_1 = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N';
+  const FAKE_4 = 'FAKE-4-01M348XP801GH3GKJT2MNM2NR9';
+  const rows = () => [...(host.regions.list ?? '').matchAll(/data-row="run:([^"]+)"/g)].map(([, row]) => row ?? '');
+  const boots = (startAt: Record<string, string>) => {
+    host.narrowed = false;
+    host.startAt = startAt;
+    page = boot(host);
+    plainIndex();
+    host.advance(100);
+    return page;
+  };
+
+  test('booted with the filters in the URL, the list is narrowed by them and the field and controls show them (ADW-546)', () => {
+    const open = boots({ view: 'history', in: 'alpha', q: 'fake-2', status: 'failed' });
+    expect([open.ui.view, open.ui.repoFilter, open.ui.listFilter, open.ui.historyStatus]).toEqual([
+      'history',
+      'alpha',
+      'fake-2',
+      'failed',
+    ]);
+    expect(host.regions.list).toContain('value="fake-2"');
+    expect(rows()).toEqual([`alpha/${FAKE_2_ID}`]);
+    expect(open.ui.runId).toBe(FAKE_2_ID);
+    expect(host.freshes).toContain('list');
+  });
+
+  test('a run the URL names opens though the restored filters hide its row (ADW-546)', () => {
+    const open = boots({ repo: 'beta', run: FAKE_4, view: 'history', in: 'alpha' });
+    expect([open.ui.repo, open.ui.runId]).toEqual(['beta', FAKE_4]);
+    expect(rows().some((row) => row.startsWith('beta/'))).toBe(false);
+  });
+
+  test('a repository or workflow the index does not list is dropped from the URL with a replace and no toast (ADW-546)', () => {
+    const open = boots({ view: 'history', in: 'gone', workflow: 'no-such' });
+    expect([open.ui.repoFilter, open.ui.historyWorkflow]).toEqual([undefined, undefined]);
+    const last = host.urls.at(-1);
+    expect(last?.push).toBe(false);
+    expect(last?.query).not.toContain('in=');
+    expect(last?.query).not.toContain('workflow=');
+    expect(last?.query).toContain('view=history');
+    expect(toasts()).toEqual([]);
+  });
+
+  test('Back and Forward restore the filters of their entry (ADW-546)', () => {
+    const open = boots({ view: 'history' });
+    host.go('view=history&status=failed');
+    host.advance(100);
+    expect(open.ui.historyStatus).toBe('failed');
+    expect(rows()).toEqual([`alpha/${FAKE_2_ID}`]);
+    host.go('view=history&in=beta&q=fake');
+    expect([open.ui.historyStatus, open.ui.repoFilter, open.ui.listFilter]).toEqual([undefined, 'beta', 'fake']);
+    host.go('view=history');
+    expect([open.ui.repoFilter, open.ui.listFilter]).toEqual([undefined, '']);
+    host.go('view=active&status=failed');
+    expect(open.ui.historyStatus).toBeUndefined();
+  });
+
+  test('a Back between two entries that differ only in the call leaves the field alone (ADW-546)', () => {
+    const open = boots({ repo: 'alpha', run: FAKE_1, view: 'history', q: 'fake' });
+    host.freshes.length = 0;
+    host.go(`repo=alpha&run=${FAKE_1}&view=history&q=fake&key=implement%231`);
+    expect(open.ui.listFilter).toBe('fake');
+    expect(host.freshes).not.toContain('list');
+  });
+
+  test('text typed before the first index is kept and written with it (ADW-546)', () => {
+    host.narrowed = false;
+    page = boot(host);
+    host.type('list-filter', 'FAKE-4');
+    plainIndex();
+    host.advance(100);
+    expect(page.ui.listFilter).toBe('FAKE-4');
+    expect(host.urls[0]?.query).toContain('q=FAKE-4');
   });
 });

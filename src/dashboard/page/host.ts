@@ -107,7 +107,7 @@ export interface PageHost {
   narrow(): boolean;
   /** The browser's offset east of UTC, in minutes. */
   offset(): number;
-  /** What the page's URL asks it to open first, from `?repo=…&run=…&key=…&tab=…&timeline=1&file=…` or `?queue=…`, each with `&view=…`: empty when it asks nothing. */
+  /** What the page's URL asks it to open first, from `?repo=…&run=…&key=…&tab=…&timeline=1&file=…` or `?queue=…`, each with `&view=…` and the list's filters `&in=…&q=…&status=…&workflow=…`: empty when it asks nothing. */
   start(): Record<string, string>;
   /** Writes the page's URL to `?query` (the path alone for an empty one), as a new history entry when `push`, else in place of the current one. */
   setUrl(query: string, push: boolean): void;

@@ -2,12 +2,14 @@
 // centre; a listed run opens with its call, tab, timeline and file, each only when it differs from what is open. A run
 // or queue the index does not list is said in a toast and keeps what is shown: at load, no run, which leaves the list
 // the centre. On Back and forward (`moved`), a query that names neither closes the open run or queue, with no notice,
-// and the list shows the view the query names, `active` when it names none; at load the store has read the view
-// already, and a click made before the first index keeps its view. The caller writes the URL once it has opened what
+// and the list shows the view and filters the query names, `active` and none when it names none; at load the store has
+// read them already, and a click made before the first index keeps its view. A repository or workflow filter the index
+// does not list is dropped, and the caller's URL write replaces the query, with no toast. The caller writes the URL once it has opened what
 // it can, but for a file the run turns out not to have: `missing()` replaces the URL itself, when the file's read
 // answers.
 
-import { queuePanels } from './index-model';
+import { listRepos, queuePanels } from './index-model';
+import { historyWorkflows } from './list-model';
 import { fromQuery, syncUrl } from './location';
 import { queueId } from './queue-view';
 import { closeFile, openFile, readLog, selectCard } from './reads';
@@ -23,16 +25,29 @@ function missing(store: Store, path: string, runId: string) {
   syncUrl(store, false);
 }
 
-/** Shows the list view a Back or forward entry names, `active` when it names none. */
+/** Shows the list view and filters a load or a Back or forward entry names, none for what it leaves out. */
 export function showView(store: Store, asked: Record<string, string>): void {
   const { ui } = store;
-  const view = fromQuery(asked).view ?? 'active';
-  if (view === ui.view) return;
+  const target = fromQuery(asked);
+  const view = target.view ?? 'active';
+  const was = [ui.view, ui.repoFilter, ui.listFilter, ui.historyStatus, ui.historyWorkflow];
   ui.view = view;
-  store.deselected = false;
-  ui.listFilter = '';
-  delete ui.listCursor;
+  if (target.repoFilter === undefined) delete ui.repoFilter;
+  else ui.repoFilter = target.repoFilter;
+  ui.listFilter = target.listFilter ?? '';
+  if (target.historyStatus === undefined) delete ui.historyStatus;
+  else ui.historyStatus = target.historyStatus;
+  if (target.historyWorkflow === undefined) delete ui.historyWorkflow;
+  else ui.historyWorkflow = target.historyWorkflow;
+  const now = [ui.view, ui.repoFilter, ui.listFilter, ui.historyStatus, ui.historyWorkflow];
+  if (now.every((value, at) => value === was[at])) return;
+  if (view !== was[0]) {
+    store.deselected = false;
+    delete ui.listCursor;
+  }
   store.fresh.add('list');
+  store.revealOpen = true;
+  store.mark('sidebar', 'list');
 }
 
 export function navigate(store: Store, asked: Record<string, string>, moved: boolean): void {
@@ -40,6 +55,18 @@ export function navigate(store: Store, asked: Record<string, string>, moved: boo
   const target = fromQuery(asked);
   const repos = store.index ?? [];
   if (moved) showView(store, asked);
+  // A repository or workflow a URL named that the index does not list is dropped, and the caller replaces the URL.
+  if (ui.repoFilter !== undefined && !repos.some((each) => each.name === ui.repoFilter)) {
+    delete ui.repoFilter;
+    store.fresh.add('list');
+  }
+  if (
+    ui.historyWorkflow !== undefined &&
+    !historyWorkflows(listRepos(repos, store.host.now()), ui.repoFilter).includes(ui.historyWorkflow)
+  ) {
+    delete ui.historyWorkflow;
+    store.fresh.add('list');
+  }
   if (target.queue !== undefined) {
     const id = target.queue;
     if (queuePanels(repos).some((panel) => queueId(panel.repo, panel.workflow) === id)) {
