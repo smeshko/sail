@@ -222,7 +222,7 @@ test('each theme block declares its color-scheme, so the browser draws native co
 });
 
 test('one rule draws every text field from the theme variables, with no literal colour (ADW-506)', () => {
-  const selector = 'input:not([type="checkbox"]):not([type="radio"])';
+  const selector = ':where(input:not([type="checkbox"]):not([type="radio"]))';
   const own = rulesOf().filter(([selectors]) => selectors.length === 1 && selectors[0] === selector);
   expect(own.length).toBe(1);
   const body = own[0]?.[1] ?? '';
@@ -230,6 +230,18 @@ test('one rule draws every text field from the theme variables, with no literal 
   expect(body).toContain('color: var(--fg);');
   expect(body).toContain('border: 1px solid var(--line-2);');
   expect(body).not.toContain('#');
+});
+
+test('the text-field rule adds no specificity, so the list filter keeps its own style (review R2) (ADW-506)', () => {
+  const fieldRules = rulesOf().filter(([selectors]) =>
+    selectors.some((each) => each.includes('input:not([type="checkbox"])')),
+  );
+  const drawing = fieldRules.filter(([, body]) => body.includes('background:'));
+  expect(drawing.length).toBe(1);
+  expect(drawing[0]?.[0]).toEqual([':where(input:not([type="checkbox"]):not([type="radio"]))']);
+  const filter = declarationsOf('.list-f');
+  expect(filter).toContain('background: var(--panel-2);');
+  expect(filter).toContain('color: var(--fg-2);');
 });
 
 test('a field’s placeholder reads in the dimmest text token (ADW-506)', () => {
