@@ -2545,12 +2545,12 @@
         <button id="pin-inspector" class="btn" type="button" data-action="toggle-inspector" aria-label="pin inspector" aria-pressed="false" title="pin the inspector (i)">⇥</button>
       </header>
       <div class="body" id="body">
-        <nav class="side">
+        <nav class="side" aria-label="sidebar">
           <div id="sidebar"></div>
         </nav>
         <!-- biome-ignore lint/a11y/useSemanticElements: a focusable separator with a value is the window splitter, which no <hr> is -->
         <div class="resize-handle" id="resize-left" data-resize="left" role="separator" aria-orientation="vertical" aria-label="sidebar width" aria-valuenow="180" aria-valuemin="140" aria-valuemax="480" tabindex="0"></div>
-        <section class="list">
+        <section class="list" aria-label="list">
           <div id="list"></div>
         </section>
         <main class="main">
@@ -2559,13 +2559,13 @@
         </main>
         <!-- biome-ignore lint/a11y/useSemanticElements: a focusable separator with a value is the window splitter, which no <hr> is -->
         <div class="resize-handle resize-right" id="resize-right" data-resize="right" role="separator" aria-orientation="vertical" aria-label="inspector width" aria-valuenow="360" aria-valuemin="240" aria-valuemax="640" tabindex="0"></div>
-        <aside class="inspector">
+        <aside class="inspector" aria-label="inspector">
           <button class="btn ins-close" type="button" data-action="close-inspector" aria-label="close inspector" title="close the inspector (Esc)">✕</button>
           <div class="inspector-b" id="inspector"></div>
         </aside>
       </div>
       <footer class="status" id="status"></footer>
-      <aside class="drawer" id="drawer"></aside>
+      <aside class="drawer" id="drawer" aria-label="file"></aside>
       <!-- biome-ignore lint/a11y/noRedundantRoles: older browsers and the review read the role off the element -->
       <dialog id="dialog" class="dlg" role="dialog" aria-modal="true" aria-labelledby="dialog-title"></dialog>
       <div id="menu" class="menu"></div>

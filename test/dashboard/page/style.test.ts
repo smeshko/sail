@@ -260,7 +260,7 @@ test('the inspector has a grid track only from 1210px, and under it is a fixed p
 });
 
 test('the inspector carries a close button over its head at every width, docked or over the centre (ADW-528, ADW-543, ADW-544)', () => {
-  const aside = /<aside class="inspector">([\s\S]*?)<\/aside>/.exec(html)?.[1] ?? '';
+  const aside = /<aside class="inspector"[^>]*>([\s\S]*?)<\/aside>/.exec(html)?.[1] ?? '';
   expect(aside).toMatch(/<button[^>]*class="btn ins-close"[^>]*data-action="close-inspector"/);
   expect(declarationsOf('.ins-close')).not.toContain('display: none');
   expect(declarationsOf('.ins-close')).toContain('display: inline-flex');
@@ -419,4 +419,11 @@ test('a handle whose column is not in the grid is display: none, so out of the t
   );
   expect(inBlock(mediaBlock('max-width: 1209px'), '.resize-right')).toContain('display: none');
   expect(inBlock(mediaBlock('max-width: 899px'), '.resize-handle')).toContain('display: none');
+});
+
+test('the sidebar, the list, the inspector and the file drawer each carry a label (ADW-547)', () => {
+  expect(html).toContain('<nav class="side" aria-label="sidebar">');
+  expect(html).toContain('<section class="list" aria-label="list">');
+  expect(html).toContain('<aside class="inspector" aria-label="inspector">');
+  expect(html).toContain('<aside class="drawer" id="drawer" aria-label="file">');
 });
