@@ -16,6 +16,7 @@ import { setFocus, subjectFrom } from './focus';
 import type { PageHost } from './host';
 import { REGIONS } from './host';
 import { onKey } from './keys';
+import { menuInput } from './menu';
 import { stopReads } from './reads';
 import { saveCleared, storedCleared } from './saved';
 import { createStore, type Store, sourceFor } from './store';
@@ -82,12 +83,14 @@ export function boot(host: PageHost): Page {
   });
   startDraw(store);
   host.onAction((action, data) => dispatch(store, action, data));
-  host.onKey((key, inInput, on) => onKey(store, key, inInput, on));
+  host.onKey((key, inInput, on, mod) => onKey(store, key, inInput, on, mod === true));
   host.onPoint((kind, data) => {
-    if (kind === 'hover') setFocus(store.ui, 'hover', subjectFrom(data));
+    // The subject is frozen while the menu is open.
+    if (kind === 'hover' && store.ui.menu === undefined) setFocus(store.ui, 'hover', subjectFrom(data));
   });
   host.onInput((name, value) => {
     if (name === 'list-filter') dispatch(store, 'list-filter', { value });
+    if (name === 'menu-query') menuInput(store, value);
   });
   openIndex(store, (asked) => actions.open?.(store, asked));
   store.mark(...REGIONS);

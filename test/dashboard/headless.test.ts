@@ -99,7 +99,17 @@ async function bootHeadless(dashboard: Dashboard, search = '') {
       listener({ target: { innerHTML: '', dataset, parentElement: null } satisfies ElementLike });
     }
   };
-  return { ids, text, click, urls, posted };
+  /** A key with Cmd or Ctrl held when `mod`, on the page's body. */
+  const press = (key: string, mod = false) => {
+    for (const listener of listeners.keydown ?? []) {
+      listener({
+        key,
+        metaKey: mod,
+        target: { innerHTML: '', dataset: {}, parentElement: null, tagName: 'BODY' } satisfies ElementLike,
+      });
+    }
+  };
+  return { ids, text, click, press, urls, posted };
 }
 
 test("the real bundle boots headless: both repositories, the golden run's eight cards and its $1.35 once its row is clicked, then FAKE-2's denial on the permissions tab", async () => {
@@ -246,5 +256,32 @@ test('undoable tier: on the real bundle, clear-attention empties attention and d
   page.click({ action: 'undo-toast', toast: id });
   expect(await until(() => page.text('attention').includes('<span class="badge">3</span>'))).toBe(true);
   expect(page.text('toasts')).not.toContain('toast ok');
+  expect(page.posted).toEqual([]);
+}, 30_000);
+
+test('on the real bundle, Cmd+K draws the command menu with the open run as its subject, and Escape empties it', async () => {
+  m = seedFixtures();
+  const leasesDir = join(m.root, 'leases');
+  const started = startDashboard({
+    registryDir: m.registryDir,
+    port: 0,
+    followPollMs: 20,
+    indexPollMs: 50,
+    leasesDir,
+    ports: fakeClonePorts(leasesDir),
+  });
+  if ('refused' in started) throw new Error(started.refused);
+  server = started;
+  const page = await bootHeadless(server);
+  expect(page.ids).toContain('menu');
+  expect(await until(() => page.text('sidebar').includes('<span class="nm">alpha</span>'))).toBe(true);
+  page.click({ action: 'open', repo: 'alpha', run: FAKE_2_ID });
+  expect(await until(() => page.text('main').includes(`${FAKE_2_ID} · ticket-to-pr@1`))).toBe(true);
+  page.press('k', true);
+  expect(await until(() => page.text('menu').includes('class="cmdk"'))).toBe(true);
+  expect(page.text('menu')).toContain(`<div class="cmdk-subj">run ${FAKE_2_ID}</div>`);
+  expect(await until(() => page.text('menu').includes('<span class="cmdk-label">clean</span>'))).toBe(true);
+  page.press('Escape');
+  expect(await until(() => page.text('menu') === '')).toBe(true);
   expect(page.posted).toEqual([]);
 }, 30_000);

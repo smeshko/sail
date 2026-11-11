@@ -1080,3 +1080,45 @@ test('a mouseover is delegated to the nearest data-subject, and one outside any 
     ['hover', undefined, { x: 0, y: 0 }],
   ]);
 });
+
+test('a key reaches the handler with whether Cmd or Ctrl is held, and a handled key default is prevented', () => {
+  const fake = fakeWindow();
+  const host = browserHost(fake.win);
+  const seen: [string, boolean | undefined][] = [];
+  host.onKey((key, _inInput, _on, mod) => {
+    seen.push([key, mod]);
+    return key === 'k' && mod === true;
+  });
+  let prevented = 0;
+  const target = element({ tagName: 'DIV' });
+  fake.fire('keydown', { key: 'k', metaKey: true, target, preventDefault: () => prevented++ });
+  fake.fire('keydown', { key: 'k', ctrlKey: true, target, preventDefault: () => prevented++ });
+  fake.fire('keydown', { key: 'k', target, preventDefault: () => prevented++ });
+  expect(seen).toEqual([
+    ['k', true],
+    ['k', true],
+    ['k', false],
+  ]);
+  expect(prevented).toBe(2);
+});
+
+test('an input event reaches the handler with the field name and value, and focusMenu focuses the menu field, else the menu', () => {
+  const fake = fakeWindow();
+  const host = browserHost(fake.win);
+  const typed: [string, string][] = [];
+  host.onInput((name, value) => typed.push([name, value]));
+  fake.fire('input', { target: element({ name: 'menu-query', value: 'res' }) });
+  fake.fire('input', { target: element({ value: 'unnamed' }) });
+  expect(typed).toEqual([['menu-query', 'res']]);
+  const menu = element();
+  const field = element({ focus: () => void focused.push('field') });
+  const box = element({ focus: () => void focused.push('box') });
+  const focused: string[] = [];
+  let withField = true;
+  menu.querySelector = (selector) => (selector.includes('menu-query') ? (withField ? field : null) : box);
+  fake.elements.menu = menu;
+  host.focusMenu();
+  withField = false;
+  host.focusMenu();
+  expect(focused).toEqual(['field', 'box']);
+});

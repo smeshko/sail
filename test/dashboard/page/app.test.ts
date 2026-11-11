@@ -9,7 +9,7 @@ import { callFile, findRepo, findRunDir, index } from '../../../src/dashboard/fi
 import type { Subject } from '../../../src/dashboard/page/action-registry';
 import { boot, CLEARED_KEY, FILTER_KEY, LIST_KEY, type Page, THEME_KEY } from '../../../src/dashboard/page/app';
 import { attention, identity } from '../../../src/dashboard/page/attention';
-import { focused } from '../../../src/dashboard/page/focus';
+import { focused, setFocus } from '../../../src/dashboard/page/focus';
 import { browserHost, type ConnectHandlers, type PageHost, type Region } from '../../../src/dashboard/page/host';
 import { listRepos, newestFirst } from '../../../src/dashboard/page/index-model';
 import { readSubjectOffers } from '../../../src/dashboard/page/reads';
@@ -64,7 +64,7 @@ class FakeHost implements PageHost {
   private timers = new Map<number, { at: number; fn: () => void }>();
   private next = 1;
   private action?: (action: string, data: Record<string, string>) => void;
-  private key?: (key: string, inInput: boolean, on?: string) => boolean;
+  private key?: (key: string, inInput: boolean, on?: string, mod?: boolean) => boolean;
 
   constructor(private readonly machine: Machine) {}
 
@@ -83,8 +83,13 @@ class FakeHost implements PageHost {
   onAction(handler: (action: string, data: Record<string, string>) => void) {
     this.action = handler;
   }
-  onKey(handler: (key: string, inInput: boolean, on?: string) => boolean) {
+  onKey(handler: (key: string, inInput: boolean, on?: string, mod?: boolean) => boolean) {
     this.key = handler;
+  }
+  /** How many times the menu was asked to take the focus. */
+  menuFocuses = 0;
+  focusMenu() {
+    this.menuFocuses++;
   }
   /** The dialog's markup while one is open, and how many times it was opened and closed. */
   dialog: string | undefined;
@@ -196,7 +201,7 @@ class FakeHost implements PageHost {
     kind: 'hover' | 'context',
     data: Record<string, string> | undefined,
     at: { x: number; y: number },
-  ) => boolean | undefined | void;
+  ) => boolean | undefined;
   onPoint(handler: NonNullable<FakeHost['point_']>) {
     this.point_ = handler;
   }
@@ -252,8 +257,8 @@ class FakeHost implements PageHost {
   click(data: Record<string, string>) {
     this.action?.(data.action ?? '', data);
   }
-  press(key: string, inInput = false, on?: string) {
-    return this.key?.(key, inInput, on);
+  press(key: string, inInput = false, on?: string, mod = false) {
+    return this.key?.(key, inInput, on, mod);
   }
   /** The open sockets whose query starts with `prefix`. */
   open(prefix: string) {
@@ -356,6 +361,7 @@ test('boot draws the sidebar and the list from the first index and opens no run;
     'inspector',
     'list',
     'main',
+    'menu',
     'sidebar',
     'status',
     'toasts',
@@ -2854,4 +2860,194 @@ test('an index that turns the open queue to watcher not running redraws main wit
   host.click({ action: 'poll-queue', repo: 'beta', workflow: QUEUE_WORKFLOW });
   await settle();
   expect(host.posts.length).toBe(posts);
+});
+
+// The command menu (ADW-520): opened on Cmd+K over the focused subject, filtered, moved and run by key.
+const cmdk = () => host.regions.menu ?? '';
+const menuLabels = () => [...cmdk().matchAll(/<span class="cmdk-label">([^<]*)<\/span>/g)].map(([, label]) => label);
+const menuSel = () => cmdk().match(/class="cmdk-row sel"[^>]*><span class="cmdk-label">([^<]*)</)?.[1];
+const menuHead = () => cmdk().match(/<div class="cmdk-subj">([^<]*)<\/div>/)?.[1];
+const cmdK = () => host.press('k', false, undefined, true);
+/** Boots with `runId` open and its offers read, the menu closed. */
+async function openRunPage(runId: string) {
+  page = boot(host);
+  firstIndex(runId);
+  await settle();
+  host.advance(100);
+}
+
+test('Cmd+K and Ctrl+K open the command menu from anywhere, an input included, and the handler reports the key handled; the same key, Escape or the backdrop closes it', async () => {
+  await openRunPage(FAKE_2_ID);
+  expect(cmdK()).toBe(true);
+  host.advance(100);
+  expect(cmdk()).toContain('class="cmdk"');
+  expect(host.menuFocuses).toBe(1);
+  expect(cmdK()).toBe(true);
+  host.advance(100);
+  expect(cmdk()).toBe('');
+  expect(host.press('k', true, undefined, true)).toBe(true);
+  host.advance(100);
+  expect(cmdk()).toContain('class="cmdk"');
+  expect(host.press('Escape', true)).toBe(true);
+  host.advance(100);
+  expect(cmdk()).toBe('');
+  expect(host.press('K', false, undefined, true)).toBe(true);
+  host.advance(100);
+  host.click({ action: 'menu-close' });
+  host.advance(100);
+  expect(cmdk()).toBe('');
+});
+
+test('Cmd+K does nothing while the confirmation dialog is open, and another key with Cmd held does nothing at all', async () => {
+  await openRunPage(FAKE_2_ID);
+  host.click({ action: 'clean-run' });
+  expect(cmdK()).toBe(false);
+  host.advance(100);
+  expect(cmdk()).toBe('');
+  host.press('Escape');
+  expect(host.press('a', false, undefined, true)).toBe(false);
+  expect(page?.ui.attention).toBe(false);
+});
+
+test('with a run open the head reads run <id> and the first group is that run offered actions; with nothing focused there is no head', async () => {
+  await openRunPage(FAKE_2_ID);
+  cmdK();
+  host.advance(100);
+  expect(menuHead()).toBe(`run ${FAKE_2_ID}`);
+  expect(menuLabels().slice(0, 2)).toEqual(['restart', 'clean']);
+  cmdK();
+  page?.stop();
+  page = boot(new FakeHost(m));
+  const bare = (page as Page).store.host as FakeHost;
+  bare.press('k', false, undefined, true);
+  bare.advance(100);
+  expect(bare.regions.menu).not.toContain('cmdk-subj');
+  expect(bare.regions.menu).toContain('switch theme');
+});
+
+test('the subject follows hover, cursor and open object, the last changed winning, and does not change while the menu is open', async () => {
+  await openRunPage(FAKE_2_ID);
+  host.point('hover', ITEM_ROW);
+  cmdK();
+  host.advance(100);
+  expect(menuHead()).toBe('item ticket:FAKE-5');
+  host.point('hover', { subject: 'run', repo: 'alpha', run: FAKE_2_ID });
+  host.advance(100);
+  expect(menuHead()).toBe('item ticket:FAKE-5');
+  cmdK();
+  host.point('hover', undefined);
+  expect(focused((page as Page).ui)).toEqual({ kind: 'run', repo: 'alpha', runId: FAKE_2_ID });
+});
+
+test('with the cursor set after a hover the menu opens on the cursor, and with the hover set after it, on the hover', async () => {
+  await openRunPage(FAKE_2_ID);
+  host.point('hover', ITEM_ROW);
+  setFocus((page as Page).ui, 'cursor', { kind: 'repo', repo: 'beta' });
+  cmdK();
+  host.advance(100);
+  expect(menuHead()).toBe('repository beta');
+  cmdK();
+  host.point('hover', { subject: 'run', repo: 'beta', run: FAKE_3_ID });
+  cmdK();
+  host.advance(100);
+  expect(menuHead()).toBe(`run ${FAKE_3_ID}`);
+});
+
+test('typing filters the rows within one flush and lists go-to rows, and the field holds what was typed', async () => {
+  await openRunPage(FAKE_2_ID);
+  cmdK();
+  host.advance(100);
+  const before = menuLabels();
+  host.type('menu-query', 'switch theme');
+  host.advance(100);
+  expect(menuLabels()).toEqual(['switch theme']);
+  expect(cmdk()).toContain('name="menu-query" type="text" value="switch theme"');
+  expect(before.length).toBeGreaterThan(1);
+  host.type('menu-query', FAKE_2_ID.slice(0, 8));
+  host.advance(100);
+  expect(cmdk()).toContain('<div class="cmdk-grp">go to</div>');
+  expect(menuLabels()).toContain(FAKE_2_ID);
+});
+
+test('ArrowDown and ArrowUp move the highlight over enabled rows only, and j typed in the menu moves no card cursor', async () => {
+  await openRunPage(FAKE_2_ID);
+  cmdK();
+  host.advance(100);
+  expect(menuSel()).toBe('restart');
+  expect(host.press('ArrowDown', true)).toBe(true);
+  host.advance(100);
+  expect(menuSel()).toBe('clean');
+  host.press('ArrowDown', true);
+  host.advance(100);
+  expect(menuSel()).toBe('all clear');
+  host.press('ArrowUp', true);
+  host.press('ArrowUp', true);
+  host.advance(100);
+  expect(menuSel()).toBe('restart');
+  const cursor = page?.ui.cursor;
+  expect(host.press('j', true)).toBe(false);
+  expect(page?.ui.cursor).toBe(cursor);
+});
+
+test('Enter on a go-to row opens a run, a queue or an item opens the queue, and a repository unfolds it, each becoming the cursor subject with the menu closed', async () => {
+  await openRunPage(FAKE_2_ID);
+  const goTo = (query: string, row: string) => {
+    cmdK();
+    host.type('menu-query', query);
+    host.advance(100);
+    expect(menuLabels()[0]).toBe(row);
+    host.press('Enter', true);
+    host.advance(100);
+    expect(cmdk()).toBe('');
+  };
+  goTo(FAKE_3_ID.slice(0, 10), FAKE_3_ID);
+  expect(page?.store.run?.runId).toBe(FAKE_3_ID);
+  expect(focused((page as Page).ui)).toEqual({ kind: 'run', repo: 'beta', runId: FAKE_3_ID });
+  goTo('ticket:FAKE-5', 'ticket:FAKE-5');
+  expect(page?.ui.queue).toBe(`beta/${QUEUE_WORKFLOW}`);
+  expect(page?.ui.focus.cursor?.subject).toEqual({
+    kind: 'item',
+    repo: 'beta',
+    workflow: QUEUE_WORKFLOW,
+    item: 'ticket:FAKE-5',
+  });
+  page?.ui.listFolded.push('queues:alpha');
+  goTo('alph', 'alpha');
+  expect(page?.ui.view).toBe('queues');
+  expect(page?.ui.listFolded).not.toContain('queues:alpha');
+  expect(page?.ui.focus.cursor?.subject).toEqual({ kind: 'repo', repo: 'alpha' });
+});
+
+test('Enter on switch theme changes the theme and on toggle inspector the inspector, and Enter on a disabled row does nothing', async () => {
+  await openRunPage(FAKE_2_ID);
+  cmdK();
+  host.type('menu-query', 'switch theme');
+  host.advance(100);
+  host.press('Enter', true);
+  expect(page?.ui.theme).toBe('light');
+  cmdK();
+  host.type('menu-query', 'toggle inspector');
+  host.advance(100);
+  host.press('Enter', true);
+  expect(page?.ui.inspector).toBe(false);
+  cmdK();
+  host.push(host.open('index')[0], indexMessage({ state: 'watcher not running', why: 'no watcher is running' }));
+  host.type('menu-query', 'poll every');
+  host.advance(100);
+  expect(cmdk()).toContain('disabled');
+  expect(host.press('Enter', true)).toBe(true);
+  host.click({ action: 'menu-run', row: '0' });
+  expect([host.posts, cmdk() === '']).toEqual([[], false]);
+});
+
+test('moving the list cursor over a run row and then a queue row makes each the cursor subject', async () => {
+  await openRunPage(FAKE_2_ID);
+  host.click({ action: 'close-detail' });
+  host.press('j');
+  host.press('j');
+  const first = page?.ui.focus.cursor?.subject;
+  expect(first?.kind).toBe('run');
+  host.click({ action: 'select-view', view: 'queues' });
+  for (let at = 0; at < 3; at++) host.press('j');
+  expect(page?.ui.focus.cursor?.subject).toEqual({ kind: 'workflow', repo: 'beta', workflow: QUEUE_WORKFLOW });
 });

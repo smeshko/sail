@@ -28,6 +28,7 @@ const SPLIT = [
   'act.ts',
   'keys.ts',
   'focus.ts',
+  'menu.ts',
   'app.ts',
 ];
 
@@ -164,6 +165,8 @@ test("the shell's actions are exactly the page's view actions: every action of t
       'toggle-theme',
       'toggle-follow',
       'copy',
+      'menu-run',
+      'menu-close',
       'dialog-confirm',
       'dialog-cancel',
       'dismiss-toast',

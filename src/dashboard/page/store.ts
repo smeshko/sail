@@ -99,6 +99,8 @@ export interface Store {
   /** What each region was last written with, and the regions whose fields the shell has just given up. */
   readonly written: Map<Region, string>;
   readonly fresh: Set<Region>;
+  /** Whether the command menu's field or the menu itself is to take the focus once the menu is drawn. */
+  menuFocus: boolean;
   /** Draws the dirty regions: the draw loop sets it. */
   flush: () => void;
   mark: (...regions: Region[]) => void;
@@ -157,6 +159,7 @@ export function createStore(host: PageHost): Store {
     dirty: new Set(),
     written: new Map(),
     fresh: new Set(),
+    menuFocus: false,
     flush: () => {
       store.flushTimer = undefined;
     },

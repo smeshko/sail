@@ -4,7 +4,17 @@
 // members the page uses, since the project's TypeScript has no DOM library.
 
 /** The page's regions, each an element id in `index.html`. */
-export const REGIONS = ['sidebar', 'list', 'attention', 'main', 'inspector', 'status', 'drawer', 'toasts'] as const;
+export const REGIONS = [
+  'sidebar',
+  'list',
+  'attention',
+  'main',
+  'inspector',
+  'status',
+  'drawer',
+  'menu',
+  'toasts',
+] as const;
 export type Region = (typeof REGIONS)[number];
 
 export interface Connection {
@@ -29,10 +39,10 @@ export interface PageHost {
   scrollToEnd(region: Region): void;
   onAction(handler: (action: string, data: Record<string, string>) => void): void;
   /**
-   * `handler` is told each key, whether it was typed in an input, and `on`, the `data-action` of the element the key
-   * landed on; answering true suppresses the key's default, as typing it would.
+   * `handler` is told each key, whether it was typed in an input, `on`, the `data-action` of the element the key
+   * landed on, and `mod`, whether Cmd or Ctrl is held; answering true suppresses the key's default, as typing it would.
    */
-  onKey(handler: (key: string, inInput: boolean, on?: string) => boolean): void;
+  onKey(handler: (key: string, inInput: boolean, on?: string, mod?: boolean) => boolean): void;
   /**
    * `handler` is told where the pointer is: `hover` when it moves onto an element, `context` when a right-click lands.
    * `data` is the dataset of the nearest ancestor with a `data-subject`, or undefined when the element is on no row.
@@ -43,12 +53,14 @@ export interface PageHost {
       kind: 'hover' | 'context',
       data: Record<string, string> | undefined,
       point: { x: number; y: number },
-    ) => boolean | undefined | void,
+    ) => boolean | undefined,
   ): void;
   /** `handler` is told the value of a named field each time it is typed into. */
   onInput(handler: (name: string, value: string) => void): void;
   /** Focuses the field named `name`, in whichever region draws it. */
   focus(name: string): void;
+  /** Focuses the command menu's field, else the menu itself. */
+  focusMenu(): void;
   /** Takes the focus off the focused element. */
   blur(): void;
   /** Scrolls the `.cur` element of `region` into view, as little as it takes. */
@@ -411,6 +423,11 @@ export function browserHost(win: BrowserWindow): PageHost {
         }
       }
     },
+    focusMenu() {
+      const menu = doc.getElementById('menu');
+      const target = menu?.querySelector?.('[name="menu-query"]') ?? menu?.querySelector?.('.cmdk');
+      target?.focus?.();
+    },
     blur() {
       doc.activeElement?.blur?.();
     },
@@ -431,9 +448,14 @@ export function browserHost(win: BrowserWindow): PageHost {
             return;
           }
         }
+        const mod = event.metaKey === true || event.ctrlKey === true;
         if (
-          handler(event.key ?? '', tag !== undefined && INPUTS.has(tag), actionOf(event.target)?.dataset.action) ===
-          true
+          handler(
+            event.key ?? '',
+            tag !== undefined && INPUTS.has(tag),
+            actionOf(event.target)?.dataset.action,
+            mod,
+          ) === true
         )
           event.preventDefault?.();
       });

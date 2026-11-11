@@ -6,8 +6,10 @@
 // list the centre. `/` focuses the list's filter field, `1`, `2` and `3` open Active, Queues and History, and `i` and `a`
 // toggle the inspector and needs attention. A key typed in an input does nothing but, for Escape, take the focus off.
 import { actions, closeAttention, step } from './actions';
+import { setFocus } from './focus';
 import { listRepos } from './index-model';
 import { entries, filterRows, groupsOf, type ListRow, VIEWS } from './list-model';
+import { menuKey, toggleMenu } from './menu';
 import { closeFile, selectCard } from './reads';
 import type { Store } from './store';
 
@@ -38,6 +40,17 @@ function moveList(store: Store, by: number) {
   // Only a move that changes the cursor asks for a reveal: one left set would scroll a later redraw (review R10).
   if (next === undefined || next === ui.listCursor) return;
   ui.listCursor = next;
+  // The row under the cursor is the cursor's subject: a run, or a queue's workflow. A group header is none.
+  const row = rowOf(store, next);
+  setFocus(
+    ui,
+    'cursor',
+    row === undefined
+      ? undefined
+      : row.kind === 'run'
+        ? { kind: 'run', repo: row.repo, runId: row.run.runId }
+        : { kind: 'workflow', repo: row.repo, workflow: row.workflow },
+  );
   store.revealList = true;
   store.mark('list');
 }
@@ -92,9 +105,9 @@ export const keys: Record<string, (store: Store) => void> = {
 /**
  * Handles `key`: while the dialog is open its keys alone; in an input, Escape takes the focus off and nothing else is
  * handled; else a cursor move, clamped to the cards or, with none open, to the list's entries, else the key's function.
- * Answers true for `/`, whose default would type it into the field just focused.
+ * Answers true for `/`, whose default would type it into the field just focused, and for a key the command menu took.
  */
-export function onKey(store: Store, key: string, inInput: boolean, on?: string): boolean {
+export function onKey(store: Store, key: string, inInput: boolean, on?: string, mod = false): boolean {
   // While the dialog is open, Escape cancels it, Enter confirms it unless the cancel button holds the focus, and no
   // other key does anything.
   if (store.actor.dialogFor() !== undefined) {
@@ -102,6 +115,17 @@ export function onKey(store: Store, key: string, inInput: boolean, on?: string):
     else if (key === 'Enter' && on !== 'dialog-cancel') store.actor.confirm();
     return false;
   }
+  // Cmd or Ctrl with K opens the command menu, or closes it; with any other key nothing is done, since typing it would
+  // reach a field or the browser's own shortcut.
+  if (mod) {
+    if (key === 'k' || key === 'K') {
+      toggleMenu(store);
+      return true;
+    }
+    return false;
+  }
+  // While the menu is open its keys alone are handled, in its field too.
+  if (store.ui.menu !== undefined) return menuKey(store, key);
   if (inInput) {
     if (key === 'Escape') store.host.blur();
     return false;
