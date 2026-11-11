@@ -105,7 +105,7 @@ test("the real bundle boots headless: both repositories, the golden run's eight 
   expect(page.text('rail')).toContain('<span class="nm">alpha</span>');
   expect(await until(() => (page.text('main').match(/data-action="select-card"/g) ?? []).length === 8)).toBe(true);
   expect(page.text('main')).toContain('<div class="stat"><b>$1.35</b><span>of $25.00 (5.4%)</span></div>');
-  expect(page.text('attention')).toContain('<span class="badge">4</span>');
+  expect(page.text('attention')).toContain('<span class="badge">3</span>');
   page.click({ action: 'select-queue', queue: 'beta/ticket-to-pr' });
   expect(await until(() => page.text('main').includes('<span class="pill p-skip">watcher not running</span>'))).toBe(
     true,

@@ -315,7 +315,7 @@ test('boot renders the rail with alpha and beta from the first index, opens the 
     'publish#1',
   ]);
   expect(host.regions.status).toContain('<span>ended completed</span>');
-  expect(host.regions.attention).toContain('⚑ needs attention<span class="badge">4</span></button>');
+  expect(host.regions.attention).toContain('⚑ needs attention<span class="badge">3</span></button>');
   expect(host.regions.attention).not.toContain('att-pane');
 });
 
@@ -2209,7 +2209,7 @@ describe('all clear', () => {
     host.click({ action: 'toggle-section', section: 'alpha/ticket-to-pr:failed' });
     host.advance(100);
     expect(host.regions.rail).toContain(`data-run="${FAKE_2_ID}"`);
-    expect(badge()).toBe('4');
+    expect(badge()).toBe('3');
     expect(host.regions.attention).toContain('data-action="clear-attention">all clear</button>');
     host.click({ action: 'clear-attention' });
     host.advance(100);
@@ -2226,18 +2226,29 @@ describe('all clear', () => {
     host.storage.set(CLEARED_KEY, JSON.stringify([other]));
     host.click({ action: 'clear-attention' });
     host.advance(100);
-    expect(toasts()).toEqual(['ok all clear: 4 hidden']);
+    expect(toasts()).toEqual(['ok all clear: 3 hidden']);
     expect(page?.ui.toasts[0]?.undo).toBe(true);
     expect(badge()).toBeUndefined();
     const saved: string[] = JSON.parse(host.storage.get(CLEARED_KEY) ?? '[]');
     expect(saved).toContain(other);
-    expect(saved).toHaveLength(5);
+    expect(saved).toHaveLength(4);
     host.click({ action: 'undo-toast', toast: '1' });
     host.advance(100);
-    expect(badge()).toBe('4');
+    expect(badge()).toBe('3');
     expect(JSON.parse(host.storage.get(CLEARED_KEY) ?? '[]')).toEqual([other]);
     expect(page?.ui.toasts).toEqual([]);
     expect(host.posts).toEqual([]);
+  });
+
+  test('a cleared run whose row gains another call in error is listed again, with it in the row', () => {
+    bootOpen();
+    host.click({ action: 'clear-attention' });
+    pushIndex((repos) => {
+      const run = repos.find((repo) => repo.name === 'alpha')?.runs.find((each) => each.runId === FAKE_2_ID);
+      for (const call of run?.summary?.calls ?? []) if (call.key === 'spec#1') call.outcome = 'error';
+    });
+    expect(badge()).toBe('1');
+    expect(host.regions.attention).toContain('also in error: spec#1');
   });
 
   test('the clear survives a reboot over the same storage', () => {
@@ -2262,7 +2273,8 @@ describe('all clear', () => {
       for (const view of repos.find((repo) => repo.name === 'beta')?.queues ?? [])
         for (const item of view.queue?.items ?? []) if (item.state === 'parked') item.attempts = 3;
     });
-    expect(badge()).toBe('1');
+    // FAKE-3's cleared error row was pruned while its run's row read as failed, so it is listed again with the parked one.
+    expect(badge()).toBe('2');
     expect(host.regions.attention).toContain('ticket:FAKE-6 parked after 3 attempts');
   });
 
@@ -2295,7 +2307,7 @@ describe('all clear', () => {
     };
     bootOpen();
     host.click({ action: 'clear-attention' });
-    // Another tab clears the new failure: its identity joins the four this tab cleared.
+    // Another tab clears the new failure: its identity joins the three this tab cleared.
     const failure = (() => {
       const repos = index(m.registryDir);
       fails(repos);
@@ -2319,7 +2331,7 @@ describe('all clear', () => {
     expect(host.storage.get(CLEARED_KEY)).toBe('[]');
     host.click({ action: 'clear-attention' });
     const kept = host.storage.get(CLEARED_KEY);
-    expect(JSON.parse(kept ?? '[]')).toHaveLength(4);
+    expect(JSON.parse(kept ?? '[]')).toHaveLength(3);
     pushIndex();
     expect(host.storage.get(CLEARED_KEY)).toBe(kept);
   });
@@ -2328,7 +2340,7 @@ describe('all clear', () => {
     for (const bad of ['nope', '{"a":1}', '[1,"a"]']) {
       host.storage.set(CLEARED_KEY, bad);
       bootOpen();
-      expect(badge()).toBe('4');
+      expect(badge()).toBe('3');
       page?.stop();
     }
   });
