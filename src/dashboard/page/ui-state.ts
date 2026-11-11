@@ -120,6 +120,8 @@ export interface UiState {
   dialog?: DialogView;
   /** The toasts on the stack, oldest first. */
   toasts: Toast[];
+  /** The command last copied and whether the clipboard took it, shown on its copy button until it times out. */
+  copied?: { text: string; ok: boolean };
   /** The command menu, while it is open. */
   menu?: MenuState;
   /** The subject each source of the focus holds. */

@@ -284,3 +284,48 @@ test('row, group and head heights are set once, in custom properties the fit tes
   expect(declarationsOf('.lgh')).toContain('min-height: var(--group-h)');
   expect(declarationsOf('.list-h')).toContain('min-height: var(--list-head-h)');
 });
+
+/** The raw body of the block that opens with `opener`, from `from`. */
+const rawBlock = (opener: string, from = 0): string => {
+  const start = style.indexOf(opener, from);
+  if (start < 0) throw new Error(`no block ${opener}`);
+  return style.slice(start + opener.length, style.indexOf('}', start));
+};
+
+test('each theme block declares its color-scheme, so the browser draws native controls for the theme (ADW-506)', () => {
+  const media = style.indexOf('@media (prefers-color-scheme: light)');
+  expect(rawBlock(':root[data-theme="dark"],\n      :root[data-theme="system"] {')).toContain('color-scheme: dark;');
+  expect(rawBlock(':root[data-theme="light"] {')).toContain('color-scheme: light;');
+  expect(rawBlock(':root[data-theme="system"] {', media)).toContain('color-scheme: light;');
+});
+
+test('one rule draws every text field from the theme variables, with no literal colour (ADW-506)', () => {
+  const selector = ':where(input:not([type="checkbox"]):not([type="radio"]))';
+  const own = rulesOf().filter(([selectors]) => selectors.length === 1 && selectors[0] === selector);
+  expect(own.length).toBe(1);
+  const body = own[0]?.[1] ?? '';
+  expect(body).toContain('background: var(--inset);');
+  expect(body).toContain('color: var(--fg);');
+  expect(body).toContain('border: 1px solid var(--line-2);');
+  expect(body).not.toContain('#');
+});
+
+test('the text-field rule adds no specificity, so the list filter keeps its own style (review R2) (ADW-506)', () => {
+  const fieldRules = rulesOf().filter(([selectors]) =>
+    selectors.some((each) => each.includes('input:not([type="checkbox"])')),
+  );
+  const drawing = fieldRules.filter(([, body]) => body.includes('background:'));
+  expect(drawing.length).toBe(1);
+  expect(drawing[0]?.[0]).toEqual([':where(input:not([type="checkbox"]):not([type="radio"]))']);
+  const filter = declarationsOf('.list-f');
+  expect(filter).toContain('background: var(--panel-2);');
+  expect(filter).toContain('color: var(--fg-2);');
+});
+
+test('a field’s placeholder reads in the dimmest text token (ADW-506)', () => {
+  expect(declarationsOf('input::placeholder')).toContain('color: var(--fg-4);');
+});
+
+test('a tickbox takes its accent from a theme variable (ADW-506)', () => {
+  expect(declarationsOf('input[type="checkbox"]')).toContain('accent-color: var(--run);');
+});

@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import type { CleanOffer, RestartOffer, ResumeOffer, StopOffer } from '../../../src/dashboard/actions';
 import { ACTIONS } from '../../../src/dashboard/page/action-registry';
 import { foldRun } from '../../../src/dashboard/page/run-model';
-import { renderRun, renderStatus, runControls } from '../../../src/dashboard/page/run-view';
+import { commandList, renderRun, renderStatus, runControls } from '../../../src/dashboard/page/run-view';
 import { initialUi } from '../../../src/dashboard/page/ui-state';
 import { readEvents } from '../../../src/events/consumers/ndjson';
 import { type Summary, summarize } from '../../../src/events/summary';
@@ -398,4 +398,23 @@ test('runControls draws only the actions it is given, and none when none is offe
   expect(drawn).toContain('stop-run');
   expect(drawn).not.toContain('resume');
   expect(runControls({ resume: RESUME_OFFER }, initialUi(0), stopOnly)).toBeUndefined();
+});
+
+test('commandList labels the copied command copied or copy failed and every other copy, keeping its attributes', () => {
+  const commands = [
+    { label: 'show', command: 'sail show X' },
+    { label: 'stop', command: 'sail stop X' },
+  ];
+  const button = (command: string, label: string) =>
+    `<button class="btn" data-action="copy" data-text="${command}">${label}</button>`;
+  expect(commandList(commands).value).toContain(button('sail show X', 'copy'));
+  expect(commandList(commands).value).not.toContain('copied');
+  const took = commandList(commands, { text: 'sail show X', ok: true }).value;
+  expect([took.includes(button('sail show X', 'copied')), took.includes(button('sail stop X', 'copy'))]).toEqual([
+    true,
+    true,
+  ]);
+  const refused = commandList(commands, { text: 'sail show X', ok: false }).value;
+  expect(refused).toContain(button('sail show X', 'copy failed'));
+  expect(refused).toContain(button('sail stop X', 'copy'));
 });
