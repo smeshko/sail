@@ -3,7 +3,7 @@
 import { expect, test } from 'bun:test';
 import type { RailRepo, RailRun } from '../../../src/dashboard/page/index-model';
 import { renderList } from '../../../src/dashboard/page/list-view';
-import { initialUi } from '../../../src/dashboard/page/ui-state';
+import { initialUi, pillOf } from '../../../src/dashboard/page/ui-state';
 
 const NOW = Date.parse('2026-10-01T12:00:00.000Z');
 const run = (runId: string, status: string, startedAt: string, extra: Partial<RailRun> = {}): RailRun => ({
@@ -156,4 +156,95 @@ test('a title, a repository name and a notice that are HTML are escaped', () => 
   expect(markup).not.toContain('<script');
   expect(markup).not.toContain('<b>');
   expect(markup).toContain('&lt;img src=x onerror=alert(1)&gt;');
+});
+
+test('a stalled running run names its stalled key in its row, and a stalled mark on a run that is not running is not drawn (review R11)', () => {
+  const stalled = (status: string) =>
+    renderList(
+      'active',
+      [repo('alpha', [run('a-stall', status, '2026-10-01T10:00:00Z', { stalled: 'spec#1' })])],
+      ui(),
+      NOW,
+      undefined as never,
+    ).value;
+  expect(stalled('running')).toContain(
+    '<span class="r-wf">alpha › flow</span><span class="stalled">stalled spec#1</span>',
+  );
+  expect(stalled('suspended')).not.toContain('class="stalled"');
+});
+
+test('a pull-request run reads PR #<n>, with its run id leading the title in its tooltip (review R11)', () => {
+  const id = 'pr-12-01M00000000000000000000000';
+  const markup = renderList(
+    'active',
+    [repo('alpha', [run(id, 'running', '2026-10-01T10:00:00Z', { pr: 12, title: 'Fix it', ticketKey: 'ADW-9' })])],
+    ui(),
+    NOW,
+    undefined as never,
+  ).value;
+  expect(markup).toContain('<span class="r-id">PR #12</span>');
+  expect(markup).toContain(`title="${id} · Fix it"`);
+  expect(markup).not.toContain('ADW-9');
+});
+
+test('each run status draws its own pill colour in its row (review R11)', () => {
+  const states = ['completed', 'failed', 'running', 'suspended'];
+  const markup = renderList(
+    'history',
+    [
+      repo(
+        'alpha',
+        states.map((status, at) => run(`r-${status}`, status, `2026-10-01T0${at}:00:00Z`)),
+      ),
+    ],
+    ui(),
+    NOW,
+    undefined as never,
+  ).value;
+  const active = renderList(
+    'active',
+    [
+      repo(
+        'alpha',
+        states.map((status, at) => run(`r-${status}`, status, `2026-10-01T0${at}:00:00Z`)),
+      ),
+    ],
+    ui(),
+    NOW,
+    undefined as never,
+  ).value;
+  const pill = (from: string, id: string) =>
+    new RegExp(`data-run="${id}"><span class="r-line"><span class="st ([^"]+)">`).exec(from)?.[1];
+  expect([
+    pill(markup, 'r-completed'),
+    pill(markup, 'r-failed'),
+    pill(active, 'r-running'),
+    pill(active, 'r-suspended'),
+  ]).toEqual(['p-pass', 'p-fail', 'p-run', 'p-warn']);
+  const all = [
+    'completed',
+    'passed',
+    'done',
+    'failed',
+    'error',
+    'running',
+    'suspended',
+    'blocked',
+    'pending',
+    undefined,
+    'skipped',
+  ];
+  expect(all.map(pillOf)).toEqual([
+    'p-pass',
+    'p-pass',
+    'p-pass',
+    'p-fail',
+    'p-fail',
+    'p-run',
+    'p-warn',
+    'p-warn',
+    'p-pend',
+    'p-pend',
+    'p-skip',
+  ]);
 });
