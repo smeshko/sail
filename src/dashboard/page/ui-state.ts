@@ -24,6 +24,9 @@ export interface ActState {
   drafts: Record<string, Record<string, string>>;
 }
 
+/** The two panes the keys can drive from 800px up: the list, or the run or queue open in the centre beside it. */
+export type Pane = 'list' | 'centre';
+
 /** Where the focused subject comes from: the row under the pointer, the keyboard's cursor, or the open run or queue. */
 export type FocusSource = 'hover' | 'cursor' | 'open';
 
@@ -110,6 +113,8 @@ export interface UiState {
   sidebar: boolean;
   /** The card under the keyboard's cursor, by its place in the run view. */
   cursor: number;
+  /** The keyed pane, which `j`, `k`, the arrows and `Enter` drive while a run or queue is open beside the list (`w` switches it). */
+  pane: Pane;
   /** Whether the log and the timeline follow their tail. */
   follow: boolean;
   /** The clock's offset east of UTC, in minutes: times are shown at it. */
@@ -148,6 +153,7 @@ export function initialUi(tz: number): UiState {
     pinned: false,
     sidebar: false,
     cursor: 0,
+    pane: 'list',
     follow: false,
     tz,
     act: { drafts: {} },

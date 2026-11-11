@@ -47,6 +47,8 @@ export interface PageHost {
       point: { x: number; y: number },
     ) => boolean | undefined,
   ): void;
+  /** `handler` is told the region a mouse button goes down in, before that press's click, or undefined for none. */
+  onPress(handler: (region: Region | undefined) => void): void;
   /** `handler` is told the value of a named field each time it is typed into. */
   onInput(handler: (name: string, value: string) => void): void;
   /** Focuses the field named `name`, in whichever region draws it. */
@@ -95,6 +97,8 @@ export interface PageHost {
   setSidebar(open: boolean): void;
   /** Whether a run or queue is open beside the list: the centre is laid out by it. */
   setDetail(open: boolean): void;
+  /** The keyed pane, the list or the centre, or undefined while only one pane shows: the page marks the one keyed. */
+  setKeys(pane: 'list' | 'centre' | undefined): void;
   /** Whether the window is under 800px: the list and the centre are two screens, and no first row is selected. */
   narrow(): boolean;
   /** The browser's offset east of UTC, in minutes. */
@@ -484,6 +488,16 @@ export function browserHost(win: BrowserWindow): PageHost {
         if (handler('context', subjectData(event.target), point) === true) event.preventDefault?.();
       });
     },
+    onPress(handler) {
+      doc.addEventListener('mousedown', (event) => {
+        const target = isElement(event.target) ? event.target : undefined;
+        handler(
+          target === undefined
+            ? undefined
+            : REGIONS.find((region) => doc.getElementById(region)?.contains?.(target) === true),
+        );
+      });
+    },
     onInput(handler) {
       doc.addEventListener('input', (event) => {
         const target = isElement(event.target) ? event.target : undefined;
@@ -640,6 +654,9 @@ export function browserHost(win: BrowserWindow): PageHost {
     },
     setDetail(open) {
       doc.documentElement.dataset.detail = open ? 'open' : 'closed';
+    },
+    setKeys(pane) {
+      doc.documentElement.dataset.keys = pane ?? 'none';
     },
     narrow: () => win.matchMedia?.('(max-width: 799px)').matches ?? false,
     offset: () => -new win.Date().getTimezoneOffset(),

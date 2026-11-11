@@ -202,6 +202,18 @@ test('no rule outside the under-800px block sizes a column or hides the centre b
   expect(declarationsOf('.main')).not.toContain('display: none');
 });
 
+test('the keyed pane is topped by a line in the focus colour, and only its cursor is drawn (ADW-535)', () => {
+  expect(html).toContain('data-keys="none"');
+  expect(declarationsOf('.list')).toContain('border-top: 2px solid transparent');
+  expect(declarationsOf('.main')).toContain('border-top: 2px solid transparent');
+  expect(declarationsOf(':root[data-keys="list"] .list')).toContain('border-top-color: var(--focus)');
+  expect(declarationsOf(':root[data-keys="centre"] .main')).toContain('border-top-color: var(--focus)');
+  for (const cursor of ['.lgh.cur', '.lgrp-row.cur', '.lrow.cur', '.q-row.cur'])
+    expect(declarationsOf(`:root[data-keys="centre"] ${cursor}`)).toContain('box-shadow: none');
+  expect(declarationsOf(':root[data-keys="centre"] .lrow.cur.picked')).toContain('inset 2px 0 0 var(--fg-3)');
+  expect(declarationsOf(':root[data-keys="list"] .card.cursor')).toContain('box-shadow: none');
+});
+
 test('the inspector has a grid track only from 1100px, and under it is a fixed panel no wider than the window (ADW-528)', () => {
   expect(declarationsOf('.body')).not.toContain('--ins-w');
   const wide = mediaBlock('min-width: 1100px');

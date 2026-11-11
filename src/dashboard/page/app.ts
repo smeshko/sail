@@ -153,6 +153,13 @@ export function boot(host: PageHost): Page {
     openMenu(store, 'context', subject, point);
     return true;
   });
+  // A press in the list or the centre gives that pane the keys; one that opens a row then gives them to the centre.
+  host.onPress((region) => {
+    const pane = region === 'list' ? 'list' : region === 'main' ? 'centre' : undefined;
+    if (pane === undefined || pane === store.ui.pane) return;
+    store.ui.pane = pane;
+    store.mark();
+  });
   host.onInput((name, value) => {
     if (name === 'list-filter') dispatch(store, 'list-filter', { value });
     if (name === 'list-status') dispatch(store, 'filter-status', { value });

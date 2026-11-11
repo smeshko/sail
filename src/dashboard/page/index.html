@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-theme="dark" data-inspector="closed" data-pinned="false" data-detail="closed" data-sidebar="closed">
+<html lang="en" data-theme="dark" data-inspector="closed" data-pinned="false" data-detail="closed" data-keys="none" data-sidebar="closed">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -659,6 +659,16 @@
       .q-row.cur {
         box-shadow: inset 2px 0 0 var(--focus);
       }
+      /* while the list and an open run or queue both show, only the keyed pane draws its cursor */
+      :root[data-keys="centre"] .lgh.cur,
+      :root[data-keys="centre"] .lgrp-row.cur,
+      :root[data-keys="centre"] .lrow.cur,
+      :root[data-keys="centre"] .q-row.cur {
+        box-shadow: none;
+      }
+      :root[data-keys="centre"] .lrow.cur.picked {
+        box-shadow: inset 2px 0 0 var(--fg-3);
+      }
       .lgrp-p {
         padding: 0 12px 6px 34px;
         font-family: var(--mono);
@@ -1017,6 +1027,16 @@
         overflow-y: auto;
         min-width: 0;
       }
+      /* the keyed pane, the one the keys drive while the list and an open run or queue both show, is topped by a line in
+         the focus colour */
+      .list,
+      .main {
+        border-top: 2px solid transparent;
+      }
+      :root[data-keys="list"] .list,
+      :root[data-keys="centre"] .main {
+        border-top-color: var(--focus);
+      }
       .d-h {
         display: flex;
         align-items: center;
@@ -1101,6 +1121,9 @@
       }
       .card.cursor {
         box-shadow: 0 0 0 1px var(--run);
+      }
+      :root[data-keys="list"] .card.cursor {
+        box-shadow: none;
       }
       .card.sel {
         border-color: var(--run);

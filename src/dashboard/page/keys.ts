@@ -1,7 +1,12 @@
-// What a key does on the page. With a run or queue open, `j`, `k` and the arrows move the card cursor within the cards,
-// `Enter` opens the card under it and `]` and `[` step to the next and previous card; with none open, they move the
-// list's cursor over its entries (group headers and the rows of the groups not folded), `Enter` opens the row under it
-// or folds the group, `.` opens the menu of the run under it, and `x`, in History, marks or unmarks the run under it.
+// What a key does on the page. `j`, `k`, the arrows and `Enter` drive one pane, the keyed pane: in the centre they move
+// the card cursor within the open run's cards and `Enter` opens the card under it; in the list they move the list's
+// cursor over its entries (group headers and the rows of the groups not folded), and `Enter` opens the row under it,
+// which gives the centre the keys, or folds the group. From 800px up, with a run or queue open beside the list, `w`
+// gives the keys to the other pane, each cursor keeping its place, and a click in a pane, or one that opens a row, gives
+// them to that pane (`app.ts`, `actions.ts`); a change of view gives them to the list, with its first row open. Under
+// 800px, or with nothing open, the keys drive what shows: the open run or queue, else the list. `]` and `[` step to the
+// next and previous card, `.` opens the menu of the run under the list's cursor, and `x`, in History with the keys in
+// the list, marks or unmarks the run under it.
 // Cmd+K or Ctrl+K opens the command menu, or closes it, and any other Cmd or Ctrl chord does nothing. While the command
 // menu is open its keys alone are handled (`menu.ts`): the arrows move its highlight, `Enter` runs its row, and
 // `Escape` goes back one step, then lets go of its subject, then closes it; a key that changes what is shown writes the URL, as a click does. Otherwise `Escape` shuts, in order, the folded sidebar, the run menu, the
@@ -10,14 +15,17 @@
 // to `4` open Inbox, Active, Queues and History, `a` opens the Inbox and `i` pins the inspector open or unpins it. In
 // the Inbox `e` dismisses the row under the cursor, else the open run's row, and Shift+E all clear. A key typed in an
 // input does nothing but, for Escape, take the focus off.
+
+import type { Subject } from './action-registry';
 import { actions, dispatch, shutSidebar, step } from './actions';
-import { setFocus } from './focus';
+import { openSubject, setFocus } from './focus';
 import { listRepos } from './index-model';
 import { type AttentionRow, attentionSubject, entries, type ListRow, shownGroups, VIEWS } from './list-model';
 import { syncUrl } from './location';
 import { menuKey, toggleMenu } from './menu';
 import { closeFile, selectCard } from './reads';
-import { listed, type Store } from './store';
+import { opens } from './selection';
+import { detailOpen, drivenPane, keyedPane, listed, type Store } from './store';
 
 /** The keys that move the cursor, and by how much. */
 export const MOVES: Record<string, number> = { j: 1, ArrowDown: 1, ArrowRight: 1, k: -1, ArrowUp: -1, ArrowLeft: -1 };
@@ -34,8 +42,15 @@ const rowOf = (store: Store, id: string | undefined): ListRow | undefined =>
     .flatMap((group) => group.rows)
     .find((row) => row.id === id);
 
-/** Whether a run or queue is open beside the list, so the keys belong to it. */
-const detailOpen = (store: Store) => store.run !== undefined || store.ui.queue !== undefined;
+/** The subject of a list row: a run, or a queue's workflow. A group header is none. */
+const rowSubject = (row: ListRow | undefined): Subject | undefined =>
+  row === undefined
+    ? undefined
+    : row.kind === 'run'
+      ? { kind: 'run', repo: row.repo, runId: row.run.runId }
+      : row.kind === 'attention'
+        ? attentionSubject(row)
+        : { kind: 'workflow', repo: row.repo, workflow: row.workflow };
 
 /** Moves the list's cursor `by` entries, clamped, to the first entry when its own is gone. */
 function moveList(store: Store, by: number) {
@@ -46,27 +61,35 @@ function moveList(store: Store, by: number) {
   // Only a move that changes the cursor asks for a reveal: one left set would scroll a later redraw (review R10).
   if (next === undefined || next === ui.listCursor) return;
   ui.listCursor = next;
-  // The row under the cursor is the cursor's subject: a run, or a queue's workflow. A group header is none.
-  const row = rowOf(store, next);
-  setFocus(
-    ui,
-    'cursor',
-    row === undefined
-      ? undefined
-      : row.kind === 'run'
-        ? { kind: 'run', repo: row.repo, runId: row.run.runId }
-        : row.kind === 'attention'
-          ? attentionSubject(row)
-          : { kind: 'workflow', repo: row.repo, workflow: row.workflow },
-  );
+  // The row under the cursor is the cursor's subject.
+  setFocus(ui, 'cursor', rowSubject(rowOf(store, next)));
   store.revealList = true;
   store.mark('list');
 }
 
-/** Opens the row under the list's cursor, or folds the group under it. */
+/**
+ * `w`: gives the keys to the other pane while both show. The cursor's subject follows them: the row under the list's
+ * cursor, or the open run or queue.
+ */
+function switchPane(store: Store) {
+  const pane = keyedPane(store);
+  if (pane === undefined) return;
+  const { ui } = store;
+  ui.pane = pane === 'list' ? 'centre' : 'list';
+  setFocus(ui, 'cursor', undefined);
+  setFocus(ui, 'cursor', ui.pane === 'list' ? rowSubject(rowOf(store, ui.listCursor)) : openSubject(store));
+  store.mark();
+}
+
+/** Opens the row under the list's cursor, which gives the centre the keys, or folds the group under it. */
 function openCursor(store: Store) {
   const { ui } = store;
   const row = rowOf(store, ui.listCursor);
+  // The centre takes the keys even when the row was open already, which draws nothing else.
+  if (row !== undefined && opens(row) !== undefined && ui.pane !== 'centre') {
+    ui.pane = 'centre';
+    store.mark();
+  }
   if (row === undefined) {
     if (ui.listCursor !== undefined && entries(shown(store), []).includes(ui.listCursor))
       actions['toggle-list-group']?.(store, { group: ui.listCursor });
@@ -99,7 +122,7 @@ export function inboxRow(store: Store): AttentionRow | undefined {
 
 export const keys: Record<string, (store: Store) => void> = {
   Enter: (store) => {
-    if (!detailOpen(store)) return openCursor(store);
+    if (drivenPane(store) === 'list') return openCursor(store);
     const card = store.run?.model.cards[store.ui.cursor];
     if (card !== undefined) selectCard(store, card.key, undefined, true);
   },
@@ -137,10 +160,10 @@ export const keys: Record<string, (store: Store) => void> = {
     const row = rowOf(store, store.ui.listCursor);
     if (row?.kind === 'run') actions['run-menu']?.(store, { repo: row.repo, run: row.run.runId });
   },
-  // Marks the History run row under the list's cursor, with no run or queue open.
+  // Marks the History run row under the list's cursor, with the keys in the list.
   x: (store) => {
     const { ui } = store;
-    const row = detailOpen(store) || ui.view !== 'history' ? undefined : rowOf(store, ui.listCursor);
+    const row = drivenPane(store) !== 'list' || ui.view !== 'history' ? undefined : rowOf(store, ui.listCursor);
     if (row?.kind === 'run') actions['toggle-select']?.(store, { row: row.id });
   },
   '/': (store) => store.host.focus('list-filter'),
@@ -152,7 +175,7 @@ export const keys: Record<string, (store: Store) => void> = {
 
 /**
  * Handles `key`: while the dialog is open its keys alone; in an input, Escape takes the focus off and nothing else is
- * handled; else a cursor move, clamped to the cards or, with none open, to the list's entries, else the key's function.
+ * handled; else a cursor move in the pane the keys drive, clamped to its cards or entries, else the key's function.
  * Answers true for `/`, whose default would type it into the field just focused, and for a key the command menu took.
  */
 export function onKey(store: Store, key: string, inInput: boolean, on?: string, mod = false): boolean {
@@ -182,6 +205,10 @@ export function onKey(store: Store, key: string, inInput: boolean, on?: string, 
     if (key === 'Escape') store.host.blur();
     return false;
   }
+  if (key === 'w') {
+    switchPane(store);
+    return false;
+  }
   const by = MOVES[key];
   // A key that does something shuts the folded sidebar, as a click does; Escape's own rule shuts it first.
   if (key !== 'Escape' && (by !== undefined || keys[key] !== undefined)) shutSidebar(store);
@@ -190,7 +217,7 @@ export function onKey(store: Store, key: string, inInput: boolean, on?: string, 
     syncUrl(store, true);
     return key === '/';
   }
-  if (!detailOpen(store)) {
+  if (drivenPane(store) === 'list') {
     moveList(store, by);
     return false;
   }
