@@ -284,3 +284,10 @@ test('row, group and head heights are set once, in custom properties the fit tes
   expect(declarationsOf('.lgh')).toContain('min-height: var(--group-h)');
   expect(declarationsOf('.list-h')).toContain('min-height: var(--list-head-h)');
 });
+
+test('the empty state is centred in the centre and wraps rather than clipping (ADW-537)', () => {
+  expect(declarationsOf('.empty')).toContain('margin: auto');
+  expect(declarationsOf('.empty')).toContain('text-align: center');
+  expect(declarationsOf('.empty')).toContain('overflow-wrap: anywhere');
+  expect(declarationsOf('.empty')).not.toMatch(/white-space:\s*nowrap/);
+});

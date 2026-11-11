@@ -132,7 +132,7 @@ test("the real bundle boots headless: both repositories, the golden run's eight 
   expect(page.ids).not.toContain('queues');
   expect(await until(() => page.text('sidebar').includes('<span class="nm">beta</span>'))).toBe(true);
   expect(page.text('sidebar')).toContain('<span class="nm">alpha</span>');
-  expect(page.text('main')).toContain('no run selected');
+  expect(page.text('main')).toContain('No run selected');
   page.click({ action: 'select-view', view: 'history' });
   expect(await until(() => page.text('list').includes(`data-run="${GOLDEN_RUN_ID}"`))).toBe(true);
   page.click({ action: 'select-run', repo: 'alpha', run: GOLDEN_RUN_ID });
@@ -172,7 +172,7 @@ test("once beta's queue/ is gone, the next index drops its queue row and gives t
   expect(await until(() => page.text('main').includes('beta / ticket-to-pr'))).toBe(true);
   rmSync(join(m.beta.clone, '.sail-runs', 'queue'), { recursive: true });
   expect(await until(() => !page.text('list').includes('select-queue'))).toBe(true);
-  expect(await until(() => page.text('main').includes('no run selected'))).toBe(true);
+  expect(await until(() => page.text('main').includes('No queue selected'))).toBe(true);
   expect(page.text('sidebar')).toContain('<span class="nm">beta</span>');
 }, 30_000);
 
@@ -375,7 +375,7 @@ test('a page loaded at a run the index does not list says so in a toast, opens n
   server = started;
   const page = await bootHeadless(server, '?repo=alpha&run=NOPE-1');
   expect(await until(() => page.text('toasts').includes('run NOPE-1 of alpha is not listed'))).toBe(true);
-  expect(page.text('main')).toContain('no run selected');
+  expect(page.text('main')).toContain('No run selected');
   const written = page.history.map((entry) => [entry.kind, entry.url]);
   expect(written[0]).toEqual(['replace', '/']);
   expect(written.flat().join(' ')).not.toContain('NOPE-1');

@@ -949,6 +949,34 @@
         color: var(--fg-4);
       }
 
+      /* the centre with nothing open: a headline, what the view holds and the keys */
+      .empty {
+        margin: auto;
+        padding: 18px;
+        max-width: 100%;
+        text-align: center;
+        overflow-wrap: anywhere;
+        font-family: var(--mono);
+        color: var(--fg-4);
+      }
+      .empty-t {
+        font-size: 14px;
+        color: var(--fg-3);
+      }
+      .empty-c,
+      .empty-k {
+        margin-top: 8px;
+        font-size: 12px;
+      }
+      .empty kbd {
+        padding: 0 4px;
+        border: 1px solid var(--line);
+        border-radius: 3px;
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--fg-3);
+      }
+
       /* the centre: the run view and the queues */
       .main {
         display: flex;

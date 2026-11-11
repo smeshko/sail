@@ -223,7 +223,7 @@ function groupBlock(group: ListGroup, ui: UiState, now: number, offers: RunActio
   return html`<div class="lgrp">${head}${open ? group.rows.map((row) => rowOf(row, ui, now, offers, group.repo?.offers)) : ''}</div>`;
 }
 
-const EMPTY: Record<ViewName, string> = {
+export const EMPTY: Record<ViewName, string> = {
   inbox: 'nothing needs attention',
   active: 'no live run',
   queues: 'no queue',

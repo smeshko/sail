@@ -131,7 +131,7 @@ export const actions: Record<string, Action> = {
     delete store.ui.listCursor;
     // The filter field gives up what was typed in it, so it reads as empty as the filter now is.
     store.fresh.add('list');
-    store.mark('sidebar', 'list');
+    store.mark('sidebar', 'list', 'main');
   },
   'filter-repo': (store, data) => {
     if (data.repo === undefined) return;
@@ -146,7 +146,7 @@ export const actions: Record<string, Action> = {
       delete store.ui.historyWorkflow;
     }
     store.fresh.add('list');
-    store.mark('sidebar', 'list');
+    store.mark('sidebar', 'list', 'main');
   },
   'toggle-list-group': (store, data) => {
     const group = data.group ?? '';

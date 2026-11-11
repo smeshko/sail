@@ -30,10 +30,11 @@ import { findRepo, index } from '../src/dashboard/files';
 import { actionOf } from '../src/dashboard/page/action-registry';
 import { attention } from '../src/dashboard/page/attention';
 import { renderDialog } from '../src/dashboard/page/dialog-view';
+import { renderEmpty } from '../src/dashboard/page/empty-view';
 import type { SafeHtml } from '../src/dashboard/page/html';
 import { listRepos, pollKind, queuePanels } from '../src/dashboard/page/index-model';
 import { renderInspector } from '../src/dashboard/page/inspector-view';
-import { shownGroups, viewCounts } from '../src/dashboard/page/list-model';
+import { groupsOf, VIEWS as LIST_VIEWS, shownGroups, viewCounts } from '../src/dashboard/page/list-model';
 import { renderList } from '../src/dashboard/page/list-view';
 import { menuRows } from '../src/dashboard/page/menu-model';
 import { renderMenu } from '../src/dashboard/page/menu-view';
@@ -305,6 +306,15 @@ export async function renderDashboardViews(outDir: string): Promise<string[]> {
       VIEWS_NOW,
     );
     views['list-queues.html'] = renderList('queues', listed, selected, VIEWS_NOW);
+    for (const view of LIST_VIEWS)
+      views[`empty-${view}.html`] = renderEmpty(
+        view,
+        groupsOf(view, listed, undefined, { now: VIEWS_NOW, tz: VIEWS_TZ }, attention(repos)),
+      );
+    views['empty-active-none.html'] = renderEmpty(
+      'active',
+      groupsOf('active', [], undefined, { now: VIEWS_NOW, tz: VIEWS_TZ }),
+    );
     const unreadable = repos.map((repo) =>
       repo.name === 'beta'
         ? {

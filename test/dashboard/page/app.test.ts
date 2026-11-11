@@ -422,11 +422,11 @@ test('boot draws the sidebar and the list from the first index and opens no run;
   expect(host.open('run=')).toEqual([]);
   host.renders = [];
   host.advance(100);
-  expect(host.renders.sort()).toEqual(['list', 'sidebar']);
+  expect(host.renders.sort()).toEqual(['list', 'main', 'sidebar']);
   expect(host.regions.sidebar).toContain('<span class="nm">alpha</span>');
   expect(host.regions.sidebar).toContain('<span class="nm">beta</span>');
   expect(host.regions.list).toContain('<span class="lh-t">Active</span><span class="c">1</span>');
-  expect(host.regions.main).toContain('no run selected');
+  expect(host.regions.main).toContain('No run selected');
   expect(host.details).toEqual([false]);
   host.click({ action: 'select-view', view: 'history' });
   host.advance(100);
@@ -1050,10 +1050,10 @@ test('the sidebar button opens the folded sidebar, and choosing a view or pressi
   host.press('Escape');
   expect(host.sidebars.slice(-2)).toEqual([true, false]);
   host.advance(100);
-  expect(host.regions.main).not.toContain('no run selected');
+  expect(host.regions.main).not.toContain('No run selected');
   host.press('Escape');
   host.advance(100);
-  expect(host.regions.main).toContain('no run selected');
+  expect(host.regions.main).toContain('No run selected');
 });
 
 test('a key that changes the list or moves its cursor shuts the open sidebar too (review R1) (ADW-528)', () => {
@@ -1076,11 +1076,11 @@ test('a view or repository chosen in the open sidebar over an open run closes th
   replay(host.open('run=')[0], GOLDEN());
   host.click({ action: 'select-run', repo: 'alpha', run: GOLDEN_RUN_ID });
   host.advance(100);
-  expect(host.regions.main).not.toContain('no run selected');
+  expect(host.regions.main).not.toContain('No run selected');
   host.click({ action: 'toggle-sidebar' });
   host.click({ action: 'select-view', view: 'history' });
   host.advance(100);
-  expect([page.ui.view, host.regions.main]).toEqual(['history', expect.stringContaining('no run selected')]);
+  expect([page.ui.view, host.regions.main]).toEqual(['history', expect.stringContaining('No run selected')]);
   host.click({ action: 'select-queue', queue: `beta/${QUEUE_WORKFLOW}` });
   host.click({ action: 'toggle-sidebar' });
   host.click({ action: 'filter-repo', repo: 'beta' });
@@ -1090,7 +1090,7 @@ test('a view or repository chosen in the open sidebar over an open run closes th
   host.click({ action: 'select-run', repo: 'alpha', run: GOLDEN_RUN_ID });
   host.click({ action: 'select-view', view: 'active' });
   host.advance(100);
-  expect(host.regions.main).not.toContain('no run selected');
+  expect(host.regions.main).not.toContain('No run selected');
 });
 
 test("the inspector's close button unpins it and deselects its card, so a pointer closes it (review R2) (ADW-528)", () => {
@@ -1693,7 +1693,7 @@ test('a click on a list row opens the run beside the list, the host is told, and
   expect(host.details).toEqual([false, true, false]);
   expect([page.ui.runId, page.ui.repo]).toEqual([undefined, undefined]);
   expect(host.open('run=')).toEqual([]);
-  expect(host.regions.main).toContain('no run selected');
+  expect(host.regions.main).toContain('No run selected');
 });
 
 test('Escape steps back through a selected card before it closes the run (ADW-522)', () => {
@@ -4198,7 +4198,7 @@ describe('loading a URL opens what it names (ADW-513)', () => {
     host.advance(100);
     expect(host.regions.toasts).toContain('queue beta/nope is not listed');
     expect(host.open('run=')).toEqual([]);
-    expect(host.regions.main).toContain('no run selected');
+    expect(host.regions.main).toContain('No run selected');
     expect(host.urls).toEqual([{ query: '', push: false }]);
   });
 
@@ -4313,7 +4313,7 @@ describe('Back and forward open what an entry names, and push nothing (ADW-513)'
     host.go('');
     host.advance(100);
     expect([page?.ui.queue, page?.ui.runId]).toEqual([undefined, undefined]);
-    expect(host.regions.main).toContain('no run selected');
+    expect(host.regions.main).toContain('No run selected');
     expect(host.urls).toHaveLength(written);
   });
 

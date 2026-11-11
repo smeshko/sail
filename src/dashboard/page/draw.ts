@@ -2,6 +2,7 @@
 // those whose markup changed, and the one-second tick that draws the running times again while anything runs. A region
 // that can't be drawn says so, and the others are still drawn.
 import { renderDrawer } from './drawer-view';
+import { renderEmpty } from './empty-view';
 import { syncOpen } from './focus';
 import { REGIONS, type Region } from './host';
 import { html } from './html';
@@ -88,7 +89,19 @@ export function regions(store: Store): Record<Region, () => string> {
         if (unwatched || menuItem === undefined || !hasItemActions(panel, menuItem)) delete ui.itemMenu;
         return renderQueue(panel, store.queues.get(ui.queue ?? '')?.stream, ui, host.now()).value;
       }
-      if (store.run === undefined) return html`<div class="qempty">no run selected</div>`.value;
+      if (store.run === undefined)
+        return renderEmpty(
+          ui.view,
+          store.index === undefined
+            ? undefined
+            : groupsOf(
+                ui.view,
+                listRepos(store.index, host.now()),
+                ui.repoFilter,
+                { now: host.now(), tz: ui.tz },
+                listed(store),
+              ),
+        ).value;
       const error = store.run.error === undefined ? '' : html`<div class="code bad">${store.run.error}</div>`;
       const card = opened(store);
       const view =
