@@ -811,3 +811,22 @@ test('a run that is not open is acted on with its own offers', () => {
   r.actor.confirm();
   expect(r.posts).toEqual([{ path: '/api/repos/alpha/runs/R2/clean', body: {} }]);
 });
+
+test('a Restart or Resume of a run that is not open opens the run it started or resumed, and a stop or clean of one leaves the open run', async () => {
+  const r = rig(RESTART);
+  r.others.R2 = RESTART;
+  const other = { repo: 'alpha', run: 'R2' };
+  r.actor.act('restart-run', other);
+  r.actor.confirm();
+  await r.answer(200, { runId: 'R3' });
+  r.actor.act('resume-run', other, { raise: '2' });
+  r.actor.confirm();
+  await r.answer(200, {});
+  r.actor.act('stop-run', other);
+  r.actor.confirm();
+  await r.answer(200, { message: 'stopped' });
+  r.actor.act('clean-run', other);
+  r.actor.confirm();
+  await r.answer(200, {});
+  expect(r.effects).toEqual(['open alpha/R3', 'open alpha/R2']);
+});

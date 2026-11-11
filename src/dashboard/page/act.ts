@@ -176,7 +176,13 @@ export function createActor(deps: ActorDeps): Actor {
     const open = deps.openRun();
     const runEffect = effect !== undefined && effect !== 'took';
     const stillOpen = subject.kind === 'run' && open?.repo === subject.repo && open.runId === subject.runId;
-    if (!(runEffect && !stillOpen)) {
+    if (runEffect && !stillOpen) {
+      // A run acted on that is not open: a Restart opens the run it started and a Resume (a reopen that keeps no menu)
+      // opens the run; a stop's reopen and a clean's leave are the open run's alone.
+      if (typeof effect === 'object' && subject.kind === 'run') effects.open(subject.repo, effect.open);
+      else if (effect === 'reopen' && answer.keepMenu !== true && subject.kind === 'run')
+        effects.open(subject.repo, subject.runId);
+    } else {
       if (effect === 'reopen' && subject.kind === 'run')
         effects.reopen(subject.repo, subject.runId, answer.keepMenu === true);
       else if (effect === 'leave') effects.leave();
