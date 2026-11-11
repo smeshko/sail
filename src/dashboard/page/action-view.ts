@@ -6,17 +6,9 @@
 // - An offer that is disabled is drawn disabled, with its `why`, only where the caller asks (`honourDisabled`): the run
 //   menu does, the queue view draws its own disabled controls with the reason, and the watch set draws enabled, with
 //   the server's refusal coming with the POST.
-// - While the pending action is this one on this subject and unsent, the button is `armed` and reads its confirm label.
-import {
-  type ActionDef,
-  type OfferSource,
-  type Param,
-  type Subject,
-  sameSubject,
-  type Values,
-} from './action-registry';
+import type { ActionDef, OfferSource, Param, Subject, Values } from './action-registry';
 import { html, type SafeHtml } from './html';
-import type { ActPlace, ActState } from './ui-state';
+import type { ActState } from './ui-state';
 
 export interface ControlOptions {
   /** Draw a disabled offer disabled, with its `why`. */
@@ -89,31 +81,12 @@ export function actionControl(
       html`<button class="btn" disabled>${def.label(subject)}</button><span class="act-why">${available.why}</span>`,
     );
   }
-  const { pending } = act;
-  const armed =
-    pending !== undefined && !pending.sent && pending.id === def.id && sameSubject(pending.subject, subject);
   const values = act.drafts[def.id] ?? {};
-  const label = armed && def.confirm !== undefined ? def.confirm(subject, values, source) : def.label(subject);
+  const label = def.label(subject);
   const params = def.params(subject, source).map((param) => field(param, values));
   return wrap(
-    html`${params}<button class="${options.class ?? 'btn'}${armed ? ' armed' : ''}" data-action="${def.id}"${
+    html`${params}<button class="${options.class ?? 'btn'}" data-action="${def.id}"${
       options.data === true ? dataOf(subject) : ''
     }${options.title === undefined ? '' : html` title="${options.title}"`}>${label}</button>`,
   );
-}
-
-/** The text of the last result shown at `place`, and, where `scope` names them, for that repository and workflow. */
-export function resultOf(
-  act: ActState,
-  place: ActPlace,
-  scope: { repo?: string; workflow?: string } = {},
-): string | undefined {
-  const result = act.results[place];
-  if (result === undefined) return undefined;
-  const { subject } = result;
-  const repo = 'repo' in subject ? subject.repo : undefined;
-  const workflow = 'workflow' in subject ? subject.workflow : undefined;
-  if (scope.repo !== undefined && repo !== scope.repo) return undefined;
-  if (scope.workflow !== undefined && workflow !== scope.workflow) return undefined;
-  return result.text;
 }
