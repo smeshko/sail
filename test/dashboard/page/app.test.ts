@@ -3561,7 +3561,7 @@ describe('all clear', () => {
   test('one click empties the list and the count, shows nothing needs attention, posts nothing and leaves the failed run in the list', () => {
     bootOpen();
     expect(badge()).toBe('3');
-    expect(listed()).toContain('data-action="clear-attention" title="dismiss all (⇧E)">all clear</button>');
+    expect(listed()).toContain('data-action="clear-attention" title="all clear (⇧E)">all clear</button>');
     host.click({ action: 'clear-attention' });
     host.advance(100);
     expect(badge()).toBe('0');

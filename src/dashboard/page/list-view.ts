@@ -294,9 +294,11 @@ export function renderList(
     ui.listFilter.trim() !== '' ||
     (view === 'history' && (ui.historyStatus !== undefined || ui.historyWorkflow !== undefined));
   const count = narrowed ? `${total(shown)} of ${total(all)}` : String(total(all));
+  const clearDef = actionOf('clear-attention');
+  const clearLabel = clearDef?.label({ kind: 'none' }) ?? 'all clear';
   const clear =
     view === 'inbox' && total(shown) > 0
-      ? html`<button class="btn" type="button" data-action="clear-attention" title="${withKey('dismiss all', actionOf('clear-attention')?.key)}">all clear</button>`
+      ? html`<button class="btn" type="button" data-action="clear-attention" title="${withKey(clearLabel, clearDef?.key)}">${clearLabel}</button>`
       : '';
   // One row of the view's name, count and filter field; History's controls on a second, which the Selection's count and
   // buttons take while rows are selected, so the head never grows a third. The count in the first says what the

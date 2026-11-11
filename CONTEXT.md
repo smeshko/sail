@@ -662,7 +662,7 @@ The live view `sail dashboard` serves on localhost for the whole machine: every 
 _Avoid_: UI, console, monitor, board
 
 **Sidebar**:
-The dashboard's navigation column, 180px wide and never growing with activity: Inbox, Active, Queues and History, each with a count, then every repository as a filter, with a dot for its watcher (watching, not watching or broken). It holds no run row, run menu or watch button. Under 900px it folds behind a button in the top bar.
+The dashboard's navigation column, 180px wide and never growing with activity: Inbox, Active, Queues and History, each with a count, then every repository as a filter, with a dot for its watcher (watching, watcher not running or broken). It holds no run row, run menu or watch button. Under 900px it folds behind a button in the top bar.
 _Avoid_: rail, nav, menu
 
 **List**:
