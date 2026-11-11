@@ -481,6 +481,19 @@ test('new --clone refuses a bad name, a folder that is none and a name given twi
   });
 });
 
+test('new --clone refuses a name the registry schema refuses, an uppercase letter, an _ or a leading -', async () => {
+  await withTempRepo(async (repo) => {
+    const dir = join(repo.dir, 'demo');
+    const codes: Record<string, number> = {};
+    for (const name of ['My_Repo', 'Atlas', 'a_b', '-x'])
+      codes[name] = (await demo(repo.env, 'new', dir, '--clone', `${name}=${join(DENSE, 'atlas')}`)).code;
+    expect({ codes, made: existsSync(dir) }).toEqual({
+      codes: { My_Repo: 2, Atlas: 2, a_b: 2, '-x': 2 },
+      made: false,
+    });
+  });
+});
+
 /** A Chrome that does nothing but write its arguments, one a line, to `<dir>/chrome-args.txt`, and exit. */
 async function recordingChrome(dir: string) {
   const script = join(dir, 'chrome.sh');

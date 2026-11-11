@@ -12,7 +12,7 @@
 //                                  with any form, registers a second clone for the dashboard: <folder> is copied to
 //                                  <dir>/clones/<name>/.sail-runs/ beside a copy of the demo's .sail/, and a registry
 //                                  entry for it goes in the demo's SAIL_HOME; repeatable, one name once, a name of
-//                                  letters, digits, - and _. Prints `demo: registered <name>` for each
+//                                  lower-case letters, digits and -, not first. Prints `demo: registered <name>` for each
 //   run <dir> sail [args…]         commits what changed in <dir>/repo, runs this checkout's sail there, prints what
 //                                  it printed and appends it to <dir>/transcript.txt; exits with sail's code. Only
 //                                  sail runs, so a stage allowed this harness runs nothing else through it
@@ -139,15 +139,15 @@ function planRuns(folders) {
   });
 }
 
-/** The clones `--clone` names, checked: a name of letters, digits, - and _, once, and a folder that exists. */
+/** The clones `--clone` names, checked: a name the registry schema takes (lower-case letters, digits and -, not first), once, and a folder that exists. */
 function planClones(specs) {
   const seen = new Set();
   return specs.map((spec) => {
     const at = spec.indexOf('=');
     const name = at < 0 ? spec : spec.slice(0, at);
     const folder = at < 0 ? '' : resolve(spec.slice(at + 1));
-    if (at < 0 || !/^[A-Za-z0-9_-]+$/.test(name))
-      refuse(`--clone ${spec}: a clone is <name>=<folder>, its name letters, digits, - and _`);
+    if (at < 0 || !/^[a-z0-9][a-z0-9-]*$/.test(name))
+      refuse(`--clone ${spec}: a clone is <name>=<folder>, its name lower-case letters, digits and -, not first`);
     if (seen.has(name)) refuse(`--clone ${name} is given twice`);
     seen.add(name);
     if (!existsSync(folder) || !statSync(folder).isDirectory())
