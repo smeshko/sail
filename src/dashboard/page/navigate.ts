@@ -46,6 +46,7 @@ export function navigate(store: Store, asked: Record<string, string>, moved: boo
       reopenQueue(store, id);
       ui.queue = id;
       store.deselected = false;
+      store.revealOpen = true;
     } else sayMissing(store, `queue ${id} is not listed`);
   } else if (target.repo !== undefined && target.run !== undefined) {
     const { repo, run } = target;

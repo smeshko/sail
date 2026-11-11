@@ -1142,6 +1142,19 @@ describe('the list host members (ADW-522)', () => {
     expect(scrolled).toEqual([{ block: 'nearest' }]);
   });
 
+  test("reveal('list', 'sel') scrolls the selected row, not the cursor's", () => {
+    const fake = fakeWindow();
+    const scrolled: string[] = [];
+    const cur = element({ scrollIntoView: () => void scrolled.push('cur') });
+    const sel = element({ scrollIntoView: (options) => void scrolled.push(`sel ${JSON.stringify(options)}`) });
+    fake.elements.list = element({
+      querySelector: (selectors: string) => (selectors === '.cur' ? cur : selectors === '[data-row].sel' ? sel : null),
+    });
+    const host = browserHost(fake.win);
+    host.reveal('list', 'sel');
+    expect(scrolled).toEqual(['sel {"block":"nearest"}']);
+  });
+
   test('a key whose handler answers true has its default suppressed, and one answered false does not', () => {
     const fake = fakeWindow();
     const host = browserHost(fake.win);

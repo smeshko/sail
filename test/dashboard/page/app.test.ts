@@ -264,8 +264,10 @@ class FakeHost implements PageHost {
   blur() {
     this.blurs++;
   }
-  reveal(region: Region) {
-    this.revealed.push(region);
+  /** The regions whose selected row was revealed, apart from `revealed`'s cursor ones. */
+  revealedOpen: Region[] = [];
+  reveal(region: Region, what: 'cur' | 'sel' = 'cur') {
+    (what === 'sel' ? this.revealedOpen : this.revealed).push(region);
   }
   /** Types `value` into the field `name`. */
   type(name: string, value: string) {
@@ -4957,5 +4959,69 @@ describe('a filter that drops the open row selects the first row left (ADW-537)'
     host.type('list-filter', 'FAKE-4');
     host.advance(100);
     expect(open.ui.runId).toBe(FAKE_3_ID);
+  });
+});
+
+describe('the open row is scrolled into sight when it changes (ADW-537)', () => {
+  beforeEach(() => {
+    host.narrowed = false;
+  });
+
+  test('a run opened from the URL at load is revealed in the list once', () => {
+    host.startAt = { repo: 'alpha', run: GOLDEN_RUN_ID };
+    page = boot(host);
+    plainIndex();
+    host.advance(100);
+    expect(host.revealedOpen).toEqual(['list']);
+  });
+
+  test('a first row the shell selects on boot, and on a change of view, is revealed once each', () => {
+    page = boot(host);
+    plainIndex();
+    host.advance(100);
+    expect(host.revealedOpen).toEqual(['list']);
+    host.press('4');
+    host.advance(100);
+    expect(host.revealedOpen).toEqual(['list', 'list']);
+  });
+
+  test('a filter that opens another row reveals it', () => {
+    page = boot(host);
+    plainIndex();
+    host.press('4');
+    host.advance(100);
+    host.revealedOpen = [];
+    host.type('list-filter', 'FAKE-4');
+    host.advance(100);
+    expect(host.revealedOpen).toEqual(['list']);
+  });
+
+  test('a tick and an index refresh scroll nothing', () => {
+    page = boot(host);
+    plainIndex();
+    host.advance(100);
+    host.revealedOpen = [];
+    host.advance(5000);
+    plainIndex();
+    host.advance(100);
+    host.press('j');
+    expect(host.revealedOpen).toEqual([]);
+  });
+
+  test('a list whose markup did not change keeps the reveal for the next write', () => {
+    host.narrowed = true;
+    page = boot(host);
+    plainIndex();
+    host.advance(100);
+    page.store.revealOpen = true;
+    page.store.mark('list');
+    host.advance(100);
+    expect(host.revealedOpen).toEqual([]);
+    expect(page.store.revealOpen).toBe(true);
+    page.ui.listFilter = 'FAKE';
+    page.store.mark('list');
+    host.advance(100);
+    expect(host.revealedOpen).toEqual(['list']);
+    expect(page.store.revealOpen).toBe(false);
   });
 });

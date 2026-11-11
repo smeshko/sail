@@ -174,6 +174,11 @@ export function flush(store: Store): void {
       store.revealList = false;
       host.reveal('list');
     }
+    // The open row, when it changed, is scrolled into sight once the list is drawn; a list left as it was keeps the flag.
+    if (region === 'list' && store.revealOpen) {
+      store.revealOpen = false;
+      host.reveal('list', 'sel');
+    }
     // A running call's timeline, followed, shows its newest entry: not while the queue holds the centre.
     if (region === 'main' && ui.follow && openQueue(store) === undefined && opened(store)?.state === 'running')
       host.scrollToEnd(region);

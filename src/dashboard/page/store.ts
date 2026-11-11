@@ -71,6 +71,8 @@ export interface Store {
   revealList: boolean;
   /** Whether a person closed what the centre showed (Esc, Back): no first row is selected again until one is opened or the view changes. */
   deselected: boolean;
+  /** Whether the open row has changed since the list was drawn, so the next draw scrolls it into sight. */
+  revealOpen: boolean;
   /** Whether the host was last told a run or queue is open beside the list. */
   detail: boolean | undefined;
   /** What the host was last told about the inspector: whether it is open and whether it is pinned. */
@@ -146,6 +148,7 @@ export function createStore(host: PageHost): Store {
     cursorPending: false,
     revealList: false,
     deselected: false,
+    revealOpen: false,
     detail: undefined,
     inspector: undefined,
     start: host.start(),

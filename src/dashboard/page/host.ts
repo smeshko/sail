@@ -53,8 +53,8 @@ export interface PageHost {
   focusMenu(): void;
   /** Takes the focus off the focused element. */
   blur(): void;
-  /** Scrolls the `.cur` element of `region` into view, as little as it takes. */
-  reveal(region: Region): void;
+  /** Scrolls the `.cur` element of `region`, or with `sel` its selected row (`[data-row].sel`), into view, as little as it takes. */
+  reveal(region: Region, what?: 'cur' | 'sel'): void;
   /**
    * Opens the confirmation dialog with `html`, modal, and remembers what had the focus. A close the browser makes
    * itself reaches the action handler as `dialog-cancel`, and a `change` of a field inside it as `dialog-change`.
@@ -470,8 +470,11 @@ export function browserHost(win: BrowserWindow): PageHost {
     blur() {
       doc.activeElement?.blur?.();
     },
-    reveal(region) {
-      doc.getElementById(region)?.querySelector?.('.cur')?.scrollIntoView?.({ block: 'nearest' });
+    reveal(region, what = 'cur') {
+      doc
+        .getElementById(region)
+        ?.querySelector?.(what === 'sel' ? '[data-row].sel' : '.cur')
+        ?.scrollIntoView?.({ block: 'nearest' });
     },
     onKey(handler) {
       doc.addEventListener('keydown', (event) => {

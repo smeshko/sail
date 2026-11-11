@@ -199,6 +199,7 @@ export function selectRun(store: Store, repo: string, runId: string) {
   closeRun(store);
   clearCall(store);
   store.deselected = false;
+  store.revealOpen = true;
   ui.repo = repo;
   ui.runId = runId;
   closeFile(store);

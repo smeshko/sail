@@ -54,6 +54,7 @@ export function openRow(store: Store, row: ListRow): void {
     if (target.run.key !== undefined) selectCard(store, target.run.key, 'overview', false);
   }
   store.deselected = false;
+  store.revealOpen = true;
   store.mark('list', 'main', 'inspector', 'status');
 }
 
@@ -73,6 +74,8 @@ export function keepSelection(store: Store, change: () => void): void {
   change();
   const is = shownRows(store, true).some((row) => isOpenRow(store, row));
   if ((was && !is) || (!somethingOpen(store) && !store.deselected)) selectFirst(store);
+  // The open row, which a filter may have moved, is kept in sight.
+  if (somethingOpen(store)) store.revealOpen = true;
 }
 
 /**

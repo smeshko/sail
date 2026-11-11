@@ -69,6 +69,7 @@ export const actions: Record<string, Action> = {
     reopenQueue(store, data.queue);
     store.ui.queue = data.queue;
     store.deselected = false;
+    store.revealOpen = true;
     store.mark('list', 'main', 'inspector', 'status');
   },
   'select-card': (store, data) => selectCard(store, data.key, undefined, true),
