@@ -34,18 +34,16 @@ export function navigate(store: Store, asked: Record<string, string>, fallback: 
     if (queuePanels(repos).some((panel) => queueId(panel.repo, panel.workflow) === id)) {
       reopenQueue(store, id);
       ui.queue = id;
-      delete ui.indexNotice;
       store.actor.clearResult('queue');
       if (store.run === undefined && fallback === 'first') openFirst(store);
     } else {
-      ui.indexNotice = `queue ${id} is not listed`;
       if (fallback === 'first') openFirst(store);
+      ui.indexNotice = `queue ${id} is not listed`;
     }
   } else if (target.repo !== undefined && target.run !== undefined) {
     const { repo, run } = target;
     if (repos.some((each) => each.name === repo && each.runs.some((entry) => entry.runId === run))) {
       delete ui.queue;
-      delete ui.indexNotice;
       selectRun(store, repo, run);
       if (target.key === undefined) {
         if (ui.key !== undefined) selectCard(store, undefined);
@@ -61,8 +59,8 @@ export function navigate(store: Store, asked: Record<string, string>, fallback: 
           missing(store, target.file ?? '', run),
         );
     } else {
-      ui.indexNotice = `run ${run} of ${repo} is not listed`;
       if (fallback === 'first') openFirst(store);
+      ui.indexNotice = `run ${run} of ${repo} is not listed`;
     }
   } else if (fallback === 'first') openFirst(store);
   store.mark('rail', 'main', 'inspector');

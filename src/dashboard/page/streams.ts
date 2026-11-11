@@ -170,6 +170,8 @@ export function closeRun(store: Store) {
 
 export function selectRun(store: Store, repo: string, runId: string) {
   const { ui } = store;
+  // Opening a run, by any path, ends a notice that a URL named what is not listed.
+  delete ui.indexNotice;
   if (store.run?.repo === repo && store.run.runId === runId && store.run.error === undefined) return;
   closeRun(store);
   clearCall(store);
@@ -301,8 +303,10 @@ export function openIndex(store: Store, onStart: (asked: Record<string, string>)
   });
 }
 
-/** Connects the queue `id` again from an empty stream, when its stream sent `error`. */
+/** Ends a notice that a URL named what is not listed, and connects the queue `id` again from an empty stream when its
+ * stream sent `error`. */
 export function reopenQueue(store: Store, id: string): void {
+  delete store.ui.indexNotice;
   const failed = store.queues.get(id);
   if (failed?.stream.error !== undefined) {
     failed.stream = { recent: [] };

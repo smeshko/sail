@@ -43,7 +43,6 @@ export const actions: Record<string, Action> = {
   'select-run': (store, data) => {
     if (data.repo === undefined || data.run === undefined) return;
     store.actor.clearResult('rail');
-    delete store.ui.indexNotice;
     leaveQueue(store);
     selectRun(store, data.repo, data.run);
   },
@@ -51,7 +50,6 @@ export const actions: Record<string, Action> = {
     if (data.queue === undefined) return;
     reopenQueue(store, data.queue);
     store.ui.queue = data.queue;
-    delete store.ui.indexNotice;
     store.actor.clearResult('queue');
     store.mark('rail', 'main');
   },

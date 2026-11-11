@@ -2491,6 +2491,15 @@ describe('loading a URL opens what it names (ADW-513)', () => {
     host.advance(100);
     expect(host.regions.rail).not.toContain('is not listed');
   });
+
+  test('a notice goes once a needs-attention row opens a run (review R2)', () => {
+    start({ repo: 'alpha', run: 'NOPE-1' });
+    host.advance(100);
+    expect(host.regions.rail).toContain('run NOPE-1 of alpha is not listed');
+    host.click({ action: 'open', repo: 'alpha', run: FAKE_2_ID, key: 'implement#1' });
+    host.advance(100);
+    expect(host.regions.rail).not.toContain('is not listed');
+  });
 });
 
 describe('Back and forward open what an entry names, and push nothing (ADW-513)', () => {
