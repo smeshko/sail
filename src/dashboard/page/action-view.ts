@@ -15,7 +15,7 @@ import {
   type Values,
 } from './action-registry';
 import { html, type SafeHtml } from './html';
-import type { ActPlace, ActState } from './ui-state';
+import type { ActState } from './ui-state';
 
 export interface ControlOptions {
   /** Draw a disabled offer disabled, with its `why`. */
@@ -99,20 +99,4 @@ export function actionControl(
       options.data === true ? dataOf(subject) : ''
     }${options.title === undefined ? '' : html` title="${options.title}"`}>${label}</button>`,
   );
-}
-
-/** The text of the last result shown at `place`, and, where `scope` names them, for that repository and workflow. */
-export function resultOf(
-  act: ActState,
-  place: ActPlace,
-  scope: { repo?: string; workflow?: string } = {},
-): string | undefined {
-  const result = act.results[place];
-  if (result === undefined) return undefined;
-  const { subject } = result;
-  const repo = 'repo' in subject ? subject.repo : undefined;
-  const workflow = 'workflow' in subject ? subject.workflow : undefined;
-  if (scope.repo !== undefined && repo !== scope.repo) return undefined;
-  if (scope.workflow !== undefined && workflow !== scope.workflow) return undefined;
-  return result.text;
 }

@@ -160,51 +160,48 @@ test('a resume that needs a raise refuses an empty, zero or non-numeric one in t
 });
 
 test('each answer means what it meant: resume reopens, restart opens the run named, stop reopens with its message, clean leaves into the rail', () => {
-  expect(def('resume-run').answer?.(200, '{}', RUN)).toEqual({ place: 'run', effect: 'reopen' });
-  expect(def('restart-run').answer?.(200, '{"runId":"NEW"}', RUN)).toEqual({ place: 'run', effect: { open: 'NEW' } });
-  expect(def('restart-run').answer?.(200, '{}', RUN)).toEqual({ place: 'run' });
+  expect(def('resume-run').answer?.(200, '{}', RUN)).toEqual({ effect: 'reopen', text: 'resumed' });
+  expect(def('restart-run').answer?.(200, '{"runId":"NEW"}', RUN)).toEqual({
+    effect: { open: 'NEW' },
+    text: 'started NEW',
+  });
+  expect(def('restart-run').answer?.(200, '{}', RUN)).toEqual({});
   expect(def('stop-run').answer?.(200, '{"message":"stopped"}', RUN)).toEqual({
-    place: 'run',
     effect: 'reopen',
     keepMenu: true,
     text: 'stopped',
   });
   expect(def('clean-run').answer?.(200, '{"message":"cleaned"}', RUN)).toEqual({
-    place: 'rail',
     effect: 'leave',
     text: 'cleaned',
   });
-  expect(def('clean-run').answer?.(200, '{}', RUN)).toEqual({ place: 'rail', effect: 'leave' });
+  expect(def('clean-run').answer?.(200, '{}', RUN)).toEqual({ effect: 'leave' });
 });
 
 test('a queue change shows a 200 message and took, a 202 waiting, and any other status its refusal', () => {
   const answer = (id: string, status: number, body: string) => def(id).answer?.(status, body, ITEM);
-  expect(answer('drop-item', 200, '{"message":"gone"}')).toEqual({ place: 'queue', text: 'gone', effect: 'took' });
-  expect(answer('poll-queue', 202, '{"waiting":"not yet"}')).toEqual({ place: 'queue', text: 'not yet' });
-  expect(answer('poll-queue', 202, '{"message":"x"}')).toEqual({ place: 'queue' });
+  expect(answer('drop-item', 200, '{"message":"gone"}')).toEqual({ text: 'gone', effect: 'took' });
+  expect(answer('poll-queue', 202, '{"waiting":"not yet"}')).toEqual({ text: 'not yet' });
+  expect(answer('poll-queue', 202, '{"message":"x"}')).toEqual({});
   expect(answer('move-item', 409, '{"error":"no watcher"}')).toEqual({
-    place: 'queue',
     text: 'no watcher',
     refused: true,
   });
   expect(answer('add-ticket', 500, 'oops')).toEqual({
-    place: 'queue',
     text: 'the add was refused (500)',
     refused: true,
   });
 });
 
 test('watch shows its message or waiting under the repository, and any other status its refusal', () => {
-  expect(def('watch').answer?.(200, '{"message":"m","waiting":"w"}', REPO)).toEqual({ place: 'repo', text: 'm' });
-  expect(def('watch').answer?.(202, '{"waiting":"w"}', REPO)).toEqual({ place: 'repo', text: 'w' });
-  expect(def('watch').answer?.(202, '{}', REPO)).toEqual({ place: 'repo' });
+  expect(def('watch').answer?.(200, '{"message":"m","waiting":"w"}', REPO)).toEqual({ text: 'm' });
+  expect(def('watch').answer?.(202, '{"waiting":"w"}', REPO)).toEqual({ text: 'w' });
+  expect(def('watch').answer?.(202, '{}', REPO)).toEqual({});
   expect(def('unwatch').answer?.(409, '{"error":"nope"}', REPO)).toEqual({
-    place: 'repo',
     text: 'nope',
     refused: true,
   });
   expect(def('unwatch').answer?.(0, '', REPO)).toEqual({
-    place: 'repo',
     text: 'the unwatch could not be sent: the dashboard did not answer',
     refused: true,
   });
@@ -238,27 +235,49 @@ test('the word under way is kept by subject, a workflow of a watch apart from th
 });
 
 test('a run action that is refused says why, by its own noun', () => {
-  expect(def('resume-run').answer?.(409, '{"error":"busy"}', RUN)).toEqual({ place: 'run', text: 'busy' });
-  expect(def('stop-run').answer?.(500, 'x', RUN)).toEqual({ place: 'run', text: 'the stop was refused (500)' });
+  expect(def('resume-run').answer?.(409, '{"error":"busy"}', RUN)).toEqual({ text: 'busy', refused: true });
+  expect(def('stop-run').answer?.(500, 'x', RUN)).toEqual({ text: 'the stop was refused (500)', refused: true });
   expect(refusal(404, '[]', 'clean')).toBe('the clean was refused (404)');
   expect(answerField('{"a":""}', 'a')).toBeUndefined();
   expect(answerField('nope', 'a')).toBeUndefined();
 });
 
-test('the confirm labels name what the action will do', () => {
-  const label = (id: string, subject: Subject, values: Record<string, string> = {}) =>
-    def(id).confirm?.(subject, values, source());
-  expect(label('resume-run', RUN)).toBe('confirm resume · spent $2.50 of $5.00');
-  expect(label('restart-run', RUN, { stage: 'spec' })).toBe('confirm restart from spec · budget $10.00');
-  expect(label('restart-run', RUN, { stage: 'gone' })).toBe('confirm restart from tests · budget $10.00');
-  expect(label('stop-run', RUN)).toBe('confirm stop · at its next call boundary');
-  expect(label('stop-run', RUN, { now: 'on' })).toBe('confirm stop now · ends its running call');
-  expect(label('clean-run', RUN)).toBe(
-    'confirm clean · removes its worktree, its branch · run directory -> /m/failed-runs/x',
-  );
-  expect(label('drop-item', ITEM)).toBe('confirm drop');
-  expect(label('unwatch', WORKFLOW)).toBe('unwatch? click again');
-  expect(label('unwatch', REPO)).toBe('unwatch all? click again');
+test('a confirmed run action opens a dialog naming the run and each consequence, built from the offers', () => {
+  const dialog = (id: string, values: Record<string, string> = {}) => def(id).dialog?.(RUN, values, source());
+  expect(dialog('resume-run', { raise: '5' })).toEqual({
+    title: 'resume FAKE-1-RUN',
+    lines: ['spent $2.50 of $5.00', 'raises the budget by $5.00'],
+    verb: 'resume',
+  });
+  expect(dialog('resume-run')?.lines).toEqual(['spent $2.50 of $5.00']);
+  expect(dialog('restart-run', { stage: 'spec' })).toEqual({
+    title: 'restart FAKE-1-RUN',
+    lines: ['runs again: spec', 'budget $10.00', 'starts a new run seeded from FAKE-1-RUN'],
+    verb: 'restart',
+  });
+  expect(dialog('restart-run', { stage: 'gone' })?.lines[0]).toBe('runs again: tests');
+  expect(dialog('stop-run')).toEqual({
+    title: 'stop FAKE-1-RUN',
+    lines: ['stops at its next call boundary', 'the run fails as stopped'],
+    verb: 'stop',
+  });
+  expect(dialog('stop-run', { now: 'on' })?.lines[0]).toBe('ends its running call now');
+  expect(dialog('clean-run')).toEqual({
+    title: 'clean FAKE-1-RUN',
+    lines: ['removes its worktree', 'removes its branch', 'run directory → /m/failed-runs/x'],
+    verb: 'clean',
+  });
+});
+
+test('the drop dialog names the item and its queue, and an unwatch keeps its second-click label until ADW-514 finishes', () => {
+  expect(def('drop-item').dialog?.(ITEM, {}, source())).toEqual({
+    title: 'drop ticket:FAKE-5',
+    lines: ["removes ticket:FAKE-5 from alpha / wf's queue"],
+    verb: 'drop',
+  });
+  expect(def('drop-item').dialog?.(WORKFLOW, {}, source())).toEqual({ title: 'drop', lines: [], verb: 'drop' });
+  expect(def('unwatch').confirm?.(WORKFLOW, {}, source())).toBe('unwatch? click again');
+  expect(def('unwatch').confirm?.(REPO, {}, source())).toBe('unwatch all? click again');
 });
 
 test('available() reads a run action from the open run, an item from its queue, a queue from its offers and watch from the repository', () => {

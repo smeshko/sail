@@ -7,7 +7,7 @@ import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { BrowserWindow, ElementLike, EventLike } from '../../src/dashboard/page/host';
 import { type Dashboard, startDashboard } from '../../src/dashboard/server';
-import { FAKE_2_ID, type Machine, seedFixtures } from '../helpers/dashboard';
+import { FAKE_2_ID, fakeClonePorts, type Machine, seedFixtures } from '../helpers/dashboard';
 
 let m: Machine | undefined;
 let server: Dashboard | undefined;
@@ -43,6 +43,7 @@ async function bootHeadless(dashboard: Dashboard) {
   const listeners: Record<string, ((event: EventLike) => void)[]> = {};
   const origin = `http://127.0.0.1:${dashboard.port}`;
   const sockets: WebSocket[] = [];
+  const posted: string[] = [];
   const timers = new Set<ReturnType<typeof setTimeout>>();
   const win: BrowserWindow = {
     document: {
@@ -54,7 +55,10 @@ async function bootHeadless(dashboard: Dashboard) {
       documentElement: { dataset: {} },
     },
     location: { host: `127.0.0.1:${dashboard.port}`, search: '' },
-    fetch: (path, init) => fetch(`${origin}${path}`, init),
+    fetch: (path, init) => {
+      if (init.method === 'POST') posted.push(path);
+      return fetch(`${origin}${path}`, init);
+    },
     // Bun's own WebSocket, with the Origin a browser would send.
     WebSocket: class extends WebSocket {
       constructor(url: string) {
@@ -86,7 +90,7 @@ async function bootHeadless(dashboard: Dashboard) {
       listener({ target: { innerHTML: '', dataset, parentElement: null } satisfies ElementLike });
     }
   };
-  return { ids, text, click };
+  return { ids, text, click, posted };
 }
 
 test("the real bundle boots headless: both repositories, the golden run's eight cards and its $1.35, then FAKE-2's denial on the permissions tab", async () => {
@@ -140,4 +144,29 @@ test('instant tier: on the real bundle and server, a poll with no watcher draws 
   expect(page.text('toasts')).toContain('role="alert"');
   expect(page.text('toasts')).toContain('poll beta / ticket-to-pr');
   expect(page.text('toasts')).toContain('no watcher is running');
+}, 30_000);
+
+test('confirmed tier: on the real bundle and server, a click on FAKE-2 clean-run fills the dialog with a clean button, and no POST was made', async () => {
+  m = seedFixtures();
+  const leasesDir = join(m.root, 'leases');
+  const started = startDashboard({
+    registryDir: m.registryDir,
+    port: 0,
+    followPollMs: 20,
+    indexPollMs: 50,
+    leasesDir,
+    ports: fakeClonePorts(leasesDir),
+  });
+  if ('refused' in started) throw new Error(started.refused);
+  server = started;
+  const page = await bootHeadless(server);
+  expect(await until(() => page.text('rail').includes('<span class="nm">alpha</span>'))).toBe(true);
+  page.click({ action: 'run-menu', repo: 'alpha', run: FAKE_2_ID });
+  expect(await until(() => page.text('rail').includes('data-action="clean-run"'))).toBe(true);
+  page.click({ action: 'clean-run', repo: 'alpha', run: FAKE_2_ID });
+  expect(await until(() => page.text('dialog').includes('data-action="dialog-confirm"'))).toBe(true);
+  expect(page.text('dialog')).toContain(`<h2 id="dialog-title">clean ${FAKE_2_ID}</h2>`);
+  expect(page.text('dialog')).toContain('autofocus>clean</button>');
+  expect(page.text('rail')).not.toContain('armed');
+  expect(page.posted).toEqual([]);
 }, 30_000);

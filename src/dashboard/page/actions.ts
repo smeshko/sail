@@ -39,7 +39,6 @@ export function closeAttention(store: Store) {
 export const actions: Record<string, Action> = {
   'select-run': (store, data) => {
     if (data.repo === undefined || data.run === undefined) return;
-    store.actor.clearResult('rail');
     leaveQueue(store);
     selectRun(store, data.repo, data.run);
   },
@@ -47,7 +46,6 @@ export const actions: Record<string, Action> = {
     if (data.queue === undefined) return;
     reopenQueue(store, data.queue);
     store.ui.queue = data.queue;
-    store.actor.clearResult('queue');
     store.mark('rail', 'main');
   },
   'select-card': (store, data) => selectCard(store, data.key, undefined, true),
@@ -126,18 +124,19 @@ export const actions: Record<string, Action> = {
     else store.ui.itemMenu = data.item;
     store.mark('main');
   },
-  // Ticking Stop now redraws an armed Stop's confirmation, which names what it will do.
+  // Ticking Stop now only records the tick: the dialog reads it at the click.
   'stop-now': (store) => {
     store.ui.act.drafts['stop-run'] = {
       ...store.ui.act.drafts['stop-run'],
       now: store.host.value('now') === 'on' ? 'on' : '',
     };
-    store.mark('rail');
   },
   // A run's ⋯ opens it and its menu under its row; on the open menu's run, it shuts the menu.
   'run-menu': (store, data) => {
     const { repo, run: runId } = data;
     if (repo === undefined || runId === undefined) return;
+    // A dialog open for a run closes with nothing sent when its menu is toggled or another run's opened.
+    if (store.actor.dialogFor()?.kind === 'run') store.actor.cancel();
     if (
       store.ui.runMenu === runId &&
       store.ui.queue === undefined &&

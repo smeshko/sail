@@ -409,3 +409,13 @@ test("a run's ⋯ is named for its run and says whether its menu is open (ADW-50
     `<button class="r-more open" type="button" data-action="run-menu" data-repo="alpha" data-run="${FAKE_2_ID}" aria-label="actions for ${FAKE_2_ID}" aria-expanded="true"`,
   );
 });
+
+test('while a request for a run is out its live row and its history row read the word under way in place of the status dot', () => {
+  const underway = { underway: { [`run:beta/${FAKE_3_ID}`]: 'stopping…', [`run:alpha/${FAKE_2_ID}`]: 'cleaning…' } };
+  const live = folded({ repo: 'beta', runId: FAKE_3_ID, ...underway });
+  expect(live).toContain('<span class="r-line"><span class="busy">stopping…</span><span class="r-id">FAKE-3</span>');
+  expect(live).not.toContain('<span class="r-line"><span class="st');
+  const history = rail({ open: ['alpha/ticket-to-pr:failed'], ...underway });
+  expect(history).toContain(`<span class="busy">cleaning…</span><span class="r-id">FAKE-2</span>`);
+  expect(rail()).not.toContain('busy');
+});

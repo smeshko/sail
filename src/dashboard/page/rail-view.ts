@@ -12,7 +12,7 @@
 import type { RunActions } from '../actions';
 import type { RepoOffers } from '../offers';
 import { ACTIONS, type OfferSource, type Subject } from './action-registry';
-import { actionControl, resultOf } from './action-view';
+import { actionControl } from './action-view';
 import { ago, cost, duration } from './format';
 import { html, type SafeHtml } from './html';
 import { newestFirst, type RailRepo, type RailRun, type RailWorkflow, workflowOf } from './index-model';
@@ -52,13 +52,21 @@ function runMenu(repo: string, run: RailRun, ui: UiState, offers: RunActions | u
   return html`<div class="r-menu"><span class="act-why">${why}</span></div>`;
 }
 
+/** A run's status dot, or the word under way while a request for the run is out. */
+function statusMark(repo: string, run: RailRun, ui: UiState): SafeHtml {
+  const underway = ui.underway[`run:${repo}/${run.runId}`];
+  return underway === undefined
+    ? html`<span class="st ${pillOf(run.status)}"></span>`
+    : html`<span class="busy">${underway}</span>`;
+}
+
 function liveRow(repo: string, run: RailRun, ui: UiState, offers: RunActions | undefined): SafeHtml {
   const tip = tooltipOf(run);
   const facts = [duration(run.durationMs), cost(run.costUsd)].join(' · ');
   return html`<div class="run live-run${isOpen(repo, run, ui) ? ' sel' : ''}"><button class="r-open"${
     tip === undefined ? '' : html` title="${tip}"`
   } data-action="select-run" data-repo="${repo}" data-run="${run.runId}">
-<span class="r-main"><span class="r-line"><span class="st ${pillOf(run.status)}"></span><span class="r-id">${runLabel(run)}</span>${
+<span class="r-main"><span class="r-line">${statusMark(repo, run, ui)}<span class="r-id">${runLabel(run)}</span>${
     run.title === undefined ? '' : html` <span class="r-title">${run.title}</span>`
   }</span><span class="r-sub">${repo} › ${workflowOf(run)}${
     run.status === 'running' && run.stalled !== undefined
@@ -108,7 +116,7 @@ const finished = (run: RailRun) => SECTIONS.some((each) => each.holds(run));
 function historyRow(repo: string, run: RailRun, ui: UiState, offers: RunActions | undefined): SafeHtml {
   const tip = cost(run.costUsd);
   return html`<div class="run hist-run${isOpen(repo, run, ui) ? ' sel' : ''}"><button class="r-open" title="${tip}" data-action="select-run" data-repo="${repo}" data-run="${run.runId}">
-<span class="st ${pillOf(run.status)}"></span><span class="r-id">${runLabel(run)}</span>${
+${statusMark(repo, run, ui)}<span class="r-id">${runLabel(run)}</span>${
     run.title === undefined ? '' : html` <span class="r-title">${run.title}</span>`
   }<span class="r-el">${duration(run.durationMs)}</span></button>${more(repo, run, ui)}</div>${runMenu(repo, run, ui, offers)}`;
 }
@@ -233,8 +241,6 @@ export function renderRail(
   offers?: RunActions | undefined,
 ): SafeHtml {
   const runs = repos.reduce((sum, repo) => sum + repo.runs.length, 0);
-  const left = resultOf(ui.act, 'rail');
-  const notice = left === undefined ? '' : html`<div class="act"><span class="warnchip">${left}</span></div>`;
-  return html`${notice}${runningBlock(repos, ui, offers)}${queuedBlock(repos, ui, now)}<div class="rail-h"><span>repositories</span><span class="c">${runs} runs</span></div>
+  return html`${runningBlock(repos, ui, offers)}${queuedBlock(repos, ui, now)}<div class="rail-h"><span>repositories</span><span class="c">${runs} runs</span></div>
 ${repos.length === 0 ? html`<div class="qempty">no repository is registered yet: run sail watch in one</div>` : ''}${repos.map((repo) => repoGroup(repo, ui, now, offers))}`;
 }

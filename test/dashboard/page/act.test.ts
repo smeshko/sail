@@ -7,7 +7,7 @@ import type { IndexRepo } from '../../../src/dashboard/files';
 import { type Actor, createActor, inertActor } from '../../../src/dashboard/page/act';
 import type { ActionDef, OfferSource } from '../../../src/dashboard/page/action-registry';
 import { ACTIONS } from '../../../src/dashboard/page/action-registry';
-import { actionControl, resultOf } from '../../../src/dashboard/page/action-view';
+import { actionControl } from '../../../src/dashboard/page/action-view';
 import { initialUi } from '../../../src/dashboard/page/ui-state';
 
 const on = { enabled: true };
@@ -96,128 +96,150 @@ const RESTART = {
   resume: { ...on, spentUsd: 1, budget: { maxUsd: 2 }, raise: 'usd' },
 } as unknown as RunActions;
 
-test('a first click on Restart arms it, a second with another stage chosen arms again, and one with the same stage posts it and opens the run the answer names', async () => {
+const R1 = { kind: 'run', repo: 'alpha', runId: 'R1' } as const;
+
+test('a first click on Restart opens a dialog naming the chosen stage and the budget and posts nothing; confirm posts { stage } and opens the run the answer names', async () => {
   const r = rig(RESTART);
   r.fields.stage = 'spec';
   r.actor.act('restart-run', {});
-  expect([r.posts, r.ui.act.pending]).toEqual([
+  expect([r.posts, r.ui.dialog, r.actor.dialogFor()]).toEqual([
     [],
-    { id: 'restart-run', subject: { kind: 'run', repo: 'alpha', runId: 'R1' }, values: { stage: 'spec' }, sent: false },
+    {
+      title: 'restart R1',
+      lines: ['runs again: s', 'budget $10.00', 'starts a new run seeded from R1'],
+      verb: 'restart',
+    },
+    R1,
   ]);
-  r.fields.stage = 'tests';
-  r.actor.act('restart-run', {});
-  expect([r.posts, r.ui.act.pending?.values, r.ui.act.pending?.sent]).toEqual([[], { stage: 'tests' }, false]);
-  r.actor.act('restart-run', {});
-  expect(r.posts).toEqual([{ path: '/api/repos/alpha/runs/R1/restart', body: { stage: 'tests' } }]);
-  expect([r.ui.act.pending?.sent, r.ui.act.results.run?.text]).toEqual([true, 'restarting R1…']);
+  r.actor.confirm();
+  expect(r.posts).toEqual([{ path: '/api/repos/alpha/runs/R1/restart', body: { stage: 'spec' } }]);
+  expect(r.ui.underway).toEqual({ 'run:alpha/R1': 'restarting…' });
   await r.answer(202, { runId: 'NEW' });
-  expect([r.effects, r.ui.act.pending, r.ui.act.results.run]).toEqual([['open alpha/NEW'], undefined, undefined]);
+  expect([r.effects, r.ui.underway, r.toasts]).toEqual([['open alpha/NEW'], {}, ['ok restart R1: started NEW']]);
 });
 
-test('a Resume that needs a raise with none typed says so and stays unarmed, and with a number typed arms and posts the raise and reopens the run', async () => {
+test('a Resume that needs a raise with none typed is a red toast and opens no dialog; with 5 typed its dialog reads raises the budget by $5.00, and its confirm posts the raise and reopens the run', async () => {
   const r = rig(RESTART);
   r.actor.act('resume-run', {});
-  expect([r.posts, r.ui.act.pending, r.ui.act.results.run?.text]).toEqual([
+  expect([r.posts, r.ui.dialog, r.dialogs, r.toasts]).toEqual([
     [],
     undefined,
-    'give the dollars to raise the budget by: at least 0.01',
+    [],
+    ['bad resume R1: give the dollars to raise the budget by: at least 0.01'],
   ]);
   r.fields.raise = '5';
   r.actor.act('resume-run', {});
-  expect([r.posts, r.ui.act.pending?.sent, r.ui.act.results.run]).toEqual([[], false, undefined]);
-  r.actor.act('resume-run', {});
+  expect([r.posts, r.ui.dialog]).toEqual([
+    [],
+    { title: 'resume R1', lines: ['spent $1.00 of $2.00', 'raises the budget by $5.00'], verb: 'resume' },
+  ]);
+  r.actor.confirm();
   expect(r.posts).toEqual([{ path: '/api/repos/alpha/runs/R1/resume', body: { raise: { usd: 5 } } }]);
   await r.answer(200, {});
-  expect([r.effects, r.ui.act.results.run]).toEqual([['reopen alpha/R1'], undefined]);
+  expect([r.effects, r.toasts.at(-1)]).toEqual([['reopen alpha/R1'], 'ok resume R1: resumed']);
 });
 
-test('a refused resume shows the refusal and performs no effect', async () => {
+test('a resume of minutes says the raise in minutes, and a resume with no raise has only what was spent', () => {
+  const minutes = rig({
+    resume: { ...on, spentMinutes: 4, budget: { maxMinutes: 10 }, raise: 'minutes' },
+  } as unknown as RunActions);
+  minutes.fields.raise = '30';
+  minutes.actor.act('resume-run', {});
+  expect(minutes.ui.dialog?.lines).toEqual(['spent 4 min of 10 min', 'raises the budget by 30 min']);
+  const plain = rig({ resume: { ...on, spentUsd: 0.5, budget: {} } } as unknown as RunActions);
+  plain.actor.act('resume-run', {});
+  expect(plain.ui.dialog?.lines).toEqual(['spent $0.50']);
+});
+
+test('a refused resume is a red toast quoting the refusal and performs no effect', async () => {
   const r = rig({ resume: { ...on, spentUsd: 0, budget: {} } } as unknown as RunActions);
   r.actor.act('resume-run', {});
-  r.actor.act('resume-run', {});
+  r.actor.confirm();
   await r.answer(409, { error: 'run is running' });
-  expect([r.effects, r.ui.act.results.run?.text, r.ui.act.results.run?.place, r.ui.act.pending]).toEqual([
-    [],
-    'run is running',
-    'run',
-    undefined,
-  ]);
+  expect([r.effects, r.toasts, r.ui.underway]).toEqual([[], ['bad resume R1: run is running'], {}]);
 });
 
-test('Stop now ticked after Stop is armed is what the second click sends, and the answer reopens the run keeping its menu, with its message', async () => {
+test('Stop now ticked is what the dialog reads and its confirm sends, and the answer reopens the run keeping its menu, with its message', async () => {
   const r = rig(RESTART);
   r.actor.act('stop-run', {});
+  expect(r.ui.dialog).toEqual({
+    title: 'stop R1',
+    lines: ['stops at its next call boundary', 'the run fails as stopped'],
+    verb: 'stop',
+  });
+  r.actor.cancel();
   r.fields.now = 'on';
   r.actor.act('stop-run', {});
+  expect(r.ui.dialog?.lines).toEqual(['ends its running call now', 'the run fails as stopped']);
+  expect(r.posts).toEqual([]);
+  r.actor.confirm();
   expect(r.posts).toEqual([{ path: '/api/repos/alpha/runs/R1/stop', body: { now: true } }]);
+  expect(r.ui.underway).toEqual({ 'run:alpha/R1': 'stopping…' });
   await r.answer(200, { message: 'stopping R1' });
-  expect([r.effects, r.ui.act.results.run]).toEqual([
-    ['reopen alpha/R1 keep'],
-    { id: 'stop-run', subject: { kind: 'run', repo: 'alpha', runId: 'R1' }, text: 'stopping R1', place: 'run' },
-  ]);
+  expect([r.effects, r.toasts]).toEqual([['reopen alpha/R1 keep'], ['ok stop R1: stopping R1']]);
 });
 
-test('a confirmed Clean leaves the run and puts the answer in the rail, and marks every region it changes', async () => {
+test('a first click on Clean opens a dialog with a removes line per thing and the archive, and its confirm posts once, leaves the run and toasts the message', async () => {
   const r = rig(RESTART);
   r.actor.act('clean-run', {});
-  r.actor.act('clean-run', {});
+  expect([r.posts, r.ui.dialog]).toEqual([
+    [],
+    { title: 'clean R1', lines: ['removes a', 'run directory → /x'], verb: 'clean' },
+  ]);
+  r.actor.confirm();
+  r.actor.confirm();
   expect(r.posts).toEqual([{ path: '/api/repos/alpha/runs/R1/clean', body: {} }]);
   await r.answer(200, { message: 'cleaned R1' });
-  expect([r.effects, r.ui.act.results.rail?.text, r.ui.act.results.rail?.place]).toEqual([
-    ['leave'],
-    'cleaned R1',
-    'rail',
-  ]);
+  expect([r.effects, r.toasts]).toEqual([['leave'], ['ok clean R1: cleaned R1']]);
   expect(r.marks.flat()).toEqual(expect.arrayContaining(['rail', 'main', 'inspector', 'status']));
 });
 
-test('any other action clicked disarms an armed one, and the same one on another run arms afresh', () => {
+test('a clean that removes nothing and has no archive says removes nothing', () => {
+  const r = rig({ clean: { ...on, removes: [] } } as unknown as RunActions);
+  r.actor.act('clean-run', {});
+  expect(r.ui.dialog?.lines).toEqual(['removes nothing']);
+});
+
+test('the same action on another run opens its own dialog, and a dialog for a run is closed by forget', () => {
   const r = rig(RESTART);
   r.actor.act('stop-run', {});
-  expect(r.actor.armed('stop-run', {})).toBe(true);
-  r.actor.act('clean-run', {});
-  expect([r.ui.act.pending?.id, r.actor.armed('stop-run', {}), r.actor.armed('clean-run', {})]).toEqual([
-    'clean-run',
-    false,
-    true,
-  ]);
-  expect(r.actor.disarm({ id: 'clean-run', subject: { kind: 'run', repo: 'alpha', runId: 'R1' } })).toBe(false);
-  expect(r.actor.disarm()).toBe(true);
-  expect([r.ui.act.pending, r.actor.disarm()]).toEqual([undefined, false]);
+  r.actor.cancel();
   r.actor.act('stop-run', { repo: 'alpha', run: 'R2' });
-  expect(r.ui.act.pending?.subject).toEqual({ kind: 'run', repo: 'alpha', runId: 'R2' });
+  expect(r.actor.dialogFor()).toEqual({ kind: 'run', repo: 'alpha', runId: 'R2' });
+  r.actor.forget('run');
+  expect([r.actor.dialogFor(), r.ui.dialog, r.dialogs.at(-1), r.posts]).toEqual([undefined, undefined, 'closed', []]);
 });
 
 test('a second run action clicked while one is out is ignored, and a disabled offer stops the click before its request', async () => {
   const r = rig(RESTART);
   r.actor.act('stop-run', {});
-  r.actor.act('stop-run', {});
+  r.actor.confirm();
   r.actor.act('clean-run', {});
-  r.actor.act('clean-run', {});
-  expect([r.posts.length, r.ui.act.pending?.id]).toEqual([1, 'stop-run']);
+  expect([r.posts.length, r.ui.dialog]).toEqual([1, undefined]);
   await r.answer(200, {});
+  r.actor.act('clean-run', {});
+  expect(r.ui.dialog?.title).toBe('clean R1');
   const off = rig({ stop: { enabled: false, why: 'no' }, clean: undefined } as unknown as RunActions);
   off.actor.act('stop-run', {});
-  off.actor.act('stop-run', {});
-  expect([off.posts, off.ui.act.pending]).toEqual([[], undefined]);
+  expect([off.posts, off.ui.dialog]).toEqual([[], undefined]);
   const none = rig(undefined);
   none.actor.act('stop-run', {});
-  expect(none.ui.act.pending).toBeUndefined();
+  expect(none.ui.dialog).toBeUndefined();
 });
 
-test('an answer for a run no longer open performs no run effect and shows nothing, and one after the page stopped is dropped', async () => {
+test('an answer for a run no longer open performs no run effect but still toasts, and one after the page stopped is dropped', async () => {
   const r = rig(RESTART);
   r.actor.act('stop-run', {});
-  r.actor.act('stop-run', {});
+  r.actor.confirm();
   r.open = { repo: 'alpha', runId: 'OTHER' };
   await r.answer(200, { message: 'stopped' });
-  expect([r.effects, r.ui.act.results.run]).toEqual([[], undefined]);
+  expect([r.effects, r.toasts]).toEqual([[], ['ok stop R1: stopped']]);
   const s = rig(RESTART);
   s.actor.act('clean-run', {});
-  s.actor.act('clean-run', {});
+  s.actor.confirm();
   s.stopped = true;
   await s.answer(200, {});
-  expect([s.effects, s.ui.act.pending?.sent]).toEqual([[], true]);
+  expect([s.effects, s.toasts]).toEqual([[], []]);
 });
 
 test('no open run and no data means a run action does nothing, and an unknown action is ignored', () => {
@@ -225,10 +247,10 @@ test('no open run and no data means a run action does nothing, and an unknown ac
   r.open = undefined;
   r.actor.act('stop-run', {});
   r.actor.act('no-such-action', {});
-  expect([r.ui.act.pending, r.posts]).toEqual([undefined, []]);
+  expect([r.ui.dialog, r.posts]).toEqual([undefined, []]);
 });
 
-test('forget drops what a run left: its pending action, its notice, its drafts, and the next keep leaves the page fields alone', () => {
+test('forget drops what a run left: its drafts, and the next keep leaves the page fields alone', () => {
   const r = rig(RESTART);
   r.fields = { raise: '3', stage: 'spec', now: 'on' };
   r.actor.keep('run');
@@ -237,10 +259,8 @@ test('forget drops what a run left: its pending action, its notice, its drafts, 
     'restart-run': { stage: 'spec' },
     'stop-run': { now: 'on' },
   });
-  r.actor.act('stop-run', {});
-  r.ui.act.results.run = { id: 'x', subject: { kind: 'none' }, text: 'n', place: 'run' };
   r.actor.forget('run');
-  expect([r.ui.act.pending, r.ui.act.results.run, r.ui.act.drafts]).toEqual([undefined, undefined, {}]);
+  expect(r.ui.act.drafts).toEqual({});
   r.actor.keep('run');
   expect(r.ui.act.drafts).toEqual({});
   r.actor.keep('run');
@@ -249,14 +269,9 @@ test('forget drops what a run left: its pending action, its notice, its drafts, 
     'restart-run': { stage: 'spec' },
     'stop-run': { now: 'on' },
   });
-  r.ui.act.results.rail = { id: 'x', subject: { kind: 'none' }, text: 'rail', place: 'rail' };
-  r.actor.clearResult('run');
-  expect(r.ui.act.results.rail?.text).toBe('rail');
-  r.actor.clearResult('rail');
-  expect(r.ui.act.results.rail).toBeUndefined();
 });
 
-test('an action added as one entry is drawn, sent and answered', async () => {
+test('an action added as one entry is drawn, sent and answered in a toast', async () => {
   const poke: ActionDef = {
     id: 'poke-run',
     label: () => 'poke',
@@ -269,19 +284,16 @@ test('an action added as one entry is drawn, sent and answered', async () => {
       subject.kind === 'run'
         ? { path: `/api/repos/${subject.repo}/runs/${subject.runId}/poke`, body: { note: values.note } }
         : undefined,
-    answer: (status, body) => ({ place: 'run', text: `poked: ${status} ${body}` }),
+    answer: (status, body) => ({ text: `poked: ${status} ${body}` }),
   };
   const r = rig(RESTART);
   r.registry.push(poke);
-  const subject = { kind: 'run', repo: 'alpha', runId: 'R1' } as const;
-  expect(actionControl(poke, subject, r.ui.act, { index: [] }).toString()).toContain(
-    'data-action="poke-run">poke</button>',
-  );
+  expect(actionControl(poke, R1, r.ui.act, { index: [] }).toString()).toContain('data-action="poke-run">poke</button>');
   r.fields.note = 'hello';
   r.actor.act('poke-run', {});
   expect(r.posts).toEqual([{ path: '/api/repos/alpha/runs/R1/poke', body: { note: 'hello' } }]);
   await r.answer(200, 'ok');
-  expect(r.ui.act.results.run).toEqual({ id: 'poke-run', subject, text: 'poked: 200 ok', place: 'run' });
+  expect(r.toasts).toEqual(['ok poke R1: poked: 200 ok']);
 });
 
 test('a local action performs its effect and posts nothing', () => {
@@ -500,15 +512,14 @@ test('each subject keeps its own word under way: a poll answered while a watch i
   await r.answer(200, { message: 'polls wf now' });
   expect([r.ui.underway, r.toasts]).toEqual([{ 'watch:beta': 'watching…' }, ['ok poll beta / wf: polls wf now']]);
   r.actor.act('stop-run', {});
-  r.actor.act('stop-run', {});
+  r.actor.confirm();
   await r.answer(200, { message: 'sail watch: it watches all' });
-  expect(resultOf(r.ui.act, 'run')).toBe('stopping R1…');
+  expect(r.ui.underway).toEqual({ 'run:alpha/R1': 'stopping…' });
   r.open = { repo: 'alpha', runId: 'OTHER' };
   await r.answer(200, { message: 'stopped' });
-  expect([resultOf(r.ui.act, 'run'), r.ui.underway, r.toasts]).toEqual([
-    undefined,
+  expect([r.ui.underway, r.toasts]).toEqual([
     {},
-    ['ok poll beta / wf: polls wf now', 'ok watch all beta: sail watch: it watches all'],
+    ['ok poll beta / wf: polls wf now', 'ok watch all beta: sail watch: it watches all', 'ok stop R1: stopped'],
   ]);
 });
 
@@ -529,18 +540,17 @@ test('a poll, drop, requeue or move that took leaves the add field as typed: onl
 test('a run action is ignored until the run action out is answered, though an unwatch armed or the run forgotten took its pending slot', async () => {
   const r = rig(RESTART, watchIndex);
   r.actor.act('clean-run', {});
-  r.actor.act('clean-run', {});
+  r.actor.confirm();
   r.actor.act('unwatch', { repo: 'beta' });
   r.actor.disarm();
   r.actor.act('stop-run', {});
-  r.actor.act('stop-run', {});
   r.actor.forget('run');
   r.actor.act('stop-run', {});
-  r.actor.act('stop-run', {});
+  r.actor.confirm();
   expect(r.posts).toEqual([{ path: '/api/repos/alpha/runs/R1/clean', body: {} }]);
   await r.answer(409, { error: 'no' });
   r.actor.act('stop-run', {});
-  r.actor.act('stop-run', {});
+  r.actor.confirm();
   expect(r.posts.at(-1)).toEqual({ path: '/api/repos/alpha/runs/R1/stop', body: { now: false } });
 });
 
@@ -551,5 +561,5 @@ test('the inert actor, the store holds until the shell wires the real one, does 
   expect(actor.armed('stop-run', {})).toBe(false);
   expect(actor.keep('run')).toBeUndefined();
   expect(actor.forget('run')).toBeUndefined();
-  expect(actor.clearResult('run')).toBeUndefined();
+  expect([actor.dialogFor(), actor.confirm(), actor.cancel()]).toEqual([undefined, undefined, undefined]);
 });

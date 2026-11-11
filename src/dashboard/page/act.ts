@@ -27,7 +27,7 @@ import {
 } from './action-registry';
 import { renderDialog } from './dialog-view';
 import type { PageHost, Region } from './host';
-import type { ActPlace, UiState } from './ui-state';
+import type { UiState } from './ui-state';
 
 export interface ActorEffects {
   /** Reads the run again, keeping its ⋯ menu open when `keepMenu`. */
@@ -67,8 +67,6 @@ export interface Actor {
   keep(place: 'run' | 'queue', subject?: Subject): void;
   /** Forgets what a run's actions hold: the pending one, the result shown in the run's menu and the drafts. */
   forget(kind: 'run'): void;
-  /** Clears the last result shown at `place`. */
-  clearResult(place: ActPlace): void;
   /** The subject of the confirmation dialog open now, if any. */
   dialogFor(): Subject | undefined;
   /** Confirms the open dialog: it sends what it asks, once. */
@@ -87,7 +85,6 @@ export function inertActor(): Actor {
     armed: () => false,
     keep: () => {},
     forget: () => {},
-    clearResult: () => {},
     dialogFor: () => undefined,
     confirm: () => {},
     cancel: () => {},
@@ -109,18 +106,6 @@ export function createActor(deps: ActorDeps): Actor {
     state.drafts[id] ??= {};
     return state.drafts[id] as Record<string, string>;
   };
-
-  function setResult(id: string, subject: Subject, place: ActPlace, text: string | undefined) {
-    if (text === undefined) delete state.results[place];
-    else state.results[place] = { id, subject, text, place };
-  }
-
-  /** Clears what `def` showed at its own place for `subject`, such as its sending line, and leaves any other's. */
-  function clearOwn(def: ActionDef, subject: Subject) {
-    const shown = state.results[def.place];
-    if (shown !== undefined && shown.id === def.id && sameSubject(shown.subject, subject))
-      delete state.results[def.place];
-  }
 
   function disarm(except?: { id: string; subject: Subject }): boolean {
     const { pending } = state;
@@ -150,12 +135,12 @@ export function createActor(deps: ActorDeps): Actor {
     return values;
   }
 
-  /** Whether `def`'s answer is a toast: the queue's and the watch set's are. */
-  const toasts = (def: ActionDef) => def.place === 'queue' || def.place === 'repo';
+  /** The head of `def`'s toast: `<verb> <subject>`. */
+  const headOf = (def: ActionDef, subject: Subject) => `${def.label(subject)} ${subjectName(subject)}`.trim();
 
   /** The toast an answer is: `<verb> <subject>`, then sail's own words. */
   function say(def: ActionDef, subject: Subject, status: number, answer: ActResult) {
-    const head = `${def.label(subject)} ${subjectName(subject)}`.trim();
+    const head = headOf(def, subject);
     if (answer.refused === true) effects.toast('bad', head, answer.text ?? `the ${def.label(subject)} was refused`);
     else effects.toast('ok', head, answer.text ?? (status === 200 ? 'done' : 'asked'));
   }
@@ -165,16 +150,13 @@ export function createActor(deps: ActorDeps): Actor {
     if (deps.stopped()) return;
     const { pending } = state;
     if (pending?.sent === true && pending.id === def.id && sameSubject(pending.subject, subject)) delete state.pending;
-    const answer = def.answer?.(status, body, subject) ?? { place: def.place };
+    const answer = def.answer?.(status, body, subject) ?? {};
     const { effect } = answer;
     delete ui.underway[underwayId(def, subject)];
     const open = deps.openRun();
     const runEffect = effect !== undefined && effect !== 'took';
     const stillOpen = subject.kind === 'run' && open?.repo === subject.repo && open.runId === subject.runId;
-    if (runEffect && !stillOpen) {
-      clearOwn(def, subject);
-      if (toasts(def)) say(def, subject, status, answer);
-    } else {
+    if (!(runEffect && !stillOpen)) {
       if (effect === 'reopen' && subject.kind === 'run')
         effects.reopen(subject.repo, subject.runId, answer.keepMenu === true);
       else if (effect === 'leave') effects.leave();
@@ -192,12 +174,10 @@ export function createActor(deps: ActorDeps): Actor {
           effects.took();
         }
       }
-      clearOwn(def, subject);
-      if (toasts(def)) say(def, subject, status, answer);
-      else setResult(def.id, subject, answer.place, answer.text);
     }
+    say(def, subject, status, answer);
     mark('rail', 'main');
-    if (answer.place === 'rail' || effect === 'leave') mark('inspector', 'status');
+    if (effect === 'leave') mark('inspector', 'status');
   }
 
   function send(def: ActionDef, subject: Subject, values: Values, request: { path: string; body: unknown }) {
@@ -205,8 +185,6 @@ export function createActor(deps: ActorDeps): Actor {
       state.pending = { id: def.id, subject, values: { ...values }, sent: true };
     if (subject.kind === 'run') runsOut++;
     if (def.underway !== undefined) ui.underway[underwayId(def, subject)] = def.underway;
-    if (def.sending !== undefined) setResult(def.id, subject, def.place, def.sending(subject));
-    else if (subject.kind === 'run') delete state.results.run;
     mark('rail', 'main');
     void host.post(request.path, request.body).then(({ status, body }) => finish(def, subject, status, body));
   }
@@ -234,7 +212,7 @@ export function createActor(deps: ActorDeps): Actor {
     if (request === undefined) return;
     if ('invalid' in request) {
       delete state.pending;
-      setResult(def.id, subject, def.place, request.invalid);
+      effects.toast('bad', headOf(def, subject), request.invalid);
       mark('rail', 'main');
       return;
     }
@@ -243,20 +221,16 @@ export function createActor(deps: ActorDeps): Actor {
       dialog = { subject, send: () => send(def, subject, values, request) };
       ui.dialog = view;
       host.openDialog(renderDialog(view).value);
+      // What was typed for its parameters is kept in the drafts, and drawn again.
+      mark('rail', 'main');
       return;
     }
     if (def.tier === 'confirmed') {
       const { pending } = state;
-      const rearms = def.params(subject, source).filter((param) => param.type === 'choice' && param.rearm === true);
       const confirms =
-        pending !== undefined &&
-        !pending.sent &&
-        pending.id === def.id &&
-        sameSubject(pending.subject, subject) &&
-        rearms.every((param) => pending.values[param.name] === values[param.name]);
+        pending !== undefined && !pending.sent && pending.id === def.id && sameSubject(pending.subject, subject);
       if (!confirms) {
         state.pending = { id: def.id, subject, values: { ...values }, sent: false };
-        if (subject.kind === 'run') delete state.results.run;
         mark('rail', 'main');
         return;
       }
@@ -310,12 +284,9 @@ export function createActor(deps: ActorDeps): Actor {
     },
     forget() {
       if (state.pending?.subject.kind === 'run') delete state.pending;
-      delete state.results.run;
+      if (dialog?.subject.kind === 'run') closeDialog();
       for (const def of registry) if (def.appliesTo.includes('run')) delete state.drafts[def.id];
       stale.add('run');
-    },
-    clearResult(place) {
-      delete state.results[place];
     },
   };
 }
