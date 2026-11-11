@@ -402,7 +402,7 @@ async function resumeRoute(starts: Starts, segments: string[], request: Request)
 
 /**
  * Starts `sail run --from-run <run> --stage <stage> --continue --run-id <minted>` for a failed run, detached in its
- * clone, under an id minted here so the answer can name the new run. Answers 202 `{ runId }` once its `run.json` exists.
+ * clone, under an id minted here so the answer can name the new run. Answers 202 `{ runId }` once its `STATUS` reads, which the run writes after its `run.json`.
  */
 async function restartRoute(starts: Starts, segments: string[], request: Request): Promise<Response> {
   const { options, underway } = starts;
@@ -435,7 +435,15 @@ async function restartRoute(starts: Starts, segments: string[], request: Request
     const log = join(runs, 'dashboard', `${minted}.log`);
     const args = ['run', '--from-run', runId, '--stage', stage, '--continue', '--run-id', minted];
     const spawned = spawnDetached(dirname(entry.sailDir), log, args, environmentOf(options), options.cli);
-    const opened = () => existsSync(join(runs, minted, RUN_HEADER_FILE));
+    const opened = () => {
+      if (!existsSync(join(runs, minted, RUN_HEADER_FILE))) return false;
+      try {
+        readStatus(join(runs, minted));
+        return true;
+      } catch {
+        return false;
+      }
+    };
     return await started(spawned, log, options.startWaitMs ?? 120_000, opened, runAnswers(minted));
   } finally {
     underway.delete(runId);
