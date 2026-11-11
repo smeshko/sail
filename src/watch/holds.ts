@@ -154,3 +154,10 @@ export function releasedAt(machine: string, key: string): number | undefined {
   const ms = typeof at === 'string' ? Date.parse(at) : Number.NaN;
   return Number.isNaN(ms) ? undefined : ms;
 }
+
+/** What a release answers: whether a hold was there. The CLI prints it after its prefix, the dashboard answers it as its message. */
+export function releasedLine(key: string, held: boolean): string {
+  return held
+    ? `released the usage-limit hold on ${key}`
+    : `no usage-limit hold on ${key}; its held runs resume on the next tick`;
+}

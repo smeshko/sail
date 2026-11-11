@@ -53,6 +53,15 @@ export function regions(store: Store): Record<Region, () => string> {
           const target = panel.items.find((each) => each.dedupKey === asked.item);
           if (unwatched || target === undefined || !offeredDrop(panel, target)) store.actor.cancel();
         }
+        // A release dialog, the one a queue's banner opens, closes with nothing sent once its queue is held on a key no more.
+        if (
+          asked?.kind === 'workflow' &&
+          asked.repo === panel.repo &&
+          asked.workflow === panel.workflow &&
+          panel.queue?.held?.harnessKey === undefined
+        ) {
+          store.actor.cancel();
+        }
         const menuItem = panel.items.find((item) => item.dedupKey === ui.itemMenu);
         if (unwatched || menuItem === undefined || !hasItemActions(panel, menuItem)) delete ui.itemMenu;
         const repoOffers = store.index?.find((repo) => repo.name === panel.repo)?.offers;

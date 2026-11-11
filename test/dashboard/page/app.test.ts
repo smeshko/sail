@@ -2789,3 +2789,108 @@ test('an index that turns the open queue to watcher not running redraws main wit
   await settle();
   expect(host.posts.length).toBe(posts);
 });
+
+/** The index with beta's queue held, on `harnessKey` when given, and with no hold when `held` is false. */
+const heldIndex = (held: boolean, harnessKey?: string) => {
+  const message = indexMessage();
+  return {
+    ...message,
+    repos: message.repos.map((repo) => ({
+      ...repo,
+      queues: repo.queues.map((queue) => ({
+        ...queue,
+        queue:
+          repo.name === 'beta' && queue.queue !== undefined
+            ? {
+                ...queue.queue,
+                ...(held
+                  ? {
+                      held: {
+                        until: '2099-01-01T00:00:00.000Z',
+                        runId: 'r',
+                        reason: 'claude-code hit the usage limit',
+                        at: '2026-11-10T10:00:00.000Z',
+                        ...(harnessKey === undefined ? {} : { harnessKey }),
+                      },
+                    }
+                  : {}),
+              }
+            : queue.queue,
+      })),
+    })),
+  };
+};
+function openHeldBetaQueue() {
+  const socket = openBetaQueue();
+  host.push(host.open('index')[0], heldIndex(true, 'claude-code'));
+  host.advance(100);
+  return socket;
+}
+
+test('the first click on release opens the dialog saying what it does and posts nothing, and its cancel and Escape close it with nothing sent (ADW-517)', () => {
+  openHeldBetaQueue();
+  const row = { ...BETA, harness: 'claude-code' };
+  expect(host.regions.main).toContain('data-harness="claude-code"');
+  host.click({ action: 'release-hold', ...row });
+  host.advance(100);
+  expect([host.posts, dialogTitle(), dialogVerb()]).toEqual([
+    [],
+    'release the usage-limit hold on claude-code',
+    'release',
+  ]);
+  expect(dialogLines()).toEqual(['releasing ends every watcher&#39;s hold on claude-code, and dispatch resumes']);
+  host.click({ action: 'dialog-cancel' });
+  host.advance(100);
+  expect([host.posts, host.dialog]).toEqual([[], undefined]);
+  host.click({ action: 'release-hold', ...row });
+  host.advance(100);
+  expect(dialogTitle()).toBe('release the usage-limit hold on claude-code');
+  host.press('Escape');
+  host.advance(100);
+  expect([host.posts, host.dialog]).toEqual([[], undefined]);
+});
+
+test("the dialog's confirm posts the key to the queue's release route, and the answer is a toast: a 200 its message, a 409 its error, no answer says so (ADW-517)", async () => {
+  openHeldBetaQueue();
+  const row = { ...BETA, harness: 'claude-code' };
+  const answers: (string | undefined)[] = [];
+  for (const answer of [
+    { status: 200, body: JSON.stringify({ message: 'released the usage-limit hold on claude-code' }) },
+    { status: 409, body: JSON.stringify({ error: 'nope' }) },
+    { status: 0, body: '' },
+  ]) {
+    host.postAnswer = answer;
+    host.click({ action: 'release-hold', ...row });
+    host.click({ action: 'dialog-confirm' });
+    await settle();
+    host.advance(100);
+    answers.push(toasts().at(-1));
+  }
+  expect(host.posts).toEqual(
+    [0, 1, 2].map(() => ({ path: `${QUEUE_PATH}/release`, body: { harnessKey: 'claude-code' } })),
+  );
+  expect(answers).toEqual([
+    'ok release beta / ticket-to-pr: released the usage-limit hold on claude-code',
+    'bad release beta / ticket-to-pr: nope',
+    'bad release beta / ticket-to-pr: the release could not be sent: the dashboard did not answer',
+  ]);
+});
+
+test('once the index says the queue is no longer held, its banner, its button and an open release dialog are gone, and a hold that comes back asks again (ADW-517)', () => {
+  openHeldBetaQueue();
+  host.click({ action: 'release-hold', ...BETA, harness: 'claude-code' });
+  host.advance(100);
+  expect(dialogTitle()).toBe('release the usage-limit hold on claude-code');
+  host.push(host.open('index')[0], heldIndex(false));
+  host.advance(100);
+  expect([host.dialog, host.regions.main?.includes('held until'), host.regions.main?.includes('release-hold')]).toEqual(
+    [undefined, false, false],
+  );
+  host.push(host.open('index')[0], heldIndex(true, 'claude-code'));
+  host.advance(100);
+  expect([host.dialog, host.regions.main?.includes('data-action="release-hold"'), host.posts]).toEqual([
+    undefined,
+    true,
+    [],
+  ]);
+});

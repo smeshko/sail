@@ -36,7 +36,7 @@ import { type ProjectConfig, type RunPort, readConfig } from '../../engine/confi
 import { runsDir as runsDirOf } from '../../engine/run-dir';
 import { formatIssue } from '../../engine/schemas';
 import { sameLabel } from '../../ports/labels';
-import { releaseHold } from '../../watch/holds';
+import { releasedLine, releaseHold } from '../../watch/holds';
 import { commandTaken, dropCommand, NOT_TAKEN } from '../../watch/inbox';
 import {
   committedWatches,
@@ -191,11 +191,7 @@ export function watchCommand(deps: WatchDeps = {}): Command {
       const project = await findProject(io, command);
       if (typeof project === 'number') return project;
       const held = releaseHold(machineDir(io.env ?? process.env), key, new Date());
-      io.stdout(
-        held
-          ? `${command}: released the usage-limit hold on ${key}\n`
-          : `${command}: no usage-limit hold on ${key}; its held runs resume on the next tick\n`,
-      );
+      io.stdout(`${command}: ${releasedLine(key, held)}\n`);
       return EXIT_OK;
     }
     const located = await locate(io, command, args, isAlive, async ({ sailDir, config }) => {
