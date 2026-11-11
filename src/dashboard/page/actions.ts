@@ -119,6 +119,8 @@ export const actions: Record<string, Action> = {
     store.host.setParam('view', store.ui.view);
     store.ui.listFilter = '';
     delete store.ui.listCursor;
+    // The filter field gives up what was typed in it, so it reads as empty as the filter now is.
+    store.fresh.add('list');
     store.mark('sidebar', 'list');
   },
   'filter-repo': (store, data) => {

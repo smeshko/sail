@@ -1589,6 +1589,17 @@ describe('the list by keyboard (ADW-522)', () => {
     expect(p.ui.listFilter).toBe('fake');
   });
 
+  test('a change of view draws the list fresh, so its filter field gives up the text the filter no longer holds (review R7)', () => {
+    const p = bootHistory();
+    host.type('list-filter', 'fake');
+    host.advance(100);
+    host.freshes = [];
+    host.press('1');
+    host.advance(100);
+    expect(p.ui.listFilter).toBe('');
+    expect(host.freshes).toContain('list');
+  });
+
   test('1, 2 and 3 change the view to Active, Queues and History, and clear the filter and the cursor', () => {
     const p = bootHistory();
     host.type('list-filter', 'x');
