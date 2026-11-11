@@ -74,6 +74,7 @@ function rig(run?: RunActions, index: IndexRepo[] = []): Rig {
     source: (subject) => ({
       run: subject?.kind === 'run' && subject.runId !== state.open?.runId ? state.others[subject.runId] : state.run,
       index,
+      ...(state.ui.start === undefined ? {} : { start: state.ui.start }),
     }),
     openRun: () => state.open,
     effects: {
@@ -81,8 +82,8 @@ function rig(run?: RunActions, index: IndexRepo[] = []): Rig {
       open: (repo, runId) => state.effects.push(`open ${repo}/${runId}`),
       leave: () => state.effects.push('leave'),
       took: () => state.effects.push('took'),
-      toast: (kind, head, text, undo) => {
-        state.toasts.push(`${kind} ${head}: ${text}${undo === undefined ? '' : ' (undo)'}`);
+      toast: (kind, head, text, undo, label) => {
+        state.toasts.push(`${kind} ${head}: ${text}${undo === undefined ? '' : ` (${label ?? 'undo'})`}`);
         if (undo !== undefined) state.undos.push(undo);
       },
       local: {
@@ -841,4 +842,126 @@ test('a Restart or Resume of a run that is not open opens the run it started or 
   r.actor.confirm();
   await r.answer(200, {});
   expect(r.effects).toEqual(['open alpha/R3', 'open alpha/R2']);
+});
+
+// Start a run (ADW-524): the check, the dialog with the roster, the start that opens the run, and start anyway.
+const STARTABLE = [
+  {
+    name: 'alpha',
+    runs: [],
+    queues: [],
+    offers: {
+      watch: { enabled: true },
+      workflows: {},
+      start: { enabled: true, workflows: ['review', 'ticket-to-pr'], defaultWorkflow: 'ticket-to-pr' },
+    },
+  },
+] as unknown as IndexRepo[];
+const ALPHA = { repo: 'alpha' };
+const CHECKED = {
+  roster: 'ticket-to-pr@1 on FAKE-1: T (Todo)\ndry run: nothing was written',
+  key: 'FAKE-1',
+  forced: [],
+  start: { source: 'FAKE-1', workflow: 'ticket-to-pr', until: 'spec' },
+};
+const ASKED = { workflow: 'ticket-to-pr', source: 'FAKE-1', until: 'spec' };
+
+test('a start is checked, shown in the dialog with its roster and no toast, and confirmed it posts the start and opens the run it answers with', async () => {
+  const r = rig(undefined, STARTABLE);
+  r.actor.act('start-run', ALPHA, ASKED);
+  expect(r.posts).toEqual([{ path: '/api/repos/alpha/starts/check', body: ASKED }]);
+  expect(r.ui.underway['watch:alpha']).toBe('checking…');
+  await r.answer(200, CHECKED);
+  expect([r.toasts, r.ui.underway['watch:alpha'], r.dialogs.length]).toEqual([[], undefined, 1]);
+  const dialog = r.dialogs[0] ?? '';
+  expect(dialog).toContain('<h2 id="dialog-title">start a run of ticket-to-pr on FAKE-1</h2>');
+  expect(dialog).toContain('<li>stops after spec</li>');
+  expect(dialog).toContain(
+    '<pre class="dlg-pre">ticket-to-pr@1 on FAKE-1: T (Todo)\ndry run: nothing was written</pre>',
+  );
+  expect(r.posts).toHaveLength(1);
+  r.actor.confirm();
+  expect(r.posts.at(-1)).toEqual({
+    path: '/api/repos/alpha/starts',
+    body: { source: 'FAKE-1', workflow: 'ticket-to-pr', until: 'spec', key: 'FAKE-1' },
+  });
+  await r.answer(202, { runId: 'FAKE-1-ABC' });
+  expect(r.effects).toEqual(['open alpha/FAKE-1-ABC']);
+  expect(r.toasts).toEqual(['ok start a run…: started FAKE-1-ABC']);
+});
+
+test('a cancelled start dialog starts nothing', async () => {
+  const r = rig(undefined, STARTABLE);
+  r.actor.act('start-run', ALPHA, ASKED);
+  await r.answer(200, CHECKED);
+  r.actor.cancel();
+  expect([r.posts.length, r.effects]).toEqual([1, []]);
+});
+
+test('a check an undesignated ticket fails is a red toast with a start anyway button, remembered so the command can start it, and the confirmed go names what it overrides', async () => {
+  const r = rig(undefined, STARTABLE);
+  const line = 'sail FAKE-3: the ticket is not designated. --force runs it anyway';
+  r.actor.act('start-run', ALPHA, { workflow: 'ticket-to-pr', source: 'FAKE-3', until: '' });
+  expect(r.posts.at(-1)?.body).toEqual({ workflow: 'ticket-to-pr', source: 'FAKE-3' });
+  await r.answer(409, { error: line, override: 'force', start: { source: 'FAKE-3', workflow: 'ticket-to-pr' } });
+  expect(r.toasts).toEqual([`bad start a run… alpha: ${line} (start anyway (--force))`]);
+  expect(r.ui.start).toEqual({ repo: 'alpha', source: 'FAKE-3', workflow: 'ticket-to-pr', override: 'force' });
+  expect(r.dialogs).toEqual([]);
+  r.undos[0]?.();
+  expect(r.posts.at(-1)).toEqual({
+    path: '/api/repos/alpha/starts/check',
+    body: { source: 'FAKE-3', workflow: 'ticket-to-pr', force: true },
+  });
+  await r.answer(200, {
+    roster: 'r\n  forced    designation',
+    key: 'FAKE-3',
+    forced: ['designation'],
+    start: { source: 'FAKE-3', workflow: 'ticket-to-pr', force: true },
+  });
+  const dialog = r.dialogs[0] ?? '';
+  expect(dialog).toContain('<h2 id="dialog-title">start FAKE-3 anyway</h2>');
+  expect(dialog).toContain('<li>overrides: designation (--force)</li>');
+  r.actor.confirm();
+  expect(r.posts.at(-1)).toEqual({
+    path: '/api/repos/alpha/starts',
+    body: { source: 'FAKE-3', workflow: 'ticket-to-pr', force: true, key: 'FAKE-3' },
+  });
+  await r.answer(202, { runId: 'FAKE-3-XYZ' });
+  expect(r.ui.start).toBeUndefined();
+  expect(r.effects).toEqual(['open alpha/FAKE-3-XYZ']);
+});
+
+test('a refusal with no override forgets an earlier start anyway and has no button', async () => {
+  const r = rig(undefined, STARTABLE);
+  r.ui.start = { repo: 'alpha', source: 'FAKE-3', override: 'force' };
+  r.actor.act('start-run', ALPHA, { workflow: 'review', source: '#4', until: '' });
+  await r.answer(409, { error: "sail #4: a draft. --force doesn't change that", start: { source: '#4' } });
+  expect(r.toasts).toEqual(["bad start a run… alpha: sail #4: a draft. --force doesn't change that"]);
+  expect(r.ui.start).toBeUndefined();
+});
+
+test('an empty source posts nothing and is a red toast in the words of the registry', () => {
+  const r = rig(undefined, STARTABLE);
+  r.actor.act('start-run', ALPHA, { workflow: 'review', source: '', until: '' });
+  expect([r.posts, r.toasts]).toEqual([
+    [],
+    ['bad start a run… alpha: give a ticket key or a pull request, such as ADW-1 or #12'],
+  ]);
+});
+
+test('a repository that offers no start, or a disabled one, is not started', () => {
+  const none = rig(undefined, [
+    { name: 'alpha', runs: [], queues: [], offers: { watch: { enabled: true }, workflows: {} } },
+  ] as unknown as IndexRepo[]);
+  none.actor.act('start-run', ALPHA, ASKED);
+  const off = rig(undefined, [
+    {
+      name: 'alpha',
+      runs: [],
+      queues: [],
+      offers: { watch: { enabled: true }, workflows: {}, start: { enabled: false, why: 'gone', workflows: [] } },
+    },
+  ] as unknown as IndexRepo[]);
+  off.actor.act('start-run', ALPHA, ASKED);
+  expect([none.posts.length, off.posts.length]).toEqual([0, 0]);
 });

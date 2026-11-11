@@ -4106,7 +4106,7 @@ test('the highlight stays on the row a person moved to when an index tick remove
   bootIndexed();
   cmdK();
   host.advance(100);
-  for (let i = 0; i < 4; i++) host.press('ArrowDown', true);
+  for (let i = 0; i < 5; i++) host.press('ArrowDown', true);
   host.advance(100);
   expect(menuSel()).toBe('switch theme');
   const message = indexMessage();
@@ -4324,6 +4324,134 @@ describe('the Inbox view (ADW-527)', () => {
       inbox();
       expect(count()).toBe('2');
       expect(rows()).not.toContain('failed: stage_error');
+    });
+  });
+});
+
+// Start a run from the command menu (ADW-524): the steps, the dialog with the roster, the run it opens, and start anyway.
+describe('start a run (ADW-524)', () => {
+  const START = { enabled: true, workflows: ['review', 'ticket-to-pr'], defaultWorkflow: 'ticket-to-pr' };
+  const ROSTER = 'ticket-to-pr@1 on FAKE-1: Add a flag (Todo)\ndry run: nothing was written';
+  const bootStartable = () => {
+    page = boot(host);
+    const message = indexMessage();
+    host.push(host.open('index')[0], {
+      ...message,
+      repos: message.repos.map((repo) => ({ ...repo, offers: { ...repo.offers, start: START } })),
+    });
+    host.advance(100);
+  };
+  const preText = () => host.dialog?.match(/<pre class="dlg-pre">([^<]*)<\/pre>/)?.[1];
+  /** Walks the menu to the step after the last, answering the check with `answer`. */
+  async function ask(source: string, until: string, answer: { status: number; body: unknown }) {
+    cmdK();
+    host.advance(100);
+    typeIn('start a run');
+    enter();
+    expect(stepLabel()).toBe('repository');
+    enter();
+    expect([stepLabel(), menuSel()]).toEqual(['workflow', 'ticket-to-pr']);
+    enter();
+    expect(stepLabel()).toBe('ticket key or pull request');
+    typeIn(source);
+    enter();
+    expect(stepLabel()).toBe('stop after');
+    typeIn(until);
+    host.postAnswer = { status: answer.status, body: JSON.stringify(answer.body) };
+    enter();
+    await settle();
+    host.advance(100);
+  }
+
+  test('by keyboard alone: the repository, workflow, ticket and stage, then the roster in the dialog, and confirming starts the run and opens it', async () => {
+    bootStartable();
+    await ask('FAKE-1', 'spec', {
+      status: 200,
+      body: {
+        roster: ROSTER,
+        key: 'FAKE-1',
+        forced: [],
+        start: { source: 'FAKE-1', workflow: 'ticket-to-pr', until: 'spec' },
+      },
+    });
+    expect(host.posts).toEqual([
+      { path: '/api/repos/alpha/starts/check', body: { workflow: 'ticket-to-pr', source: 'FAKE-1', until: 'spec' } },
+    ]);
+    expect([cmdk(), toasts()]).toEqual(['', []]);
+    expect([dialogTitle(), dialogLines(), dialogVerb()]).toEqual([
+      'start a run of ticket-to-pr on FAKE-1',
+      ['stops after spec'],
+      'start',
+    ]);
+    expect(preText()).toBe(ROSTER);
+    host.postAnswer = { status: 202, body: JSON.stringify({ runId: NEW_ID }) };
+    host.press('Enter');
+    await settle();
+    host.advance(100);
+    expect(host.posts.at(-1)).toEqual({
+      path: '/api/repos/alpha/starts',
+      body: { workflow: 'ticket-to-pr', source: 'FAKE-1', until: 'spec', key: 'FAKE-1' },
+    });
+    expect([page?.ui.runId, toasts()]).toEqual([NEW_ID, [`ok start a run…: started ${NEW_ID}`]]);
+  });
+
+  test('a refused start is a red toast with a start anyway button, the menu then lists it, and its dialog names the check it overrides', async () => {
+    bootStartable();
+    const line = 'sail FAKE-3: the ticket is not designated. --force runs it anyway';
+    await ask('FAKE-3', '', {
+      status: 409,
+      body: { error: line, override: 'force', start: { source: 'FAKE-3', workflow: 'ticket-to-pr' } },
+    });
+    expect(toasts()).toEqual([`bad start a run… alpha: ${line}`]);
+    expect(host.regions.toasts).toContain('>start anyway (--force)</button>');
+    expect(host.dialog).toBeUndefined();
+    cmdK();
+    host.advance(100);
+    typeIn('start FAKE-3');
+    expect(menuLabels()).toEqual(['start FAKE-3 anyway (--force)']);
+    host.postAnswer = {
+      status: 200,
+      body: JSON.stringify({
+        roster: `${ROSTER}\n  forced    designation`,
+        key: 'FAKE-3',
+        forced: ['designation'],
+        start: { source: 'FAKE-3', workflow: 'ticket-to-pr', force: true },
+      }),
+    };
+    enter();
+    await settle();
+    host.advance(100);
+    expect(host.posts.at(-1)).toEqual({
+      path: '/api/repos/alpha/starts/check',
+      body: { source: 'FAKE-3', workflow: 'ticket-to-pr', force: true },
+    });
+    expect([dialogTitle(), dialogLines()]).toEqual(['start FAKE-3 anyway', ['overrides: designation (--force)']]);
+    host.postAnswer = { status: 202, body: JSON.stringify({ runId: NEW_ID }) };
+    host.press('Enter');
+    await settle();
+    host.advance(100);
+    expect(page?.ui.runId).toBe(NEW_ID);
+    cmdK();
+    host.advance(100);
+    typeIn('start FAKE-3');
+    expect(menuLabels()).toEqual([]);
+  });
+
+  test('the toast button posts the same check as the menu row', async () => {
+    bootStartable();
+    await ask('FAKE-3', '', {
+      status: 409,
+      body: {
+        error: 'x. --force runs it anyway',
+        override: 'force',
+        start: { source: 'FAKE-3', workflow: 'ticket-to-pr' },
+      },
+    });
+    const id = page?.ui.toasts.at(-1)?.id ?? 0;
+    host.click({ action: 'undo-toast', toast: String(id) });
+    expect(host.posts.at(-1)).toEqual({
+      path: '/api/repos/alpha/starts/check',
+      body: { source: 'FAKE-3', workflow: 'ticket-to-pr', force: true },
     });
   });
 });

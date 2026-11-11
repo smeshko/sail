@@ -13,8 +13,10 @@ export interface Toast {
   head: string;
   /** Sail's own words. */
   text: string;
-  /** Whether it carries an Undo button. */
+  /** Whether it carries a button: Undo, or the one `undoLabel` names. */
   undo?: boolean;
+  /** What its button says in place of undo: a refusal's start anyway. */
+  undoLabel?: string;
 }
 
 /** `list` with `toast` added at its end. A refusal equal in head and text to one still shown replaces it. */

@@ -38,6 +38,8 @@ const POST_SEGMENTS = [
   '/add',
   '/requeue',
   '/drop',
+  '/starts',
+  '/starts/check',
 ];
 
 /** The POST segments a source names as string literals. */

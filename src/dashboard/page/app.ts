@@ -68,7 +68,7 @@ export function boot(host: PageHost): Page {
       },
       leave: () => closeRun(store),
       took: () => store.fresh.add('main'),
-      toast: (kind, head, text, undo) => toast(store, kind, head, text, undo),
+      toast: (kind, head, text, undo, label) => toast(store, kind, head, text, undo, label),
       local: {
         'dismiss-attention': (data) => {
           // The menu's dismiss names no item: it dismisses the Inbox row `e` would.

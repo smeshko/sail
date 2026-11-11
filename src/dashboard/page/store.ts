@@ -202,8 +202,8 @@ export const listed = (store: Store) =>
 export function sourceFor(store: Store, subject?: Subject): OfferSource {
   const index = store.index ?? [];
   if (subject?.kind !== 'run' || (store.run?.repo === subject.repo && store.run.runId === subject.runId))
-    return { run: store.offers, index };
+    return { run: store.offers, index, ...(store.ui.start === undefined ? {} : { start: store.ui.start }) };
   const read = store.subjectOffers;
   const own = read?.repo === subject.repo && read.runId === subject.runId ? read.offers : undefined;
-  return { run: own, index };
+  return { run: own, index, ...(store.ui.start === undefined ? {} : { start: store.ui.start }) };
 }

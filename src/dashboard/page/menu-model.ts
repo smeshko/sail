@@ -21,7 +21,8 @@ export type MenuRun =
   | { goto: Subject }
   | { view: string }
   | { pollAll: true }
-  | { pick: string }
+  | { pick: string; of?: 'repo' }
+  | { repo: string }
   | { queue: { repo: string; workflow: string } }
   | { value: string };
 
@@ -164,6 +165,16 @@ function queuesOffering(id: string, source: OfferSource) {
   );
 }
 
+/** The repositories of the index that offer `id`, with the offer: the repository and its availability. */
+function reposOffering(id: string, source: OfferSource) {
+  const def = actionOf(id);
+  return source.index.flatMap((repo) => {
+    const subject: Subject = { kind: 'repo', repo: repo.name };
+    const available = def?.available(subject, source);
+    return available?.offered === true ? [{ subject, available }] : [];
+  });
+}
+
 /** A row for an action that works on every queue offering it: disabled, with the first reason, while none is enabled. */
 function everyQueueRow(label: string, id: string, run: MenuRun, source: OfferSource): MenuRow[] {
   const offering = queuesOffering(id, source);
@@ -173,19 +184,46 @@ function everyQueueRow(label: string, id: string, run: MenuRun, source: OfferSou
   return [{ group: 'general', label, disabled: !enabled, ...(enabled || why === undefined ? {} : { why }), run }];
 }
 
-/** The actions that need no subject: the registry's, adding a ticket, polling every queue, and the two view actions. */
+/** A row for the start of a run, which asks the repository first: disabled, with the first reason, while none is enabled. */
+function startRow(source: OfferSource): MenuRow[] {
+  const offering = reposOffering('start-run', source);
+  if (offering.length === 0) return [];
+  const enabled = offering.some((each) => each.available.enabled);
+  const why = offering.find((each) => !each.available.enabled)?.available.why;
+  return [
+    {
+      group: 'general',
+      label: actionOf('start-run')?.label({ kind: 'none' }) ?? 'start a run…',
+      disabled: !enabled,
+      ...(enabled || why === undefined ? {} : { why }),
+      run: { pick: 'start-run', of: 'repo' },
+    },
+  ];
+}
+
+/**
+ * The actions that need no subject: the registry's (those with rows of their own, such as start anyway, by their
+ * variants), starting a run, adding a ticket, polling every queue, and the two view actions.
+ */
 export function generalRows(source: OfferSource): MenuRow[] {
   const none: Subject = { kind: 'none' };
   return [
-    ...ACTIONS.filter((def) => def.appliesTo.includes('none')).map(
-      (def): MenuRow => ({
+    ...ACTIONS.filter((def) => def.appliesTo.includes('none')).flatMap((def): MenuRow[] => {
+      const available = def.available(none, source);
+      if (!available.offered) return [];
+      const row = (label: string, data: Record<string, string>): MenuRow => ({
         group: 'general',
-        label: def.label(none),
+        label,
         ...(def.key === undefined ? {} : { key: def.key }),
-        disabled: false,
-        run: { act: def.id, subject: none, data: {} },
-      }),
-    ),
+        ...(available.enabled || available.why === undefined ? {} : { why: available.why }),
+        disabled: !available.enabled,
+        run: { act: def.id, subject: none, data },
+      });
+      return def.variants === undefined
+        ? [row(def.label(none), {})]
+        : def.variants(none, source).map((variant) => row(variant.label, variant.data));
+    }),
+    ...startRow(source),
     ...everyQueueRow('add a ticket…', 'add-ticket', { pick: 'add-ticket' }, source),
     ...everyQueueRow('poll every queue', 'poll-queue', { pollAll: true }, source),
     { group: 'general', label: 'switch theme', disabled: false, run: { view: 'toggle-theme' } },
@@ -211,6 +249,22 @@ const stepRow = (label: string, run: MenuRun, hint?: string): MenuRow => ({
  * step's parameter), and its rows. A choice lists its options, starting on its initial one; the queue to pick lists each queue that offers the action.
  */
 export function stepOf(step: MenuStep, source: OfferSource, typed = ''): StepModel {
+  if ('pick' in step && step.pick === 'repo') {
+    const rows = reposOffering(step.action, source).map((each) => ({
+      ...stepRow(subjectName(each.subject), { repo: each.subject.kind === 'repo' ? each.subject.repo : '' }),
+      disabled: !each.available.enabled,
+      ...(each.available.enabled || each.available.why === undefined ? {} : { why: each.available.why }),
+    }));
+    return {
+      label: 'repository',
+      lines: [],
+      rows,
+      start: Math.max(
+        0,
+        rows.findIndex((row) => !row.disabled),
+      ),
+    };
+  }
   if ('pick' in step) {
     const rows = queuesOffering(step.action, source).map((each) => {
       const subject = each.subject;
