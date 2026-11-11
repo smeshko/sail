@@ -1,17 +1,18 @@
 // Where a path really goes: resolved the way the kernel would, symlinks followed and `..` applied after them, then
-// placed in the worktree, `$STAGE_IN`, `$STAGE_OUT` or outside, and checked against the step's read or write globs.
+// placed in the worktree, `$STAGE_IN`, `$STAGE_OUT`, the scratch folder or outside, and checked against the step's read or write globs.
 import { lstatSync, readlinkSync, realpathSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, join, normalize } from 'node:path';
 import { matchesGlob } from './glob';
 import { allow, type DecideContext, type Decision, deny, type Permissions } from './types';
 
-export type Region = 'worktree' | 'stage-in' | 'stage-out' | 'outside';
+export type Region = 'worktree' | 'stage-in' | 'scratch' | 'stage-out' | 'outside';
 
-/** The three roots, each `realpath`'d. */
+/** The roots, each `realpath`'d; the scratch folder only when the context names one that exists. */
 export interface Roots {
   readonly worktree: string;
   readonly stageIn: string;
   readonly stageOut: string;
+  readonly scratch?: string;
 }
 
 export type Resolved = { readonly ok: true; readonly path: string } | { readonly ok: false; readonly reason: string };
@@ -24,11 +25,17 @@ const SINKS = new Set(['/dev/null', '/dev/stdout', '/dev/stderr']);
 
 /** The roots of `ctx`, `realpath`'d: macOS puts temp directories behind `/var` → `/private/var`. */
 export function roots(ctx: DecideContext): Roots {
-  return {
+  const base = {
     worktree: realpathSync(ctx.worktree),
     stageIn: realpathSync(ctx.stageIn),
     stageOut: realpathSync(ctx.stageOut),
   };
+  if (ctx.scratch === undefined || ctx.scratch.trim() === '') return base;
+  try {
+    return { ...base, scratch: realpathSync(ctx.scratch) };
+  } catch {
+    return base; // a folder that is gone is no region: its paths are outside
+  }
 }
 
 /** `text` with `$NAME` and `${NAME}` replaced from `env`. `~` and a variable `env` lacks leave it unresolvable. */
@@ -91,15 +98,20 @@ function within(path: string, root: string): boolean {
   return path === root || path.startsWith(`${root}/`);
 }
 
-/** The region `abs` lies in. `$STAGE_IN` is matched first, without case, as it lies beside `$STAGE_OUT`. */
+/**
+ * The region `abs` lies in. `$STAGE_IN` is matched first, without case, as it lies beside `$STAGE_OUT`; the scratch
+ * folder comes before `$STAGE_OUT` and the worktree, as an in-clone step's lies inside its worktree.
+ */
 export function place(abs: string, at: Roots): Region {
   if (within(abs.toLowerCase(), at.stageIn.toLowerCase())) return 'stage-in';
+  if (at.scratch !== undefined && within(abs, at.scratch)) return 'scratch';
   if (within(abs, at.stageOut)) return 'stage-out';
   if (within(abs, at.worktree)) return 'worktree';
   return 'outside';
 }
 
 function rootOf(region: Region, at: Roots): string {
+  if (region === 'scratch') return at.scratch as string;
   return region === 'stage-in' ? at.stageIn : region === 'stage-out' ? at.stageOut : at.worktree;
 }
 
@@ -148,7 +160,7 @@ function hasGitComponent(rel: string): boolean {
   return rel.split('/').some((part) => part.toLowerCase() === '.git');
 }
 
-/** Reads are open in `$STAGE_IN` and `$STAGE_OUT`, and in the worktree where a read glob matches. */
+/** Reads are open in `$STAGE_IN`, `$STAGE_OUT` and the scratch folder, and in the worktree where a read glob matches. */
 export function checkRead(
   paths: readonly string[],
   permissions: Permissions,
@@ -160,7 +172,7 @@ export function checkRead(
     const found = locate(path, ctx, at, cwd);
     if (!found.ok) return deny('read', `read ${path}: ${found.reason}`);
     const region = place(found.path, at);
-    if (region === 'stage-in' || region === 'stage-out') continue;
+    if (region === 'stage-in' || region === 'stage-out' || region === 'scratch') continue;
     const said = `read ${path} → ${found.path}`;
     if (region === 'outside') return deny('read', `${said}: outside the workspace, $STAGE_IN and $STAGE_OUT`);
     const rel = relativeTo(found.path, at.worktree);
@@ -171,7 +183,10 @@ export function checkRead(
   return allow;
 }
 
-/** Writes are open in the worktree and `$STAGE_OUT` where a write glob matches; never in `$STAGE_IN` or `.git`. */
+/**
+ * Writes are open in the worktree and `$STAGE_OUT` where a write glob matches, and in the scratch folder whatever the
+ * globs; never in `$STAGE_IN`, and never under `.git`.
+ */
 export function checkWrite(
   paths: readonly string[],
   permissions: Permissions,
@@ -189,7 +204,7 @@ export function checkWrite(
     if (region === 'stage-in') return deny('write', `${said}: $STAGE_IN is the engine's record of the call's inputs`);
     const rel = relativeTo(found.path, rootOf(region, at));
     if (hasGitComponent(rel)) return deny('write', `${said}: nothing under .git is ever written`);
-    if (!matchesGlob(rel, globsFor(region, permissions.write))) {
+    if (region !== 'scratch' && !matchesGlob(rel, globsFor(region, permissions.write))) {
       return deny('write', `${said}: matches none of the step's write globs`);
     }
   }
