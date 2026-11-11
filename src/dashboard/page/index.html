@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-theme="dark" data-inspector="open" data-detail="closed">
+<html lang="en" data-theme="dark" data-inspector="closed" data-pinned="false" data-detail="closed" data-sidebar="closed">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -160,18 +160,12 @@
       }
       .body {
         display: grid;
-        grid-template-columns: var(--side-w, 180px) 5px 1fr 5px var(--ins-w, 360px);
+        grid-template-columns: var(--side-w, 180px) 5px minmax(0, 1fr);
         overflow: hidden;
       }
-      :root[data-inspector="closed"] .body {
-        grid-template-columns: var(--side-w, 180px) 5px 1fr;
-      }
-      /* a run or queue open beside the list: the list keeps --list-w and the run view takes the rest */
+      /* a run or queue open beside the list: the run view keeps 320px and the list gives way first */
       :root[data-detail="open"] .body {
-        grid-template-columns: var(--side-w, 180px) 5px var(--list-w, 340px) 1fr 5px var(--ins-w, 360px);
-      }
-      :root[data-detail="open"][data-inspector="closed"] .body {
-        grid-template-columns: var(--side-w, 180px) 5px var(--list-w, 340px) 1fr;
+        grid-template-columns: var(--side-w, 180px) 5px minmax(0, var(--list-w, 340px)) minmax(320px, 1fr);
       }
       .resize-handle {
         cursor: col-resize;
@@ -201,6 +195,11 @@
         height: 19px;
         border-radius: 5px;
         background: linear-gradient(135deg, #4c8dff, #34d399);
+      }
+      .sidebar-btn,
+      .back,
+      .ins-close {
+        display: none;
       }
       .spacer {
         flex: 1;
@@ -922,6 +921,10 @@
       }
       .in-row.sel {
         background: var(--panel-2);
+        color: var(--fg);
+      }
+      :root[data-pinned="true"] [data-action="toggle-inspector"] {
+        border-color: var(--err);
         color: var(--fg);
       }
       .in-failed,
@@ -1947,16 +1950,93 @@
       :root[data-inspector="closed"] .resize-right {
         display: none;
       }
+      /* from 1100px the open inspector is a column of the grid */
+      @media (min-width: 1100px) {
+        :root[data-inspector="open"] .body {
+          grid-template-columns: var(--side-w, 180px) 5px minmax(0, 1fr) 5px var(--ins-w, 360px);
+        }
+        :root[data-detail="open"][data-inspector="open"] .body {
+          grid-template-columns: var(--side-w, 180px) 5px minmax(0, var(--list-w, 340px)) minmax(320px, 1fr) 5px var(--ins-w, 360px);
+        }
+      }
+      /* under it the open inspector lies over the right of the centre and takes no column */
+      @media (max-width: 1099px) {
+        .resize-right {
+          display: none;
+        }
+        .inspector {
+          position: fixed;
+          top: 46px;
+          right: 0;
+          bottom: 26px;
+          width: min(var(--ins-w, 360px), 100vw);
+          z-index: 15;
+          box-shadow: -12px 0 32px rgba(0, 0, 0, 0.35);
+        }
+        .ins-close {
+          display: inline-flex;
+          position: absolute;
+          top: 7px;
+          right: 8px;
+          z-index: 1;
+        }
+        .inspector .ins-h {
+          padding-right: 44px;
+        }
+      }
+      /* under 800px the page is one column: the list, or the open run or queue with a way back */
+      @media (max-width: 799px) {
+        .body,
+        :root[data-detail="open"] .body {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .resize-handle {
+          display: none;
+        }
+        .side {
+          display: none;
+        }
+        :root[data-sidebar="open"] .side {
+          display: block;
+          position: fixed;
+          top: 46px;
+          left: 0;
+          bottom: 26px;
+          width: min(260px, 80vw);
+          z-index: 30;
+          background: var(--panel);
+          box-shadow: 12px 0 32px rgba(0, 0, 0, 0.35);
+        }
+        :root[data-detail="open"] .list {
+          display: none;
+        }
+        .sidebar-btn {
+          display: inline-flex;
+        }
+        :root[data-detail="open"] .back {
+          display: inline-flex;
+          align-self: flex-start;
+          margin: 8px 12px 0;
+        }
+        .brand-t {
+          display: none;
+        }
+        .status {
+          overflow: hidden;
+          white-space: nowrap;
+        }
+      }
     </style>
   </head>
   <body>
     <div class="shell">
       <header class="top">
-        <div class="brand"><i></i>sail dashboard</div>
+        <button class="btn sidebar-btn" type="button" data-action="toggle-sidebar" aria-label="sidebar" title="sidebar">☰</button>
+        <div class="brand"><i></i><span class="brand-t">sail dashboard</span></div>
         <div class="spacer"></div>
         <div id="link"></div>
         <button class="btn" type="button" data-action="toggle-theme" aria-label="switch theme" title="theme">◐</button>
-        <button class="btn" type="button" data-action="toggle-inspector" aria-label="toggle inspector" title="inspector (i)">⇥</button>
+        <button class="btn" type="button" data-action="toggle-inspector" aria-label="pin inspector" title="pin the inspector (i)">⇥</button>
       </header>
       <div class="body" id="body">
         <nav class="side">
@@ -1967,10 +2047,12 @@
           <div id="list"></div>
         </section>
         <main class="main">
+          <button class="btn back" type="button" data-action="close-detail" title="back to the list (Esc)">‹ list</button>
           <div id="main"></div>
         </main>
         <div class="resize-handle resize-right" data-resize="right"></div>
         <aside class="inspector">
+          <button class="btn ins-close" type="button" data-action="close-inspector" aria-label="close inspector" title="close the inspector (Esc)">✕</button>
           <div class="inspector-b" id="inspector"></div>
         </aside>
       </div>

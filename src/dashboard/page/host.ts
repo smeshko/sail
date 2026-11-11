@@ -87,7 +87,10 @@ export interface PageHost {
   /** Copies to the clipboard: false when it can't. */
   copy(text: string): Promise<boolean>;
   setTheme(theme: string): void;
-  setInspector(open: boolean): void;
+  /** Whether the inspector takes its room, and whether it is pinned open. */
+  setInspector(open: boolean, pinned: boolean): void;
+  /** Whether the folded sidebar is open. */
+  setSidebar(open: boolean): void;
   /** Whether a run or queue is open beside the list: the centre is laid out by it. */
   setDetail(open: boolean): void;
   /** The browser's offset east of UTC, in minutes. */
@@ -571,8 +574,12 @@ export function browserHost(win: BrowserWindow): PageHost {
       if (push) win.history.pushState(null, '', url);
       else win.history.replaceState(null, '', url);
     },
-    setInspector(open) {
+    setInspector(open, pinned) {
       doc.documentElement.dataset.inspector = open ? 'open' : 'closed';
+      doc.documentElement.dataset.pinned = pinned ? 'true' : 'false';
+    },
+    setSidebar(open) {
+      doc.documentElement.dataset.sidebar = open ? 'open' : 'closed';
     },
     setDetail(open) {
       doc.documentElement.dataset.detail = open ? 'open' : 'closed';

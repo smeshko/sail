@@ -36,7 +36,14 @@ export function leaveQueue(store: Store) {
   const { ui } = store;
   if (ui.queue === undefined) return;
   delete ui.queue;
-  store.mark('list', 'main');
+  store.mark('list', 'main', 'inspector', 'status');
+}
+
+/** Shuts the folded sidebar, when it is open. */
+export function shutSidebar(store: Store) {
+  if (!store.ui.sidebar) return;
+  store.ui.sidebar = false;
+  store.host.setSidebar(false);
 }
 
 export const actions: Record<string, Action> = {
@@ -49,7 +56,7 @@ export const actions: Record<string, Action> = {
     if (data.queue === undefined) return;
     reopenQueue(store, data.queue);
     store.ui.queue = data.queue;
-    store.mark('list', 'main');
+    store.mark('list', 'main', 'inspector', 'status');
   },
   'select-card': (store, data) => selectCard(store, data.key, undefined, true),
   open: (store, data) => {
@@ -224,8 +231,19 @@ export const actions: Record<string, Action> = {
     store.mark('main');
   },
   'toggle-inspector': (store) => {
-    store.ui.inspector = !store.ui.inspector;
-    store.host.setInspector(store.ui.inspector);
+    store.ui.pinned = !store.ui.pinned;
+    store.mark('inspector');
+  },
+  // The inspector's own close button, for a pointer under 1100px where it lies over the centre: it unpins it and
+  // deselects its card, as `i` and Esc do.
+  'close-inspector': (store) => {
+    store.ui.pinned = false;
+    if (store.ui.key !== undefined) selectCard(store, undefined);
+    store.mark('inspector');
+  },
+  'toggle-sidebar': (store) => {
+    store.ui.sidebar = !store.ui.sidebar;
+    store.host.setSidebar(store.ui.sidebar);
   },
   'toggle-theme': (store) => {
     store.ui.theme = THEMES[(THEMES.indexOf(store.ui.theme) + 1) % THEMES.length] ?? 'dark';
@@ -276,6 +294,10 @@ export function dispatch(store: Store, action: string, data: Record<string, stri
   const dialogClick = action === 'dialog-confirm' || action === 'dialog-cancel' || action === 'dialog-change';
   const shuts = ui.itemMenu !== undefined && action !== 'item-menu' && !confirming && !dialogClick;
   const shutsRun = ui.runMenu !== undefined && !runAction && action !== 'run-menu' && !dialogClick;
+  // The folded sidebar shuts on any action but its own button. A view or a repository chosen in it closes the open run
+  // or queue, which hides the list under 800px, so the choice shows.
+  if (ui.sidebar && (action === 'select-view' || action === 'filter-repo')) closeDetail(store);
+  if (action !== 'toggle-sidebar') shutSidebar(store);
   if (shuts) delete ui.itemMenu;
   if (shutsRun) delete ui.runMenu;
   if (shuts || shutsRun) store.mark('main', 'list');

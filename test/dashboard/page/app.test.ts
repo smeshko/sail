@@ -57,7 +57,11 @@ class FakeHost implements PageHost {
   storage = new Map<string, string>();
   copied: string[] = [];
   theme = '';
-  inspector = true;
+  /** What the host was told about the inspector, in order: whether it is open and whether it is pinned. */
+  inspectors: [boolean, boolean][] = [];
+  get inspector() {
+    return this.inspectors.at(-1);
+  }
   /** The query the page's URL holds, as start() gives it. */
   startAt: Record<string, string> = {};
   clock = Date.parse('2026-10-01T12:00:00.000Z');
@@ -262,8 +266,13 @@ class FakeHost implements PageHost {
   type(name: string, value: string) {
     this.input?.(name, value);
   }
-  setInspector(open: boolean) {
-    this.inspector = open;
+  /** What the host was told about the folded sidebar, in order. */
+  sidebars: boolean[] = [];
+  setSidebar(open: boolean) {
+    this.sidebars.push(open);
+  }
+  setInspector(open: boolean, pinned: boolean) {
+    this.inspectors.push([open, pinned]);
   }
   offset() {
     return 0;
@@ -929,7 +938,7 @@ test('a failed queue reopened before its old socket closes keeps one open socket
   expect(host.open('queue=')).toHaveLength(1);
 });
 
-test('keys move the cursor, Enter opens a timeline, ] and [ step it, Escape goes back to the cards then deselects, i toggles the inspector, and a key typed in an input does nothing', () => {
+test('keys move the cursor, Enter opens a timeline, ] and [ step it, Escape goes back to the cards then deselects, and a key typed in an input does nothing', () => {
   page = boot(host);
   firstIndex();
   replay(host.open('run=')[0], GOLDEN());
@@ -958,13 +967,143 @@ test('keys move the cursor, Enter opens a timeline, ] and [ step it, Escape goes
   expect(cursor()).toBe('implement#1');
   host.press('Escape');
   expect(page.ui.key).toBeUndefined();
-  host.press('i');
-  expect(host.inspector).toBe(false);
-  host.press('i');
-  expect(host.inspector).toBe(true);
   for (let i = 0; i < 20; i++) host.press('ArrowRight');
   host.advance(100);
   expect(cursor()).toBe('publish#1');
+});
+
+test('the inspector opens when a card is selected and closes when it is deselected (ADW-528)', () => {
+  page = boot(host);
+  firstIndex();
+  replay(host.open('run=')[0], GOLDEN());
+  host.advance(100);
+  expect(host.inspector).toEqual([false, false]);
+  host.click({ action: 'select-card', key: 'implement#1' });
+  host.advance(100);
+  expect(host.inspector).toEqual([true, false]);
+  host.press('Escape');
+  host.press('Escape');
+  host.advance(100);
+  expect(page.ui.key).toBeUndefined();
+  expect(host.inspector).toEqual([false, false]);
+});
+
+test('i pins the inspector open with no card selected, and i again unpins it (ADW-528)', () => {
+  page = boot(host);
+  firstIndex();
+  replay(host.open('run=')[0], GOLDEN());
+  host.advance(100);
+  host.press('i');
+  host.advance(100);
+  expect(host.inspector).toEqual([true, true]);
+  expect(host.regions.inspector).toContain('select a stage card');
+  host.press('i');
+  host.advance(100);
+  expect(host.inspector).toEqual([false, false]);
+});
+
+test('a queue open over a selected card closes the inspector, and a pinned one shows no card (ADW-528)', () => {
+  page = boot(host);
+  firstIndex();
+  replay(host.open('run=')[0], GOLDEN());
+  host.click({ action: 'select-card', key: 'implement#1' });
+  host.advance(100);
+  expect(host.inspector).toEqual([true, false]);
+  host.click({ action: 'select-queue', queue: `beta/${QUEUE_WORKFLOW}` });
+  host.advance(100);
+  expect(host.inspector).toEqual([false, false]);
+  host.press('i');
+  host.advance(100);
+  expect(host.inspector).toEqual([true, true]);
+  expect(host.regions.inspector).toContain('select a stage card');
+  expect(host.regions.inspector).not.toContain('implement#1');
+});
+
+test('the status bar is empty while a queue is open and describes the run again once it is back (ADW-528)', () => {
+  page = boot(host);
+  firstIndex();
+  expect(host.regions.status ?? '').toBe('');
+  replay(host.open('run=')[0], GOLDEN());
+  host.advance(100);
+  expect(host.regions.status).toContain('calls <b>');
+  host.click({ action: 'select-queue', queue: `beta/${QUEUE_WORKFLOW}` });
+  host.advance(100);
+  expect(host.regions.status).toBe('');
+  host.click({ action: 'select-run', repo: 'alpha', run: GOLDEN_RUN_ID });
+  host.advance(100);
+  expect(host.regions.status).toContain('calls <b>');
+});
+
+test('the sidebar button opens the folded sidebar, and choosing a view or pressing Escape shuts it (ADW-528)', () => {
+  page = boot(host);
+  firstIndex();
+  host.click({ action: 'toggle-sidebar' });
+  expect(host.sidebars).toEqual([true]);
+  host.click({ action: 'toggle-sidebar' });
+  expect(host.sidebars).toEqual([true, false]);
+  host.click({ action: 'toggle-sidebar' });
+  host.click({ action: 'select-view', view: 'history' });
+  expect([host.sidebars, page.ui.view]).toEqual([[true, false, true, false], 'history']);
+  replay(host.open('run=')[0], GOLDEN());
+  host.click({ action: 'select-run', repo: 'alpha', run: GOLDEN_RUN_ID });
+  host.click({ action: 'toggle-sidebar' });
+  host.press('Escape');
+  expect(host.sidebars.slice(-2)).toEqual([true, false]);
+  host.advance(100);
+  expect(host.regions.main).not.toContain('no run selected');
+  host.press('Escape');
+  host.advance(100);
+  expect(host.regions.main).toContain('no run selected');
+});
+
+test('a key that changes the list or moves its cursor shuts the open sidebar too (review R1) (ADW-528)', () => {
+  page = boot(host);
+  firstIndex();
+  host.click({ action: 'toggle-sidebar' });
+  host.press('4');
+  expect([host.sidebars, page.ui.view]).toEqual([[true, false], 'history']);
+  host.click({ action: 'toggle-sidebar' });
+  host.press('j');
+  expect(host.sidebars).toEqual([true, false, true, false]);
+  host.click({ action: 'toggle-sidebar' });
+  host.press('Escape');
+  expect(host.sidebars).toEqual([true, false, true, false, true, false]);
+});
+
+test('a view or repository chosen in the open sidebar over an open run closes the run, so the list shows (review R3) (ADW-528)', () => {
+  page = boot(host);
+  firstIndex();
+  replay(host.open('run=')[0], GOLDEN());
+  host.click({ action: 'select-run', repo: 'alpha', run: GOLDEN_RUN_ID });
+  host.advance(100);
+  expect(host.regions.main).not.toContain('no run selected');
+  host.click({ action: 'toggle-sidebar' });
+  host.click({ action: 'select-view', view: 'history' });
+  host.advance(100);
+  expect([page.ui.view, host.regions.main]).toEqual(['history', expect.stringContaining('no run selected')]);
+  host.click({ action: 'select-queue', queue: `beta/${QUEUE_WORKFLOW}` });
+  host.click({ action: 'toggle-sidebar' });
+  host.click({ action: 'filter-repo', repo: 'beta' });
+  host.advance(100);
+  expect([page.ui.repoFilter, page.ui.queue]).toEqual(['beta', undefined]);
+  // With the sidebar shut, as it is from 800px, choosing a view keeps the open run beside the list.
+  host.click({ action: 'select-run', repo: 'alpha', run: GOLDEN_RUN_ID });
+  host.click({ action: 'select-view', view: 'active' });
+  host.advance(100);
+  expect(host.regions.main).not.toContain('no run selected');
+});
+
+test("the inspector's close button unpins it and deselects its card, so a pointer closes it (review R2) (ADW-528)", () => {
+  page = boot(host);
+  firstIndex();
+  replay(host.open('run=')[0], GOLDEN());
+  host.click({ action: 'select-card', key: 'implement#1' });
+  host.click({ action: 'toggle-inspector' });
+  host.advance(100);
+  expect(host.inspector).toEqual([true, true]);
+  host.click({ action: 'close-inspector' });
+  host.advance(100);
+  expect([host.inspector, page.ui.key, page.ui.pinned]).toEqual([[false, false], undefined, false]);
 });
 
 test('a copy that took draws one ok toast reading what it copied, and 4,000 ms on it is gone', async () => {
@@ -2661,9 +2800,9 @@ test('Escape and the cancel button close the dialog and post nothing, and Enter 
 test('while the dialog is open, j, a and i change nothing', () => {
   openBetaQueue();
   host.click({ action: 'drop-item', ...BETA, item: 'ticket:FAKE-6' });
-  const before = [page?.ui.view, page?.ui.inspector, page?.ui.cursor];
+  const before = [page?.ui.view, page?.ui.pinned, page?.ui.cursor];
   for (const key of ['j', 'a', 'i']) host.press(key);
-  expect([page?.ui.view, page?.ui.inspector, page?.ui.cursor]).toEqual(before);
+  expect([page?.ui.view, page?.ui.pinned, page?.ui.cursor]).toEqual(before);
   expect(dialogTitle()).toBe('drop ticket:FAKE-6');
 });
 
@@ -3498,7 +3637,7 @@ test('Enter on switch theme changes the theme and on toggle inspector the inspec
   host.type('menu-query', 'toggle inspector');
   host.advance(100);
   host.press('Enter', true);
-  expect(page?.ui.inspector).toBe(false);
+  expect(page?.ui.pinned).toBe(true);
   cmdK();
   host.push(host.open('index')[0], indexMessage({ state: 'watcher not running', why: 'no watcher is running' }));
   host.type('menu-query', 'poll every');
@@ -4397,7 +4536,7 @@ test('the highlight stays on the row a person moved to when an index tick remove
   expect(menuLabels()).not.toContain('poll every queue');
   expect(menuSel()).toBe('switch theme');
   host.press('Enter', true);
-  expect([page?.ui.theme, page?.ui.inspector]).toEqual(['light', true]);
+  expect([page?.ui.theme, page?.ui.pinned]).toEqual(['light', false]);
 });
 
 describe('the Inbox view (ADW-527)', () => {
