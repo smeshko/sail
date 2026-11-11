@@ -109,6 +109,20 @@ test('the pinned inspector toggle is drawn in the focus colour, not the error co
   expect(rule?.[1]).not.toContain('--err');
 });
 
+test('the run view header is two rows that never wrap, and its actions never shrink (ADW-548)', () => {
+  const body = (selector: string) => rules().find(([sel]) => sel === selector)?.[1] ?? '';
+  expect(body('.run-h')).toContain('flex-wrap: nowrap');
+  expect(body('.run-h')).toContain('flex-direction: column');
+  expect(body('.h-row')).toContain('white-space: nowrap');
+  expect(body('.h-row')).not.toMatch(/flex-wrap:\s*wrap/);
+  expect(body('.h-row .h-acts')).toContain('flex: 0 0 auto');
+  expect(body('.h-row .d-agent')).toContain('text-overflow: ellipsis');
+  expect(body('.h-row .d-agent')).not.toContain('margin-left: auto');
+  expect(rules().filter(([sel, rule]) => /\.(run-h|h-row)\b/.test(sel) && /flex-wrap:\s*wrap\b/.test(rule))).toEqual(
+    [],
+  );
+});
+
 test('--focus is at least 3:1 on every surface in each theme block (ADW-508)', () => {
   const low: string[] = [];
   for (const [name, read] of THEMES) {

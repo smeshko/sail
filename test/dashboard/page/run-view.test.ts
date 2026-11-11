@@ -147,7 +147,7 @@ test('a running card shows running and its time so far, a PR link is drawn only 
   expect(markup).toContain(
     '<div class="facts"><div><b>2.5s</b><span class="lbl">duration</span></div><div><b>0</b><span class="lbl">tool calls</span></div></div>',
   );
-  expect(markup).toContain('<span class="pill p-run">running</span><span class="d-agent">');
+  expect(markup).toContain('<span class="pill p-run">running</span></div><div class="h-row"><span class="d-agent">');
   expect(markup).toContain(`<code>sail show ${GOLDEN_RUN_ID} --follow</code>`);
   expect(renderStatus(model, undefined).value).toBe(
     '<span>calls <b>3/4</b></span><span>tools <b>0</b></span><span class="">denied <b>0</b></span><span title="tokens in, out and read from the cache">tokens <b>15.0k</b> in · <b>5.4k</b> out · <b>82.4k</b> cached</span><span>cost <b>$0.79</b></span><span class="spacer"></span><span>● live</span>',
@@ -416,8 +416,33 @@ test('a failed run whose restart is refused shows it disabled in the header, wit
     clean: CLEAN,
   });
   expect(markup).toContain(
-    '<button class="btn" disabled>restart</button><span class="act-why">branch sail/x is leased by run FAKE-9</span>',
+    '<button class="btn" disabled title="branch sail/x is leased by run FAKE-9">restart</button>',
   );
+  expect(markup).not.toContain('act-why');
+});
+
+test("a running run's disabled stop in the header carries its reason in its title and no text beside it (ADW-548)", () => {
+  const markup = header(runningModel(), { stop: { enabled: false, why: 'run is not running' } });
+  expect(markup).toContain('<button class="btn" disabled title="run is not running">stop</button>');
+  expect(markup).not.toContain('act-why');
+});
+
+test("the run view's header is two rows: key, title and status, then id, workflow and the actions (ADW-548)", () => {
+  const markup = header(runningModel(), { stop: STOP });
+  expect(markup.match(/class="h-row"/g)).toHaveLength(2);
+  const [first, second] = markup.split('<div class="h-row">').slice(1) as [string, string];
+  expect(first).toContain('class="pill p-run">running</span>');
+  expect(first).not.toContain('d-agent');
+  expect(second).toContain(`<span class="d-agent">${GOLDEN_RUN_ID}`);
+  expect(second).toContain('<span class="h-acts">');
+  expect(markup.indexOf('d-title')).toBeLessThan(markup.indexOf('d-agent'));
+});
+
+test('the second row is drawn with the run id when the run offers no action (ADW-548)', () => {
+  const markup = header(foldRun(readEvents(GOLDEN_RUN)), undefined);
+  expect(markup.match(/class="h-row"/g)).toHaveLength(2);
+  expect(markup).toContain(`<div class="h-row"><span class="d-agent">${GOLDEN_RUN_ID}`);
+  expect(markup).not.toContain('h-acts');
 });
 
 test('a completed run, offers that offer nothing and offers not read yet draw no button and no ⋯ in the header', () => {

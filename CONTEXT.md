@@ -690,7 +690,7 @@ The list of ended runs, failed and completed together: one newest-first list gro
 _Avoid_: archive, past runs
 
 **View header**:
-The top line of the dashboard's run view or queue view, naming what it shows and carrying its actions: a run's buttons for its status and a ⋯ for the rest, or a queue's poll and its workflow's watch or unwatch. It is drawn on the page and is not the run header, the `run.json` a run writes at start.
+The top line of the dashboard's run view or queue view, naming what it shows and carrying its actions: a run's, two rows that never wrap (its ticket key, title and status, then its id, workflow and actions: a button for each its status has and a ⋯ for the rest, a disabled button's reason being its tooltip), or a queue's poll and its workflow's watch or unwatch. It is drawn on the page and is not the run header, the `run.json` a run writes at start.
 _Avoid_: run header (the `run.json` one), title bar, toolbar
 
 **Queues view**:
