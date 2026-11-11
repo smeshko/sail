@@ -497,6 +497,31 @@ test('a seeded run opens while its workflow live runs fill the cap, and records 
   });
 });
 
+test('a seeded run opens while held runs fill the cap, and records no cap', async () => {
+  await withTempRepo(async (repo) => {
+    const from = await source.copyInto(repo.dir);
+    const adapters = await fakeAdapters(repo.dir);
+    const lives = [];
+    for (const [index, runId] of [
+      'ZZ-live-1-01M3BWNZM08Q4T6V2XRJ5KWD3A',
+      'ZZ-live-2-01M3BWNZM08Q4T6V2XRJ5KWD3B',
+    ].entries()) {
+      lives.push(
+        await writeLiveRun(repo.dir, { workflow: 'ticket-to-pr', ticketKey: `FAKE-${index + 2}`, runId, adapters }),
+      );
+    }
+    try {
+      for (const live of lives) await live.hold();
+      const end = await seeded(repo, from.runId, 'spec');
+      expect(endOf(end)).toEqual({ status: 'suspended', stopReason: 'until' });
+      const header = JSON.parse(readFileSync(join(dirOf(end), 'run.json'), 'utf8'));
+      expect(header.source.forced).toEqual([]);
+    } finally {
+      for (const live of lives) await live.release();
+    }
+  });
+});
+
 test('a resume restores the reused calls a crash before the run start took, each once, with fromRun', async () => {
   await withTempRepo(async (first) => {
     const from = await source.copyInto(first.dir);

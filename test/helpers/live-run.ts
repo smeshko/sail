@@ -5,6 +5,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ResolvedAdapters } from '../../src/engine/adapters';
+import { holdRun } from '../../src/engine/control';
 import { writeStatus } from '../../src/engine/run-dir';
 import { GOLDEN_RUN } from './golden-run';
 
@@ -22,6 +23,8 @@ export interface LiveRun {
   branch: string;
   /** Marks the lease suspended and writes STATUS `suspended interrupted`, as a run does as it suspends. */
   suspend(): Promise<void>;
+  /** Suspends the run as `suspend()` does, then holds it, as `sail stop --suspend` does. */
+  hold(): Promise<void>;
   /** Releases the lease. */
   release(): Promise<void>;
 }
@@ -46,12 +49,17 @@ export async function writeLiveRun(repoDir: string, options: LiveRunOptions): Pr
   const holder = { runId, runDir, pid: options.pid ?? process.pid };
   const leased = await workspace.lease(url, branch, holder);
   if (!leased.leased) throw new Error(`the live run's branch ${branch} is already leased`);
+  const suspend = async () => {
+    await workspace.lease(url, branch, { ...holder, suspended: true });
+    writeStatus(runDir, 'suspended', 'interrupted');
+  };
   return {
     runDir,
     branch,
-    async suspend() {
-      await workspace.lease(url, branch, { ...holder, suspended: true });
-      writeStatus(runDir, 'suspended', 'interrupted');
+    suspend,
+    async hold() {
+      await suspend();
+      holdRun(runDir);
     },
     async release() {
       await workspace.releaseLease(url, branch, runId);

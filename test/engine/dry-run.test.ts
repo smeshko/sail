@@ -165,7 +165,7 @@ async function twoLiveRuns(repo: TempRepo) {
       await writeLiveRun(repo.dir, { workflow: 'ticket-to-pr', ticketKey: runId.slice(0, 6), runId, adapters }),
     );
   }
-  return { ids, release: () => Promise.all(runs.map((run) => run.release())) };
+  return { ids, runs, release: () => Promise.all(runs.map((run) => run.release())) };
 }
 
 test("dryRun at its workflow's full cap refuses with the start's own words and writes nothing", async () => {
@@ -176,6 +176,23 @@ test("dryRun at its workflow's full cap refuses with the start's own words and w
       const before = traces(repo);
       expect(await dry(repo)).toEqual({
         refused: `workflow 'ticket-to-pr' has 2 live runs, its maxConcurrentRuns of 2: ${live.ids.join(', ')}; --force starts it anyway`,
+      });
+      expect(traces(repo)).toEqual(before);
+    } finally {
+      await live.release();
+    }
+  });
+});
+
+test('dryRun at a cap a held run fills refuses in the start words and writes nothing', async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    const live = await twoLiveRuns(repo);
+    try {
+      await live.runs[1]?.hold();
+      const before = traces(repo);
+      expect(await dry(repo)).toEqual({
+        refused: `workflow 'ticket-to-pr' has 1 live run and 1 held run, its maxConcurrentRuns of 2: ${live.ids[0]}, ${live.ids[1]} (held); --force starts it anyway`,
       });
       expect(traces(repo)).toEqual(before);
     } finally {
