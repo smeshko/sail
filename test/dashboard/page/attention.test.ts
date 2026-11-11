@@ -1,10 +1,10 @@
 // Needs attention, from the index alone (D9): failed runs, calls that ended in error, parked queue items and
 // problems, across every repository in one list, each saying what it opens.
-import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { index } from '../../../src/dashboard/files';
-import { type AttentionItem, attention, identity } from '../../../src/dashboard/page/attention';
+import { type AttentionItem, attention, identity, itemAbout } from '../../../src/dashboard/page/attention';
 import {
   FAKE_2_ID,
   FAKE_3_ID,
@@ -43,8 +43,9 @@ test("attention lists one row per run: FAKE-2's failure with its error joined, F
       runId: FAKE_2_ID,
       key: 'implement#1',
       kind: 'failed',
+      about: 'FAKE-2',
       title: 'failed: stage_error',
-      detail: `FAKE-2 Print the version with --version · ${FAKE_2_MESSAGE} · 1 denial`,
+      detail: `Print the version with --version · ${FAKE_2_MESSAGE} · 1 denial`,
       opens: { repo: 'alpha', runId: FAKE_2_ID, key: 'implement#1' },
     },
     {
@@ -52,6 +53,7 @@ test("attention lists one row per run: FAKE-2's failure with its error joined, F
       runId: FAKE_3_ID,
       key: 'implement#1',
       kind: 'error',
+      about: 'FAKE-3',
       title: 'implement#1 ended in error',
       detail: '',
       opens: { repo: 'beta', runId: FAKE_3_ID, key: 'implement#1' },
@@ -60,7 +62,8 @@ test("attention lists one row per run: FAKE-2's failure with its error joined, F
       repo: 'beta',
       workflow: QUEUE_WORKFLOW,
       kind: 'parked',
-      title: 'ticket:FAKE-6 parked after 2 attempts',
+      about: 'FAKE-6',
+      title: 'parked after 2 attempts',
       detail: PARKED,
     },
   ]);
@@ -69,6 +72,46 @@ test("attention lists one row per run: FAKE-2's failure with its error joined, F
 
 const runOf = (repos: ReturnType<typeof index>, repo: string, runId: string) =>
   repos.find((r) => r.name === repo)?.runs.find((r) => r.runId === runId);
+
+describe('audit 2: rows say what they are (ADW-543)', () => {
+  test("a run's item is about its pull request, else its ticket key, else its run id; a parked item about its key", () => {
+    const repos = index(m.registryDir);
+    const failed = runOf(repos, 'alpha', FAKE_2_ID);
+    const errored = runOf(repos, 'beta', FAKE_3_ID);
+    if (!failed?.summary || !errored?.summary) throw new Error('missing fixture summaries');
+    failed.summary.source = { kind: 'pr', number: 12 } as never;
+    Reflect.deleteProperty(errored.summary, 'ticket');
+    Reflect.deleteProperty(errored.summary, 'source');
+    Reflect.deleteProperty(errored, 'source');
+    for (const view of repos.find((r) => r.name === 'beta')?.queues ?? [])
+      for (const item of view.queue?.items ?? []) if (item.state === 'parked') item.dedupKey = 'pr:7';
+    const abouts = attention(repos).map((item) => [item.kind, item.about]);
+    expect(abouts).toEqual([
+      ['failed', 'PR #12'],
+      ['error', FAKE_3_ID],
+      ['parked', 'PR #7'],
+    ]);
+    expect(itemAbout('ticket:FAKE-6')).toBe('FAKE-6');
+    expect(itemAbout('other')).toBe('other');
+  });
+
+  test('problems are about their repository, their run or their workflow', () => {
+    const repos = index(m.registryDir);
+    const beta = repos.find((r) => r.name === 'beta');
+    const run = runOf(repos, 'beta', FAKE_3_ID);
+    if (!beta || !run) throw new Error('missing beta');
+    beta.problem = 'gone';
+    run.problem = 'unreadable';
+    const view = beta.queues[0];
+    if (view) view.problem = 'bad queue';
+    const problems = attention(repos).filter((item) => item.kind === 'problem');
+    expect(problems.map((item) => [item.title, item.about])).toEqual([
+      ['repository', 'beta'],
+      ['run', 'FAKE-3'],
+      ['queue', QUEUE_WORKFLOW],
+    ]);
+  });
+});
 
 test('a run with denials and no failure or error adds no item, and denials only join a row that exists', () => {
   const repos = index(m.registryDir);
@@ -127,6 +170,7 @@ test('a run that is not failed with two calls in error is one error item opening
       runId: FAKE_3_ID,
       key: 'implement#1',
       kind: 'error',
+      about: 'FAKE-3',
       title: 'implement#1 ended in error',
       detail: `boom · also in error: ${earlier.key}`,
       opens: { repo: 'beta', runId: FAKE_3_ID, key: 'implement#1' },
@@ -156,14 +200,14 @@ test("the joined item's identity changes when another call errors, and is equal 
   expect(identity(attention(repos)[0] as AttentionItem)).not.toBe(before);
 });
 
-test('a failed run without a message keeps the ticket and its denials as its detail', () => {
+test("a failed run without a message keeps the ticket's title and its denials as its detail, led by its key", () => {
   const repos = index(m.registryDir);
   const failed = runOf(repos, 'alpha', FAKE_2_ID)?.summary;
   if (failed) Reflect.deleteProperty(failed, 'message');
   const details = attention(repos)
     .filter((item) => item.kind === 'failed')
-    .map((item) => item.detail);
-  expect(details).toEqual(['FAKE-2 Print the version with --version · 1 denial']);
+    .map((item) => `${item.about}: ${item.detail}`);
+  expect(details).toEqual(['FAKE-2: Print the version with --version · 1 denial']);
 });
 
 test('a suspended run adds no item', () => {
@@ -198,13 +242,14 @@ test('a repository whose .sail/ is gone is a problem, after what else it needs, 
   expect(beta[0]?.detail).toContain('no longer exists');
 });
 
-test('an item has one identity, equal for equal items and different when any one of its seven fields differs', () => {
+test('an item has one identity, equal for equal items and different when any one of its eight fields differs', () => {
   const base: AttentionItem = {
     repo: 'alpha',
     runId: 'r1',
     key: 'implement#1',
     workflow: 'w',
     kind: 'error',
+    about: 'ADW-1',
     title: 'implement#1 ended in error',
     detail: 'boom',
   };
@@ -216,11 +261,12 @@ test('an item has one identity, equal for equal items and different when any one
     { runId: 'r2' },
     { key: 'tests#1' },
     { workflow: 'x' },
+    { about: 'ADW-2' },
     { title: 'parked after 3 attempts' },
     { detail: 'bang' },
   ];
   const ids = [base, ...changed.map((change) => ({ ...base, ...change }))].map(identity);
-  expect(new Set(ids).size).toBe(8);
+  expect(new Set(ids).size).toBe(9);
   const { runId: _runId, ...noRun } = base;
   expect(identity(noRun)).not.toBe(identity(base));
   expect(identity({ ...base, detail: 'a · b', title: 'c' })).not.toBe(

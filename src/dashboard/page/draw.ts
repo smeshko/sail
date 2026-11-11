@@ -9,7 +9,7 @@ import { html } from './html';
 import { listRepos, statusOf } from './index-model';
 import { renderInspector } from './inspector-view';
 import { renderSheet } from './keys-view';
-import { filterRows, groupsOf, viewCounts } from './list-model';
+import { filterRows, groupsOf, shownGroups, viewCounts } from './list-model';
 import { renderList } from './list-view';
 import { highlighted, modelOf } from './menu';
 import { renderMenu } from './menu-view';
@@ -24,6 +24,7 @@ import {
   listed,
   opened,
   openQueue,
+  problemOf,
   type Store,
   selected,
   summaryOf,
@@ -88,21 +89,18 @@ export function regions(store: Store): Record<Region, () => string> {
       if (store.run === undefined)
         return renderEmpty(
           ui.view,
+          // What the list shows, its filters applied, so the counts are the rows beside them.
           store.index === undefined
             ? undefined
-            : groupsOf(
-                ui.view,
-                listRepos(store.index, host.now()),
-                ui.repoFilter,
-                { now: host.now(), tz: ui.tz },
-                listed(store),
-              ),
+            : shownGroups(ui.view, listRepos(store.index, host.now()), ui, host.now(), listed(store)),
+          ui,
+          store.index?.length,
         ).value;
       const error = store.run.error === undefined ? '' : html`<div class="code bad">${store.run.error}</div>`;
       const card = opened(store);
       const view =
         card === undefined
-          ? renderRun(store.run.model, summaryOf(store, store.run), ui, host.now(), store.offers)
+          ? renderRun(store.run.model, summaryOf(store, store.run), ui, host.now(), store.offers, problemOf(store))
           : renderTimeline(card, ui, host.now(), store.outputs);
       return html`${error}${view}`.value;
     },

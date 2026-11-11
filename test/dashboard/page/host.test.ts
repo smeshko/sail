@@ -830,6 +830,43 @@ describe('Enter and Space on a focused control', () => {
 
 const row = (run: string) => `<button data-action="select-run" data-repo="alpha" data-run="${run}">${run}</button>`;
 
+describe('audit 2: rows say what they are (ADW-543)', () => {
+  const subjectRow = (run: string) =>
+    `<button data-action="select-run" data-subject="run" data-repo="alpha" data-run="${run}">${run}</button>`;
+
+  test("the focus reaching a row by Tab is told as focus with the row's data, and the focus a redraw gives back is not", () => {
+    const fake = fakeWindow();
+    fake.live('list');
+    const host = browserHost(fake.win);
+    const seen: [string, Record<string, string> | undefined][] = [];
+    host.onPoint((kind, data) => {
+      seen.push([kind, data]);
+    });
+    // A browser fires focusin each time an element takes the focus, the page's own focus() included.
+    let active = fake.focus.active;
+    Object.defineProperty(fake.focus, 'active', {
+      get: () => active,
+      set: (next: ElementLike | null) => {
+        active = next;
+        if (next !== null) fake.fire('focusin', { target: next });
+      },
+    });
+    host.render('list', `${subjectRow('r1')}${subjectRow('r2')}`);
+    fake.tab();
+    fake.tab();
+    const told = (run: string): [string, Record<string, string>] => [
+      'focus',
+      { action: 'select-run', subject: 'run', repo: 'alpha', run },
+    ];
+    expect(seen).toEqual([told('r1'), told('r2')]);
+    host.render('list', `${subjectRow('r1')}${subjectRow('r2')}<span>more</span>`);
+    expect(fake.focus.active?.dataset.run).toBe('r2');
+    expect(seen).toEqual([told('r1'), told('r2')]);
+    fake.fire('focusin', { target: element() });
+    expect(seen.at(-1)).toEqual(['focus', undefined]);
+  });
+});
+
 test('render puts the focus back on the element with the same data-action and data, a new element, so Tab goes on from it', () => {
   const fake = fakeWindow();
   const listed = fake.live('list');

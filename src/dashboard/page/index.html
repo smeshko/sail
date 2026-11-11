@@ -213,9 +213,16 @@
         background: linear-gradient(135deg, #4c8dff, #34d399);
       }
       .sidebar-btn,
-      .back,
-      .ins-close {
+      .back {
         display: none;
+      }
+      /* the inspector's ✕, at every width: docked from 1210px, and over the centre under it */
+      .ins-close {
+        display: inline-flex;
+        position: absolute;
+        top: 7px;
+        right: 8px;
+        z-index: 1;
       }
       .spacer {
         flex: 1;
@@ -415,7 +422,7 @@
         display: flex;
         align-items: center;
         gap: 8px;
-        padding: 6px 0;
+        padding: 6px 14px;
       }
       .qadd .txt {
         width: 14em;
@@ -585,14 +592,34 @@
         overflow-x: hidden;
         border-right: 1px solid var(--line);
       }
+      /* the list's head: a row of the view's name, count and filter, and History's controls on a second, each one line */
       .list-h {
         display: flex;
-        align-items: center;
-        flex-wrap: wrap;
-        gap: 8px;
+        flex-direction: column;
+        justify-content: center;
+        gap: 6px;
         min-height: var(--list-head-h);
         padding: 6px 12px;
         border-bottom: 1px solid var(--line);
+      }
+      .lh-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+        min-height: 26px;
+      }
+      .lh-t,
+      .lh-row > .c,
+      .lh-row > .btn {
+        flex: 0 0 auto;
+      }
+      .lh-end {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex: 0 0 auto;
+        margin-left: auto;
       }
       .lh-t {
         font-size: 14px;
@@ -609,6 +636,17 @@
         background: var(--panel-2);
         box-shadow: inset 2px 0 0 var(--fg-3);
       }
+      /* a picked row's tick, so it reads apart from the open row's bar */
+      .r-tick {
+        position: absolute;
+        top: 0;
+        left: 1px;
+        line-height: var(--row-h);
+        font-family: var(--sans);
+        font-size: 9px;
+        font-weight: 700;
+        color: var(--fg);
+      }
       .lh-sel {
         font-family: var(--mono);
         font-size: 10.5px;
@@ -616,8 +654,12 @@
       }
       .list-s {
         flex: 0 1 auto;
-        min-width: 0;
-        max-width: 110px;
+        field-sizing: content;
+        min-width: 4em;
+        max-width: 12em;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
         padding: 2px 4px;
         font-family: var(--mono);
         font-size: 11.5px;
@@ -644,7 +686,6 @@
       .lgrp-row {
         display: flex;
         align-items: center;
-        flex-wrap: wrap;
         gap: 6px;
         padding-right: 12px;
       }
@@ -665,6 +706,7 @@
       .lgrp-row .lgh {
         flex: 1 1 auto;
         width: auto;
+        min-width: 0;
       }
       .lgh:hover,
       .lgrp-row:hover {
@@ -812,11 +854,19 @@
         color: var(--warn);
       }
       .run .why {
-        color: var(--del);
+        color: var(--warn);
+      }
+      .run .why.fail {
+        color: var(--err);
       }
       .r-problem {
-        display: block;
-        padding: 0 0 5px 14px;
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+        line-clamp: 2;
+        overflow: hidden;
+        margin-bottom: 5px;
+        padding-left: 14px;
         font-size: 10.5px;
         color: var(--del);
         overflow-wrap: anywhere;
@@ -978,9 +1028,32 @@
         font-size: 11.5px;
         border-left: 2px solid transparent;
       }
+      .in-row:hover {
+        background: var(--hover);
+      }
+      .in-row .r-id {
+        flex: 0 0 auto;
+        max-width: 40%;
+        color: var(--fg-3);
+      }
+      .in-row .r-title {
+        flex: 0 1 auto;
+        max-width: 55%;
+        white-space: nowrap;
+        color: var(--fg);
+      }
+      .in-row .r-title:last-child {
+        max-width: none;
+      }
       .in-row.sel {
         background: var(--panel-2);
         color: var(--fg);
+      }
+      .in-row.in-failed.sel,
+      .in-row.in-error.sel,
+      .in-row.in-parked.sel,
+      .in-row.in-problem.sel {
+        border-left-color: var(--run);
       }
       :root[data-pinned="true"] [data-action="toggle-inspector"] {
         border-color: var(--err);
@@ -1022,6 +1095,10 @@
       }
 
       /* the centre with nothing open: a headline, what the view holds and the keys */
+      #main:has(> .empty) {
+        display: flex;
+        flex: 1;
+      }
       .empty {
         margin: auto;
         padding: 18px;
@@ -1039,6 +1116,13 @@
       .empty-k {
         margin-top: 8px;
         font-size: 12px;
+      }
+      .empty.first .empty-c {
+        max-width: 36em;
+        line-height: 1.6;
+      }
+      .empty-c code {
+        color: var(--fg-2);
       }
       .empty kbd {
         padding: 0 4px;
@@ -1092,6 +1176,38 @@
         line-height: 1.6;
         color: var(--fg-2);
         background: var(--panel-2);
+      }
+      /* a run that can't be read: why, under its view header, with the Rebuild it offers */
+      .d-problem {
+        padding: 10px 14px;
+        border-bottom: 1px solid var(--line);
+        border-left: 2px solid var(--err);
+        background: var(--panel-2);
+      }
+      .d-problem-t {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 10px;
+        font-size: 12.5px;
+        color: var(--fg);
+      }
+      .d-problem-w {
+        margin-top: 4px;
+        font-family: var(--mono);
+        font-size: 11px;
+        line-height: 1.6;
+        color: var(--del);
+        overflow-wrap: anywhere;
+      }
+      /* a queue that can't be read: its problem in place of its counts and items */
+      .qproblem {
+        padding: 8px 14px;
+      }
+      .qproblem-t {
+        margin-bottom: 6px;
+        font-size: 12.5px;
+        color: var(--fg);
       }
       .run-b {
         padding: 14px;
@@ -1158,7 +1274,8 @@
         border-color: var(--run);
       }
       .card.pending {
-        opacity: 0.45;
+        border-style: dashed;
+        background: transparent;
         cursor: default;
       }
       .c-top {
@@ -1723,9 +1840,6 @@
         padding: 9px 14px;
         border-top: 1px solid var(--line);
       }
-      .qrow2.done {
-        opacity: 0.6;
-      }
       .qsec {
         display: flex;
         align-items: center;
@@ -1995,6 +2109,7 @@
 
       /* the inspector */
       .inspector {
+        position: relative;
         background: var(--panel);
         border-left: 1px solid var(--line);
         display: flex;
@@ -2010,7 +2125,7 @@
         display: flex;
         align-items: center;
         gap: 9px;
-        padding: 11px 12px;
+        padding: 11px 44px 11px 12px;
         border-bottom: 1px solid var(--line);
         font-size: 13px;
         font-weight: 600;
@@ -2303,6 +2418,33 @@
       :root[data-inspector="closed"] .inspector,
       :root[data-inspector="closed"] .resize-right {
         display: none;
+      }
+      /* rules that narrow a base rule above them, kept after it (ADW-543) */
+      .lgrp-row > .wf-act,
+      .lgrp-row > .busy {
+        white-space: nowrap;
+      }
+      /* a long repository name ends in an ellipsis, its whole in its tooltip, so its buttons keep their line */
+      .lgrp-row .lgh .nm {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .in-row .r-detail {
+        flex: 1 1 0;
+      }
+      .empty.first .cmds {
+        align-items: center;
+        margin-top: 14px;
+      }
+      .card.pending .c-name {
+        font-weight: 500;
+        color: var(--fg-3);
+      }
+      .qrow2.done .c-ref,
+      .qrow2.done .c-t,
+      .qrow2.done .c-sub {
+        color: var(--fg-4);
       }
       /* from 1210px, where the sidebar, the list, the centre's floor and the inspector all fit, the open inspector is a column of the grid */
       @media (min-width: 1210px) {

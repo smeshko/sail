@@ -1,6 +1,7 @@
 // Which row the centre shows without being asked. A view opens with its first row selected, on the first load and on a
 // change of view; Esc clears the selection until a row is opened or the view changes. Under 800px, where the list and
-// the centre are two screens, nothing is selected unasked.
+// the centre are two screens, nothing is selected unasked. The list's cursor goes to the row that is opened, asked or
+// not, so the keys go on from it.
 import { listRepos } from './index-model';
 import { type ListRow, shownGroups } from './list-model';
 import { queueId } from './queue-view';
@@ -40,7 +41,21 @@ export function isOpenRow(store: Store, row: ListRow): boolean {
   return ui.queue === undefined && ui.repo === target.run.repo && ui.runId === target.run.runId;
 }
 
-/** Opens `row` as a click on it does. */
+/**
+ * Puts the list's cursor on the open row the list shows: the one under it already when that one is open, as an Inbox
+ * row of a run that has another, else the first.
+ */
+export function cursorToOpen(store: Store): void {
+  const { ui } = store;
+  const rows = shownRows(store, true);
+  if (rows.some((row) => row.id === ui.listCursor && isOpenRow(store, row))) return;
+  const open = rows.find((row) => isOpenRow(store, row));
+  if (open === undefined || open.id === ui.listCursor) return;
+  ui.listCursor = open.id;
+  store.mark('list');
+}
+
+/** Opens `row` as a click on it does, and puts the list's cursor on it. */
 export function openRow(store: Store, row: ListRow): void {
   const { ui } = store;
   const target = opens(row);
@@ -55,6 +70,7 @@ export function openRow(store: Store, row: ListRow): void {
   }
   store.deselected = false;
   store.revealOpen = true;
+  ui.listCursor = row.id;
   store.mark('list', 'main', 'inspector', 'status');
 }
 
@@ -79,8 +95,8 @@ export function keepSelection(store: Store, change: () => void): void {
 }
 
 /**
- * Selects the first row of the view that opens something, unless it is open already; with none, closes what is open so
- * the empty state shows. Nothing is selected under 800px.
+ * Selects the first row of the view that opens something, unless it is open already, and puts the list's cursor on it;
+ * with none, closes what is open so the empty state shows. Nothing is selected under 800px.
  */
 export function selectFirst(store: Store): void {
   if (store.host.narrow()) return;
@@ -90,4 +106,9 @@ export function selectFirst(store: Store): void {
     return;
   }
   if (!isOpenRow(store, first)) openRow(store, first);
+  else if (store.ui.listCursor !== first.id) {
+    // The row open already, as on a view chosen again, still takes the list's cursor.
+    store.ui.listCursor = first.id;
+    store.mark('list');
+  }
 }

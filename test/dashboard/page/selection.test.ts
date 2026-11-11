@@ -1,9 +1,9 @@
 // Which row the centre shows unasked: the first row of a view that opens something, a folded group's rows and an Inbox
 // problem row skipped, an empty view closing what is open, and a narrow window selecting nothing.
-import { expect, test } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 import type { IndexRepo } from '../../../src/dashboard/files';
 import type { PageHost } from '../../../src/dashboard/page/host';
-import { keepSelection, selectFirst, shownRows } from '../../../src/dashboard/page/selection';
+import { cursorToOpen, keepSelection, selectFirst, shownRows } from '../../../src/dashboard/page/selection';
 import { createStore, type Store } from '../../../src/dashboard/page/store';
 
 const NOW = Date.parse('2026-10-01T12:00:00.000Z');
@@ -54,6 +54,29 @@ const live = [
     runOf('a-done', 'completed', '2026-10-01T07:00:00Z'),
   ]),
 ];
+
+describe('audit 2: rows say what they are (ADW-543)', () => {
+  test("the row a view opens with takes the list's cursor, and so does the first row when it was open already", () => {
+    const { store: made } = store(live);
+    made.ui.view = 'active';
+    selectFirst(made);
+    expect(made.ui.listCursor).toBe('run:alpha/a-new');
+    delete made.ui.listCursor;
+    selectFirst(made);
+    expect([made.ui.runId, made.ui.listCursor]).toEqual(['a-new', 'run:alpha/a-new']);
+  });
+
+  test('cursorToOpen keeps the cursor on an open row it is on, else moves it to the open row the list shows', () => {
+    const { store: made } = store(live);
+    made.ui.view = 'active';
+    selectFirst(made);
+    made.ui.listCursor = 'run:alpha/a-old';
+    cursorToOpen(made);
+    expect(made.ui.listCursor).toBe('run:alpha/a-new');
+    cursorToOpen(made);
+    expect(made.ui.listCursor).toBe('run:alpha/a-new');
+  });
+});
 
 test('Active opens its newest running run, as a click on its first row does', () => {
   const { store: made, connects } = store(live);

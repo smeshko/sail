@@ -143,7 +143,7 @@ const ROWS = (...ids: string[]) =>
   ids
     .map(
       (id) =>
-        `<div class="lrow" data-row="inbox:${id}"><button class="r-open" data-action="open" data-run="${id}">${id}</button><button class="r-dismiss" data-action="dismiss-attention" data-item="${id}">✕</button></div>`,
+        `<div class="lrow" data-row="inbox:${id}" data-subject="run" data-repo="r" data-run="${id}"><button class="r-open" data-action="open" data-run="${id}">${id}</button><button class="r-dismiss" data-action="dismiss-attention" data-item="${id}">✕</button></div>`,
     )
     .join('');
 const MENU =
@@ -154,32 +154,32 @@ describe('audit 2: overlays behave (ADW-542)', () => {
   test('the command menu, opened from a row, gives the focus back to that row when it closes, though the list was drawn again', () => {
     const { host, state, find } = fakeDom();
     host.render('list', ROWS('a', 'b'));
-    find('list', '[data-run="b"]').focus?.();
+    find('list', '.r-open[data-run="b"]').focus?.();
     host.render('menu', MENU);
     host.focusMenu();
     expect(state.active?.name).toBe('menu-query');
     host.render('list', ROWS('a', 'b'));
     host.render('menu', '');
-    expect(state.active).toBe(find('list', '[data-run="b"]'));
+    expect(state.active).toBe(find('list', '.r-open[data-run="b"]'));
   });
 
   test('the shortcut sheet and a context menu, which have no field, give it back too, and a redraw of an open one keeps it in the menu', () => {
     const { host, state, find } = fakeDom();
     host.render('list', ROWS('a', 'b'));
-    find('list', '[data-run="a"]').focus?.();
+    find('list', '.r-open[data-run="a"]').focus?.();
     host.render('menu', SHEET);
     host.focusMenu();
     expect(state.active).toBe(find('menu', '.cmdk'));
     host.render('menu', `${SHEET}<i></i>`);
     expect(state.active).toBe(find('menu', '.cmdk'));
     host.render('menu', '');
-    expect(state.active).toBe(find('list', '[data-run="a"]'));
+    expect(state.active).toBe(find('list', '.r-open[data-run="a"]'));
   });
 
   test('a dialog opened from the command menu gives the focus back to what had it before the menu', () => {
     const { host, state, find } = fakeDom();
     host.render('list', ROWS('a'));
-    find('list', '[data-run="a"]').focus?.();
+    find('list', '.r-open[data-run="a"]').focus?.();
     host.render('menu', MENU);
     host.focusMenu();
     host.openDialog('<button data-action="dialog-confirm">stop</button>');
@@ -187,7 +187,7 @@ describe('audit 2: overlays behave (ADW-542)', () => {
     host.render('menu', '');
     expect(state.active?.dataset.action).toBe('dialog-confirm');
     host.closeDialog();
-    expect(state.active).toBe(find('list', '[data-run="a"]'));
+    expect(state.active).toBe(find('list', '.r-open[data-run="a"]'));
   });
 
   test("a toast's dismissed ✕ gives the focus to the newest toast left, and the last one's back to what had it before", () => {
@@ -195,13 +195,13 @@ describe('audit 2: overlays behave (ADW-542)', () => {
     const toast = (id: number) =>
       `<div class="toast bad" data-toast="${id}"><button class="toast-x" data-action="dismiss-toast" data-toast="${id}">✕</button></div>`;
     host.render('list', ROWS('a'));
-    find('list', '[data-run="a"]').focus?.();
+    find('list', '.r-open[data-run="a"]').focus?.();
     host.render('toasts', `${toast(1)}${toast(2)}${toast(3)}`);
     find('toasts', '[data-toast="3"].toast-x').focus?.();
     host.render('toasts', `${toast(1)}${toast(2)}`);
     expect(state.active).toBe(find('toasts', '[data-toast="2"].toast-x'));
     host.render('toasts', '');
-    expect(state.active).toBe(find('list', '[data-run="a"]'));
+    expect(state.active).toBe(find('list', '.r-open[data-run="a"]'));
   });
 
   test("an Inbox row's ✕ gives the focus to the row that took its place, the next, else the one before", () => {
@@ -209,10 +209,10 @@ describe('audit 2: overlays behave (ADW-542)', () => {
     host.render('list', ROWS('a', 'b', 'c'));
     find('list', '[data-item="b"]').focus?.();
     host.render('list', ROWS('a', 'c'));
-    expect(state.active).toBe(find('list', '[data-run="c"]'));
+    expect(state.active).toBe(find('list', '.r-open[data-run="c"]'));
     find('list', '[data-item="c"]').focus?.();
     host.render('list', ROWS('a'));
-    expect(state.active).toBe(find('list', '[data-run="a"]'));
+    expect(state.active).toBe(find('list', '.r-open[data-run="a"]'));
     host.render('list', '<p>none</p>');
     expect(state.active).toBeNull();
   });
@@ -223,6 +223,25 @@ describe('audit 2: overlays behave (ADW-542)', () => {
     host.focusMenu();
     host.render('menu', '');
     expect(state.active).toBeNull();
+  });
+
+  test("the focus given back or moved on is the page's, never told as a person's: only the person's own reaches the row's subject", () => {
+    const { host, find } = fakeDom();
+    const told: (string | undefined)[] = [];
+    host.onPoint((kind, data) => {
+      if (kind === 'focus') told.push(data?.run ?? data?.item ?? 'none');
+      return undefined;
+    });
+    host.render('list', ROWS('a', 'b', 'c'));
+    find('list', '.r-open[data-run="b"]').focus?.();
+    expect(told).toEqual(['b']);
+    host.render('menu', MENU);
+    host.focusMenu();
+    told.length = 0;
+    host.render('menu', '');
+    find('list', '[data-item="b"]').focus?.();
+    host.render('list', ROWS('a', 'c'));
+    expect(told).toEqual(['b']);
   });
 
   test('the pin toggle says whether it is pressed', () => {

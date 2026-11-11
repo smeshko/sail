@@ -16,7 +16,8 @@
 import { createActor } from './act';
 import type { Subject } from './action-registry';
 import { dispatch } from './actions';
-import { type AttentionItem, identity } from './attention';
+import { identity } from './attention';
+import { focusRow } from './cursor';
 import { startDraw } from './draw';
 import { setFocus, subjectFrom } from './focus';
 import type { PageHost } from './host';
@@ -55,14 +56,6 @@ function runOf(store: Store, subject: Subject) {
   return listRepos(store.index ?? [], store.host.now())
     .find((repo) => repo.name === subject.repo)
     ?.runs.find((each) => each.runId === subject.runId);
-}
-
-/** What a dismiss's toast calls an Inbox row: its run's ticket key or pull request, else its run id, else its words. */
-function inboxName(store: Store, item: AttentionItem): string {
-  const run = item.runId === undefined ? undefined : runOf(store, { kind: 'run', repo: item.repo, runId: item.runId });
-  const key = run?.ticketKey ?? (run?.pr === undefined ? item.runId : `#${run.pr}`);
-  if (key !== undefined) return key;
-  return item.kind === 'problem' ? `the ${item.title} problem of ${item.repo}` : `“${item.title}”`;
 }
 
 export function boot(host: PageHost): Page {
@@ -129,7 +122,7 @@ export function boot(host: PageHost): Page {
           saveCleared(host, store.cleared);
           store.mark('sidebar', 'list');
           return {
-            text: `${inboxName(store, item)} is hidden from the Inbox`,
+            text: `${item.about} ${item.title} is hidden from the Inbox`,
             undo: () => {
               store.cleared = new Set([...storedCleared(host), ...store.cleared].filter((each) => each !== id));
               saveCleared(host, store.cleared);
@@ -168,6 +161,10 @@ export function boot(host: PageHost): Page {
     if (kind === 'hover') {
       // The subject is frozen while the menu is open.
       if (store.ui.menu === undefined) setFocus(store.ui, 'hover', subject);
+      return false;
+    }
+    if (kind === 'focus') {
+      focusRow(store, data);
       return false;
     }
     // A right-click on a row opens that row's actions in place; on no row, or under the dialog, the browser's own menu.

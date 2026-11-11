@@ -259,10 +259,13 @@ test('the inspector has a grid track only from 1210px, and under it is a fixed p
   ]);
 });
 
-test('under 1210px the inspector carries a close button over its head, and from 1210px it is hidden (review R2) (ADW-528, ADW-544)', () => {
+test('the inspector carries a close button over its head at every width, docked or over the centre (ADW-528, ADW-543, ADW-544)', () => {
   const aside = /<aside class="inspector">([\s\S]*?)<\/aside>/.exec(html)?.[1] ?? '';
   expect(aside).toMatch(/<button[^>]*class="btn ins-close"[^>]*data-action="close-inspector"/);
-  expect(declarationsOf('.ins-close')).toContain('display: none');
+  expect(declarationsOf('.ins-close')).not.toContain('display: none');
+  expect(declarationsOf('.ins-close')).toContain('display: inline-flex');
+  expect(declarationsOf('.ins-close')).toContain('position: absolute');
+  expect(declarationsOf('.inspector')).toContain('position: relative');
   const narrow = mediaBlock('max-width: 1209px');
   expect(inBlock(narrow, '.ins-close')).toContain('display: inline-flex');
   expect(inBlock(narrow, '.ins-close')).toContain('position: absolute');

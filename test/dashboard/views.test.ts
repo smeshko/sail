@@ -97,8 +97,8 @@ test("the dense fixture's recorded menu shows a title query's runs by key and ti
 
 test("the committed paused, held, watched queue's row holds both chips, an enabled poll and an unwatch", () => {
   const row = readFileSync(join(COMMITTED, 'list-queues-held.html'), 'utf8');
-  expect(row).toContain('paused: ticketSource fake: the provider did not answer');
-  expect(row).toMatch(/held until \d\d:\d\d:\d\d: usage limit/);
+  expect(row).toContain('ticket polls paused — fake: the provider did not answer');
+  expect(row).toMatch(/held until \d\d:\d\d — usage limit/);
   expect(row).toContain('data-action="poll-queue" data-repo="beta" data-workflow="ticket-to-pr"');
   expect(row).toContain('data-action="unwatch" data-repo="beta" data-workflow="ticket-to-pr"');
   expect(row).toContain('watched</span>');

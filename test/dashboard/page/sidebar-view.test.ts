@@ -1,5 +1,5 @@
 // The sidebar: four entries with counts, then a filter button per repository with its dot, and no run row or menu.
-import { expect, test } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 import type { ListRepo } from '../../../src/dashboard/page/index-model';
 import { renderSidebar } from '../../../src/dashboard/page/sidebar-view';
 import { initialUi } from '../../../src/dashboard/page/ui-state';
@@ -15,6 +15,13 @@ const repo = (name: string, extra: Partial<ListRepo> = {}): ListRepo => ({
 const repos = [repo('alpha', { watching: ['w'] }), repo('beta'), repo('<i>gamma</i>', { problem: 'broken clone' })];
 const counts = { inbox: 5, active: 8, queues: 2, history: 36 };
 const draw = (fields = {}) => renderSidebar(repos, counts, { ...initialUi(0), ...fields }).value;
+
+describe('audit 2: rows say what they are (ADW-543)', () => {
+  test('the repositories heading is drawn only over a repository', () => {
+    expect(draw()).toContain('<div class="side-h">repositories</div>');
+    expect(renderSidebar([], counts, initialUi(0)).value).not.toContain('side-h');
+  });
+});
 
 test('the sidebar draws Inbox, Active, Queues and History with their counts', () => {
   const entries = [...draw().matchAll(/<span class="nm">(\w+)<\/span><span class="c">(\d+)<\/span><\/button>/g)].map(

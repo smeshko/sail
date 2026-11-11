@@ -39,13 +39,14 @@ export interface PageHost {
    */
   onKey(handler: (key: string, inInput: boolean, on?: string, mod?: boolean) => boolean): void;
   /**
-   * `handler` is told where the pointer is: `hover` when it moves onto an element, `context` when a right-click lands.
-   * `data` is the dataset of the nearest ancestor with a `data-subject`, or undefined when the element is on no row.
-   * A `context` answered true has its default prevented.
+   * `handler` is told where the pointer is: `hover` when it moves onto an element, `context` when a right-click lands,
+   * and `focus` when the focus reaches an element, by Tab or a click, though not when a redraw, a closing dialog, menu,
+   * sheet or toast, or a row written away gives it back or moves it on. `data` is the dataset of the nearest ancestor with a `data-subject`, or undefined when the element is on no
+   * row. A `context` answered true has its default prevented.
    */
   onPoint(
     handler: (
-      kind: 'hover' | 'context',
+      kind: 'hover' | 'context' | 'focus',
       data: Record<string, string> | undefined,
       point: { x: number; y: number },
     ) => boolean | undefined,
@@ -367,6 +368,16 @@ export function browserHost(win: BrowserWindow): PageHost {
   const fitColumns = installResize(win);
   /** The focus key of what had the focus when the dialog opened. */
   let opener: string | undefined;
+  /** Set while the page gives the focus back itself, so that focus is not told as a person's. */
+  let refocusing = false;
+  const refocus = (target: ElementLike) => {
+    refocusing = true;
+    try {
+      target.focus?.({ preventScroll: true });
+    } finally {
+      refocusing = false;
+    }
+  };
   /** The regions drawn over the page, which give the focus back when they close. */
   const over = (element: ElementLike) =>
     (['menu', 'toasts', 'dialog'] as const).some((id) => doc.getElementById(id)?.contains?.(element) === true);
@@ -375,14 +386,14 @@ export function browserHost(win: BrowserWindow): PageHost {
   doc.addEventListener('focusin', (event) => {
     if (isElement(event.target) && !over(event.target)) back = focusKey(event.target);
   });
-  /** Focuses the element of the regions with `key`, the first, and answers whether there was one. */
-  const refocus = (key: string | undefined) => {
+  /** Gives the focus back to the element of the regions with `key`, the first, and answers whether there was one. */
+  const refocusKey = (key: string | undefined) => {
     if (key === undefined) return false;
     for (const region of REGIONS) {
       const root = doc.getElementById(region);
       const target = root === null ? undefined : keyed(root, key)[0];
       if (target !== undefined) {
-        target.focus?.({ preventScroll: true });
+        refocus(target);
         return true;
       }
     }
@@ -400,21 +411,23 @@ export function browserHost(win: BrowserWindow): PageHost {
   /** Moves on a focus the write of `region` took away, from the row it was in, if any. */
   const moveOn = (region: Region, element: ElementLike, markup: string, row: ReturnType<typeof rowAround>) => {
     if (region === 'menu') {
-      if (markup === '') refocus(back);
-      else menuTarget()?.focus?.({ preventScroll: true });
+      if (markup === '') refocusKey(back);
+      else {
+        const target = menuTarget();
+        if (target !== null && target !== undefined) refocus(target);
+      }
       return;
     }
     if (region === 'toasts') {
       const left = Array.from(element.querySelectorAll?.('[data-action="dismiss-toast"]') ?? []).at(-1);
-      if (left === undefined) refocus(back);
-      else left.focus?.({ preventScroll: true });
+      if (left === undefined) refocusKey(back);
+      else refocus(left);
       return;
     }
     if (row === undefined) return;
     const at = row.ids.indexOf(row.id);
-    rowTarget(element, [row.id, ...row.ids.slice(at + 1), ...row.ids.slice(0, at).reverse()])?.focus?.({
-      preventScroll: true,
-    });
+    const target = rowTarget(element, [row.id, ...row.ids.slice(at + 1), ...row.ids.slice(0, at).reverse()]);
+    if (target !== undefined) refocus(target);
   };
   let onAction: (action: string, data: Record<string, string>) => void = () => {};
   /** Delivers `element`'s action with its data, as a click on it would. */
@@ -478,7 +491,7 @@ export function browserHost(win: BrowserWindow): PageHost {
     if (focused !== undefined) {
       const found = keyed(element, focused.key);
       const target = found[Math.min(focused.place, found.length - 1)];
-      target?.focus?.({ preventScroll: true });
+      if (target !== undefined) refocus(target);
       if (target !== undefined && selection !== undefined) {
         if (typeof selection.start === 'number' && typeof selection.end === 'number') {
           try {
@@ -527,7 +540,7 @@ export function browserHost(win: BrowserWindow): PageHost {
       dialog?.close?.();
       const key = opener;
       opener = undefined;
-      refocus(key);
+      refocusKey(key);
     },
     redrawDialog(markup) {
       const dialog = doc.getElementById('dialog-body') ?? doc.getElementById('dialog');
@@ -559,6 +572,10 @@ export function browserHost(win: BrowserWindow): PageHost {
     onPoint(handler) {
       doc.addEventListener('mouseover', (event) => {
         handler('hover', subjectData(event.target), { x: event.clientX ?? 0, y: event.clientY ?? 0 });
+      });
+      // The focus reaching a row, by Tab or a click, is told as `focus`; the page's own giving it back is not.
+      doc.addEventListener('focusin', (event) => {
+        if (!refocusing) handler('focus', subjectData(event.target), { x: 0, y: 0 });
       });
       // A right-click on a row is the page's, and its default is prevented only when the handler took it: one on no row
       // keeps the browser's own menu.
