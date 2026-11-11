@@ -2,7 +2,7 @@
 // sequence number of its last change, and the one that changed last is the focused subject. A source set to the subject
 // it already holds is no change, so a redraw under a resting pointer doesn't take the subject back from the keyboard.
 // Pure over the state: it reads the store only to find the open run or queue.
-import type { Subject } from './action-registry';
+import { type Subject, type SubjectKind, subjectOf } from './action-registry';
 import { openQueue, type Store } from './store';
 import type { FocusSource, UiState } from './ui-state';
 
@@ -45,4 +45,12 @@ export function openSubject(store: Store): Subject | undefined {
 /** Makes the open source what the page has open now. */
 export function syncOpen(store: Store): void {
   setFocus(store.ui, 'open', openSubject(store));
+}
+
+const ROWS: readonly SubjectKind[] = ['run', 'item', 'workflow', 'repo'];
+
+/** The subject a row's dataset names by its `data-subject`, or undefined for a row that names none. */
+export function subjectFrom(data: Readonly<Record<string, string>> | undefined): Subject | undefined {
+  const kind = ROWS.find((each) => each === data?.subject);
+  return kind === undefined || data === undefined ? undefined : subjectOf([kind], data);
 }

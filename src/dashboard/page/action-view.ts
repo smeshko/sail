@@ -23,6 +23,12 @@ export interface ControlOptions {
   wrap?: boolean;
 }
 
+/** A row's ` data-subject` and the `data-*` that name its subject, for the focus to read from the row under the pointer. */
+export function subjectAttrs(subject: Subject): SafeHtml | '' {
+  if (subject.kind === 'none') return '';
+  return html` data-subject="${subject.kind}"${dataOf(subject)}`;
+}
+
 function dataOf(subject: Subject): SafeHtml | '' {
   switch (subject.kind) {
     case 'run':

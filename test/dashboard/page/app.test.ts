@@ -6,8 +6,10 @@ import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { runActions } from '../../../src/dashboard/actions';
 import { callFile, findRepo, findRunDir, index } from '../../../src/dashboard/files';
+import type { Subject } from '../../../src/dashboard/page/action-registry';
 import { boot, CLEARED_KEY, FILTER_KEY, LIST_KEY, type Page, THEME_KEY } from '../../../src/dashboard/page/app';
 import { attention, identity } from '../../../src/dashboard/page/attention';
+import { focused } from '../../../src/dashboard/page/focus';
 import { browserHost, type ConnectHandlers, type PageHost, type Region } from '../../../src/dashboard/page/host';
 import { listRepos, newestFirst } from '../../../src/dashboard/page/index-model';
 import type { QueueWatch } from '../../../src/dashboard/watch-state';
@@ -188,6 +190,18 @@ class FakeHost implements PageHost {
   /** The filter field's typing handler, the fields focused by name, the blurs, and the regions revealed. */
   private input?: (name: string, value: string) => void;
   focused: string[] = [];
+  private point_?: (
+    kind: 'hover' | 'context',
+    data: Record<string, string> | undefined,
+    at: { x: number; y: number },
+  ) => boolean | undefined | void;
+  onPoint(handler: NonNullable<FakeHost['point_']>) {
+    this.point_ = handler;
+  }
+  /** The pointer reaching a row's dataset (or no row), as the browser host reports it. */
+  point(kind: 'hover' | 'context', data: Record<string, string> | undefined, at = { x: 0, y: 0 }) {
+    return this.point_?.(kind, data, at);
+  }
   blurs = 0;
   revealed: Region[] = [];
   onInput(handler: (name: string, value: string) => void) {
@@ -579,6 +593,34 @@ test("the open run, then the open queue, is the open source's subject", () => {
   expect(page.ui.focus.open?.subject).toEqual({ kind: 'workflow', repo: 'beta', workflow: QUEUE_WORKFLOW });
 });
 
+const ITEM_ROW = { subject: 'item', repo: 'beta', workflow: QUEUE_WORKFLOW, item: 'ticket:FAKE-5' };
+
+test("hovering a queue item's row makes it the subject, and leaving it gives back the open queue", () => {
+  page = boot(host);
+  firstIndex(GOLDEN_RUN_ID);
+  host.click({ action: 'select-queue', queue: `beta/${QUEUE_WORKFLOW}` });
+  host.advance(100);
+  const queue: Subject = { kind: 'workflow', repo: 'beta', workflow: QUEUE_WORKFLOW };
+  expect(host.regions.main).toContain(
+    `<div class="qrow2" data-subject="item" data-repo="beta" data-workflow="${QUEUE_WORKFLOW}" data-item="ticket:FAKE-5">`,
+  );
+  host.point('hover', ITEM_ROW);
+  expect(focused(page.ui)).toEqual({ kind: 'item', repo: 'beta', workflow: QUEUE_WORKFLOW, item: 'ticket:FAKE-5' });
+  host.point('hover', undefined);
+  expect(focused(page.ui)).toEqual(queue);
+});
+
+test('the list draws each row with its subject: a run, a queue and a repository', () => {
+  page = boot(host);
+  host.push(host.open('index')[0], indexMessage());
+  host.advance(100);
+  expect(host.regions.list).toContain(`data-subject="run" data-repo="beta" data-run="${FAKE_3_ID}"`);
+  host.click({ action: 'select-view', view: 'queues' });
+  host.advance(100);
+  expect(host.regions.list).toContain(`data-subject="workflow" data-repo="beta" data-workflow="${QUEUE_WORKFLOW}"`);
+  expect(host.regions.list).toContain('data-subject="repo" data-repo="beta"');
+});
+
 test('a queue opened over a run stays open when that run leaves the index, and the run alone closes (review R10)', () => {
   page = boot(host);
   firstIndex(GOLDEN_RUN_ID);
@@ -725,7 +767,7 @@ test("with no queue the list has no queue row and no queue socket opens; with be
   host.click({ action: 'select-view', view: 'queues' });
   host.advance(100);
   expect(host.regions.list).toContain(
-    `<button class="q-row" data-row="queue:beta/${QUEUE_WORKFLOW}" title="polled 7d ago" data-action="select-queue"`,
+    `<button class="q-row" data-row="queue:beta/${QUEUE_WORKFLOW}" title="polled 7d ago" data-subject="workflow" data-repo="beta" data-workflow="${QUEUE_WORKFLOW}" data-action="select-queue"`,
   );
   host.renders = [];
   for (const event of readEvents(queueDirOf(m))) host.push(sockets[0], { kind: 'queue-event', event });
@@ -761,7 +803,7 @@ test("with no queue the list has no queue row and no queue socket opens; with be
   host.advance(100);
   expect(host.regions.main).toContain('<span class="c-ref">ticket:FAKE-4</span>');
   expect(host.regions.list).toContain(
-    `<button class="q-row sel" data-row="queue:beta/${QUEUE_WORKFLOW}" title="polled 7d ago" data-action="select-queue"`,
+    `<button class="q-row sel" data-row="queue:beta/${QUEUE_WORKFLOW}" title="polled 7d ago" data-subject="workflow" data-repo="beta" data-workflow="${QUEUE_WORKFLOW}" data-action="select-queue"`,
   );
   expect(host.regions.list).not.toMatch(/<div class="run[^"]* sel">/);
   host.renders = [];

@@ -1,7 +1,7 @@
 // The focused subject: three sources, the one that changed last wins, and a source set to what it holds is no change.
 import { expect, test } from 'bun:test';
 import type { Subject } from '../../../src/dashboard/page/action-registry';
-import { focused, sameSubject, setFocus } from '../../../src/dashboard/page/focus';
+import { focused, sameSubject, setFocus, subjectFrom } from '../../../src/dashboard/page/focus';
 import { initialUi } from '../../../src/dashboard/page/ui-state';
 
 const run: Subject = { kind: 'run', repo: 'alpha', runId: 'FAKE-1-x' };
@@ -66,4 +66,18 @@ test('two subjects are the same only when every field is', () => {
   expect(sameSubject(run, other)).toBe(false);
   expect(sameSubject(undefined, undefined)).toBe(true);
   expect(sameSubject(run, undefined)).toBe(false);
+});
+
+test('subjectFrom reads a row by its data-subject, and a row that names no known kind is none', () => {
+  expect(subjectFrom({ subject: 'run', repo: 'alpha', run: 'FAKE-1-x' })).toEqual(run);
+  expect(subjectFrom({ subject: 'item', repo: 'beta', workflow: 'ticket-to-pr', item: 'ticket:FAKE-5' })).toEqual(item);
+  expect(subjectFrom({ subject: 'workflow', repo: 'beta', workflow: 'w' })).toEqual({
+    kind: 'workflow',
+    repo: 'beta',
+    workflow: 'w',
+  });
+  expect(subjectFrom({ subject: 'repo', repo: 'beta' })).toEqual({ kind: 'repo', repo: 'beta' });
+  expect(subjectFrom({ subject: 'none' })).toBeUndefined();
+  expect(subjectFrom({ repo: 'beta' })).toBeUndefined();
+  expect(subjectFrom(undefined)).toBeUndefined();
 });

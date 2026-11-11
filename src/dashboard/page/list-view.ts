@@ -12,7 +12,7 @@
 import type { RunActions } from '../actions';
 import type { RepoOffers } from '../offers';
 import { ACTIONS, type OfferSource, type Subject } from './action-registry';
-import { actionControl } from './action-view';
+import { actionControl, subjectAttrs } from './action-view';
 import { ago, cost, duration } from './format';
 import { html, type SafeHtml } from './html';
 import { type ListRepo, type ListRun, workflowOf } from './index-model';
@@ -96,7 +96,7 @@ const cur = (id: string, ui: UiState) => (ui.listCursor === id ? ' cur' : '');
 function runRow(row: RunRow, ui: UiState, offers: RunActions | undefined): SafeHtml {
   const { repo, run } = row;
   const tip = tooltipOf(run);
-  return html`<div class="run lrow${isOpen(repo, run, ui) ? ' sel' : ''}${cur(row.id, ui)}" data-row="${row.id}"><button class="r-open"${
+  return html`<div class="run lrow${isOpen(repo, run, ui) ? ' sel' : ''}${cur(row.id, ui)}" data-row="${row.id}"${subjectAttrs({ kind: 'run', repo, runId: run.runId })}><button class="r-open"${
     tip === undefined ? '' : html` title="${tip}"`
   } data-action="select-run" data-repo="${repo}" data-run="${run.runId}"><span class="r-line">${statusMark(repo, run, ui)}<span class="r-id">${runLabel(run)}</span><span class="r-title">${run.title}</span><span class="r-wf">${repo} › ${workflowOf(run)}</span>${
     run.status === 'running' && run.stalled !== undefined
@@ -110,13 +110,14 @@ function runRow(row: RunRow, ui: UiState, offers: RunActions | undefined): SafeH
 function queueRow(row: QueueRow, ui: UiState, now: number): SafeHtml {
   const id = queueId(row.repo, row.workflow);
   const sel = `${ui.queue === id ? ' sel' : ''}${cur(row.id, ui)}`;
+  const subject = subjectAttrs({ kind: 'workflow', repo: row.repo, workflow: row.workflow });
   // A queue that can't be read has nothing to count: its problem wraps inside its row in place of its waiting count.
   if (row.problem !== undefined) {
-    return html`<button class="q-row bad${sel}" data-row="${row.id}" data-action="select-queue" data-queue="${id}"><span class="qd"></span><span class="nm">${row.repo} › ${row.workflow}</span>${watchWord(row.watch)}<span class="n">unreadable</span><span class="r-problem">${row.problem}</span></button>`;
+    return html`<button class="q-row bad${sel}" data-row="${row.id}"${subject} data-action="select-queue" data-queue="${id}"><span class="qd"></span><span class="nm">${row.repo} › ${row.workflow}</span>${watchWord(row.watch)}<span class="n">unreadable</span><span class="r-problem">${row.problem}</span></button>`;
   }
   return html`<button class="q-row${sel}" data-row="${row.id}"${
     row.lastPolledAt === undefined ? '' : html` title="polled ${ago(row.lastPolledAt, now)}"`
-  } data-action="select-queue" data-queue="${id}"><span class="qd"></span><span class="nm">${row.repo} › ${row.workflow}</span>${watchWord(row.watch)}<span class="n">${row.waiting} waiting</span></button>`;
+  }${subject} data-action="select-queue" data-queue="${id}"><span class="qd"></span><span class="nm">${row.repo} › ${row.workflow}</span>${watchWord(row.watch)}<span class="n">${row.waiting} waiting</span></button>`;
 }
 
 const rowOf = (row: ListRow, ui: UiState, now: number, offers: RunActions | undefined): SafeHtml =>
@@ -124,7 +125,7 @@ const rowOf = (row: ListRow, ui: UiState, now: number, offers: RunActions | unde
 
 /** A Queues group's header row: the repository, its watch buttons and its problem. */
 function repoHeader(group: ListGroup, repo: ListRepo, open: boolean, ui: UiState): SafeHtml {
-  return html`<div class="lgrp-row${cur(group.id, ui)}"><button class="lgh${open ? ' open' : ''}"${
+  return html`<div class="lgrp-row${cur(group.id, ui)}"${subjectAttrs({ kind: 'repo', repo: repo.name })}><button class="lgh${open ? ' open' : ''}"${
     repo.remote === null ? '' : html` title="${repo.remote}"`
   } data-action="toggle-list-group" data-group="${group.id}" aria-expanded="${open ? 'true' : 'false'}"><span class="lcaret">›</span><span class="nm">${group.label}</span><span class="c">${group.rows.length}</span></button>${watchButtons(repo.name, repo.offers, ui)}</div>${
     repo.problem === undefined ? '' : html`<div class="lgrp-p">${repo.problem}</div>`

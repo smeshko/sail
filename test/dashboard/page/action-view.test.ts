@@ -2,7 +2,7 @@
 // why, nothing when not offered, and the parameters each kind draws.
 import { expect, test } from 'bun:test';
 import { ACTIONS, type ActionDef, type OfferSource, type Subject } from '../../../src/dashboard/page/action-registry';
-import { actionControl } from '../../../src/dashboard/page/action-view';
+import { actionControl, subjectAttrs } from '../../../src/dashboard/page/action-view';
 import type { ActState } from '../../../src/dashboard/page/ui-state';
 
 const RUN: Subject = { kind: 'run', repo: 'alpha', runId: 'R1' };
@@ -136,4 +136,16 @@ test('a parameter the row gives is not drawn', () => {
   expect(actionControl(move, item, idle, source).toString()).toBe(
     '<button class="btn" data-action="move-item">move</button>',
   );
+});
+
+test('subjectAttrs writes the kind and the data each subject needs, and nothing for none', () => {
+  expect(String(subjectAttrs(RUN))).toBe(' data-subject="run" data-repo="alpha" data-run="R1"');
+  expect(String(subjectAttrs({ kind: 'item', repo: 'a', workflow: 'w', item: 'ticket:X-1' }))).toBe(
+    ' data-subject="item" data-repo="a" data-workflow="w" data-item="ticket:X-1"',
+  );
+  expect(String(subjectAttrs({ kind: 'workflow', repo: 'a', workflow: 'w' }))).toBe(
+    ' data-subject="workflow" data-repo="a" data-workflow="w"',
+  );
+  expect(String(subjectAttrs({ kind: 'repo', repo: 'a' }))).toBe(' data-subject="repo" data-repo="a"');
+  expect(subjectAttrs({ kind: 'none' })).toBe('');
 });

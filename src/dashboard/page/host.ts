@@ -33,6 +33,18 @@ export interface PageHost {
    * landed on; answering true suppresses the key's default, as typing it would.
    */
   onKey(handler: (key: string, inInput: boolean, on?: string) => boolean): void;
+  /**
+   * `handler` is told where the pointer is: `hover` when it moves onto an element, `context` when a right-click lands.
+   * `data` is the dataset of the nearest ancestor with a `data-subject`, or undefined when the element is on no row.
+   * A `context` answered true has its default prevented.
+   */
+  onPoint(
+    handler: (
+      kind: 'hover' | 'context',
+      data: Record<string, string> | undefined,
+      point: { x: number; y: number },
+    ) => boolean | undefined | void,
+  ): void;
   /** `handler` is told the value of a named field each time it is typed into. */
   onInput(handler: (name: string, value: string) => void): void;
   /** Focuses the field named `name`, in whichever region draws it. */
@@ -113,6 +125,9 @@ export interface EventLike {
   target: unknown;
   key?: string;
   clientX?: number;
+  clientY?: number;
+  metaKey?: boolean;
+  ctrlKey?: boolean;
   preventDefault?(): void;
 }
 
@@ -152,6 +167,17 @@ const isElement = (value: unknown): value is ElementLike =>
 function actionOf(target: unknown): ElementLike | undefined {
   for (let at = isElement(target) ? target : null; at !== null; at = at.parentElement) {
     if (at.dataset.action !== undefined) return at;
+  }
+  return undefined;
+}
+
+/** The dataset of the nearest ancestor of `target` that names a subject, as a plain record. */
+function subjectData(target: unknown): Record<string, string> | undefined {
+  for (let at = isElement(target) ? target : null; at !== null; at = at.parentElement) {
+    if (at.dataset.subject === undefined) continue;
+    const data: Record<string, string> = {};
+    for (const [name, value] of Object.entries(at.dataset)) if (value !== undefined) data[name] = value;
+    return data;
   }
   return undefined;
 }
@@ -363,6 +389,11 @@ export function browserHost(win: BrowserWindow): PageHost {
       doc.addEventListener('click', (event) => {
         const element = actionOf(event.target);
         if (element !== undefined) fire(element);
+      });
+    },
+    onPoint(handler) {
+      doc.addEventListener('mouseover', (event) => {
+        handler('hover', subjectData(event.target), { x: event.clientX ?? 0, y: event.clientY ?? 0 });
       });
     },
     onInput(handler) {

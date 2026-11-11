@@ -1063,3 +1063,20 @@ describe('the URL parameters (ADW-522)', () => {
     expect(fake.replaced.map((each) => each.url)).toEqual(['/dashboard?view=a+b']);
   });
 });
+
+test('a mouseover is delegated to the nearest data-subject, and one outside any gives none', () => {
+  const fake = fakeWindow();
+  const host = browserHost(fake.win);
+  const seen: [string, Record<string, string> | undefined, { x: number; y: number }][] = [];
+  host.onPoint((kind, data, point) => {
+    seen.push([kind, data, point]);
+  });
+  const row = element({ dataset: { subject: 'item', repo: 'beta', item: 'ticket:FAKE-5' } });
+  const child = element({ dataset: { action: 'x' }, parentElement: row });
+  fake.fire('mouseover', { target: child, clientX: 12, clientY: 34 });
+  fake.fire('mouseover', { target: element() });
+  expect(seen).toEqual([
+    ['hover', { subject: 'item', repo: 'beta', item: 'ticket:FAKE-5' }, { x: 12, y: 34 }],
+    ['hover', undefined, { x: 0, y: 0 }],
+  ]);
+});

@@ -12,6 +12,7 @@
 import { createActor } from './act';
 import { actions, dispatch } from './actions';
 import { startDraw } from './draw';
+import { setFocus, subjectFrom } from './focus';
 import type { PageHost } from './host';
 import { REGIONS } from './host';
 import { onKey } from './keys';
@@ -80,6 +81,9 @@ export function boot(host: PageHost): Page {
   startDraw(store);
   host.onAction((action, data) => dispatch(store, action, data));
   host.onKey((key, inInput, on) => onKey(store, key, inInput, on));
+  host.onPoint((kind, data) => {
+    if (kind === 'hover') setFocus(store.ui, 'hover', subjectFrom(data));
+  });
   host.onInput((name, value) => {
     if (name === 'list-filter') dispatch(store, 'list-filter', { value });
   });

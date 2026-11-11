@@ -67,14 +67,14 @@ test('the Active list is headed Active with its count, then waiting on you and r
 
 test('a run row holds its status, id, title, repository › workflow, duration, cost and stop reason, and a problem inside the row', () => {
   const markup = draw('active');
-  const row = markup.match(/<div class="run lrow" data-row="run:alpha\/a-run">.*?<\/button>/s)?.[0] ?? '';
+  const row = markup.match(/<div class="run lrow" data-row="run:alpha\/a-run"[^>]*>.*?<\/button>/s)?.[0] ?? '';
   expect(row).toContain(
     '<span class="st p-run"></span><span class="r-id">ADW-1</span><span class="r-title">Fix the parser</span><span class="r-wf">alpha › flow</span>',
   );
   expect(row).toContain('<span class="r-el">1m 5s</span><span class="r-cost">$1.50</span>');
-  const susp = markup.match(/data-row="run:alpha\/a-susp">.*?<\/button>/s)?.[0] ?? '';
+  const susp = markup.match(/data-row="run:alpha\/a-susp"[^>]*>.*?<\/button>/s)?.[0] ?? '';
   expect(susp).toContain('<span class="why">usage_limit</span>');
-  const bad = markup.match(/data-row="run:alpha\/a-bad">.*?<\/button>/s)?.[0] ?? '';
+  const bad = markup.match(/data-row="run:alpha\/a-bad"[^>]*>.*?<\/button>/s)?.[0] ?? '';
   expect(bad).toContain('<span class="r-problem">run.json is not a run header</span>');
 });
 
@@ -108,7 +108,9 @@ test('the open run draws its ⋯ menu under its row with the run controls, and t
     { repo: 'alpha', runId: 'a-run', runMenu: 'a-run', listCursor: 'run:alpha/a-run' },
     offers,
   );
-  expect(markup).toContain('class="run lrow sel cur" data-row="run:alpha/a-run"');
+  expect(markup).toContain(
+    'class="run lrow sel cur" data-row="run:alpha/a-run" data-subject="run" data-repo="alpha" data-run="a-run"',
+  );
   expect(markup).toContain(
     'data-action="run-menu" data-repo="alpha" data-run="a-run" aria-label="actions for a-run" aria-expanded="true"',
   );
