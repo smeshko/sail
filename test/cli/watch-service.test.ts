@@ -263,6 +263,30 @@ test('sail watch --install while a live watcher of the repository is recorded ex
   });
 }, 30_000);
 
+test('sail watch --service with a live watcher of the repository already recorded exits 3, naming its pid, and drops no command', async () => {
+  await withTempRepo(async (repo) => {
+    const world = repository(repo);
+    mkdirSync(world.registry, { recursive: true });
+    const sailDir = join(repo.dir, '.sail');
+    writeFileSync(
+      join(world.registry, 'stub.json'),
+      JSON.stringify({
+        schema: 'sail.registry.v1',
+        name: 'stub',
+        remote: null,
+        clone: repo.dir,
+        sailDir,
+        updatedAt: START,
+        watcher: { pid: 5151, startedAt: START, sailDir, ticketSource: 'fake', labels: ['sail-a'] },
+      }),
+    );
+    const got = await sail({ isAlive: (pid) => pid === 5151 }, repo.dir, world.env, { service: true }, ['a']);
+    expect(got.code).toBe(EXIT_REFUSED);
+    expect(got.stderr).toContain('pid 5151');
+    expect(existsSync(join(repo.dir, '.sail-runs', 'watcher', 'commands'))).toBe(false);
+  });
+}, 30_000);
+
 test('sail watch --install --all writes one plist for the repository that declares a watch and skips the other, saying why', async () => {
   await withTempRepo(async (repo) => {
     const world = repository(repo);

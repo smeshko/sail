@@ -226,6 +226,13 @@ export function watchCommand(deps: WatchDeps = {}): Command {
 
     if (live !== undefined) {
       const { pid } = live.watcher;
+      // A login service that only joined another watcher would exit 0, which launchd takes for a stop and leaves down:
+      // it refuses instead, so launchd tries again once that watcher is gone.
+      if (args.values.service === true) {
+        return refuse(
+          `a watcher of '${entry.name}' already runs outside this login service (pid ${pid}): launchd starts this one again once it stops`,
+        );
+      }
       const watched = liveSet(sailDir, pid);
       const known = [...watched];
       const kinds = new Map<string, WatchDeclaration>();
