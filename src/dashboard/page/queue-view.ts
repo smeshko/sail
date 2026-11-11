@@ -5,12 +5,12 @@
 // workflow that polls tickets), and, at a row's right, ▲ and ▼ on a waiting item to move it before or after its waiting
 // neighbour, and a ⋯ on any item but a running one, which opens its menu: requeue, on a parked item or a failed one
 // whose run has ended, and drop, which needs a second click. One menu is open at a time. The answer to any of them, a refusal or that the watcher has not taken it yet, shows
-// beside the header. While the workflow isn't watched, or its watcher isn't running, which the index says from the live
+// beside the header. A queue held on the usage limit of a harness key also offers a release of that hold, after a second click: it needs no watcher. While the workflow isn't watched, or its watcher isn't running, which the index says from the live
 // watcher, every one of those controls is drawn disabled and the server's reason shows beside the poll button. An item whose run the rail lists opens it. A waiting item shows its priority. A held item shows
 // when its hold ends and why, and its hold's events name it. An item that waits on its ticket's prerequisites names them.
 import type { QueueEvent } from '../../events/types';
 import type { QueueItemState } from '../../watch/queue-store';
-import { ACTIONS, actionOf, type OfferSource, type Subject } from './action-registry';
+import { ACTIONS, actionOf, type OfferSource, type Subject, sameSubject } from './action-registry';
 import { actionControl, resultOf } from './action-view';
 import { ago, clock } from './format';
 import { html, type SafeHtml, safeHref } from './html';
@@ -120,6 +120,27 @@ function itemMenu(panel: QueuePanel, item: PanelItem, ui: UiState, why: string |
   return html`<span class="qmore">${toggle}<span class="qmenu">${buttons}</span></span>`;
 }
 
+/**
+ * The release of the usage-limit hold on `key`, drawn after the held chip: a `release` button, and once a first click has
+ * armed it, what releasing does and a button that confirms. The hold is the machine's, so it needs no watcher.
+ */
+function releaseControl(panel: QueuePanel, key: string, ui: UiState): SafeHtml | '' {
+  const def = actionOf('release-hold');
+  if (def === undefined) return '';
+  const subject: Subject = { kind: 'workflow', repo: panel.repo, workflow: panel.workflow };
+  const { pending } = ui.act;
+  const armed =
+    pending !== undefined && !pending.sent && pending.id === def.id && sameSubject(pending.subject, subject);
+  const button = actionControl(def, subject, ui.act, panelSource(panel), {
+    data: true,
+    attrs: { harness: key },
+    title: `release the usage-limit hold on ${key}`,
+  });
+  return armed
+    ? html`<span class="warnchip">releasing ends every watcher's hold on ${key}, and dispatch resumes</span>${button}`
+    : button;
+}
+
 /** The field to add a ticket by its key, with Force, as typed so far. */
 function addForm(panel: QueuePanel, ui: UiState, why: string | undefined): SafeHtml {
   const typed = ui.act.drafts['add-ticket'];
@@ -212,7 +233,7 @@ function panelView(panel: QueuePanel, stream: QueueStream | undefined, ui: UiSta
   }${paused === undefined ? '' : html`<span class="warnchip">paused: ${paused.port} ${paused.adapter}: ${paused.message}</span>`}${
     held === undefined
       ? ''
-      : html`<span class="warnchip">held${held.until === undefined ? '' : html` until ${clock(held.until, ui.tz)}`}: ${held.reason}</span>`
+      : html`<span class="warnchip">held${held.until === undefined ? '' : html` until ${clock(held.until, ui.tz)}`}: ${held.reason}</span>${held.harnessKey === undefined ? '' : releaseControl(panel, held.harnessKey, ui)}`
   }${notice === undefined ? '' : html`<span class="warnchip">${notice}</span>`}${
     !queueOffered(panel, 'poll-queue')
       ? ''

@@ -1,4 +1,4 @@
-// The registry of the page's actions: its twelve entries, what each posts, what each answer means and where each reads
+// The registry of the page's actions: its thirteen entries, what each posts, what each answer means and where each reads
 // its availability from the server's offers.
 import { expect, test } from 'bun:test';
 import type { RunActions } from '../../../src/dashboard/actions';
@@ -49,7 +49,7 @@ const def = (id: string) => {
 const request = (id: string, subject: Subject, values: Record<string, string> = {}, from = source()) =>
   def(id).request?.(subject, values, from);
 
-test('ACTIONS has exactly the twelve ids, each with a label, appliesTo, a tier and a request and answer or a local run', () => {
+test('ACTIONS has exactly the thirteen ids, each with a label, appliesTo, a tier and a request and answer or a local run', () => {
   expect(ACTIONS.map((each) => each.id).sort()).toEqual(
     [
       'resume-run',
@@ -60,6 +60,7 @@ test('ACTIONS has exactly the twelve ids, each with a label, appliesTo, a tier a
       'requeue-item',
       'move-item',
       'poll-queue',
+      'release-hold',
       'add-ticket',
       'watch',
       'unwatch',
@@ -80,6 +81,7 @@ test('ACTIONS has exactly the twelve ids, each with a label, appliesTo, a tier a
     'stop-run',
     'clean-run',
     'drop-item',
+    'release-hold',
     'unwatch',
   ]);
   expect(ACTIONS.some((each) => each.tier === 'undoable')).toBe(false);
@@ -182,6 +184,27 @@ test('a queue change shows a 200 message and took, a 202 waiting, and any other 
   expect(answer('poll-queue', 202, '{"message":"x"}')).toEqual({ place: 'queue' });
   expect(answer('move-item', 409, '{"error":"no watcher"}')).toEqual({ place: 'queue', text: 'no watcher' });
   expect(answer('add-ticket', 500, 'oops')).toEqual({ place: 'queue', text: 'the add was refused (500)' });
+});
+
+test('release-hold posts the harness key its row gives to the queue release route, confirmed by a second click', () => {
+  expect(request('release-hold', WORKFLOW, { harness: 'pi:openai-codex' })).toEqual({
+    path: '/api/repos/alpha/queues/wf/release',
+    body: { harnessKey: 'pi:openai-codex' },
+  });
+  expect(def('release-hold').tier).toBe('confirmed');
+  expect(def('release-hold').confirm?.(WORKFLOW, {}, source())).toBe('confirm release');
+  expect(def('release-hold').available(WORKFLOW, source())).toEqual({ offered: true, enabled: true });
+  const answer = (status: number, body: string) => def('release-hold').answer?.(status, body, WORKFLOW);
+  expect(answer(200, '{"message":"released the usage-limit hold on k"}')).toEqual({
+    place: 'queue',
+    text: 'released the usage-limit hold on k',
+    effect: 'took',
+  });
+  expect(answer(409, '{"error":"no"}')).toEqual({ place: 'queue', text: 'no' });
+  expect(answer(0, '')).toEqual({
+    place: 'queue',
+    text: 'the release could not be sent: the dashboard did not answer',
+  });
 });
 
 test('watch shows its message or waiting under the repository, and any other status its refusal', () => {

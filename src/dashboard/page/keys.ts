@@ -26,6 +26,9 @@ export const keys: Record<string, (store: Store) => void> = {
       delete ui.itemMenu;
       store.actor.disarm();
       store.mark('main');
+    } else if (ui.act.pending?.id === 'release-hold') {
+      store.actor.disarm();
+      store.mark('main');
     } else if (ui.attention) closeAttention(store);
     else if (ui.file !== undefined) closeFile(store);
     else if (ui.timeline) actions['close-timeline']?.(store, {});

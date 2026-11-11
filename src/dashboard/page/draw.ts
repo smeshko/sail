@@ -52,6 +52,17 @@ export function regions(store: Store): Record<Region, () => string> {
             store.actor.disarm();
           }
         }
+        // An armed release asks again once its queue is held on that key no more, and an armed one of another queue is dropped.
+        const releasing = ui.act.pending;
+        if (
+          releasing?.id === 'release-hold' &&
+          (panel.queue?.held?.harnessKey === undefined ||
+            releasing.subject.kind !== 'workflow' ||
+            releasing.subject.repo !== panel.repo ||
+            releasing.subject.workflow !== panel.workflow)
+        ) {
+          store.actor.disarm();
+        }
         const menuItem = panel.items.find((item) => item.dedupKey === ui.itemMenu);
         if (unwatched || menuItem === undefined || !hasItemActions(panel, menuItem)) delete ui.itemMenu;
         return renderQueue(panel, store.queues.get(ui.queue ?? '')?.stream, ui, host.now()).value;

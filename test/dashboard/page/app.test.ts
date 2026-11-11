@@ -2296,3 +2296,105 @@ test('an index that turns the open queue to watcher not running redraws main wit
   await settle();
   expect(host.posts.length).toBe(posts);
 });
+
+/** The index with beta's queue held, on `harnessKey` when given, and with no hold when `held` is false. */
+const heldIndex = (held: boolean, harnessKey?: string) => {
+  const message = indexMessage();
+  return {
+    ...message,
+    repos: message.repos.map((repo) => ({
+      ...repo,
+      queues: repo.queues.map((queue) => ({
+        ...queue,
+        queue:
+          repo.name === 'beta' && queue.queue !== undefined
+            ? {
+                ...queue.queue,
+                ...(held
+                  ? {
+                      held: {
+                        until: '2099-01-01T00:00:00.000Z',
+                        runId: 'r',
+                        reason: 'claude-code hit the usage limit',
+                        at: '2026-11-10T10:00:00.000Z',
+                        ...(harnessKey === undefined ? {} : { harnessKey }),
+                      },
+                    }
+                  : {}),
+              }
+            : queue.queue,
+      })),
+    })),
+  };
+};
+const armedRelease = () => (page?.ui.act.pending?.id === 'release-hold' ? 'armed' : undefined);
+
+function openHeldBetaQueue() {
+  const socket = openBetaQueue();
+  host.push(host.open('index')[0], heldIndex(true, 'claude-code'));
+  host.advance(100);
+  return socket;
+}
+
+test('the first click on release arms it and posts nothing, and any other click or Escape disarms it (ADW-517)', () => {
+  openHeldBetaQueue();
+  const row = { ...BETA, harness: 'claude-code' };
+  expect(host.regions.main).toContain('data-harness="claude-code"');
+  host.click({ action: 'release-hold', ...row });
+  host.advance(100);
+  expect([host.posts, armedRelease(), host.regions.main?.includes('confirm release')]).toEqual([[], 'armed', true]);
+  expect(host.regions.main).toContain("releasing ends every watcher's hold on claude-code, and dispatch resumes");
+  host.click({ action: 'toggle-queue-events' });
+  host.advance(100);
+  expect([armedRelease(), host.regions.main?.includes('confirm release')]).toEqual([undefined, false]);
+  host.click({ action: 'release-hold', ...row });
+  host.advance(100);
+  expect(armedRelease()).toBe('armed');
+  host.press('Escape');
+  host.advance(100);
+  expect([host.posts, armedRelease(), host.regions.main?.includes('confirm release')]).toEqual([[], undefined, false]);
+});
+
+test('the second click on release posts the key, and the answer shows beside the header: a 200 its message, a 409 its error, no answer says so (ADW-517)', async () => {
+  openHeldBetaQueue();
+  const row = { ...BETA, harness: 'claude-code' };
+  const notices: (string | undefined)[] = [];
+  for (const answer of [
+    { status: 200, body: JSON.stringify({ message: 'released the usage-limit hold on claude-code' }) },
+    { status: 409, body: JSON.stringify({ error: 'nope' }) },
+    { status: 0, body: '' },
+  ]) {
+    host.postAnswer = answer;
+    host.click({ action: 'release-hold', ...row });
+    host.click({ action: 'release-hold', ...row });
+    await settle();
+    host.advance(100);
+    notices.push(page?.ui.act.results.queue?.text);
+  }
+  expect(host.posts).toEqual(
+    [0, 1, 2].map(() => ({ path: `${QUEUE_PATH}/release`, body: { harnessKey: 'claude-code' } })),
+  );
+  expect(notices).toEqual([
+    'released the usage-limit hold on claude-code',
+    'nope',
+    'the release could not be sent: the dashboard did not answer',
+  ]);
+  expect(host.regions.main).toContain('the release could not be sent: the dashboard did not answer</span>');
+});
+
+test('once the index says the queue is no longer held, its banner, button and an armed release are gone, and a hold that comes back asks again (ADW-517)', () => {
+  openHeldBetaQueue();
+  host.click({ action: 'release-hold', ...BETA, harness: 'claude-code' });
+  host.advance(100);
+  expect(armedRelease()).toBe('armed');
+  host.push(host.open('index')[0], heldIndex(false));
+  host.advance(100);
+  expect([
+    armedRelease(),
+    host.regions.main?.includes('held until'),
+    host.regions.main?.includes('release-hold'),
+  ]).toEqual([undefined, false, false]);
+  host.push(host.open('index')[0], heldIndex(true, 'claude-code'));
+  host.advance(100);
+  expect([armedRelease(), host.regions.main?.includes('confirm release')]).toEqual([undefined, false]);
+});
