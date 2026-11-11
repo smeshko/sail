@@ -114,13 +114,65 @@ test('a completed run offers neither, and says it completed', async () => {
   });
 });
 
-test('a running run offers both, disabled, saying it is running', async () => {
+const FAKE_2_BUDGET = { maxUsd: 25, maxMinutes: 90 };
+
+test('a running run a live process holds offers both, disabled, saying it is running', async () => {
   setStatus(runDir('alpha', FAKE_2_ID), 'running');
+  takeLease(leasesDir, 'fake://origin', FAKE_2_BRANCH, {
+    runId: FAKE_2_ID,
+    runDir: runDir('alpha', FAKE_2_ID),
+    pid: process.pid,
+  });
   const why = `run ${FAKE_2_ID} is running`;
   expect(await actions('alpha', FAKE_2_ID)).toEqual({
-    resume: { enabled: false, why, spentUsd: 0.3625, budget: { maxUsd: 25, maxMinutes: 90 } },
-    restart: { enabled: false, why, stages: [], budget: { maxUsd: 25, maxMinutes: 90 } },
+    resume: { enabled: false, why, spentUsd: 0.3625, budget: FAKE_2_BUDGET },
+    restart: { enabled: false, why, stages: [], budget: FAKE_2_BUDGET },
     stop: { enabled: true },
+  });
+});
+
+test('a running run no live process holds offers Resume', async () => {
+  setStatus(runDir('alpha', FAKE_2_ID), 'running');
+  expect(await actions('alpha', FAKE_2_ID)).toEqual({
+    resume: { enabled: true, spentUsd: 0.3625, budget: FAKE_2_BUDGET },
+    stop: { enabled: true },
+  });
+});
+
+test('a running run whose lease names a dead process offers Resume', async () => {
+  setStatus(runDir('alpha', FAKE_2_ID), 'running');
+  const dead = Bun.spawnSync(['true']).pid;
+  takeLease(leasesDir, 'fake://origin', FAKE_2_BRANCH, {
+    runId: FAKE_2_ID,
+    runDir: runDir('alpha', FAKE_2_ID),
+    pid: dead,
+  });
+  expect(await actions('alpha', FAKE_2_ID)).toEqual({
+    resume: { enabled: true, spentUsd: 0.3625, budget: FAKE_2_BUDGET },
+    stop: { enabled: true },
+  });
+});
+
+test('a running run no live process holds, whose branch another run leases, offers Resume disabled naming that run', async () => {
+  setStatus(runDir('alpha', FAKE_2_ID), 'running');
+  takeLease(leasesDir, 'fake://origin', FAKE_2_BRANCH, {
+    runId: 'FAKE-9-01HZX3Y4Z5A6B7C8D9E0F1G2H3',
+    runDir: m.root,
+    pid: process.pid,
+  });
+  expect((await actions('alpha', FAKE_2_ID)).resume).toMatchObject({
+    enabled: false,
+    why: `branch ${FAKE_2_BRANCH} is leased by run FAKE-9-01HZX3Y4Z5A6B7C8D9E0F1G2H3`,
+  });
+});
+
+test('a suspended run that crashed offers Resume', async () => {
+  settleQueue();
+  setStatus(runDir('beta', FAKE_3_ID), 'suspended crashed');
+  expect((await actions('beta', FAKE_3_ID)).resume).toEqual({
+    enabled: true,
+    spentUsd: 1.0625,
+    budget: { maxUsd: 1, maxMinutes: 90 },
   });
 });
 
@@ -256,6 +308,11 @@ test('a suspended run offers Stop beside Resume, and a running run offers Stop w
   settleQueue();
   expect((await actions('beta', FAKE_3_ID)).stop).toEqual({ enabled: true });
   setStatus(runDir('beta', FAKE_3_ID), 'running');
+  takeLease(leasesDir, 'fake://origin', FAKE_3_BRANCH, {
+    runId: FAKE_3_ID,
+    runDir: runDir('beta', FAKE_3_ID),
+    pid: process.pid,
+  });
   expect((await actions('beta', FAKE_3_ID)).stop).toEqual({ enabled: true });
 });
 

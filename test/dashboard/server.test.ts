@@ -644,6 +644,43 @@ test('a POST to resume a suspended run starts `sail resume` with the raise, answ
   expect(JSON.parse(runs.body).map((run: { runId: string }) => run.runId)).not.toContain(`${FAKE_3_ID}.log`);
 });
 
+test('a POST to resume a running run no live process holds starts sail resume, answers 409 with the CLI line when it is refused and 202 once STATUS changes', async () => {
+  m = seedFixtures();
+  settleQueue();
+  writeFileSync(join(betaRun(), 'STATUS'), 'running\n');
+  const refused = stubSail("echo 'run is held elsewhere' >&2\nexit 3");
+  const first = await post(startWith(refused.cli), RESUME, startedBy('{}'));
+  expect([first.status, await first.json(), refused.argv()]).toEqual([
+    409,
+    { error: 'run is held elsewhere' },
+    [`resume ${FAKE_3_ID}`],
+  ]);
+  const taken = stubSail(`printf 'suspended until\\n' > '${join(betaRun(), 'STATUS')}'\nsleep 1`);
+  const second = await post(startWith(taken.cli), RESUME, startedBy('{}'));
+  // Both stubs record into one file: the second start is its last line.
+  expect([second.status, await second.json(), taken.argv()]).toEqual([
+    202,
+    { runId: FAKE_3_ID },
+    [`resume ${FAKE_3_ID}`, `resume ${FAKE_3_ID}`],
+  ]);
+});
+
+test('a POST to resume a running run a live process holds is 409 is running and starts nothing', async () => {
+  m = seedFixtures();
+  settleQueue();
+  writeFileSync(join(betaRun(), 'STATUS'), 'running\n');
+  const leasesDir = join(m.root, 'leases');
+  mkdirSync(leasesDir, { recursive: true });
+  takeLease(leasesDir, 'fake://origin', FAKE_3_BRANCH, { runId: FAKE_3_ID, runDir: betaRun(), pid: process.pid });
+  const stub = stubSail('exit 0');
+  const response = await post(startWith(stub.cli), RESUME, startedBy('{}'));
+  expect([response.status, await response.json(), stub.argv()]).toEqual([
+    409,
+    { error: `run ${FAKE_3_ID} is running` },
+    [],
+  ]);
+});
+
 test('a POST to restart a failed run starts `sail run --from-run` under a minted id of its ticket and answers 202 with it once its STATUS reads', async () => {
   m = seedFixtures();
   const stub = stubSail(

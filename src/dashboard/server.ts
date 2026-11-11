@@ -15,7 +15,8 @@
 //    run offers (src/dashboard/actions.ts), then starts `sail resume <run>` or `sail run --from-run <run> --stage …`
 //    itself, detached in the clone, its output in `.sail-runs/dashboard/<run id>.log`, as a typed command would: it
 //    needs no watcher and skips the watcher's cap. It answers 202 once the run has started, or 409 with the line the
-//    start was refused with. The last two are `…/runs/<run>/stop` (body `{ now }`) and `…/clean` (`{}`): each calls the
+//    start was refused with. A `running` run no live process holds is resumed too: it has started once a live process
+//    holds it or its STATUS no longer reads `running`. The last two are `…/runs/<run>/stop` (body `{ now }`) and `…/clean` (`{}`): each calls the
 //    engine function `sail stop` or `sail clean` calls (src/engine/stop.ts, src/engine/clean.ts) in this process,
 //    with the clone's Workspace port, and is refused in the same words, 409. A stop answers 202 `{ message }`, since a
 //    running run ends later, and a clean 200 `{ message, removed, archived }`; a clean whose removal failed is 409
@@ -57,7 +58,7 @@ import { commandFor, itemLine, outcomeOf, streamMark } from '../watch/queue-comm
 import { queueItemsNaming, startingRun } from '../watch/queue-store';
 import { liveSet, liveWatcher } from '../watch/registry';
 import { lastLine, type SpawnedRun, spawnDetached } from '../watch/spawn';
-import { runActions } from './actions';
+import { runActions, runAlive } from './actions';
 import { clonePorts, type ResolveClonePorts } from './clone-ports';
 import { callFile, containedFile, findRepo, findRunDir, repos, runItems } from './files';
 import { renderMarkdown } from './markdown';
@@ -372,8 +373,9 @@ function runOf(registryDir: string, segments: string[]) {
 }
 
 /**
- * Starts `sail resume <run>` for a suspended run, detached in its clone. A run suspended over its budget needs the
- * raise of the budget it ran out of. Answers 202 once STATUS no longer reads `suspended`.
+ * Starts `sail resume <run>` for a suspended run, or a `running` one no live process holds, detached in its clone. A
+ * run suspended over its budget needs the raise of the budget it ran out of. Answers 202 once STATUS no longer reads
+ * `suspended`; for a run that read `running`, once a live process holds it or STATUS no longer reads `running`.
  */
 async function resumeRoute(starts: Starts, segments: string[], request: Request): Promise<Response> {
   const { options, underway } = starts;
@@ -403,6 +405,8 @@ async function resumeRoute(starts: Starts, segments: string[], request: Request)
   if (underway.has(runId)) return error(409, `a start of ${runId} is already under way`);
   underway.add(runId);
   try {
+    const wasRunning = readStatus(dir).status === 'running';
+    const header = readRunHeader(dir);
     const log = join(runsDir(entry.sailDir), 'dashboard', `${runId}.log`);
     const spawned = spawnDetached(
       dirname(entry.sailDir),
@@ -411,14 +415,16 @@ async function resumeRoute(starts: Starts, segments: string[], request: Request)
       environmentOf(options),
       options.cli,
     );
-    const suspended = () => {
+    const taken = () => {
       try {
-        return readStatus(dir).status !== 'suspended';
+        const { status } = readStatus(dir);
+        if (!wasRunning) return status !== 'suspended';
+        return status !== 'running' || runAlive(entry, runId, header, options);
       } catch {
         return false;
       }
     };
-    return await started(spawned, log, options.startWaitMs ?? 120_000, suspended, runAnswers(runId));
+    return await started(spawned, log, options.startWaitMs ?? 120_000, taken, runAnswers(runId));
   } finally {
     underway.delete(runId);
   }

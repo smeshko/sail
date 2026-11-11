@@ -2,14 +2,16 @@
 // one check behind both the actions route and each POST that acts on a run, so a request is judged again as it arrives.
 // Read-only: Clean's offer asks the engine's `checkClean()`, which removes nothing.
 //
-// - A `completed` run offers nothing, and says why. A `running` run offers Resume and Restart, disabled.
+// - A `completed` run offers nothing, and says why. A `running` run a live process holds offers Resume and Restart,
+//   disabled. A `running` run no live process holds (its process was killed outright, so its STATUS never changed) is
+//   read as a suspended one: the lease decides, as `liveRuns()` has it, not STATUS.
 // - Stop is offered for a `running` or `suspended` run, and for a dispatched run that has no run directory yet. It is
 //   never disabled: `sail stop` stops a run the watcher dispatched, and its refusals come with the POST. A `completed`
 //   or `failed` run has ended, so it offers none.
 // - Clean is offered for a `failed` run, beside Restart: enabled with what it removes and where the run directory goes,
 //   or disabled with `sail clean`'s refusal, or with why the clone's ports can't be resolved. It is not held back by
 //   the watcher check below, since the engine's checks refuse a leased branch and a queue item that names the run.
-// - Resume is offered for a `suspended` run. For stop reason `budget_exceeded` it needs a raise: the budget the run
+// - Resume is offered for a `suspended` run, and for a dead `running` one. For stop reason `budget_exceeded` it needs a raise: the budget the run
 //   suspended on (its `run:suspended`), else `usd` when the cost has reached the budget's dollars, else `minutes`.
 // - Restart is offered for a `failed` run, a stopped one included. It is a seeded run, so it is disabled for the runs
 //   `openSeededRun` refuses, in its words: a pull-request run, a run with no workspace, a run whose intake didn't pass.
@@ -20,7 +22,7 @@
 // - Either is disabled while its branch is leased by another run, and while a queue item of the run's workflow names the
 //   run and is dispatched, or failed and waiting to retry: the watcher has it.
 import { join } from 'node:path';
-import { defaultLeasesDir, heldLease } from '../adapters/leases';
+import { defaultLeasesDir, heldLease, isAlive, readLease } from '../adapters/leases';
 import { isPlainName } from '../engine/call-dir';
 import { checkClean } from '../engine/clean';
 import { INTAKE_KEY } from '../engine/intake';
@@ -107,15 +109,32 @@ function raiseOf(events: readonly SailEvent[], spentUsd: number, budget: Budget)
   return budget.maxUsd !== undefined && spentUsd >= budget.maxUsd ? 'usd' : 'minutes';
 }
 
+/** The directory the run's branch lease is looked up in. */
+function leasesDirOf(entry: RegistryEntry, header: RunHeader, options: ActionsOptions): string {
+  return (
+    options.leasesDir ??
+    (header.adapters.workspace.use === 'fake'
+      ? join(runsDir(entry.sailDir), 'fake', 'leases')
+      : defaultLeasesDir(options.env))
+  );
+}
+
+/**
+ * Whether a live process runs `runId`: the lease on its branch is its own, not suspended, and its pid is alive. A run
+ * with no branch or repository can't be judged and counts as alive.
+ */
+export function runAlive(entry: RegistryEntry, runId: string, header: RunHeader, options: ActionsOptions): boolean {
+  const { branch, repository } = header;
+  if (branch === undefined || repository === undefined) return true;
+  const lease = readLease(leasesDirOf(entry, header, options), repository.url, branch);
+  return lease !== undefined && lease.runId === runId && !lease.suspended && isAlive(lease.pid);
+}
+
 /** Why another run holds the branch, or a queue item of the watcher has this run; undefined when neither does. */
 function heldBy(entry: RegistryEntry, runId: string, header: RunHeader, options: ActionsOptions): string | undefined {
   const { branch, repository } = header;
   if (branch !== undefined && repository !== undefined) {
-    const dir =
-      options.leasesDir ??
-      (header.adapters.workspace.use === 'fake'
-        ? join(runsDir(entry.sailDir), 'fake', 'leases')
-        : defaultLeasesDir(options.env));
+    const dir = leasesDirOf(entry, header, options);
     const lease = heldLease(dir, repository.url, branch);
     if (lease !== undefined && lease.runId !== runId) return `branch ${branch} is leased by run ${lease.runId}`;
   }
@@ -226,7 +245,7 @@ export async function runActions(
     const events = readEvents(dir);
     const spentUsd = summarize(events)?.totals.usage.costUsd ?? 0;
     const budget = budgetOf(header, events);
-    if (status === 'running') {
+    if (status === 'running' && runAlive(entry, runId, header, options)) {
       const why = `run ${runId} is running`;
       return {
         resume: { enabled: false, why, spentUsd, budget },
