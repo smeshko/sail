@@ -61,6 +61,7 @@ import { renderMarkdown } from './markdown';
 import { createPage } from './page';
 import { findQueueDir, queueViews, readQueue } from './queues';
 import { createIndexFeed, openQueueFollow, openRunStream, resolveTarget } from './streams';
+import { workflowWatch } from './watch-state';
 
 export interface DashboardOptions {
   registryDir: string;
@@ -154,15 +155,8 @@ const MoveBody = z
  * polls the workflow on, or the 409 that says why not.
  */
 function watchedBy(entry: RegistryEntry, workflow: string): { named: string; label: string } | Response {
-  const watcher = liveWatcher(entry);
-  if (watcher === undefined) {
-    return error(409, `no watcher is running for '${entry.name}': sail watch ${workflow} first`);
-  }
-  const named = `the watcher of '${entry.name}' (pid ${watcher.pid})`;
-  if (watcher.sailDir !== entry.sailDir) return error(409, `${named} runs in another clone: ${watcher.sailDir}`);
-  const set = liveSet(entry.sailDir, watcher.pid).find((each) => each.workflow === workflow);
-  if (set === undefined) return error(409, `${named} does not watch '${workflow}': sail watch ${workflow} first`);
-  return { named, label: set.label };
+  const watch = workflowWatch(entry, workflow);
+  return watch.state === 'watched' ? { named: watch.named, label: watch.label } : error(409, watch.why);
 }
 
 /**

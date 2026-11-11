@@ -399,7 +399,19 @@ test("the index carries each repository's queues, and an item added to queue.jso
   const queuesOf = (message: Received) => message.repos.map((repo: Received) => [repo.name, repo.queues]);
   expect(queuesOf(socket.messages[0])).toEqual([
     ['alpha', []],
-    ['beta', [{ workflow: QUEUE_WORKFLOW, queue: file }]],
+    [
+      'beta',
+      [
+        {
+          workflow: QUEUE_WORKFLOW,
+          queue: file,
+          watch: {
+            state: 'watcher not running',
+            why: `no watcher is running for 'beta': sail watch ${QUEUE_WORKFLOW} first`,
+          },
+        },
+      ],
+    ],
   ]);
   const item = { ...file.items[0], dedupKey: 'ticket:FAKE-7', source: { kind: 'ticket', ticketKey: 'FAKE-7' } };
   writeFileSync(join(queueDirOf(s), 'queue.json'), JSON.stringify({ ...file, items: [...file.items, item] }));
