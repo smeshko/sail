@@ -1,6 +1,15 @@
 // Standing workspaces: where one lives and who holds it.
 import { afterEach, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gitSync } from '../../../src/adapters/workspace/git';
@@ -269,6 +278,33 @@ test('a standing directory that holds a plain folder, not a worktree, is skipped
     expect(got?.path).toBe(standingPath(runsDir, 'demo', 1));
     expect(existsSync(join(standingDir(runsDir, 'demo', 0), 'LEASE'))).toBe(false);
     expect(read(standingPath(runsDir, 'demo', 0), 'mine.txt')).toBe('keep');
+  });
+});
+
+test('a link at a standing workspace or its directory is skipped and never checked out over', async () => {
+  await standingRepo(({ repo, runsDir, sha, next }) => {
+    writeFileSync(join(repo.dir, 'precious.txt'), 'mine');
+    writeFileSync(join(repo.dir, 'tracked.txt'), 'edited\n');
+    mkdirSync(standingDir(runsDir, 'demo', 0), { recursive: true });
+    symlinkSync(repo.dir, standingPath(runsDir, 'demo', 0));
+    const elsewhere = tempDir();
+    mkdirSync(join(runsDir, STANDING_DIR), { recursive: true });
+    symlinkSync(elsewhere, standingDir(runsDir, 'demo', 1));
+    const got = leaseStanding({ repo: repo.dir, run: next('run-a'), sha, env: repo.env });
+    expect(got).toBeUndefined();
+    expect(read(repo.dir, 'precious.txt')).toBe('mine');
+    expect(read(repo.dir, 'tracked.txt')).toBe('edited\n');
+    expect(existsSync(join(standingDir(runsDir, 'demo', 0), 'LEASE'))).toBe(false);
+    expect(readdirSync(elsewhere)).toEqual([]);
+  });
+});
+
+test('a link at standing/ is never looked into', async () => {
+  await standingRepo(({ repo, runsDir, sha, next }) => {
+    const elsewhere = tempDir();
+    symlinkSync(elsewhere, join(runsDir, STANDING_DIR));
+    expect(leaseStanding({ repo: repo.dir, run: next('run-a'), sha, env: repo.env })).toBeUndefined();
+    expect(readdirSync(elsewhere)).toEqual([]);
   });
 });
 

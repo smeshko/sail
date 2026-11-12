@@ -9,11 +9,12 @@ import { dirname, join, resolve } from 'node:path';
 import { PortError } from '../../ports/errors';
 import type { Workspace } from '../../ports/types';
 import type { RunRef } from '../../ports/workspace';
-import { addDetached, type GitResult, gitSync, keepHead, reopenWorktree } from './git';
+import { addDetached, type GitResult, gitSync, isLink, keepHead, reopenWorktree } from './git';
 import {
   dropStanding,
   heldByRun,
   readStanding,
+  STANDING_DIR,
   type StandingLease,
   standingDir,
   standingOf,
@@ -94,7 +95,8 @@ const runsDirOf = (run: { runDir: string }): string => dirname(resolve(run.runDi
  * Gives `run` the first free standing workspace of its workflow, its commit `sha` checked out. It walks `n` from 0
  * below `run.maxConcurrentRuns ?? 1`, takes the first lease it can, keeps the head of a stale holder it took over at
  * that run's run ref first, then adds the worktree (`--force`, so one removed by hand is made again) or checks out in
- * place. A directory that can't be used, a folder that is no worktree among them, is skipped and its lease dropped.
+ * place. A directory that can't be used, a folder that is no worktree among them, is skipped and its lease dropped. A
+ * link at `standing/`, at the directory or at its worktree is skipped untouched.
  * Undefined when none is free, or when `run` names no workflow.
  */
 export function leaseStanding(options: {
@@ -111,6 +113,8 @@ export function leaseStanding(options: {
   for (let n = 0; n < (run.maxConcurrentRuns ?? 1); n++) {
     const dir = standingDir(runsDir, run.workflow, n);
     const path = join(dir, 'workspace');
+    // A link is never looked into: a checkout through one would discard the work of whatever checkout it names.
+    if ([join(runsDir, STANDING_DIR), dir, path].some(isLink)) continue;
     const taken = takeStanding(dir, holder, options.now);
     if (!taken.taken) continue;
     try {

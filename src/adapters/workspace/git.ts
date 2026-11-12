@@ -177,7 +177,7 @@ export function addDetached(
 }
 
 /** Whether `path` is a symbolic link, dangling or not. */
-function isLink(path: string): boolean {
+export function isLink(path: string): boolean {
   try {
     return lstatSync(path).isSymbolicLink();
   } catch {
