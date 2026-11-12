@@ -86,3 +86,142 @@ test('a failed listing reports the port command and provider error', () => {
     spawn.mockRestore();
   }
 });
+
+/** State of `count` tickets and pairs of the one groomed ticket against each. */
+const world = (count: number, text = 'x') => {
+  const tickets: Record<string, { title: string; description: string }> = {};
+  const pairs = [];
+  for (let index = 0; index < count; index++) {
+    tickets[`T-${index}`] = { title: text, description: text };
+    pairs.push({ name: `G:T-${index}`, a: ['ticket', 'G'], b: ['tickets', `T-${index}`] });
+  }
+  return { state: { ticket: { G: { title: 'g', description: 'g' } }, tickets }, pairs };
+};
+
+type Request = {
+  state: { ticket: Record<string, unknown>; tickets: Record<string, unknown> };
+  questions: Record<string, unknown>;
+};
+const recorder = () => {
+  const requests: Request[] = [];
+  const ask = (request: Request) => {
+    requests.push(request);
+    return Object.fromEntries(Object.keys(request.questions).map((name) => [name, { noul: 0.5 }]));
+  };
+  return { requests, ask };
+};
+
+test('askSameWork splits 65 pairs into requests of 64 and 1 questions and merges their answers', () => {
+  const { state, pairs } = world(65);
+  const { requests, ask } = recorder();
+  const answers = lib.askSameWork(state, pairs, ask);
+  expect(requests.map((each) => Object.keys(each.questions).length)).toEqual([64, 1]);
+  expect(Object.keys(answers)).toHaveLength(65);
+});
+
+test('askSameWork asks nothing for no pairs', () => {
+  const { requests, ask } = recorder();
+  expect(lib.askSameWork({ ticket: {}, tickets: {} }, [], ask)).toEqual({});
+  expect(requests).toHaveLength(0);
+});
+
+test('askSameWork splits by serialized bytes so no request passes the limit', () => {
+  const { state, pairs } = world(40, 'y'.repeat(900));
+  const { requests, ask } = recorder();
+  const answers = lib.askSameWork(state, pairs, ask);
+  expect(requests.length).toBeGreaterThan(1);
+  for (const request of requests)
+    expect(Buffer.byteLength(JSON.stringify(request), 'utf8')).toBeLessThanOrEqual(lib.MAX_REQUEST_BYTES);
+  expect(Object.keys(answers)).toHaveLength(40);
+});
+
+test('askSameWork carries only the entries its questions name, with every collection present', () => {
+  const { state, pairs } = world(3);
+  const { requests, ask } = recorder();
+  lib.askSameWork(state, pairs.slice(0, 2), ask);
+  expect(requests).toHaveLength(1);
+  expect(Object.keys(requests[0]?.state.tickets ?? {})).toEqual(['T-0', 'T-1']);
+  expect(Object.keys(requests[0]?.state.ticket ?? {})).toEqual(['G']);
+  expect(requests[0]?.questions['G:T-0']).toEqual(lib.sameWork('ticket["G"]', 'tickets["T-0"]'));
+});
+
+test('askSameWork starts the next request with every collection empty of the last one', () => {
+  const { state, pairs } = world(65);
+  const { requests, ask } = recorder();
+  lib.askSameWork(state, pairs, ask);
+  expect(Object.keys(requests[1]?.state.tickets ?? {})).toEqual(['T-64']);
+});
+
+test('askSameWork throws for one pair over the byte limit', () => {
+  const { state, pairs } = world(1, 'z'.repeat(lib.MAX_REQUEST_BYTES));
+  expect(() => lib.askSameWork(state, pairs, recorder().ask)).toThrow(
+    'one duplicate-check pair exceeds the Jev request byte limit',
+  );
+});
+
+test('askSameWork throws what its ask throws', () => {
+  const { state, pairs } = world(2);
+  expect(() =>
+    lib.askSameWork(state, pairs, () => {
+      throw new Error('jev down');
+    }),
+  ).toThrow('jev down');
+});
+
+test('askJev sends the request in a body file and returns the answers', () => {
+  let body = '';
+  const spawn = spyOn(childProcess, 'spawnSync').mockImplementation(((_cmd: string, args: string[]) => {
+    body = require('node:fs').readFileSync(args[4], 'utf8');
+    return result(`${JSON.stringify({ answers: { a: { noul: 1 } } })}\n`);
+  }) as never);
+  try {
+    const request = { state: {}, questions: { a: {} } };
+    expect(lib.askJev(request)).toEqual({ a: { noul: 1 } });
+    expect((spawn.mock.calls[0]?.[1] ?? []).slice(0, 4)).toEqual(['port', 'jev', 'ask', '--body-file']);
+    expect(JSON.parse(body)).toEqual(request);
+  } finally {
+    spawn.mockRestore();
+  }
+});
+
+test('askJev throws the port stderr on a non-zero exit', () => {
+  const spawn = spyOn(childProcess, 'spawnSync').mockReturnValue(result('', 1, 'jev answered 500'));
+  try {
+    expect(() => lib.askJev({ state: {}, questions: {} })).toThrow('jev answered 500');
+  } finally {
+    spawn.mockRestore();
+  }
+});
+
+const scored = (...values: number[]) => values.map((confidence, index) => ({ ticketKey: `T-${index}`, confidence }));
+
+test('closest orders by score, highest first, with a why per rank', () => {
+  expect(lib.closest(scored(0.2, 0.6, 0.31))).toEqual([
+    { ticketKey: 'T-1', confidence: 0.6, why: 'ranked 1 of 3 by Jev, score 0.60' },
+    { ticketKey: 'T-2', confidence: 0.31, why: 'ranked 2 of 3 by Jev, score 0.31' },
+    { ticketKey: 'T-0', confidence: 0.2, why: 'ranked 3 of 3 by Jev, score 0.20' },
+  ]);
+});
+
+test('closest keeps a score of 0.05 and drops 0.049', () => {
+  expect(lib.closest(scored(0.05, 0.049)).map((each: { ticketKey: string }) => each.ticketKey)).toEqual(['T-0']);
+});
+
+test('closest gives the top three of four over the floor', () => {
+  const kept = lib.closest(scored(0.5, 0.9, 0.7, 0.6));
+  expect(kept.map((each: { ticketKey: string }) => each.ticketKey)).toEqual(['T-1', 'T-2', 'T-3']);
+  expect(kept[2].why).toBe('ranked 3 of 4 by Jev, score 0.60');
+});
+
+test('closest keeps the order given for a tie', () => {
+  expect(lib.closest(scored(0.4, 0.4)).map((each: { ticketKey: string }) => each.ticketKey)).toEqual(['T-0', 'T-1']);
+});
+
+test('closest gives nothing when no score reaches the floor', () => {
+  expect(lib.closest(scored(0.04, 0))).toEqual([]);
+  expect(lib.closest([])).toEqual([]);
+});
+
+test('closest has a limit of three and a floor of 0.05', () => {
+  expect([lib.RANK_LIMIT, lib.RANK_FLOOR]).toEqual([3, 0.05]);
+});

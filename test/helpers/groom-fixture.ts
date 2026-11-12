@@ -3,12 +3,19 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Ticket } from '../../src/ports/types';
-import { writeOwnSail } from './own-sail';
+import { OWN_SAIL, writeOwnSail } from './own-sail';
 import type { TempRepo } from './temp-repo';
 
-/** sail's own `.sail/` in `repo` on the fakes. */
-export function writeGroomRepo(repo: TempRepo): string {
-  return writeOwnSail(repo);
+/**
+ * sail's own `.sail/` in `repo` on the fakes, with the fake Jev answering from the committed seed, from `jev` when given,
+ * or absent for `false`.
+ */
+export function writeGroomRepo(repo: TempRepo, options: { jev?: object | false } = {}): string {
+  const jev =
+    options.jev === false
+      ? undefined
+      : (options.jev ?? JSON.parse(readFileSync(join(OWN_SAIL, 'fake', 'jev.json'), 'utf8')));
+  return writeOwnSail(repo, jev === undefined ? {} : { jev });
 }
 
 /** The ticket as the fake holds it after a run: its state file, or the seed while nothing has changed it. */

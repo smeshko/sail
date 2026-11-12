@@ -1,6 +1,7 @@
 // Reads the ticket in $INPUT_SOURCE through `sail port ticket-source get`, and the team's unstarted and started tickets
 // through `list`. Wraps every human-written passage with one `sail port render` call, then writes ticket.json,
-// brief.md and others.md (the other open tickets, their states, labels, titles and description excerpts).
+// brief.md and others.md (the other open tickets, their states, labels, titles and description excerpts), and
+// others.json, the same tickets' keys, titles and excerpts unwrapped, for a script that wraps them itself.
 // Makes no claim. Prints the GroomInput, with the other open tickets' keys, the keys groom keeps, and whether a
 // review filed the ticket.
 import { spawnSync } from 'node:child_process';
@@ -93,6 +94,18 @@ writeFileSync(join(out, 'brief.md'), lines(brief));
 const kept = [ticket, ...open]
   .filter((each) => each.state.type === 'started' || each.labels.includes('epic'))
   .map((each) => each.ticketKey);
+writeFileSync(
+  join(out, 'others.json'),
+  `${JSON.stringify(
+    open.map(({ ticketKey, title, description }) => ({
+      ticketKey,
+      title,
+      description: excerpt(description || '(none)'),
+    })),
+    null,
+    2,
+  )}\n`,
+);
 writeFileSync(
   join(out, 'others.md'),
   ['# Other open tickets', '', ...(others.length === 0 ? ['None.'] : others.map(lines)), ''].join('\n'),
