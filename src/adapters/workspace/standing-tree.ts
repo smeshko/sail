@@ -9,7 +9,7 @@ import { dirname, join, resolve } from 'node:path';
 import { PortError } from '../../ports/errors';
 import type { Workspace } from '../../ports/types';
 import type { RunRef } from '../../ports/workspace';
-import { type GitResult, gitSync, keepHead, reopenWorktree } from './git';
+import { addDetached, type GitResult, gitSync, keepHead, reopenWorktree } from './git';
 import {
   dropStanding,
   heldByRun,
@@ -137,3 +137,49 @@ export function reopenStanding(
   if (!taken.taken) throw invalid(`standing workspace held by run ${taken.holder.runId}`);
   return reopenWorktree(path, from.branch, from.baseSha, env);
 }
+
+/** What `startWorkspace()` made: where the run works, how it got there, and the event's `standing` field. */
+export interface Started {
+  readonly path: string;
+  readonly raw: NonNullable<unknown> | null;
+  readonly standing?: 'leased' | 'none_free';
+}
+
+/**
+ * The workspace of `run`'s start at `sha`: with `standing` on and `run.workflow` named, a standing workspace of its
+ * workflow, else, when none is free, a detached worktree at `<runDir>/workspace`. With `standing` off, the latter alone,
+ * and no `standing` field.
+ */
+export function startWorkspace(options: {
+  repo: string;
+  run: RunRef;
+  sha: string;
+  standing: boolean;
+  env?: Env;
+  now?: Date;
+}): Started {
+  const { repo, run, sha, env } = options;
+  if (options.standing && run.workflow !== undefined) {
+    const leased = leaseStanding({
+      repo,
+      run,
+      sha,
+      ...(env === undefined ? {} : { env }),
+      ...(options.now === undefined ? {} : { now: options.now }),
+    });
+    if (leased !== undefined) return { path: leased.path, raw: leased.raw, standing: 'leased' };
+    const path = join(run.runDir, 'workspace');
+    return { path, raw: addDetached(repo, path, sha, env), standing: 'none_free' };
+  }
+  const path = join(run.runDir, 'workspace');
+  return { path, raw: addDetached(repo, path, sha, env) };
+}
+
+/** Gives up the standing workspace at `path` that `run` took, leaving the worktree: for a start that failed after it. */
+export function abandonStanding(run: RunRef, path: string): void {
+  const dir = standingOf(runsDirOf(run), path);
+  if (dir !== undefined) dropStanding(dir, run.runId);
+}
+
+/** Whether `path` is a standing workspace of the runs directory `run` sits in. */
+export const isStandingPath = (run: RunRef, path: string): boolean => standingOf(runsDirOf(run), path) !== undefined;

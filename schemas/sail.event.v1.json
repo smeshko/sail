@@ -1481,6 +1481,7 @@
         "branch": { "type": "string" },
         "baseSha": { "$ref": "#/$defs/sha" },
         "startSha": { "$ref": "#/$defs/sha" },
+        "standing": { "enum": ["leased", "none_free"] },
         "durationMs": { "type": "number", "minimum": 0 }
       },
       "required": ["path", "branch", "baseSha", "durationMs"],

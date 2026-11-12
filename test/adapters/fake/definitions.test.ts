@@ -131,6 +131,17 @@ test('the workspace fake takes remote and defaultBranch, and keeps its leases in
   });
 });
 
+test('the workspace fake takes the standing option: its worktree for a workflow is under runsDir/standing', async () => {
+  await withTempRepo(async (repo) => {
+    const ctx = context(repo);
+    const workspace = await fakeAdapters.workspace.create({ standing: true }, ctx);
+    const runDir = join(ctx.runsDir, 'r1');
+    mkdirSync(runDir, { recursive: true });
+    const created = await workspace.create({ runId: 'r1', runDir, workflow: 'demo' }, { base: 'main', branch: 'b' });
+    expect(created.path).toBe(join(ctx.runsDir, 'standing', 'demo-0', 'workspace'));
+  });
+});
+
 test.each<[Port, Record<string, unknown>, string]>([
   ['ticketSource', { seeds: 'x' }, 'seeds'],
   ['ticketSource', { seed: 3 }, 'seed'],
@@ -139,6 +150,7 @@ test.each<[Port, Record<string, unknown>, string]>([
   ['workspace', { repo: 3 }, 'repo'],
   ['workspace', { remote: '' }, 'remote'],
   ['workspace', { defaultBranch: 7 }, 'defaultBranch'],
+  ['workspace', { standing: 'yes' }, 'standing'],
   ['harness', { seed: './fake/tickets.json' }, 'seed'],
 ])('%s created with %j throws, naming %s', async (port, options, name) => {
   await withTempRepo(async (repo) => {

@@ -6,14 +6,13 @@
 // machine-wide. The branch is never checked out: a workspace records it for the later push of `HEAD:<branch>`, so only
 // the lease keeps two runs of one branch apart (ADR-0018). `holder()` reads the same leases. Its repository is both clone
 // and remote, so a branch in it reads as both the local and the remote branch, and removing it removes both.
-import { basename, join } from 'node:path';
+import { basename } from 'node:path';
 import type { ProviderEvent } from '../../events/types';
 import { PortError } from '../../ports/errors';
 import type { ProviderOptions } from '../../ports/ticket-source';
 import type { WorkspacePort } from '../../ports/workspace';
 import { defaultLeasesDir, heldLease, releaseLease, takeLease } from '../leases';
 import {
-  addDetached,
   carriedHead,
   copyTree,
   deleteLocalBranch,
@@ -24,8 +23,9 @@ import {
   reopenWorktree,
   resolveCommit,
   sweepEnded,
-  WORKSPACE_DIR,
+  workspaceOf,
 } from '../workspace/git';
+import { isStandingPath, releaseStanding, reopenStanding, startWorkspace } from '../workspace/standing-tree';
 
 /** The remote the fake reports when none is set. */
 export const FAKE_REMOTE = 'fake://origin';
@@ -41,6 +41,8 @@ export interface FakeWorkspaceOptions extends ProviderOptions {
   readonly leasesDir?: string;
   /** The environment for the git the fake runs. */
   readonly env?: Readonly<Record<string, string>>;
+  /** Keep standing workspaces between runs of a workflow, as `git-worktree`'s option does. Off when left out. */
+  readonly standing?: boolean;
 }
 
 export function createFakeWorkspace(options: FakeWorkspaceOptions): WorkspacePort {
@@ -76,19 +78,28 @@ export function createFakeWorkspace(options: FakeWorkspaceOptions): WorkspacePor
       base ??= resolveCommit(repo, `refs/heads/${branch}`, env) ? `refs/heads/${branch}` : (fallback ?? defaultBranch);
       const baseSha = resolveCommit(repo, base, env);
       if (baseSha === undefined) throw new PortError('workspace', 'create', 'invalid', `${base} names no commit`);
-      const path = join(run.runDir, WORKSPACE_DIR);
       const startSha = carry === undefined ? undefined : carriedHead(repo, carry, baseSha, env);
-      const added = addDetached(repo, path, startSha ?? baseSha, env);
+      const made = startWorkspace({
+        repo,
+        run,
+        sha: startSha ?? baseSha,
+        standing: options.standing === true,
+        ...(env === undefined ? {} : { env }),
+        now: now(),
+      });
+      const { path } = made;
       const carried = startSha === undefined ? {} : { startSha };
+      const standing = made.standing === undefined ? {} : { standing: made.standing };
       emit({
         type: 'workspace:created',
         path,
         branch,
         baseSha,
         ...carried,
+        ...standing,
         durationMs: Math.max(0, now().getTime() - started),
       });
-      return { path, branch, baseSha, ...carried, raw: added };
+      return { path, branch, baseSha, ...carried, raw: made.raw };
     },
     async readTree(into, { paths, base = defaultBranch }) {
       const sha = resolveCommit(repo, base, env);
@@ -100,16 +111,24 @@ export function createFakeWorkspace(options: FakeWorkspaceOptions): WorkspacePor
       return { moved: false };
     },
     async reopen(run, { branch, baseSha }) {
-      return reopenWorktree(join(run.runDir, WORKSPACE_DIR), branch, baseSha, env);
+      const path = workspaceOf(run, 'reopen');
+      return isStandingPath(run, path)
+        ? reopenStanding(run, path, { branch, baseSha }, env, now())
+        : reopenWorktree(path, branch, baseSha, env);
     },
     async diff(path, range) {
       return diffWorkingTree(path, range, env);
     },
     async release(run, keep) {
-      const path = join(run.runDir, WORKSPACE_DIR);
+      const path = workspaceOf(run, 'release');
       if (keep) {
         emit({ type: 'workspace:released', path, kept: keep });
         return { path, kept: keep, raw: null };
+      }
+      if (isStandingPath(run, path)) {
+        const { raw, ...commits } = releaseStanding(repo, run, path, env);
+        emit({ type: 'workspace:released', path, kept: true, ...commits });
+        return { path, kept: true, ...commits, raw };
       }
       const { raw, ...commits } = releaseWorktree(repo, run, 'release', env);
       emit({ type: 'workspace:released', path, kept: keep, ...commits });

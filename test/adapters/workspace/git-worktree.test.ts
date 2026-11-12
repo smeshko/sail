@@ -127,11 +127,19 @@ async function withServer<T>(
 }
 
 describe('the port suite', () => {
-  workspaceSuite('git-worktree', async (emit) => {
-    const repo = clone();
-    const w = world(repo);
-    return { adapter: adapterOf(repo, w, { emit }), world: w };
-  });
+  workspaceSuite(
+    'git-worktree',
+    async (emit) => {
+      const repo = clone();
+      const w = world(repo);
+      return { adapter: adapterOf(repo, w, { emit }), world: w };
+    },
+    async (emit) => {
+      const repo = clone();
+      const w = world(repo);
+      return { adapter: adapterOf(repo, w, { emit, standing: true }), world: w };
+    },
+  );
 });
 
 test('with SAIL_HOME in its env and no leases directory named, a lease lands in $SAIL_HOME/leases', async () => {
@@ -416,6 +424,48 @@ test('a workspace setup that fails, or outlasts setupTimeoutMs, fails create as 
     });
   });
 }, 5_000);
+
+test('the setup runs on the first and the second lease of one standing workspace, and a failing one refuses the create, frees the lease and leaves the worktree', async () => {
+  await withTempRepo(async (repo) => {
+    withOrigin(repo);
+    const w = world(repo);
+    const stand = (id: string) => ({ ...runIn(w.runsDir, id), workflow: 'demo' });
+    const counted = adapterOf(repo, w, { standing: true, setup: 'echo ran >> setup-count.txt' });
+    const first = await counted.create(stand('r1'), { branch: BRANCH });
+    writeFileSync(join(w.runsDir, 'r1', 'run.json'), JSON.stringify({ workspace: '../standing/demo-0/workspace' }));
+    await counted.release(stand('r1'), false);
+    // setup-count.txt is untracked and not ignored: the checkout removes it, so the second line is the second setup.
+    const second = await counted.create(stand('r2'), { branch: BRANCH });
+    expect([second.path, readFileSync(join(second.path, 'setup-count.txt'), 'utf8')]).toEqual([first.path, 'ran\n']);
+    writeFileSync(join(w.runsDir, 'r2', 'run.json'), JSON.stringify({ workspace: '../standing/demo-0/workspace' }));
+    await counted.release(stand('r2'), false);
+
+    const failing = adapterOf(repo, w, { standing: true, setup: 'exit 3' });
+    const refused = await failing.create(stand('r3'), { branch: BRANCH }).catch(messageOf);
+    expect(refused).toContain('exited 3');
+    expect(existsSync(first.path)).toBe(true);
+    expect(existsSync(join(w.runsDir, 'standing', 'demo-0', 'LEASE'))).toBe(false);
+    const again = await counted.create(stand('r4'), { branch: BRANCH });
+    expect(again.path).toBe(first.path);
+  });
+}, 20_000);
+
+test("with the option off or no workflow named, workspace:created has no standing field and the workspace is the run's own", async () => {
+  await withTempRepo(async (repo) => {
+    withOrigin(repo);
+    const w = world(repo);
+    const { emit, events } = captureEvents();
+    const off = adapterOf(repo, w, { emit });
+    const made = await off.create({ ...runIn(w.runsDir, 'r1'), workflow: 'demo' }, { branch: BRANCH });
+    const on = adapterOf(repo, w, { emit, standing: true });
+    const bare = await on.create(runIn(w.runsDir, 'r2'), { branch: BRANCH });
+    expect([made.path, bare.path]).toEqual([join(w.runsDir, 'r1', 'workspace'), join(w.runsDir, 'r2', 'workspace')]);
+    expect(events.filter((event) => event.type === 'workspace:created').map((event) => 'standing' in event)).toEqual([
+      false,
+      false,
+    ]);
+  });
+}, 20_000);
 
 test("two creates at once on a clone whose origin moved both succeed: the fetch that lost git's ref lock is tried again", async () => {
   await withTempRepo(async (repo) => {
