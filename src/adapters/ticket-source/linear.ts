@@ -43,6 +43,8 @@ export interface LinearTicketSourceOptions extends ProviderOptions {
   readonly fetch?: Fetch;
   /** The origin of the files Linear hosts. `LINEAR_UPLOADS_ORIGIN` unless a test serves them elsewhere. */
   readonly uploadsOrigin?: string;
+  /** The pause before a query's first retry, which the client doubles for the next two. 1 s unless given. */
+  readonly retryDelayMs?: number;
 }
 
 /** Where Linear stores the files uploaded to its tickets. `download` sends the API key here and nowhere else. */
@@ -230,6 +232,7 @@ function buildLinearTicketSource(options: LinearTicketSourceOptions): {
     endpoint: options.endpoint,
     apiKey: options.apiKey,
     ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
+    ...(options.retryDelayMs === undefined ? {} : { retryDelayMs: options.retryDelayMs }),
   });
   const now = () => options.now?.() ?? new Date();
   const emit = (event: ProviderEvent) => options.emit?.(event);
@@ -900,10 +903,11 @@ const LinearOptions = z.strictObject({
     .min(1)
     .refine((names) => new Set(names).size === names.length, 'names a state twice')
     .optional(),
+  retryDelayMs: z.number().int().nonnegative().optional(),
 });
 
 /**
- * `linear` in `project.yaml`: `team` is required, `inReview` and `pickUp` optional, and the key comes from
+ * `linear` in `project.yaml`: `team` is required, `inReview`, `pickUp` and `retryDelayMs` optional, and the key comes from
  * `LINEAR_API_KEY`. With `pickUp`, creating it reads the team's states once to check the names, and skips the check while Linear is unavailable.
  */
 export const linearTicketSource: AdapterDefinition<TicketSource> = {
@@ -919,6 +923,7 @@ export const linearTicketSource: AdapterDefinition<TicketSource> = {
       team: parsed.data.team,
       ...(parsed.data.inReview === undefined ? {} : { inReview: parsed.data.inReview }),
       ...(parsed.data.pickUp === undefined ? {} : { pickUp: parsed.data.pickUp }),
+      ...(parsed.data.retryDelayMs === undefined ? {} : { retryDelayMs: parsed.data.retryDelayMs }),
       apiKey: context.env.LINEAR_API_KEY ?? '',
       endpoint: context.env.SAIL_LINEAR_API_URL || LINEAR_ENDPOINT,
       ...(context.emit === undefined ? {} : { emit: context.emit }),

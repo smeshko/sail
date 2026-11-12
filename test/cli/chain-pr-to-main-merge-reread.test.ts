@@ -6,6 +6,8 @@
 // response. A pull request that merged anyway is reported `merged`, so the run goes on to `done` and completes instead
 // of handing back a merged pull request with `sail-blocked`. A pull request that did not merge is handed back as before.
 import { expect, test } from 'bun:test';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { EXIT_FAILED, EXIT_OK } from '../../src/cli/exit-codes';
 import { type Observed, observe } from '../helpers/chain';
 import { type WorldResponse, worldMergeSha } from '../helpers/github-world';
@@ -83,6 +85,11 @@ test('a merge answered pending that GitHub reports merged without its merge comm
             return PENDING.body;
           },
         }),
+      // The re-read fails all four of its tries: the short pause keeps the run from waiting 7 s on each.
+      prepare: (sail) => {
+        const file = join(sail, 'project.yaml');
+        writeFileSync(file, readFileSync(file, 'utf8').replace('repository: o/r', 'repository: o/r, retryDelayMs: 1'));
+      },
     },
     ['#7', '--workflow', 'pr-to-main'],
   );
@@ -111,7 +118,7 @@ test('a merge answered pending whose re-read fails hands back with merge pending
           status: 200,
           // Read as the merge is answered: the re-read after it, and only that, fails.
           get body() {
-            if (!failed) world.inject('GET /pulls/7', LOST);
+            if (!failed) world.inject('GET /pulls/7', LOST, 4);
             failed = true;
             return PENDING.body;
           },

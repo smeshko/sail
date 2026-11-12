@@ -41,12 +41,12 @@ function answering(canned: Canned): { fetch: Fetch; sent: Sent[] } {
   return { fetch, sent };
 }
 
-const clientOf = (fetch: Fetch, timeoutMs?: number) =>
+const clientOf = (fetch: Fetch, timeoutMs?: number, retryDelayMs = 1) =>
   createLinearClient({
     endpoint: LINEAR_ENDPOINT,
     apiKey: KEY,
     fetch,
-    retryDelayMs: 1,
+    retryDelayMs,
     ...(timeoutMs ? { timeoutMs } : {}),
   });
 
@@ -380,16 +380,34 @@ test('no failure carries the API key, in its message or its raw answer', async (
   expect(carried).toEqual([]);
 });
 
-test('a query that gets no answer is sent once more, and the second answer counts', async () => {
-  const { fetch, calls } = droppingFirst(1, { status: 200, body: { data: { issues: { nodes: [] } } } });
+const DATA = { status: 200, body: { data: { issues: { nodes: [] } } } };
+const MUTATION = 'mutation SailComment($id: String!) { commentCreate(input: { issueId: $id }) { success } }';
+
+test('a query that gets no answer twice is sent a third time, and that answer counts', async () => {
+  const { fetch, calls } = droppingFirst(2, DATA);
   const data = await clientOf(fetch).request('get', 'SailTicket', QUERY, {});
   expect(data).toEqual({ issues: { nodes: [] } });
-  expect(calls()).toBe(2);
+  expect(calls()).toBe(3);
 });
 
-test('a query that gets no answer twice is unavailable, after exactly two sends', async () => {
-  const { fetch, calls } = droppingFirst(2, { status: 200, body: { data: {} } });
-  const error = await rejection(clientOf(fetch).request('get', 'SailTicket', QUERY, {}));
+test('a query answered 502 three times is sent a fourth time, and that answer counts', async () => {
+  let calls = 0;
+  const fetch: Fetch = async () => {
+    calls += 1;
+    return calls <= 3
+      ? new Response('Bad Gateway', { status: 502 })
+      : new Response(JSON.stringify(DATA.body), { status: 200 });
+  };
+  const data = await clientOf(fetch).request<unknown>('get', 'SailTicket', QUERY, {});
+  expect(data).toEqual({ issues: { nodes: [] } });
+  expect(calls).toBe(4);
+});
+
+test('a query that gets no answer four times is unavailable, after exactly four sends and pauses of 1, 2 and 4 times retryDelayMs', async () => {
+  const { fetch, calls } = droppingFirst(4, DATA);
+  const started = performance.now();
+  const error = await rejection(clientOf(fetch, undefined, 20).request('get', 'SailTicket', QUERY, {}));
+  const elapsed = performance.now() - started;
   expect(failureFields(error)).toEqual({
     port: 'ticketSource',
     op: 'get',
@@ -398,19 +416,61 @@ test('a query that gets no answer twice is unavailable, after exactly two sends'
       'ticketSource.get: Linear is unreachable at api.linear.app: The socket connection was closed unexpectedly.',
     raw: undefined,
   });
-  expect(calls()).toBe(2);
+  expect(calls()).toBe(4);
+  expect(elapsed).toBeGreaterThanOrEqual(135);
 });
 
-test('a mutation that gets no answer is not sent again: it may have landed', async () => {
-  const { fetch, calls } = droppingFirst(1, { status: 200, body: { data: {} } });
-  const mutation = 'mutation SailComment($id: String!) { commentCreate(input: { issueId: $id }) { success } }';
-  const error = await rejection(clientOf(fetch).request('comment', 'SailComment', mutation, {}));
+test.each<[string, Canned | undefined]>([
+  ['gets no answer', undefined],
+  ['is answered 500', { status: 500, body: { errors: [{ message: 'boom' }] } }],
+])('a mutation that %s is not sent again: it may have landed', async (_, canned) => {
+  let calls = 0;
+  const fetch: Fetch = async () => {
+    calls += 1;
+    if (canned === undefined) throw new TypeError('The socket connection was closed unexpectedly.');
+    return new Response(JSON.stringify(canned.body), { status: canned.status });
+  };
+  const error = await rejection(clientOf(fetch).request('comment', 'SailComment', MUTATION, {}));
   expect(failureFields(error)).toMatchObject({ op: 'comment', code: 'unavailable' });
-  expect(calls()).toBe(1);
+  expect(calls).toBe(1);
 });
 
-test('an answer that is an error is not sent again', async () => {
-  const { fetch, sent } = answering({ status: 500, body: { errors: [{ message: 'boom' }] } });
+test.each<[string, Canned]>([
+  ['429', { status: 429, body: { errors: [{ message: 'Too many requests' }] }, headers: RESET }],
+  [
+    'RATELIMITED',
+    {
+      status: 400,
+      body: { errors: [{ message: 'Rate limit exceeded', extensions: { code: 'RATELIMITED' } }] },
+      headers: RESET,
+    },
+  ],
+  ['a 200 with errors', { status: 200, body: { errors: [{ message: 'Something is wrong' }] } }],
+])('a query answered %s is not sent again', async (_, canned) => {
+  const { fetch, sent } = answering(canned);
   await rejection(clientOf(fetch).request('get', 'SailTicket', QUERY, {}));
   expect(sent).toHaveLength(1);
+});
+
+test('an abort during the pause between tries rejects as interrupted, without waiting the pause out, and sends nothing more', async () => {
+  const controller = new AbortController();
+  let calls = 0;
+  const fetch: Fetch = async () => {
+    calls += 1;
+    throw new TypeError('The socket connection was closed unexpectedly.');
+  };
+  const pending = rejection(
+    clientOf(fetch, undefined, 60_000).request('get', 'SailTicket', QUERY, {}, controller.signal),
+  );
+  await Bun.sleep(10);
+  controller.abort();
+  const error = await Promise.race([pending, Bun.sleep(100).then(() => 'still pending')]);
+  expect(failureFields(error)).toEqual({
+    port: 'ticketSource',
+    op: 'get',
+    code: 'unavailable',
+    message: 'ticketSource.get: the request to Linear at api.linear.app was interrupted',
+    raw: undefined,
+  });
+  expect(calls).toBe(1);
 });

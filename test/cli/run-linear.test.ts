@@ -312,13 +312,16 @@ test('sail port ticket-source get on a Linear URL prints the Linear ticket as on
   ]);
 });
 
-const PICK_UP = 'ticketSource: { use: linear, team: ADW, pickUp: [Todo] }';
+const PICK_UP = 'ticketSource: { use: linear, team: ADW, pickUp: [Todo], retryDelayMs: 1 }';
 const UNAVAILABLE = { status: 503, body: 'Service Unavailable' };
 
 test('sail port ticket-source get with pickUp, while Linear answers the team read with a 503, still prints the ticket', async () => {
   const run = await linearRun(['port', 'ticket-source', 'get', 'ADW-1'], {
     project: PICK_UP,
-    prepare: (linear) => linear.failNext('SailTeam', UNAVAILABLE),
+    prepare: (linear) => {
+      // Every try of a read fails: four sends.
+      for (let sent = 0; sent < 4; sent += 1) linear.failNext('SailTeam', UNAVAILABLE);
+    },
   });
   expect({ code: run.code, stderr: run.stderr, key: JSON.parse(run.stdout || '{}').ticketKey }).toEqual({
     code: EXIT_OK,
@@ -332,8 +335,10 @@ test('sail port ticket-source get with pickUp, while Linear is unavailable throu
   const run = await linearRun(['port', 'ticket-source', 'get', 'ADW-1'], {
     project: PICK_UP,
     prepare: (linear) => {
-      linear.failNext('SailTeam', UNAVAILABLE);
-      linear.failNext('SailTicket', UNAVAILABLE);
+      for (let sent = 0; sent < 4; sent += 1) {
+        linear.failNext('SailTeam', UNAVAILABLE);
+        linear.failNext('SailTicket', UNAVAILABLE);
+      }
     },
     env: { SAIL_EVENTS: file },
   });

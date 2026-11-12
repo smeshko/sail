@@ -17,7 +17,7 @@ interface Sent {
 }
 
 /** A client whose `fetch` records what it was sent and answers `answer()`. */
-function client(answer: (init: RequestInit) => Response | Promise<Response>, timeoutMs?: number) {
+function client(answer: (init: RequestInit) => Response | Promise<Response>, timeoutMs?: number, retryDelayMs = 1) {
   const sent: Sent[] = [];
   const fetch: Fetch = async (url, init) => {
     sent.push({
@@ -34,7 +34,7 @@ function client(answer: (init: RequestInit) => Response | Promise<Response>, tim
     owner: 'o',
     repo: 'r',
     fetch,
-    retryDelayMs: 1,
+    retryDelayMs,
     ...(timeoutMs === undefined ? {} : { timeoutMs }),
   });
   return { github, sent };
@@ -217,31 +217,95 @@ test('a text answer that holds the token across the cut at 200 characters leaves
   expect(messages.map((message) => message.endsWith('[redacted]'))).toEqual([true, true, true]);
 });
 
-test('a GET that gets no answer is sent once more, and the second answer counts', async () => {
+test('a GET that gets no answer twice is sent a third time, and that answer counts', async () => {
   let calls = 0;
   const { github, sent } = client(() => {
     calls += 1;
-    if (calls === 1) throw new TypeError('The socket connection was closed unexpectedly.');
+    if (calls <= 2) throw new TypeError('The socket connection was closed unexpectedly.');
     return json(200, { number: 7 });
   });
   const pull = await github.request<{ number: number }>('getPullRequest', 'GET', github.repoPath('pulls', 7));
   expect(pull).toEqual({ number: 7 });
-  expect(sent.map((each) => each.method)).toEqual(['GET', 'GET']);
+  expect(sent.map((each) => each.method)).toEqual(['GET', 'GET', 'GET']);
 });
 
-test('a write that gets no answer is not sent again: it may have landed', async () => {
+test('a GET answered 502 three times is sent a fourth time, and that answer counts', async () => {
+  let calls = 0;
   const { github, sent } = client(() => {
-    throw new TypeError('The socket connection was closed unexpectedly.');
+    calls += 1;
+    return calls <= 3 ? json(502, { message: 'Bad Gateway' }) : json(200, { number: 7 });
   });
-  const error = await rejection(
-    github.request('comment', 'POST', github.repoPath('issues', 7, 'comments'), { body: 'x' }),
-  );
-  expect(failure(error)).toMatchObject({ code: 'unavailable' });
-  expect(sent.map((each) => each.method)).toEqual(['POST']);
+  const pull = await github.request<{ number: number }>('getPullRequest', 'GET', github.repoPath('pulls', 7));
+  expect(pull).toEqual({ number: 7 });
+  expect(sent).toHaveLength(4);
 });
 
-test('a GET answered with an error is not sent again', async () => {
-  const { github, sent } = client(() => json(500, { message: 'boom' }));
+test('a GET that fails four times is unavailable with the last failure, after pauses of 1, 2 and 4 times retryDelayMs', async () => {
+  const words = ['first', 'second', 'third', 'fourth'];
+  let calls = 0;
+  const answering = client(() => json(500, { message: words[calls++] }), undefined, 20);
+  const started = performance.now();
+  const error = await rejection(
+    answering.github.request('getPullRequest', 'GET', answering.github.repoPath('pulls', 7)),
+  );
+  const elapsed = performance.now() - started;
+  expect(failure(error)).toEqual({ code: 'unavailable', message: 'codeHost.getPullRequest: GitHub 500: fourth' });
+  expect(answering.sent).toHaveLength(4);
+  expect(elapsed).toBeGreaterThanOrEqual(135);
+
+  const dropping = client(() => Promise.reject(new TypeError('fetch failed')));
+  const dropped = await rejection(
+    dropping.github.request('getPullRequest', 'GET', dropping.github.repoPath('pulls', 7)),
+  );
+  expect(failure(dropped)).toEqual({
+    code: 'unavailable',
+    message: 'codeHost.getPullRequest: GitHub is unreachable at 127.0.0.1:9: fetch failed',
+  });
+  expect(dropping.sent).toHaveLength(4);
+});
+
+test('requestText retries like any GET', async () => {
+  let calls = 0;
+  const { github, sent } = client(() => {
+    calls += 1;
+    return calls === 1 ? json(503, { message: 'down' }) : new Response('the log', { status: 200 });
+  });
+  expect(await github.requestText('checkLog', github.repoPath('actions', 'jobs', 5, 'logs'))).toBe('the log');
+  expect(sent).toHaveLength(2);
+});
+
+test.each<[string, string, string, () => Response | Promise<Response>]>([
+  [
+    'a POST that gets no answer',
+    'POST',
+    'issues/7/comments',
+    () => {
+      throw new TypeError('The socket connection was closed unexpectedly.');
+    },
+  ],
+  ['a POST answered 502', 'POST', 'issues/7/comments', () => json(502, { message: 'Bad Gateway' })],
+  ['a merge PUT answered 502', 'PUT', 'pulls/7/merge', () => json(502, { message: 'Bad Gateway' })],
+])('%s is not sent again: it may have landed', async (_, method, path, answer) => {
+  const { github, sent } = client(answer);
+  const error = await rejection(github.request('write', method, github.repoPath(...path.split('/')), { body: 'x' }));
+  expect(failure(error)).toMatchObject({ code: 'unavailable' });
+  expect(sent).toHaveLength(1);
+});
+
+test.each<[string, () => Response]>([
+  ['404', () => json(404, { message: 'Not Found' })],
+  ['429', () => json(429, { message: 'Too many requests' })],
+  [
+    'a rate-limit 403',
+    () =>
+      json(
+        403,
+        { message: 'API rate limit exceeded' },
+        { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': '1790000000' },
+      ),
+  ],
+])('a GET answered %s is not sent again', async (_, answer) => {
+  const { github, sent } = client(answer);
   await rejection(github.request('getPullRequest', 'GET', github.repoPath('pulls', 7)));
   expect(sent).toHaveLength(1);
 });

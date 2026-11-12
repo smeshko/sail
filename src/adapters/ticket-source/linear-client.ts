@@ -1,9 +1,25 @@
 // One GraphQL request to Linear over plain `fetch` (DECISIONS D1). Every failure becomes a PortError that keeps Linear's
 // own message: an HTTP status, a GraphQL `errors[]`, a network failure or a timeout. The API key goes in the request
-// header alone, so no message and no `raw` can carry it. Caller aborts cut requests and body reads short.
+// header alone, so no message and no `raw` can carry it. Caller aborts cut requests, body reads and the pauses between tries short.
 import { PortError, type PortErrorCode } from '../../ports/errors';
 
 export const LINEAR_ENDPOINT = 'https://api.linear.app/graphql';
+
+/** How many more times a query is sent after a transport failure or a 5xx answer. */
+const RETRIES = 3;
+
+/** Waits `ms`, or until `signal` aborts, whichever is first. */
+const pause = (ms: number, signal?: AbortSignal): Promise<void> =>
+  new Promise((resolve) => {
+    if (signal?.aborted) return resolve();
+    const done = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    signal?.addEventListener('abort', done);
+  });
 
 /** The part of `fetch` the client calls: a test injects its own. */
 export type Fetch = (input: string, init: RequestInit) => Promise<Response>;
@@ -14,7 +30,7 @@ export interface LinearClientOptions {
   readonly fetch?: Fetch;
   /** How long a request may take. 30 s unless given. */
   readonly timeoutMs?: number;
-  /** The pause before a query's one retry after a transport failure. 1 s unless given. */
+  /** The pause before a query's first retry; the second and third wait twice and four times as long. 1 s unless given. */
   readonly retryDelayMs?: number;
 }
 
@@ -131,15 +147,16 @@ export function createLinearClient(options: LinearClientOptions): LinearClient {
       };
       let response: Response;
       let text: string;
-      try {
-        ({ response, text } = await exchange());
-      } catch (error) {
-        // A query that got no answer is sent once more: a long-lived watcher meets dropped keep-alive sockets and
-        // short network blips, and one of those shouldn't fail a dispatch. A mutation may have landed, so it isn't.
-        if (!isQuery(query) || signal?.aborted) throw error;
-        await Bun.sleep(options.retryDelayMs ?? 1_000);
+      for (let attempt = 0; ; attempt += 1) {
+        const last = !isQuery(query) || attempt === RETRIES;
+        try {
+          ({ response, text } = await exchange());
+          if (last || response.status < 500) break;
+        } catch (error) {
+          if (last || signal?.aborted) throw error;
+        }
+        await pause((options.retryDelayMs ?? 1_000) * 2 ** attempt, signal);
         if (signal?.aborted) throw transport(op, signal.reason, '', signal);
-        ({ response, text } = await exchange());
       }
       let body: Body;
       try {

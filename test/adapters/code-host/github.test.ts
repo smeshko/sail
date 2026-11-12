@@ -14,7 +14,11 @@
 import { afterAll, describe, expect, setDefaultTimeout, test } from 'bun:test';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createGitHubCodeHost, type GitHubCodeHostOptions } from '../../../src/adapters/code-host/github';
+import {
+  createGitHubCodeHost,
+  type GitHubCodeHostOptions,
+  githubCodeHost,
+} from '../../../src/adapters/code-host/github';
 import type { ProviderEmit } from '../../../src/events/types';
 import type { CodeHost } from '../../../src/ports/code-host';
 import { PortError } from '../../../src/ports/errors';
@@ -1837,4 +1841,32 @@ test("pullRequestFrom never returns a fork's pull request", async () => {
     pullRequests: [{ number: 13, head: 'sail/forked', labels: ['sail'], fork: true, headSha: 'a'.repeat(40) }],
   });
   expect(await host(on).pullRequestFrom('sail/forked')).toBeUndefined();
+});
+
+test('an adapter made with retryDelayMs: 1 reads past three 502 answers in under a second, with four requests of the route', async () => {
+  const on = world();
+  on.inject('GET /pulls/7', { status: 502, body: { message: 'Bad Gateway' } }, 3);
+  const started = performance.now();
+  const pull = await host(on, undefined, { retryDelayMs: 1 }).getPullRequest(7);
+  expect(pull.number).toBe(7);
+  expect(performance.now() - started).toBeLessThan(1000);
+  expect(on.routes().filter((route) => route.startsWith('GET ') && route.endsWith('/pulls/7'))).toHaveLength(4);
+});
+
+describe('the definition takes retryDelayMs', () => {
+  const context = () => ({ root: repo().dir, sailDir: '', runsDir: '', env: { ...repo().env, GITHUB_TOKEN: TOKEN } });
+
+  test('and accepts a non-negative integer', () => {
+    expect(() => githubCodeHost.create({ repository: 'o/r', retryDelayMs: 1 }, context())).not.toThrow();
+  });
+
+  test.each<[unknown]>([[-1], ['fast']])('and refuses %j, naming the option', (value) => {
+    let message = '';
+    try {
+      githubCodeHost.create({ repository: 'o/r', retryDelayMs: value }, context());
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message.startsWith('github codeHost: option retryDelayMs: ')).toBe(true);
+  });
 });
