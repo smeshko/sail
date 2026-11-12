@@ -59,7 +59,13 @@ describe('the cd line', () => {
     expect(decide(command).allow).toBe(false);
   });
 
-  test.each(['cd src', 'git -C src status'])('allows %s', (command) => {
+  test('names the scratch folder among the places a cd may go', () => {
+    expect(deniedCommands().replaceAll('\n  ', ' ')).toContain(
+      'A `cd` is denied when it leaves the workspace, the stage directories and the scratch folder',
+    );
+  });
+
+  test.each(['cd src', 'git -C src status', 'cd $TMPDIR && ls'])('allows %s', (command) => {
     expect(decide(command).allow).toBe(true);
   });
 });
