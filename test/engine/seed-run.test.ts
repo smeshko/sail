@@ -206,6 +206,32 @@ test('seeding spec copies the intake call byte for byte, journals intake#1 alone
   });
 }, 60_000);
 
+test('a seeded run takes a free standing workspace, records its path in run.json and starts at the commit its source carried', async () => {
+  await withTempRepo(async (repo) => {
+    const from = await source.copyInto(repo.dir);
+    edit(
+      join(repo.dir, '.sail'),
+      'project.yaml',
+      'workspace: { use: fake }',
+      'workspace: { use: fake, standing: true }',
+    );
+    const opened = openedFrom(await seed(repo, { fromRun: from.runId }));
+    const header = readRunHeader(opened.dir);
+    const path = join(repo.dir, '.sail-runs', 'standing', 'ticket-to-pr-0', 'workspace');
+    expect({
+      workspace: header.workspace,
+      worktree: existsSync(join(path, '.git')),
+      inRunDir: existsSync(join(opened.dir, 'workspace')),
+      head: repo.git('-C', path, 'rev-parse', 'HEAD'),
+    }).toEqual({
+      workspace: '../standing/ticket-to-pr-0/workspace',
+      worktree: true,
+      inRunDir: false,
+      head: header.repository?.startSha ?? header.repository?.baseSha ?? '',
+    });
+  });
+}, 60_000);
+
 test('a source run of layout 2 still seeds a run, which is of layout 3 and keeps its own copy of .sail/', async () => {
   await withTempRepo(async (repo) => {
     const from = await source.copyInto(repo.dir);

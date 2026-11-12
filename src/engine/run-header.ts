@@ -67,6 +67,8 @@ export interface HeaderWorkspace {
   repository: { url: string; defaultBranch: string };
   baseSha: string;
   startSha?: string;
+  /** The workspace's path relative to the run directory: outside it for a standing workspace. `workspace` when left out. */
+  path?: string;
 }
 
 const sha256 = (data: string | Uint8Array) => new Bun.CryptoHasher('sha256').update(data).digest('hex');
@@ -122,7 +124,7 @@ export interface HeaderFields {
 export function workspaceFields(
   workspace: HeaderWorkspace,
 ): Required<Pick<RunHeader, 'branch' | 'repository' | 'workspace'>> {
-  const { branch, repository, baseSha, startSha } = workspace;
+  const { branch, repository, baseSha, startSha, path } = workspace;
   return {
     branch,
     repository: {
@@ -131,7 +133,7 @@ export function workspaceFields(
       baseSha,
       ...(startSha === undefined ? {} : { startSha }),
     },
-    workspace: 'workspace',
+    workspace: path ?? 'workspace',
   };
 }
 

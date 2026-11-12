@@ -390,6 +390,11 @@ export async function undoOpened(port: WorkspacePort, run: RunRef, remote: strin
   await quietly(() => port.releaseLease(remote, branch, run.runId));
 }
 
+/** `run` told where `workspace` is, relative to its run directory, for a release before any header records it. */
+export function withWorkspace(run: RunRef, workspace: Workspace): RunRef {
+  return { ...run, workspace: relative(run.runDir, workspace.path) };
+}
+
 /** What a fresh start made: the repository it leased a branch in, and the workspace. */
 export interface Made {
   repository: Repository;
@@ -435,7 +440,8 @@ export async function startWorkspace(options: {
 
   let workspace: Workspace | undefined;
   const undo = async (refused: string): Promise<{ refused: string }> => {
-    if (workspace !== undefined) await quietly(() => port.release(run, false));
+    // No header names the workspace yet, so the release is told where it is: a standing one is outside the run directory.
+    if (workspace !== undefined) await quietly(() => port.release(withWorkspace(run, workspace as Workspace), false));
     returnStop(runsDir(sailDir), run.runId);
     removeRunDir(run.runDir);
     await quietly(() => port.releaseLease(repository.url, branch, run.runId));
@@ -725,7 +731,13 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | Refu
   if (options.signal?.aborted) return { refused: 'stopped before the run was opened' };
   const { home } = preflight;
   const root = dirname(home);
-  const run: RunRef = { runId, runDir: join(runsDir(home), runId) };
+  const cap = loaded.workflow.maxConcurrentRuns;
+  const run: RunRef = {
+    runId,
+    runDir: join(runsDir(home), runId),
+    workflow: loaded.name,
+    ...(cap === undefined ? {} : { maxConcurrentRuns: cap }),
+  };
   const { relay } = options.adapters;
   let started: ProviderEvent[] = [];
   const opened = await collecting(relay, root, async (events) => {
@@ -770,7 +782,12 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | Refu
   ]);
   const header: RunHeader = redact.value({
     ...preflighted,
-    ...workspaceFields({ branch, repository: made.repository, baseSha: made.workspace.baseSha }),
+    ...workspaceFields({
+      branch,
+      repository: made.repository,
+      baseSha: made.workspace.baseSha,
+      path: relative(run.runDir, made.workspace.path),
+    }),
   });
   // A failure from here is thrown, not refused: these are sail's own files.
   const dir = run.runDir;
@@ -783,7 +800,7 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | Refu
     removeOpening(dir);
   } catch (error) {
     // No run is behind the workspace, so nothing may hold its branch: undone as a refusal would, as far as it still can.
-    await undoOpened(options.adapters.ports.workspace, run, made.repository.url, branch);
+    await undoOpened(options.adapters.ports.workspace, withWorkspace(run, made.workspace), made.repository.url, branch);
     const why = error instanceof Error ? error.message : String(error);
     throw new Error(`run ${runId}'s directory was not written: ${why}`, { cause: error });
   }

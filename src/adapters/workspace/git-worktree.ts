@@ -202,7 +202,7 @@ export function createGitWorktreeWorkspace(options: GitWorktreeOptions): Workspa
         sha: startSha ?? baseSha,
         standing: options.standing === true,
         ...(env === undefined ? {} : { env }),
-        now: now(),
+        ...(options.standing === true ? { now: now() } : {}),
       });
       const { path } = made;
       if (options.setup !== undefined) {

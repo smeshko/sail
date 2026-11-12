@@ -85,7 +85,7 @@ export function createFakeWorkspace(options: FakeWorkspaceOptions): WorkspacePor
         sha: startSha ?? baseSha,
         standing: options.standing === true,
         ...(env === undefined ? {} : { env }),
-        now: now(),
+        ...(options.standing === true ? { now: now() } : {}),
       });
       const { path } = made;
       const carried = startSha === undefined ? {} : { startSha };

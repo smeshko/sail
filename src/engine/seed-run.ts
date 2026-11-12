@@ -57,6 +57,7 @@ import {
   resolveNamed,
   startWorkspace,
   undoOpened,
+  withWorkspace,
 } from './open-run';
 import { credentialValues, redactor } from './redact';
 import { effortProblems, harnessesReached, modelProblems } from './roster';
@@ -322,7 +323,13 @@ export async function openSeededRun(options: SeededRunOptions): Promise<OpenedRu
   if (options.signal?.aborted) return { refused: 'stopped before the run was opened' };
 
   const root = dirname(found.dir);
-  const run: RunRef = { runId, runDir: join(runsDir(found.dir), runId) };
+  const cap = loaded.workflow.maxConcurrentRuns;
+  const run: RunRef = {
+    runId,
+    runDir: join(runsDir(found.dir), runId),
+    workflow: loaded.name,
+    ...(cap === undefined ? {} : { maxConcurrentRuns: cap }),
+  };
   const { relay } = options.adapters;
   const port = options.adapters.ports.workspace;
   let started: ProviderEvent[] = [];
@@ -353,6 +360,7 @@ export async function openSeededRun(options: SeededRunOptions): Promise<OpenedRu
       branch,
       repository: made.repository,
       baseSha: made.workspace.baseSha,
+      path: relative(run.runDir, made.workspace.path),
       ...(made.workspace.startSha === undefined ? {} : { startSha: made.workspace.startSha }),
     }),
   });
@@ -375,7 +383,7 @@ export async function openSeededRun(options: SeededRunOptions): Promise<OpenedRu
     writeStatus(dir, 'running');
     removeOpening(dir);
   } catch (error) {
-    await undoOpened(port, run, made.repository.url, branch);
+    await undoOpened(port, withWorkspace(run, made.workspace), made.repository.url, branch);
     throw error;
   }
   return {
