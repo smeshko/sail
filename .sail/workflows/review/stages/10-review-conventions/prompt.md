@@ -1,6 +1,6 @@
 Review this pull request for one question: does the change follow AGENTS.md and CONTEXT.md, and is it fit for a public
-repository? Five other reviewers cover requirements, architecture, bugs, tests and security at the same time, and
-validation runs the typecheck, lint and the affected tests: stay on your question.
+repository? Four other reviewers cover requirements, architecture, bugs and tests at the same time, and validation runs
+the typecheck, lint and the affected tests: stay on your question.
 
 The change is `git diff {{base}}...HEAD`, its commits are `git log {{base}}..HEAD`, the pull request is described at
 `{{brief}}`, and what it should do at `{{requirements}}`. Read past the diff: the code around each change, its callers

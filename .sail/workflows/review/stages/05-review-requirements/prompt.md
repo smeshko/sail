@@ -1,5 +1,5 @@
 Review this pull request for one question: does the change do what its requirements ask, all of it and nothing more?
-Five other reviewers cover architecture, bugs, tests, security and conventions at the same time, and validation runs the
+Four other reviewers cover architecture, bugs, tests and conventions at the same time, and validation runs the
 typecheck, lint and the affected tests: stay on your question.
 
 The change is `git diff {{base}}...HEAD`, its commits are `git log {{base}}..HEAD`, the pull request is described at
