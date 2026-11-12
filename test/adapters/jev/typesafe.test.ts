@@ -79,8 +79,27 @@ function echoing(): Fetch {
 
 jevSuite('typesafe', async (emit) => createTypesafeJev({ apiKey: KEY, fetch: echoing(), emit }));
 
-const asking = (fetch: Fetch, extra: { model?: string; timeoutMs?: number; apiUrl?: string } = {}) =>
-  createTypesafeJev({ apiKey: KEY, fetch, ...extra });
+/** A sleep that waits for nothing and keeps what it was asked to wait. */
+function waiting(): { sleep: (ms: number) => Promise<void>; waits: number[] } {
+  const waits: number[] = [];
+  return {
+    waits,
+    sleep: async (ms) => {
+      waits.push(ms);
+    },
+  };
+}
+
+const asking = (
+  fetch: Fetch,
+  extra: {
+    model?: string;
+    timeoutMs?: number;
+    apiUrl?: string;
+    sleep?: (ms: number) => Promise<void>;
+    now?: () => Date;
+  } = {},
+) => createTypesafeJev({ apiKey: KEY, fetch, sleep: waiting().sleep, ...extra });
 
 test('a docs-shaped answer becomes typed answers keyed by name, with confidence, probabilities, legend and usage', async () => {
   const jev = asking(scripted(() => json(DOCS_ANSWER)).fetch);
@@ -205,11 +224,11 @@ test('a 401 fails unauthorized, a 429 and a 503 unavailable, each with its statu
   });
   expect(await failure(429, { detail: 'rate limited' })).toMatchObject({
     code: 'unavailable',
-    message: 'jev.ask: TypeSafe answered 429 Too Many Requests: rate limited',
+    message: 'jev.ask: TypeSafe answered 429 Too Many Requests: rate limited (after 3 attempts)',
   });
   expect(await failure(503, { message: 'overloaded' })).toMatchObject({
     code: 'unavailable',
-    message: expect.stringContaining('TypeSafe answered 503 Service Unavailable: '),
+    message: expect.stringMatching(/TypeSafe answered 503 Service Unavailable: .* \(after 3 attempts\)$/),
   });
 });
 
@@ -260,7 +279,7 @@ test('an error body that is no JSON is kept as text in the message', async () =>
   const error = (await rejection(jev.ask(THREE_QUESTIONS))) as PortError;
   expect({ code: error.code, message: error.message }).toEqual({
     code: 'unavailable',
-    message: 'jev.ask: TypeSafe answered 502 Bad Gateway: upstream connect error',
+    message: 'jev.ask: TypeSafe answered 502 Bad Gateway: upstream connect error (after 3 attempts)',
   });
 });
 
@@ -275,7 +294,7 @@ test('a request that does not answer within timeoutMs fails unavailable, naming 
   const error = (await rejection(jev.ask(THREE_QUESTIONS))) as PortError;
   expect({ code: error.code, message: error.message }).toEqual({
     code: 'unavailable',
-    message: 'jev.ask: TypeSafe at api.typesafe.ai did not answer within 20 ms',
+    message: 'jev.ask: TypeSafe at api.typesafe.ai did not answer within 20 ms (after 3 attempts)',
   });
 });
 
@@ -288,7 +307,7 @@ test('a network failure fails unavailable, keeping the cause', async () => {
   const error = (await rejection(jev.ask(THREE_QUESTIONS))) as PortError;
   expect({ code: error.code, message: error.message }).toEqual({
     code: 'unavailable',
-    message: 'jev.ask: TypeSafe is unreachable at api.typesafe.ai: connect ECONNREFUSED',
+    message: 'jev.ask: TypeSafe is unreachable at api.typesafe.ai: connect ECONNREFUSED (after 3 attempts)',
   });
 });
 
@@ -304,7 +323,7 @@ test('an answer whose body breaks off while read fails unavailable, keeping the 
   const error = (await rejection(asking(fetch).ask(THREE_QUESTIONS))) as PortError;
   expect({ code: error.code, message: error.message }).toEqual({
     code: 'unavailable',
-    message: 'jev.ask: the answer from TypeSafe at api.typesafe.ai broke off: socket hang up',
+    message: 'jev.ask: the answer from TypeSafe at api.typesafe.ai broke off: socket hang up (after 3 attempts)',
   });
 });
 
@@ -536,4 +555,145 @@ test('an apiUrl option is refused, naming the variable that replaces it', () => 
   expect(() => typesafeJev.create({ apiUrl: 'http://localhost:1' }, context)).toThrow(
     /^typesafe jev: option apiUrl: .*SAIL_TYPESAFE_API_URL/,
   );
+});
+
+test('a 429 then a 200 answers, after one wait', async () => {
+  let calls = 0;
+  const answering = scripted(() => (++calls === 1 ? json({ detail: 'slow' }, 429) : json(DOCS_ANSWER)));
+  const { sleep, waits } = waiting();
+  const capture = captureEvents();
+  const jev = createTypesafeJev({ apiKey: KEY, fetch: answering.fetch, sleep, emit: capture.emit });
+  const answered = await jev.ask(THREE_QUESTIONS);
+  expect(answered.model).toBe('jev-latest');
+  expect({ sends: answering.sent.length, waits, asked: capture.events.length }).toEqual({
+    sends: 2,
+    waits: [1000],
+    asked: 1,
+  });
+});
+
+test.each([
+  [503, 'Service Unavailable'],
+  [529, 'Overloaded'],
+])('a persistent %d fails unavailable after three sends, waiting 1 and 2 seconds', async (status, text) => {
+  const answering = scripted(() => json({ detail: 'down' }, status));
+  const { sleep, waits } = waiting();
+  const error = (await rejection(asking(answering.fetch, { sleep }).ask(THREE_QUESTIONS))) as PortError;
+  expect({ code: error.code, message: error.message, sends: answering.sent.length, waits }).toEqual({
+    code: 'unavailable',
+    message: `jev.ask: TypeSafe answered ${status} ${text}: down (after 3 attempts)`,
+    sends: 3,
+    waits: [1000, 2000],
+  });
+});
+
+test('a persistent network failure and a persistent timeout each make three sends and wait 1 and 2 seconds', async () => {
+  const down = scripted(() => {
+    throw new Error('connect ECONNREFUSED');
+  });
+  const first = waiting();
+  await rejection(asking(down.fetch, { sleep: first.sleep }).ask(THREE_QUESTIONS));
+  const silent = scripted(
+    ({ init }) =>
+      new Promise<Response>((_, reject) => init.signal?.addEventListener('abort', () => reject(init.signal?.reason))),
+  );
+  const second = waiting();
+  await rejection(asking(silent.fetch, { sleep: second.sleep, timeoutMs: 5 }).ask(THREE_QUESTIONS));
+  expect({ down: [down.sent.length, first.waits], silent: [silent.sent.length, second.waits] }).toEqual({
+    down: [3, [1000, 2000]],
+    silent: [3, [1000, 2000]],
+  });
+});
+
+test('a retry-after of 3 seconds is waited, instead of the back-off', async () => {
+  let calls = 0;
+  const answering = scripted(() =>
+    ++calls === 1 ? new Response('{}', { status: 429, headers: { 'retry-after': '3' } }) : json(DOCS_ANSWER),
+  );
+  const { sleep, waits } = waiting();
+  await asking(answering.fetch, { sleep }).ask(THREE_QUESTIONS);
+  expect(waits).toEqual([3000]);
+});
+
+test('a retry-after given as an HTTP date is read against now()', async () => {
+  let calls = 0;
+  const at = new Date('2026-10-22T09:00:00.000Z');
+  const answering = scripted(() =>
+    ++calls === 1
+      ? new Response('{}', {
+          status: 503,
+          headers: { 'retry-after': new Date(at.getTime() + 4000).toUTCString() },
+        })
+      : json(DOCS_ANSWER),
+  );
+  const { sleep, waits } = waiting();
+  await asking(answering.fetch, { sleep, now: () => at }).ask(THREE_QUESTIONS);
+  expect(waits).toEqual([4000]);
+});
+
+test('a retry-after of 60 seconds fails unavailable after one send and no wait', async () => {
+  const answering = scripted(
+    () => new Response('{"detail":"slow"}', { status: 429, headers: { 'retry-after': '60' } }),
+  );
+  const { sleep, waits } = waiting();
+  const error = (await rejection(asking(answering.fetch, { sleep }).ask(THREE_QUESTIONS))) as PortError;
+  expect({ code: error.code, message: error.message, sends: answering.sent.length, waits }).toEqual({
+    code: 'unavailable',
+    message:
+      'jev.ask: TypeSafe answered 429 Too Many Requests: slow (retry-after of 60 s is over the 10 s an ask waits)',
+    sends: 1,
+    waits: [],
+  });
+});
+
+test('a retry-after that cannot be read is ignored', async () => {
+  let calls = 0;
+  const answering = scripted(() =>
+    ++calls === 1 ? new Response('{}', { status: 429, headers: { 'retry-after': 'soon' } }) : json(DOCS_ANSWER),
+  );
+  const { sleep, waits } = waiting();
+  await asking(answering.fetch, { sleep }).ask(THREE_QUESTIONS);
+  expect(waits).toEqual([1000]);
+});
+
+test.each([400, 401, 402])('a %d fails after one send and no wait', async (status) => {
+  const answering = scripted(() => json({ detail: 'no' }, status));
+  const { sleep, waits } = waiting();
+  await rejection(asking(answering.fetch, { sleep }).ask(THREE_QUESTIONS));
+  expect({ sends: answering.sent.length, waits }).toEqual({ sends: 1, waits: [] });
+});
+
+test('latencyMs covers the waits of a retried ask', async () => {
+  let clock = 0;
+  let calls = 0;
+  const answering = scripted(() => (++calls === 1 ? json({}, 503) : json(DOCS_ANSWER)));
+  const jev = createTypesafeJev({
+    apiKey: KEY,
+    fetch: answering.fetch,
+    sleep: async (ms) => {
+      clock += ms;
+    },
+    now: () => new Date(clock),
+  });
+  expect((await jev.ask(THREE_QUESTIONS)).latencyMs).toBe(1000);
+});
+
+test('an attempt times out after 10000 ms when no timeoutMs is given', async () => {
+  const silent = scripted(
+    ({ init }) =>
+      new Promise<Response>((_, reject) => init.signal?.addEventListener('abort', () => reject(init.signal?.reason))),
+  );
+  const realTimeout = AbortSignal.timeout;
+  AbortSignal.timeout = ((ms: number) => {
+    seen.push(ms);
+    return realTimeout(1);
+  }) as typeof AbortSignal.timeout;
+  const seen: number[] = [];
+  try {
+    const error = (await rejection(asking(silent.fetch).ask(THREE_QUESTIONS))) as PortError;
+    expect(error.message).toContain('did not answer within 10000 ms');
+    expect(seen).toEqual([10_000, 10_000, 10_000]);
+  } finally {
+    AbortSignal.timeout = realTimeout;
+  }
 });
