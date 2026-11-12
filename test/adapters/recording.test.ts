@@ -581,6 +581,19 @@ describe('masking machine paths', () => {
   });
 });
 
+describe('the prompt hash and the conventions', () => {
+  test('a request with conventions hashes as the old whole prompt, and changes with the conventions', () => {
+    const base = request();
+    const [conventions, prompt] = ['## Repository conventions: AGENTS.md\n\nIndent with tabs.', 'Write the spec.\n'];
+    const split = { ...base, conventions, prompt };
+    const whole = { ...base, prompt: `${conventions}\n\n## Your task\n\n${prompt}` };
+    expect('conventions' in whole).toBe(false);
+    expect(promptSha256(split)).toBe(promptSha256(whole));
+    expect(promptSha256({ ...split, conventions: 'Other.' })).not.toBe(promptSha256(split));
+    expect(promptSha256({ ...base, prompt })).not.toBe(promptSha256(split));
+  });
+});
+
 describe('failures never reject', () => {
   test('a directory that cannot be written turns a done result into a harness error that keeps the usage', async () => {
     const blocker = join(tempDir(), 'file');

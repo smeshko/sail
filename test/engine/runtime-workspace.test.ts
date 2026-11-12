@@ -638,8 +638,8 @@ test('a run from committed definitions prompts with the committed conventions fr
       });
       const [spec] = asked;
       expect({
-        committed: spec?.prompt.includes('committed rule') ?? false,
-        uncommitted: spec?.prompt.includes('uncommitted rule') ?? true,
+        committed: spec?.conventions?.includes('committed rule') ?? false,
+        uncommitted: spec?.conventions?.includes('uncommitted rule') ?? true,
         recorded: readRunHeader(end.dir).definitionsSha,
         dir: end.dir,
       }).toEqual({

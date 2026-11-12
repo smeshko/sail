@@ -8,7 +8,7 @@ import type { Env } from '../../ports/adapter';
 import type { Harness, HarnessEvent, HarnessRequest } from '../../ports/harness';
 import type { HarnessCapabilities, HarnessResult } from '../../ports/types';
 import { type BudgetTimers, createBudgetWatch } from '../claude-code/budget';
-import { sessionPrompt, stepGuide } from '../claude-code/harness';
+import { sessionPrompt, stepGuide, systemText } from '../claude-code/harness';
 import { renderTranscript } from '../claude-code/transcript';
 import { createGate, gateExtension } from './gate';
 import { createPiSessionReader, type PiEvent, type PiSessionReader } from './messages';
@@ -265,8 +265,12 @@ export function createPiHarness(options: PiHarnessOptions): Harness {
           cwd: request.cwd,
           model: request.model,
           ...(request.effort === undefined ? {} : { effort: request.effort }),
-          // The same text for every call: the call's own values end the prompt it is sent.
-          systemPrompt: [stepGuide(hasShell, (request.env.TMPDIR ?? '') !== ''), '', SUBMIT_CONTRACT].join('\n'),
+          // The same text for every call with the same tools and conventions: the call's own values end the prompt it is sent.
+          systemPrompt: systemText(
+            stepGuide(hasShell, (request.env.TMPDIR ?? '') !== ''),
+            SUBMIT_CONTRACT,
+            request.conventions,
+          ),
           tools,
           gate: gateExtension(gate),
           submit: submitTool(request.outputSchema, (found) => {

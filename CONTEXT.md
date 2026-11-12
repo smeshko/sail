@@ -243,9 +243,11 @@ _Avoid_: linter, assertion, gate, check
 
 **Prompt**:
 An agent step's instructions, rendered with the step's bindings.
-The engine puts the repository's conventions before them and appends both shared fragments, about untrusted input and submitting, so steps with the same conventions start with the same text.
+The engine appends both shared fragments, about untrusted input and submitting, and hands the repository's conventions to the harness apart from the prompt.
+The harness puts them in the session's system prompt after its own static text, so sessions with the same conventions and tools share it.
+`prompt.md` records the conventions and the prompt together.
 A harness ends the prompt it sends a session with the call's own values, under "Where you work".
-_Avoid_: system prompt, instructions file
+_Avoid_: instructions file; "system prompt" for the prompt (it names the harness's own session text, where the conventions go)
 
 **Fragment**:
 A piece of prompt text sail appends to every agent step's prompt: one about untrusted input, one about submitting. Each is a built-in that a repository may shadow.
@@ -253,7 +255,7 @@ _Avoid_: partial, include, snippet, footer
 
 **Conventions**:
 The repository's own instruction files for agents, such as `AGENTS.md`.
-The engine puts each one as it is at the start of every agent step's prompt, before the step's own text and the fragments.
+The engine gives each one as it is to the step's harness, which puts them in the session's system prompt.
 The config lists them, and an empty list adds none.
 With no list, they are `AGENTS.md` and `CLAUDE.md`, where those exist.
 An agent step may name its own list, which replaces the config's for that step.

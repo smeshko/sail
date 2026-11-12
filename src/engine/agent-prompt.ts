@@ -1,8 +1,9 @@
-// prepareAgentPrompt(): an agent step's prompt as its harness receives it. The repository's convention files come
-// first, so two steps with the same conventions start with the same text, which a session can read from the prompt
-// cache. Then the step's `prompt.md` and the shared fragments, rendered with the call's bindings, then a corrective
-// try's feedback. Neither the conventions nor the feedback is read as a template, and the feedback goes inside an
-// untrusted-input block. Nothing that differs per call comes before the step's prompt.
+// prepareAgentPrompt(): an agent step's prompt, in the parts its harness receives. The message is the step's
+// `prompt.md` and the shared fragments, rendered with the call's bindings, then a corrective try's feedback. The
+// repository's convention files are apart from it, so two steps with the same conventions hand their harness the same
+// text, which goes in the session's system prompt and is read from the prompt cache. `text` is the record `prompt.md`
+// keeps: the conventions, then the message. Neither the conventions nor the feedback is read as a template, and the
+// feedback goes inside an untrusted-input block.
 import { readFileSync, realpathSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { inputVar, type PreparedBindings } from './bindings';
@@ -16,7 +17,7 @@ export const DEFAULT_CONVENTIONS = ['AGENTS.md', 'CLAUDE.md'] as const;
 /** The `source` of the untrusted-input block that holds a corrective try's problems. */
 export const FEEDBACK_SOURCE = 'the problems found in your last output';
 
-/** The heading of the step's own prompt, there only when a convention precedes it. */
+/** The heading of the step's own prompt in the record `prompt.md` keeps, there only when a convention precedes it. */
 export const TASK_HEADING = '## Your task';
 
 export interface AgentPromptOptions {
@@ -36,7 +37,12 @@ export interface AgentPromptOptions {
 export type AgentPrompt =
   | {
       ok: true;
+      /** The record `prompt.md` keeps: the conventions, `## Your task` and the message. */
       text: string;
+      /** What the session is sent: the step's prompt, then a corrective try's feedback. */
+      message: string;
+      /** The convention files' text, for the harness's system prompt; absent when the step has none. */
+      conventionsText?: string;
       /** The untrusted values the prompt prints. */
       untrusted: number;
       fragments: { name: FragmentName; origin: string }[];
@@ -45,6 +51,10 @@ export type AgentPrompt =
     }
   /** Why there is no prompt: a file that can't be read, a template that can't be rendered. */
   | { ok: false; message: string };
+
+/** The record of a prompt: `message` alone, or the conventions, `## Your task` and `message`. */
+export const promptRecord = (conventionsText: string | undefined, message: string): string =>
+  conventionsText === undefined ? message : `${conventionsText}\n\n${TASK_HEADING}\n\n${message}`;
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
@@ -116,17 +126,20 @@ export function prepareAgentPrompt(options: AgentPromptOptions): AgentPrompt {
   } catch (error) {
     return { ok: false, message: messageOf(error) };
   }
-  const parts = conventions.files.map(({ path, text }) => `## Repository conventions: ${path}\n\n${text.trimEnd()}`);
-  // A step's prompt has no heading of its own: after a convention it would read as that file's closing lines.
-  parts.push(parts.length > 0 ? `${TASK_HEADING}\n\n${rendered.text.trimEnd()}` : rendered.text.trimEnd());
+  const sections = conventions.files.map(({ path, text }) => `## Repository conventions: ${path}\n\n${text.trimEnd()}`);
+  const parts = [rendered.text.trimEnd()];
   if (feedback.length > 0) {
     const intro = 'Your last output was rejected. Fix each problem below, then submit again.';
     const problems = wrapUntrusted(feedback.map((message) => message.trimEnd()).join('\n\n'), FEEDBACK_SOURCE);
     parts.push(`## Fix your last output\n\n${intro}\n\n${problems}`);
   }
+  const message = `${parts.join('\n\n')}\n`;
+  const conventionsText = sections.length > 0 ? sections.join('\n\n') : undefined;
   return {
     ok: true,
-    text: `${parts.join('\n\n')}\n`,
+    text: promptRecord(conventionsText, message),
+    message,
+    ...(conventionsText === undefined ? {} : { conventionsText }),
     untrusted: rendered.untrusted + (feedback.length > 0 ? 1 : 0),
     fragments: rendered.fragments,
     conventions: conventions.files.map(({ path }) => path),

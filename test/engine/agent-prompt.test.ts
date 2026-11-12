@@ -8,6 +8,7 @@ import {
   type AgentPromptOptions,
   FEEDBACK_SOURCE,
   prepareAgentPrompt,
+  promptRecord,
   TASK_HEADING,
 } from '../../src/engine/agent-prompt';
 import { materialisePrepared, prepareBindings, type Supplied } from '../../src/engine/bindings';
@@ -110,7 +111,7 @@ test('a prompt prints a value as its schema parsed it, wrapped where the schema 
     ].join('\n');
 
     const prompt = s.prepare(template, { conventions: [] }, consumes, supplied);
-    const { text: _text, ...facts } = prompt.ok ? prompt : { text: '', ...prompt };
+    const { text: _text, message: _message, ...facts } = prompt.ok ? prompt : { text: '', ...prompt, message: '' };
     expect(facts).toEqual({
       ok: true,
       untrusted: 2,
@@ -381,5 +382,44 @@ test('a prompt with no feedback has no fix section and no extra untrusted value'
     expect(textOf(none)).not.toContain(FEEDBACK_SOURCE);
     expect(none).toEqual(absent);
     expect(none.ok && none.untrusted).toBe(0);
+  });
+});
+
+test('the conventions are apart from the message, which holds the prompt and the feedback, and the record is made of the two', async () => {
+  await withTempRepo((repo) => {
+    const s = scratch(repo);
+    write(join(repo.dir, 'AGENTS.md'), 'Indent with tabs.\n');
+    write(join(repo.dir, 'CLAUDE.md'), 'Ask before deleting.\n');
+    const sections = [
+      '## Repository conventions: AGENTS.md\n\nIndent with tabs.',
+      '## Repository conventions: CLAUDE.md\n\nAsk before deleting.',
+    ].join('\n\n');
+    const prepared = s.prepare('Write the spec.\n');
+    if (!prepared.ok) throw new Error(prepared.message);
+    expect(prepared.conventionsText).toBe(sections);
+    expect(prepared.message.startsWith('Write the spec.')).toBe(true);
+    expect(prepared.message).not.toContain('## Repository conventions');
+    expect(prepared.message).not.toContain(TASK_HEADING);
+    expect(prepared.text).toBe(promptRecord(prepared.conventionsText, prepared.message));
+    expect(prepared.text).toBe(`${sections}\n\n${TASK_HEADING}\n\n${prepared.message}`);
+
+    const corrective = s.prepare('Write the spec.\n', { feedback: ['no summary'] });
+    if (!corrective.ok) throw new Error(corrective.message);
+    expect(corrective.message).toContain('## Fix your last output');
+    expect(corrective.message.endsWith('no summary\n</untrusted-input>\n')).toBe(true);
+    expect(corrective.conventionsText).toBe(sections);
+    const review = s.prepare('Review the diff.\n');
+    expect(review.ok && review.conventionsText).toBe(sections);
+  });
+});
+
+test('a step with no convention has no conventions text, and its message is its record', async () => {
+  await withTempRepo((repo) => {
+    const s = scratch(repo);
+    const none = s.prepare('Write the spec.\n');
+    if (!none.ok) throw new Error(none.message);
+    expect(none.conventionsText).toBeUndefined();
+    expect('conventionsText' in none).toBe(false);
+    expect(none.message).toBe(none.text);
   });
 });

@@ -102,12 +102,22 @@ export function sessionEnv(preamble: Readonly<Record<string, string>>, env: Env)
 const hasBash = (request: HarnessRequest) => sessionTools(request.permissions).tools.includes('Bash');
 
 /**
- * The text appended to the preset system prompt: how a step handles files and commands, then how it submits. It is
- * the same for every call whose session has the same tools, whatever its run, stage, call or try, so sessions share it
+ * The text appended to the preset system prompt: how a step handles files and commands, how it submits, then the
+ * repository's conventions. It is the same for every call whose session has the same tools and conventions, whatever its run, stage, call or try, so sessions share it
  * in the prompt cache: the call's own values end the prompt the session is sent instead (sessionPrompt()).
  */
 export function appendedSystemPrompt(request: HarnessRequest): string {
-  return [stepGuide(hasBash(request), (request.env.TMPDIR ?? '') !== ''), '', SUBMIT_CONTRACT].join('\n');
+  return systemText(
+    stepGuide(hasBash(request), (request.env.TMPDIR ?? '') !== ''),
+    SUBMIT_CONTRACT,
+    request.conventions,
+  );
+}
+
+/** The system text both harnesses build: `guide`, `contract`, then the conventions, when they hold anything. */
+export function systemText(guide: string, contract: string, conventions?: string): string {
+  const base = [guide, '', contract].join('\n');
+  return conventions === undefined || conventions.trim() === '' ? base : `${base}\n\n${conventions.trimEnd()}`;
 }
 
 /**

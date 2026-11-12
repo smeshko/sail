@@ -65,7 +65,7 @@
       }
     },
     "conventions": {
-      "description": "the convention files appended to every agent prompt, each a path inside the repository; AGENTS.md and CLAUDE.md when absent, none when empty",
+      "description": "the convention files the harness puts in every agent session's system prompt, each a path inside the repository; AGENTS.md and CLAUDE.md when absent, none when empty",
       "type": "array",
       "items": { "type": "string", "minLength": 1 },
       "uniqueItems": true

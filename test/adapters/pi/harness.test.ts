@@ -181,6 +181,24 @@ test('pi’s system prompt is identical for two calls that differ in run, stage,
   }
 });
 
+test('pi’s system prompt ends with the conventions, the same for two calls with them, and holds none without; the prompt sent holds none', async () => {
+  const conventions = '## Repository conventions: AGENTS.md\n\nIndent with tabs.';
+  const system = async (extra: Partial<HarnessRequest>) => {
+    const { scripted } = await play('done', extra);
+    return { system: scripted.calls[0]?.params.systemPrompt ?? '', sent: scripted.calls[0]?.prompts[0] ?? '' };
+  };
+  const none = await system({});
+  const one = await system({ conventions });
+  const two = await system({ conventions, key: 'review:bugs#3', try: 2 });
+  const other = await system({ conventions: 'Other rules.' });
+  const blank = await system({ conventions: '' });
+  expect(one.system).toBe(`${none.system}\n\n${conventions}`);
+  expect(two.system).toBe(one.system);
+  expect(other.system).not.toBe(one.system);
+  expect(blank.system).toBe(none.system);
+  expect(one.sent).not.toContain('Indent with tabs.');
+});
+
 test('the prompt a pi session is sent ends with Where you work, after the stage prompt and Fix your last output, and a session with no shell gets every variable there', async () => {
   const engine = '## Your task\n\nWrite the spec.\n\n## Fix your last output\n\nYour last output was rejected.\n';
   const made = request(engine);

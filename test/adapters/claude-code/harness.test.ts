@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import {
+  appendedSystemPrompt,
   createClaudeCodeHarness,
   INTERRUPT_GRACE_MS,
   type QueryFunction,
@@ -219,33 +220,41 @@ test('the prompt a session with no shell is sent ends with Where you work: the w
   );
 });
 
-test('Where you work is the last thing in the prompt a session is sent, after the conventions, the stage prompt and Fix your last output', async () => {
-  const engine = [
-    '## Repository conventions: AGENTS.md\n\nIndent with tabs.',
-    '## Your task\n\nWrite the spec.',
-    '## Fix your last output\n\nYour last output was rejected.\n',
-  ].join('\n\n');
-  const req = request(engine, { permissions: WITH_COMMANDS });
+test('Where you work is the last thing in the prompt a session is sent, after the stage prompt and Fix your last output, and the conventions are in the system prompt', async () => {
+  const conventions = '## Repository conventions: AGENTS.md\n\nIndent with tabs.';
+  const engine = ['Write the spec.', '## Fix your last output\n\nYour last output was rejected.\n'].join('\n\n');
+  const req = { ...request(engine, { permissions: WITH_COMMANDS }), conventions };
   const { query } = await play(SUITE.done ?? [], req);
   const sent = query.calls[0]?.prompt ?? '';
-  const at = [
-    '## Repository conventions: AGENTS.md',
-    '## Your task',
-    '## Fix your last output',
-    '## Where you work',
-  ].map((heading) => sent.indexOf(heading));
+  const at = ['Write the spec.', '## Fix your last output', '## Where you work'].map((heading) =>
+    sent.indexOf(heading),
+  );
   expect(at).not.toContain(-1);
   expect(at).toEqual([...at].sort((a, b) => a - b));
   expect(sent).toBe(`${engine.trimEnd()}\n\n${whereYouWork(req, true)}\n`);
   expect(sent).toBe(sessionPrompt(req, true));
   expect(sent.endsWith(`- \`$TRY\`: 1\n`)).toBe(true);
-  // Two stages with the same conventions are sent prompts with the same start.
-  const other = sessionPrompt(
-    elsewhere({ ...req, prompt: engine.replace('Write the spec.', 'Review the diff.') }),
-    true,
-  );
-  const shared = '## Repository conventions: AGENTS.md\n\nIndent with tabs.\n\n## Your task\n\n';
-  expect([sent.startsWith(shared), other.startsWith(shared)]).toEqual([true, true]);
+  expect(sent).not.toContain('## Repository conventions');
+  expect(sent).not.toContain('Indent with tabs.');
+  expect(appendedSystemPrompt(req)).toContain(conventions);
+});
+
+test('the text appended to the system prompt is identical for two calls with the same conventions and tools, and differs when the conventions differ', () => {
+  const conventions = '## Repository conventions: AGENTS.md\n\nIndent with tabs.\n';
+  for (const permissions of [request().permissions, WITH_COMMANDS]) {
+    const none = { ...request('Write the spec.', { permissions }), env: {} };
+    const one = { ...none, conventions };
+    const two = { ...elsewhere(one), conventions };
+    const append = (r: HarnessRequest) => (sessionOptions(r, {}).systemPrompt as { append: string }).append;
+    expect(append(two)).toBe(append(one));
+    expect(append(one)).toBe(`${append(none)}\n\n${conventions.trimEnd()}`);
+    expect(append(one).startsWith(`${append(none)}\n\n`)).toBe(true);
+    expect(append({ ...one, conventions: 'Other rules.' })).not.toBe(append(one));
+    expect(append({ ...one, conventions: '' })).toBe(append(none));
+    expect(append({ ...one, conventions: ' \n' })).toBe(append(none));
+  }
+  const bare = request('Write the spec.');
+  expect(appendedSystemPrompt({ ...bare, env: {} })).toBe(appended());
 });
 
 test('the session options hold the request effort as the SDK effort, and no effort key when it has none, with thinking unchanged', () => {
