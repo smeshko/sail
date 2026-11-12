@@ -144,17 +144,17 @@
       "outcome": "done",
       "output": {
         "summary": "The footer works for runs with agent calls; an empty run and a rounding edge are broken, and validation fails on the empty run's test.",
+        "raised": [
+          {
+            "criterion": "A run with no agent calls prints `total $0.00`",
+            "test": "test/cli/show.test.ts: a run of a one-script workflow ends with `total $0.00`"
+          }
+        ],
         "decisions": [
           {
             "finding": "V1",
             "verdict": "fix",
             "rationale": "The failing test is the empty-run criterion.",
-            "ticket": null
-          },
-          {
-            "finding": "D1",
-            "verdict": "fix",
-            "rationale": "An acceptance criterion this change must meet.",
             "ticket": null
           },
           {

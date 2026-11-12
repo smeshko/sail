@@ -68,7 +68,7 @@ export default workflow(
   'review',
   {
     intake: pr,
-    version: 12,
+    version: 13,
     watch: { every: '5m' },
     // Two pull requests at a time, though each merge moves the base the other is being reviewed against.
     maxConcurrentRuns: 2,
@@ -156,16 +156,6 @@ export default workflow(
         detail: `${hit.file}:${hit.line} uses "${hit.word}", which CONTEXT.md's ${hit.term} entry lists under _Avoid_. Jev answers yes at ${hit.yes} (hit from ${banned.output.jev.threshold}). Use ${hit.term}.`,
       });
     }
-    for (const criterion of shown.output.criteria.filter((each) => !each.shown)) {
-      findings.push({
-        id: `D${findings.filter((each) => each.source === 'demonstrate').length + 1}`,
-        source: 'demonstrate',
-        severity: 'high',
-        file: '',
-        title: `Not shown: ${criterion.criterion}`,
-        detail: criterion.evidence,
-      });
-    }
     const summaries: ({ lens: (typeof LENSES)[number] } & Pick<z.infer<typeof Reviewed>, 'summary' | 'coverage'>)[] =
       [];
     const nits: z.infer<typeof ReviewRecord>['nits'] = [];
@@ -188,6 +178,7 @@ export default workflow(
       }
     }
 
+    // The demonstration is evidence for the judge, not a source of findings: the judge may raise a criterion it didn't show.
     // The judge decides what each finding becomes, and which reviews it can't trust. It runs with no findings too: a
     // clean review is only as good as what its coverage says it checked.
     const triaged = await run.stage(jevTriage, { findings: { findings }, diff: run.intake.files['diff.patch'] });
@@ -200,6 +191,25 @@ export default workflow(
       evidence: { validation: validated.output, demonstration: shown.output, reviews: summaries },
     });
     if (judged.outcome === 'blocked') return handOff(`judge blocked: ${judged.reason}`);
+    // A criterion the judge raised: the demonstration didn't show it and no test does. Each is a high finding the fix pass
+    // takes, decided `fix` here, after the reviewers' findings; it never reaches triage or the judge's findings.
+    const raised = (judged.output.raised ?? []).map((each, index) => ({
+      finding: {
+        id: `D${index + 1}`,
+        source: 'demonstrate' as const,
+        severity: 'high' as const,
+        file: '',
+        title: `Not shown: ${each.criterion}`,
+        detail: each.test,
+      },
+      decision: {
+        finding: `D${index + 1}`,
+        verdict: 'fix' as const,
+        rationale: 'Raised by the judge: no test shows this criterion.',
+        ticket: null,
+      },
+    }));
+    for (const each of raised) findings.push(each.finding);
     const overridden = new Set(judged.output.decisions.map((decision) => decision.finding));
     const judgement: z.infer<typeof Judgement> = {
       ...judged.output,
@@ -208,6 +218,7 @@ export default workflow(
           .filter((decision) => !overridden.has(decision.finding))
           .map((decision) => ({ ...decision, ticket: null })),
         ...judged.output.decisions,
+        ...raised.map((each) => each.decision),
       ],
     };
     const decided = new Map(judgement.decisions.map((each) => [each.finding, each]));

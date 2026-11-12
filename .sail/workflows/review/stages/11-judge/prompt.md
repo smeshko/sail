@@ -6,14 +6,14 @@ pull request merges into `staging` on its own. A finding you `drop` ships as it 
 look that part of the change gets.
 
 `$STAGE_IN/findings.json` holds every finding, numbered: `V1` when validation (`bun run gate`) failed, `L<n>` for each
-tracker-key prefix or denylist term the leak check found, with its count and example locations, and for each line its Jev pass flagged, `B<n>` for each avoided word the banned-words check flagged, `D<n>` for each acceptance criterion the demonstration couldn't show, and `R<n>` from the
+tracker-key prefix or denylist term the leak check found, with its count and example locations, and for each line its Jev pass flagged, `B<n>` for each avoided word the banned-words check flagged, and `R<n>` from the
 five reviewers at medium or above, each with the reviewer it came from. `$STAGE_IN/evidence.json` holds how each check went as a whole:
-validation's output, the demonstration's criteria and transcript, and each reviewer's summary and coverage: what it
+validation's output, the demonstration's criteria, each shown or not, and its transcript (they are evidence, never findings), and each reviewer's summary and coverage: what it
 checked, how, and with what result.
 
 `$STAGE_IN/triage.json` holds Jev's answers, its clear `decided` findings, and the `judge` ids it left to you.
-Decide every finding in `judge` as below. A merge-stopping finding (high severity, or from validation, leak-check,
-demonstration or checks) is always yours, whatever Jev answered. For a Jev-decided finding, submit a decision only to
+Decide every finding in `judge` as below. A merge-stopping finding (high severity, or from validation, leak-check
+or checks) is always yours, whatever Jev answered. For a Jev-decided finding, submit a decision only to
 overrule Jev, after reading its code; omitting it keeps Jev's verdict. Spend your work on what remains unclear.
 
 ## 1. Check each finding before you decide on it
@@ -21,7 +21,7 @@ overrule Jev, after reading its code; omitting it keeps Jev's verdict. Spend you
 Reviewers overreach, and two lenses often report one problem. For each finding in `judge`, and any Jev-decided finding
 you consider overruling, read the code it points at and confirm it is real: the trigger exists, and what it says goes
 wrong does. You need not inspect the code for Jev decisions you keep. Merge duplicates: decide the first, and drop the
-others as duplicates of it. A failed validation or an unshown criterion is real unless its evidence shows the check
+others as duplicates of it. A failed validation is real unless its evidence shows the check
 itself went wrong.
 
 A leak-check finding that gives a count covers every occurrence: decide it once, for all of them. Read its examples; it is
@@ -56,14 +56,19 @@ the text as it stands is wrong in a way that would mislead a reader or the next 
 behaviour the code doesn't have, a help line that gives a wrong flag, a glossary term the change misuses. Then it is
 `fix`, at its own severity, and the fix stage commits the minor ones together when a pass runs.
 
-A failed validation and an unshown criterion are `fix` unless the problem lies outside the change. Never `drop` a real
+A failed validation is `fix` unless the problem lies outside the change. Never `drop` a real
 problem in scope to keep the pull request moving.
 
-An unshown criterion is `fix` only when the demonstration ran its scenario and saw the wrong thing. When its evidence
-says the harness couldn't run the scenario at all (a pipe, a second command alongside the first, a background process,
-a test), no fix to the code can show it either: read the tests the change adds for it. When a test asserts the
-criterion, `drop` the finding as covered by that test, naming it; when none does, it is `fix`, and the fix is that
-test, never another attempt at the demonstration.
+## Raising an unshown criterion
+
+Read each criterion in `evidence.json`'s demonstration with `shown: false`. Raise it only when no test the change adds
+asserts it. When a test does, raise nothing and name that test in your summary. A criterion the demonstration ran and
+saw go wrong is a bug the reviewers' findings or validation carry; when none does, raise it the same way.
+
+A raised entry gives the `criterion` in the evidence's words and the `test` that would show it: its file and the
+assertion. The fix is that test, or the code change that makes it pass, never another attempt at the demonstration.
+The workflow numbers each raised criterion as a finding of its own, decides it `fix` and sends it to the fix pass. The list is for this
+case only: every other problem is a finding the reviewers or the checks reported.
 
 A ticket costs a reader's attention every time they pass it, and sail has one maintainer, who writes every adapter and
 workflow. File one only when doing it changes something a person would notice: a failure someone hit or can reach
@@ -83,4 +88,5 @@ You decide only. Don't change any file.
 Submit a one-paragraph summary of the pull request's state; the thin reviews, each with its reviewer and what it left
 out, none when every review holds; and a decision for every id in `triage.json`'s `judge`, plus any Jev-decided
 finding you overrule: its id, verdict and a one-sentence rationale, and for a `ticket` the ticket, null otherwise.
-Do not restate Jev decisions you keep.
+Do not restate Jev decisions you keep. Also submit `raised`, the criteria you raise as above, each with its `criterion` and
+`test`; leave it out or empty when there is none.
