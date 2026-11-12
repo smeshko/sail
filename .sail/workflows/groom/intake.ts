@@ -1,7 +1,7 @@
 // read-ticket: groom's own intake. The built-in `ticket` intake claims, which moves the ticket to In Progress; this one
-// only reads: the ticket, and the team's other open tickets for the duplicate check. Every passage a person wrote is
-// wrapped as untrusted input in the files it writes, except others.json: the other tickets unwrapped, which a script
-// reads and wraps itself.
+// only reads: the ticket, and the team's other open tickets for the duplicate check. brief.md and others.md wrap every
+// passage a person wrote as untrusted input, for agents. ticket.json (the ticket as `ticket-source get` returns it) and
+// others.json (the other tickets) are unwrapped, for scripts that wrap what they pass on: bind neither to an agent.
 import { intake, script, value, z } from 'sail';
 import { GroomInput } from './schemas';
 
