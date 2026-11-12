@@ -16,7 +16,9 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import pkg from '../../package.json' with { type: 'json' };
+import { jevListing } from '../../src/cli/commands/check';
 import { EXIT_INTERNAL, EXIT_OK, EXIT_REFUSED } from '../../src/cli/exit-codes';
+import { readConfig } from '../../src/engine/config';
 import { editorDeclarations } from '../../src/engine/editor';
 import { withCatalog } from '../helpers/catalog-harness';
 import { dropReview } from '../helpers/review-fixture';
@@ -154,6 +156,42 @@ test('check --list orders private stages by folder, intake first, lists a multi-
       stderr: '',
     });
   });
+});
+
+/** `sail check --list` in a copy of the fixture whose config gains `jev` as `jev` says. */
+async function listedWithJev(jev: string | undefined) {
+  return await withTempRepo(async (repo) => {
+    const sail = copyFixture(repo.dir);
+    if (jev !== undefined) {
+      const config = join(sail, 'project.yaml');
+      const text = readFileSync(config, 'utf8');
+      writeFileSync(
+        config,
+        text.replace('  workspace: { use: fake }\n', `  workspace: { use: fake }\n  jev: ${jev}\n`),
+      );
+    }
+    return await runCaptured(['check', '--list'], repo.dir);
+  });
+}
+
+test('check --list ends with a jev section naming the configured adapter and its model', async () => {
+  const { code, stdout } = await listedWithJev('{ use: fake, model: jev-1.14.0 }');
+  expect(code).toBe(EXIT_OK);
+  expect(stdout.split('\n').slice(-4)).toEqual(['', 'jev', '  fake  jev-1.14.0', '']);
+});
+
+test("check --list says the adapter's default model when the config names none, and prints no jev section without adapters.jev", async () => {
+  const defaulted = await listedWithJev('{ use: fake }');
+  expect(defaulted.stdout.split('\n').slice(-3)).toEqual(['jev', "  fake  adapter's default model", '']);
+  const without = await listedWithJev(undefined);
+  expect(without.stdout).not.toContain('jev');
+  expect(without.stdout.endsWith('\n')).toBe(true);
+});
+
+test("sail's own config pins the typesafe Jev to jev-1.14.0", () => {
+  const config = readConfig(join(import.meta.dir, '..', '..', '.sail'));
+  if ('issues' in config) throw new Error(JSON.stringify(config.issues));
+  expect(jevListing(config)).toEqual(['', 'jev', '  typesafe  jev-1.14.0']);
 });
 
 test('check without --list prints only the summary', async () => {

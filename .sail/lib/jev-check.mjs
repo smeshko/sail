@@ -45,8 +45,9 @@ export function noul(instructions, yes, no) {
 
 /**
  * Asks Jev `questions` about `state` through `sail port jev ask`, the request kept as `name` in `out`.
- * `{ asked: true, model, answers }`, or `{ asked: false, note }` when the request is over MAX_REQUEST_BYTES, or the port
- * refuses, fails or answers nothing.
+ * `{ asked: true, model, answers }`, or `{ asked: false, note }` when the request is over MAX_REQUEST_BYTES, which was
+ * never sent, or `{ asked: false, failed: true, note }` when the port call itself failed: it did not start, exited
+ * non-zero or printed no JSON.
  */
 export function askNouls(questions, state, out, name = 'jev-request.json') {
   const file = join(out, name);
@@ -62,16 +63,17 @@ export function askNouls(questions, state, out, name = 'jev-request.json') {
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
   });
-  if (result.error) return { asked: false, note: `sail port jev ask did not start: ${result.error.message}` };
+  if (result.error)
+    return { asked: false, failed: true, note: `sail port jev ask did not start: ${result.error.message}` };
   if (result.status !== 0) {
     const last = result.stderr.trim().split('\n').at(-1) || `exited ${result.status}`;
-    return { asked: false, note: last };
+    return { asked: false, failed: true, note: last };
   }
   try {
     const answered = JSON.parse(result.stdout.trim().split('\n').at(-1));
     return { asked: true, model: answered.model, answers: answered.answers ?? {} };
   } catch {
-    return { asked: false, note: 'sail port jev ask printed no JSON answer' };
+    return { asked: false, failed: true, note: 'sail port jev ask printed no JSON answer' };
   }
 }
 

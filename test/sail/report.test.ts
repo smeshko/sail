@@ -27,6 +27,8 @@ interface Record {
   thin: { lens: string; why: string }[];
   open: { finding: string; detail: string }[];
   nits: Nit[];
+  bannedWordsNote?: string;
+  jevIncomplete?: { stage: string; note: string }[];
 }
 
 const LIMIT = 60_000;
@@ -264,4 +266,42 @@ test('a report shortened to level 4 fits the comment limit and counts its nits, 
   expect(size(result.comment)).toBeLessThanOrEqual(LIMIT);
   expect(result.comment).toContain('15 nits: see the full report.');
   for (let n = 1; n <= 15; n++) expect(result.full).toContain(`- bugs: nit ${n} x`);
+});
+
+const CREDITS = 'jev.ask: the TypeSafe account has no credits: TypeSafe answered 402 Payment Required: x';
+
+test('two jevIncomplete entries sharing a note print one line naming both stages', async () => {
+  const result = await report({
+    ...record([], () => 'drop'),
+    jevIncomplete: [
+      { stage: 'leak-check', note: CREDITS },
+      { stage: 'banned-words', note: CREDITS },
+    ],
+  });
+  expect(result.comment.split('\n').filter((line) => line.startsWith('Jev check incomplete'))).toEqual([
+    `Jev check incomplete (leak-check, banned-words): ${CREDITS}.`,
+  ]);
+});
+
+test('jevIncomplete entries with two notes print two lines, and none prints no line', async () => {
+  const two = await report({
+    ...record([], () => 'drop'),
+    jevIncomplete: [
+      { stage: 'leak-check', note: 'one' },
+      { stage: 'banned-words', note: 'two' },
+    ],
+  });
+  expect(two.comment.split('\n').filter((line) => line.startsWith('Jev check incomplete'))).toEqual([
+    'Jev check incomplete (leak-check): one.',
+    'Jev check incomplete (banned-words): two.',
+  ]);
+  expect((await report(record([], () => 'drop'))).comment).not.toContain('Jev check incomplete');
+});
+
+test('a banned-words omission still prints its own line', async () => {
+  const result = await report({
+    ...record([], () => 'drop'),
+    bannedWordsNote: '1 candidates omitted (request limits)',
+  });
+  expect(result.comment).toContain('Banned-words check incomplete: 1 candidates omitted (request limits).');
 });

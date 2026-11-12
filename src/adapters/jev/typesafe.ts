@@ -1,5 +1,6 @@
 // The typesafe Jev: TypeSafe's System One API over plain `fetch`. One POST per ask carries the state and the questions;
-// the answer holds one typed answer per question. Every failure becomes a PortError that keeps TypeSafe's own detail,
+// the answer holds one typed answer per question. An ask changes nothing, so it is sent up to three times, 10 s each,
+// after no answer, a 429 or a status from 500 up, pausing 1 and 2 seconds or the answer's `retry-after` up to 10 seconds. Every failure becomes a PortError that keeps TypeSafe's own detail,
 // and the API key, which goes in the request's header alone, is masked wherever a message or a `raw` could hold it. The
 // key is sent only to https://api.typesafe.ai or a loopback host, whatever SAIL_TYPESAFE_API_URL says.
 import { z } from 'zod';
@@ -13,6 +14,9 @@ import { jevError } from './status';
 
 export const TYPESAFE_API_URL = 'https://api.typesafe.ai';
 const DEFAULT_MODEL = 'jev-latest';
+const ATTEMPTS = 3;
+const BACKOFF_MS = [1000, 2000];
+const MAX_RETRY_AFTER_MS = 10_000;
 
 /** The part of `fetch` the adapter calls: a test injects its own. */
 export type Fetch = (input: string, init: RequestInit) => Promise<Response>;
@@ -22,10 +26,13 @@ export interface TypesafeJevOptions {
   readonly apiUrl?: string;
   /** The model that answers when a request names none. `jev-latest` when left out. */
   readonly model?: string;
+  /** How long one attempt waits for TypeSafe, 10 000 when left out. An ask makes up to three attempts. */
   readonly timeoutMs?: number;
   readonly fetch?: Fetch;
   readonly emit?: ProviderEmit;
   readonly now?: () => Date;
+  /** What the retry waits with: `Bun.sleep` when left out. A test injects one that returns at once. */
+  readonly sleep?: (ms: number) => Promise<void>;
 }
 
 const Reply = z.object({
@@ -82,11 +89,37 @@ export function typesafeEndpoint(value: string): string {
   return `${url.origin}${url.pathname}`.replace(/\/+$/, '');
 }
 
+interface Answer {
+  response: Response;
+  text: string;
+  body: unknown;
+}
+
+/** Whether an answer of `status` is worth asking again: a 429 or anything from 500 up. */
+const retryable = (status: number): boolean => status === 429 || status >= 500;
+
+/** A PortError's message without its `jev.ask: ` prefix, which a new PortError puts back. */
+const bare = (error: PortError): string => error.message.slice(`${error.port}.${error.op}: `.length);
+
+/**
+ * A `retry-after` header in milliseconds: whole seconds, or an HTTP date read against `at`. Undefined when unreadable,
+ * such as `1.5` or `-5`, which `Date.parse` would read as a date long past: an HTTP date always names its day and month.
+ */
+function retryAfterMs(header: string | null, at: Date): number | undefined {
+  if (header === null) return undefined;
+  const value = header.trim();
+  if (/^\d+$/.test(value)) return Number(value) * 1000;
+  if (!/[a-z]{3}/i.test(value)) return undefined;
+  const date = Date.parse(value);
+  return Number.isNaN(date) ? undefined : Math.max(0, date - at.getTime());
+}
+
 export function createTypesafeJev(options: TypesafeJevOptions): Jev {
   const base = typesafeEndpoint(options.apiUrl ?? TYPESAFE_API_URL);
   const host = new URL(base).host;
-  const timeoutMs = options.timeoutMs ?? 30_000;
+  const timeoutMs = options.timeoutMs ?? 10_000;
   const now = options.now ?? (() => new Date());
+  const sleep = options.sleep ?? ((ms: number) => Bun.sleep(ms));
   const mask = redactor([options.apiKey]);
 
   /** The PortError for a failure of the transport, before the answer or while its body is read. */
@@ -99,6 +132,34 @@ export function createTypesafeJev(options: TypesafeJevOptions): Jev {
   };
   const invalid = (message: string, raw?: unknown) => new PortError('jev', 'ask', 'invalid', message, raw);
 
+  /** One attempt: the fetch and the body read. A failure of the transport is returned as the PortError it is. */
+  async function attemptOnce(model: string, request: JevRequest): Promise<Answer | { error: PortError }> {
+    let response: Response;
+    try {
+      response = await (options.fetch ?? fetch)(`${base}/v1/systemone`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${options.apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model, state: request.state, questions: request.questions }),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    } catch (error) {
+      return { error: transport(error, `TypeSafe is unreachable at ${host}`) };
+    }
+    let text: string;
+    try {
+      text = await response.text();
+    } catch (error) {
+      return { error: transport(error, `the answer from TypeSafe at ${host} broke off`) };
+    }
+    let body: unknown;
+    try {
+      body = JSON.parse(text);
+    } catch {
+      body = undefined;
+    }
+    return { response, text, body };
+  }
+
   async function send(input: JevRequest): Promise<JevAnswered> {
     const parsed = JevRequest.safeParse(input);
     if (!parsed.success) {
@@ -108,29 +169,31 @@ export function createTypesafeJev(options: TypesafeJevOptions): Jev {
     const request = parsed.data;
     const model = request.model ?? options.model ?? DEFAULT_MODEL;
     const started = now().getTime();
-    let response: Response;
-    let text: string;
-    try {
-      response = await (options.fetch ?? fetch)(`${base}/v1/systemone`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${options.apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model, state: request.state, questions: request.questions }),
-        signal: AbortSignal.timeout(timeoutMs),
-      });
-    } catch (error) {
-      throw transport(error, `TypeSafe is unreachable at ${host}`);
+    let answer: Answer | undefined;
+    for (let attempt = 1; answer === undefined; attempt++) {
+      const got = await attemptOnce(model, request);
+      if (!('error' in got) && !retryable(got.response.status)) {
+        answer = got;
+        break;
+      }
+      const failure =
+        'error' in got ? got.error : jevError(got.response.status, detailOf(got.body, got.text), got.body);
+      const waitMs = 'error' in got ? undefined : retryAfterMs(got.response.headers.get('retry-after'), now());
+      if (waitMs !== undefined && waitMs > MAX_RETRY_AFTER_MS) {
+        throw new PortError(
+          'jev',
+          'ask',
+          failure.code,
+          `${bare(failure)} (retry-after of ${waitMs / 1000} s is over the ${MAX_RETRY_AFTER_MS / 1000} s an ask waits)`,
+          failure.raw,
+        );
+      }
+      if (attempt === ATTEMPTS) {
+        throw new PortError('jev', 'ask', failure.code, `${bare(failure)} (after ${ATTEMPTS} attempts)`, failure.raw);
+      }
+      await sleep(waitMs ?? BACKOFF_MS[attempt - 1] ?? 0);
     }
-    try {
-      text = await response.text();
-    } catch (error) {
-      throw transport(error, `the answer from TypeSafe at ${host} broke off`);
-    }
-    let body: unknown;
-    try {
-      body = JSON.parse(text);
-    } catch {
-      body = undefined;
-    }
+    const { response, text, body } = answer;
     if (!response.ok) throw jevError(response.status, detailOf(body, text), body);
     const reply = Reply.safeParse(body);
     if (!reply.success) {

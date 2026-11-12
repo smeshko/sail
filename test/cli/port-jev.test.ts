@@ -108,6 +108,25 @@ test('an answer of 429 exits 1 with the status on stderr, and leaves an error:po
   });
 });
 
+test('an answer of 402 exits 1 with the credits message, and leaves an error:port of code payment_required', async () => {
+  await withTempRepo(async (repo) => {
+    withJev(repo, { error: { status: 402, detail: 'billing_error' } });
+    const file = join(repo.dir, 'port-events.ndjson');
+    const { code, stderr } = await jev(repo, ['ask'], { env: { SAIL_EVENTS: file }, stdin: BODY });
+    expect(code).toBe(EXIT_FAILED);
+    expect(stderr).toContain('the TypeSafe account has no credits');
+    expect(appended(file)).toEqual([
+      {
+        type: 'error:port',
+        port: 'jev',
+        op: 'ask',
+        code: 'payment_required',
+        message: 'jev.ask: the TypeSafe account has no credits: TypeSafe answered 402 Payment Required: billing_error',
+      },
+    ]);
+  });
+});
+
 test.each([
   ['a body that is no JSON', 'not json', 'jev ask needs a JSON body: '],
   [

@@ -7,6 +7,7 @@ import { join } from 'node:path';
 
 interface Asked {
   asked: boolean;
+  failed?: boolean;
   model?: string;
   answers?: Record<string, unknown>;
   note?: string;
@@ -80,12 +81,18 @@ test('askNouls does not send a request over MAX_REQUEST_BYTES, and notes its siz
   });
 });
 
+test('askNouls marks a request over MAX_REQUEST_BYTES, which it never sent, as not failed', () => {
+  const out = stubSail('exit 1');
+  const asked = lib.askNouls({}, { text: 'x'.repeat(lib.MAX_REQUEST_BYTES) }, out) as { failed?: boolean };
+  expect(asked.failed).toBeUndefined();
+});
+
 test('askNouls answers nothing when sail fails, noting its last stderr line, or its exit code when it printed none', () => {
   const said = lib.askNouls({}, {}, stubSail('echo "first" >&2\necho "jev: no key" >&2\nexit 3'));
   const silent = lib.askNouls({}, {}, stubSail('exit 4'));
   expect({ said, silent }).toEqual({
-    said: { asked: false, note: 'jev: no key' },
-    silent: { asked: false, note: 'exited 4' },
+    said: { asked: false, failed: true, note: 'jev: no key' },
+    silent: { asked: false, failed: true, note: 'exited 4' },
   });
 });
 
@@ -95,8 +102,11 @@ test('askNouls answers nothing when sail prints no JSON, or does not start', () 
   process.env.PATH = out;
   rmSync(join(out, 'sail'));
   const missing = lib.askNouls({}, {}, out);
-  expect({ garbled, missing: { asked: missing.asked, note: missing.note?.split(':')[0] } }).toEqual({
-    garbled: { asked: false, note: 'sail port jev ask printed no JSON answer' },
-    missing: { asked: false, note: 'sail port jev ask did not start' },
+  expect({
+    garbled,
+    missing: { asked: missing.asked, failed: missing.failed, note: missing.note?.split(':')[0] },
+  }).toEqual({
+    garbled: { asked: false, failed: true, note: 'sail port jev ask printed no JSON answer' },
+    missing: { asked: false, failed: true, note: 'sail port jev ask did not start' },
   });
 });

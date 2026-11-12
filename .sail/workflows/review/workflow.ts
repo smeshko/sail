@@ -348,7 +348,11 @@ export default workflow(
         open,
         nits,
         thin,
-        bannedWordsNote: banned.output.jev.candidates > 0 ? banned.output.jev.note : '',
+        bannedWordsNote: banned.output.jev.candidates > 0 && !banned.output.jev.failed ? banned.output.jev.note : '',
+        jevIncomplete: [
+          { stage: 'leak-check', jev: leaks.output.jev },
+          { stage: 'banned-words', jev: banned.output.jev },
+        ].flatMap(({ stage, jev }) => (jev.failed ? [{ stage, note: jev.note }] : [])),
       },
       pr: pullRequest,
       label: LABEL,

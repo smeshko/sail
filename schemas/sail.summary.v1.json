@@ -189,6 +189,24 @@
       "required": ["calls", "questions", "latencyMs"],
       "additionalProperties": false
     },
+    "portErrors": {
+      "description": "the port calls that failed under a call or step, in event order; present only when one did",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "properties": {
+          "port": { "enum": ["ticketSource", "codeHost", "jev"] },
+          "op": { "type": "string", "minLength": 1 },
+          "code": {
+            "enum": ["not_found", "unauthorized", "forbidden", "conflict", "invalid", "unavailable", "payment_required"]
+          },
+          "message": { "type": "string" }
+        },
+        "required": ["port", "op", "code", "message"],
+        "additionalProperties": false
+      }
+    },
     "callEntry": {
       "type": "object",
       "properties": {
@@ -207,6 +225,7 @@
         "costUsd": { "type": "number", "minimum": 0 },
         "commits": { "type": "integer", "minimum": 0 },
         "jev": { "$ref": "#/$defs/jevTotals" },
+        "portErrors": { "$ref": "#/$defs/portErrors" },
         "feedbackFrom": { "type": "string" },
         "files": { "type": "array", "items": { "type": "string" } },
         "summary": { "type": "string" },
@@ -233,6 +252,7 @@
         "toolCalls": { "type": "integer", "minimum": 0 },
         "costUsd": { "type": "number", "minimum": 0 },
         "jev": { "$ref": "#/$defs/jevTotals" },
+        "portErrors": { "$ref": "#/$defs/portErrors" },
         "files": { "type": "array", "items": { "type": "string" } },
         "summary": { "type": "string" }
       },

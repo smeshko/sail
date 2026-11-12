@@ -10,7 +10,7 @@ import { existsSync } from 'node:fs';
 import { basename, dirname, join, relative } from 'node:path';
 import { BUILTINS } from '../../adapters/index';
 import { checkModelAliases } from '../../engine/adapters';
-import { readConfig } from '../../engine/config';
+import { type ProjectConfig, readConfig } from '../../engine/config';
 import { byFile, type Definitions, loadDefinitions, type StageEntry } from '../../engine/definitions';
 import { EditorWriteError, writeEditorDeclarations } from '../../engine/editor';
 import { type ImportGraph, importGraph } from '../../engine/imports';
@@ -82,6 +82,17 @@ function listing(definitions: Definitions, graph: ImportGraph, at: (path: string
     lines.push('', 'shared stages', ...columns(shared.map((s) => [s.name, s.kind, used(s), at(s.file)])));
   }
   return lines.map((line) => `${line}\n`).join('');
+}
+
+/**
+ * The lines of `--list`'s last section, `jev`, after a blank line: one row naming the Jev adapter the config fills and
+ * its `model` option, or `adapter's default model` when it names none. No lines when `adapters.jev` is left out.
+ */
+export function jevListing(config: Pick<ProjectConfig, 'adapters'>): string[] {
+  const jev = config.adapters.jev;
+  if (jev === undefined) return [];
+  const model = typeof jev.model === 'string' ? jev.model : "adapter's default model";
+  return ['', 'jev', ...columns([[jev.use, model]])];
 }
 
 /**
@@ -163,6 +174,13 @@ export async function check(args: Parsed, io: Io): Promise<ExitCode> {
   }
 
   io.stdout(`${sail} checked: ${count(workflows.length, 'workflow')}, ${count(stages.length, 'stage')}\n`);
-  if (args.values.list === true) io.stdout(listing(definitions, imports.graph, at));
+  if (args.values.list === true) {
+    io.stdout(listing(definitions, imports.graph, at));
+    io.stdout(
+      jevListing(config)
+        .map((line) => `${line}\n`)
+        .join(''),
+    );
+  }
   return EXIT_OK;
 }

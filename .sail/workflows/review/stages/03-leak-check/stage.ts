@@ -27,7 +27,13 @@ export const Leaks = z.object({
   ),
   /** Where the denylist was read from, or null when there is none and only tracker keys were scanned for. */
   denylist: z.string().nullable(),
-  jev: z.object({ asked: z.boolean(), note: z.string(), threshold: z.number(), lines: z.number() }),
+  jev: z.object({
+    asked: z.boolean(),
+    failed: z.boolean(),
+    note: z.string(),
+    threshold: z.number(),
+    lines: z.number(),
+  }),
 });
 
 export const leakCheck = script('leak-check', {

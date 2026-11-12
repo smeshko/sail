@@ -124,7 +124,13 @@ for (const [i, hit] of hits.entries()) {
 }
 writeFileSync(join(process.env.STAGE_OUT, 'leak-locations.txt'), locations.join(''));
 const note = answer.note;
-const jev = { asked: answer.asked, note, threshold: LEAK_YES, lines: lines.length };
+const jev = {
+  asked: answer.asked,
+  failed: results.some((result) => result.failed === true),
+  note,
+  threshold: LEAK_YES,
+  lines: lines.length,
+};
 process.stderr.write(
   `${hits.length} hit${hits.length === 1 ? '' : 's'} in ${groups.length} group${groups.length === 1 ? '' : 's'}; denylist: ${terms.length > 0 ? listed : 'none'}; jev: ${answer.asked ? `${lines.length} lines in ${requests.length} request${requests.length === 1 ? '' : 's'}, ${count} over ${LEAK_YES}${note ? `; ${note}` : ''}` : `not asked (${note})`}\n`,
 );

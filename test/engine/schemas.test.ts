@@ -777,6 +777,27 @@ test('summary: a stop reason is required when failed or suspended, and forbidden
   ]);
 });
 
+test('summary: a call and a step may list port errors, and an empty list or an unknown code is refused', () => {
+  const portError = { port: 'jev', op: 'ask', code: 'payment_required', message: 'jev.ask: no credits' };
+  const step = { key: 'a#1/b', kind: 'script', outcome: 'passed', durationMs: 1 };
+  const entry = (extra: Record<string, unknown>, steps?: unknown[]) => ({
+    ...summary,
+    calls: [{ key: 'a#1', outcome: 'passed', durationMs: 1, ...extra, ...(steps === undefined ? {} : { steps }) }],
+  });
+  expect({
+    call: paths('sail.summary.v1', entry({ portErrors: [portError] })),
+    step: paths(
+      'sail.summary.v1',
+      entry({}, [
+        { ...step, portErrors: [portError] },
+        { ...step, key: 'a#1/c' },
+      ]),
+    ),
+    empty: paths('sail.summary.v1', entry({ portErrors: [] })),
+    unknown: paths('sail.summary.v1', entry({ portErrors: [{ ...portError, code: 'broke' }] })),
+  }).toEqual({ call: [], step: [], empty: ['/calls/0/portErrors'], unknown: ['/calls/0/portErrors/0/code'] });
+});
+
 test('summary: totals may leave out budget, as for a run with no budget.maxUsd', () => {
   const { budget: _, ...totals } = summary.totals;
   expect(validateDocument('sail.summary.v1', { ...summary, totals })).toEqual([]);
@@ -909,6 +930,14 @@ test('event: a run:suspended on an unavailable port names its call, and takes no
     withBudget: ['/budget'],
     runEnd: [],
   });
+});
+
+test('event: an error:port may carry the code payment_required', () => {
+  const sample = { ...envelope, type: 'error:port', port: 'jev', op: 'ask', message: 'jev.ask: no credits' };
+  expect({
+    credits: paths('sail.event.v1', { ...sample, code: 'payment_required' }),
+    unknown: paths('sail.event.v1', { ...sample, code: 'broke' }),
+  }).toEqual({ credits: [], unknown: ['/code'] });
 });
 
 test('result: a port error may carry the code unavailable, and no other code', () => {

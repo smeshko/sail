@@ -168,6 +168,8 @@ export const FixFeedback = z.object({
 export const ReviewRecord = z.object({
   /** Limitations of the banned-words check, shown even when it flagged nothing. */
   bannedWordsNote: z.string().optional(),
+  /** The Jev checks whose port call failed, each with the port's reason: the report names them. */
+  jevIncomplete: z.array(z.object({ stage: z.string(), note: z.string() })).optional(),
   findings: z.array(NumberedFinding),
   judgement: Judgement.nullable(),
   rounds: z.array(z.object({ round: z.number().int(), fixed: Fixed, checked: FixChecked, validated: z.boolean() })),

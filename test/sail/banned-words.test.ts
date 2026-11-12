@@ -66,7 +66,7 @@ test('the stage, with Jev answering word-1 0.97, reports the hit with its word a
     expect(result.output).toEqual({
       hits: [{ file: 'note.md', line: 1, word: 'invocation', term: 'Call', yes: 0.97 }],
       glossary: { entries: 1, words: 1 },
-      jev: { asked: true, note: '', threshold: 0.8, candidates: 1 },
+      jev: { asked: true, failed: false, note: '', threshold: 0.8, candidates: 1 },
     });
   });
 });
@@ -129,6 +129,7 @@ test('the stage asks Jev nothing when no added line holds an avoided word', asyn
     const result = stage(repo, '+++ b/x.ts\n@@ -0,0 +1 @@\n+const x = 1;\n');
     expect(result.output.jev).toEqual({
       asked: false,
+      failed: false,
       note: 'no avoided word on an added line',
       threshold: 0.8,
       candidates: 0,
@@ -145,6 +146,17 @@ test('the stage scans commit messages since the base', async () => {
     expect(stage(repo, '', base).output.hits).toEqual([
       { file: `commit ${sha}`, line: 1, word: 'invocation', term: 'Call', yes: 0.97 },
     ]);
+  });
+});
+test('the stage, with a Jev answering 402, exits 0 and reports the port failure with the credits message', async () => {
+  await withTempRepo((repo) => {
+    writeOwnSail(repo, { jev: { error: { status: 402, detail: 'billing_error' } } });
+    writeFileSync(join(repo.dir, 'CONTEXT.md'), glossary);
+    const result = stage(repo, doc);
+    expect(result.code).toBe(0);
+    expect(result.output.hits).toEqual([]);
+    expect(result.output.jev).toMatchObject({ asked: false, failed: true, candidates: 1 });
+    expect(result.output.jev.note).toContain('the TypeSafe account has no credits');
   });
 });
 test('the stage exits zero without adapters.jev even when there are candidates', async () => {
@@ -189,7 +201,13 @@ test('the stage with no CONTEXT.md makes no Jev request', async () => {
     setup(repo, {});
     unlinkSync(join(repo.dir, 'CONTEXT.md'));
     const result = stage(repo, doc);
-    expect(result.output.jev).toEqual({ asked: false, note: 'no CONTEXT.md', threshold: 0.8, candidates: 0 });
+    expect(result.output.jev).toEqual({
+      asked: false,
+      failed: false,
+      note: 'no CONTEXT.md',
+      threshold: 0.8,
+      candidates: 0,
+    });
     expect(result.output.glossary).toEqual({ entries: 0, words: 0 });
     expect(existsSync(result.request)).toBe(false);
   });
@@ -202,6 +220,7 @@ test('the stage with no glossary entries makes no Jev request', async () => {
     expect(result.output.glossary).toEqual({ entries: 0, words: 0 });
     expect(result.output.jev).toEqual({
       asked: false,
+      failed: false,
       note: 'no avoided word on an added line',
       threshold: 0.8,
       candidates: 0,

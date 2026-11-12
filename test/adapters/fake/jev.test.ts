@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createFakeJev } from '../../../src/adapters/fake/jev';
-import { PortError } from '../../../src/ports/errors';
+import { PortError, type PortErrorCode } from '../../../src/ports/errors';
 import { captureEvents, rejection } from '../../helpers/ports';
 import { jevSuite, THREE_QUESTIONS } from '../../ports/jev.suite';
 
@@ -94,6 +94,16 @@ test('a seeded 422 fails invalid', async () => {
     code: 'invalid',
     message: 'jev.ask: TypeSafe answered 422 Unprocessable Entity: questions: required',
   });
+});
+
+test.each<[number, PortErrorCode, string]>([
+  [402, 'payment_required', 'jev.ask: the TypeSafe account has no credits: TypeSafe answered 402 Payment Required: x'],
+  [413, 'invalid', 'jev.ask: TypeSafe answered 413 Payload Too Large: x'],
+  [415, 'invalid', 'jev.ask: TypeSafe answered 415 Unsupported Media Type: x'],
+])('a seeded %d fails %s like the real adapter', async (status, code, message) => {
+  const jev = createFakeJev({ seed: seedFile({ error: { status, detail: 'x' } }) });
+  const error = (await rejection(jev.ask(THREE_QUESTIONS))) as PortError;
+  expect({ code: error.code, message: error.message }).toEqual({ code, message });
 });
 
 test('a seeded answer of another type than the question fails invalid, naming the question', async () => {
