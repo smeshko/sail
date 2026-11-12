@@ -1,5 +1,7 @@
 // Formats the ReviewRecord in $INPUT_RECORD as REVIEW.md, the full report, and comments it on the pull request as
 // COMMENT.md: the same text when it fits 60,000 bytes, a shortened one otherwise that names REVIEW.md in this run's output.
+// Findings to fix that no pass was started for (`record.nits`: low ones, with none at medium or above beside them)
+// read as the verdict `nit` and are said to be unfixed.
 // Then, when findings are
 // still open or a review was too thin to trust, swaps the designation label in $INPUT_LABEL for needs-human. Prints
 // whether it removed it.
@@ -24,7 +26,9 @@ const commits = new Map();
 for (const round of record.rounds) {
   for (const each of round.fixed.fixes) if (each.commit) commits.set(each.finding, each.commit.slice(0, 7));
 }
+const nits = new Set(record.nits);
 const verdict = (id) => {
+  if (nits.has(id)) return 'nit';
   const decision = decided.get(id);
   if (decision === undefined) return 'fix';
   return decision.verdict;
@@ -83,7 +87,9 @@ function build(level) {
   const lines = ['## sail review', ''];
   lines.push(
     mergeable
-      ? 'Every finding to fix is fixed, and validation passes.'
+      ? nits.size > 0
+        ? `No finding at medium or above is left to fix, and validation passes. ${plural(nits.size, 'low finding')} ${nits.size === 1 ? 'is' : 'are'} listed as ${nits.size === 1 ? 'a nit' : 'nits'}, not fixed: a fix pass starts only for a finding at medium or above.`
+        : 'Every finding to fix is fixed, and validation passes.'
       : `${why.join(', and ')}: this pull request needs a human: its \`${label}\` label is off and \`needs-human\` is on.`,
     '',
   );

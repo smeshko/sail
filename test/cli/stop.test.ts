@@ -15,7 +15,15 @@ import { edit } from '../helpers/fixture';
 import { manualClock, ticket } from '../helpers/queue';
 import { runCaptured } from '../helpers/run-captured';
 import { killOne, runsIn, sail, sailProcess, until, WAIT_MS } from '../helpers/sail-process';
-import { heldRuns, releaseHeld, setHoldAt, writeStub } from '../helpers/stub-workflow';
+import {
+  heldRuns,
+  isAlive,
+  releaseHeld,
+  setHoldAt,
+  stubExecutions,
+  whenSleeping,
+  writeStub,
+} from '../helpers/stub-workflow';
 import { withTempRepo } from '../helpers/temp-repo';
 
 const COMPLETED = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N';
@@ -267,3 +275,88 @@ test('sail stop on a run a dispatched item names with a dead process, or that no
     });
   });
 });
+
+/** The process group `pid` is in. */
+function groupOf(pid: number): number {
+  return Number(
+    Bun.spawnSync(['ps', '-o', 'pgid=', '-p', String(pid)])
+      .stdout.toString()
+      .trim(),
+  );
+}
+
+test("sail stop --suspend ends a script step's child in a process group of its own before STATUS reads suspended, and sail resume runs the step again", async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir, { sleepAt: 'implement#1', testsPassAt: 1 });
+    writeFileSync(join(repo.dir, '.stub', 'sleep-ignores-term'), '');
+    writeFileSync(join(repo.dir, '.stub', 'sleep-own-group'), '');
+    const env = { ...repo.env, SAIL_HOME: join(repo.home, 'sail-home') };
+    const running = sailProcess(repo.dir, env, ['FAKE-1']);
+    let pids: number[] = [];
+    try {
+      pids = await whenSleeping(repo.dir);
+      const [script, sleeper] = pids as [number, number];
+      expect(groupOf(sleeper)).not.toBe(groupOf(script));
+      const [runId = ''] = readdirSync(join(repo.dir, '.sail-runs')).filter((name) => name.startsWith('FAKE-1-'));
+      const dir = join(repo.dir, '.sail-runs', runId);
+      const stopped = await sail(repo.dir, env, ['stop', runId, '--suspend']);
+      expect(stopped).toEqual({
+        code: EXIT_OK,
+        stdout: `sail stop: run ${runId} suspends now, held until sail resume ${runId} (pid ${running.pid})\n`,
+        stderr: '',
+      });
+      const status = join(dir, 'STATUS');
+      const deadline = performance.now() + 15_000;
+      let leftover = pids;
+      while (performance.now() < deadline) {
+        const read = existsSync(status) ? readFileSync(status, 'utf8') : '';
+        leftover = pids.filter(isAlive);
+        if (read.startsWith('suspended')) break;
+        await Bun.sleep(5);
+      }
+      for (const pid of leftover) killOne(pid, 'SIGKILL');
+      expect(leftover).toEqual([]);
+      expect({
+        code: await running.exited,
+        status: readFileSync(status, 'utf8'),
+        hold: existsSync(join(dir, 'HOLD')),
+        end: runsIn(join(repo.dir, '.sail-runs'))
+          .find((run) => run.runId === runId)
+          ?.events.at(-1),
+        issues: validateRunDir(dir).issues,
+      }).toEqual({
+        code: 2,
+        status: 'suspended interrupted\n',
+        hold: true,
+        end: expect.objectContaining({
+          type: 'run:end',
+          message: 'suspended by sail stop --suspend during implement#1',
+        }),
+        issues: [],
+      });
+      const resumed = await sail(repo.dir, env, ['resume', runId]);
+      const journal = readFileSync(join(dir, 'journal.ndjson'), 'utf8')
+        .split('\n')
+        .filter((line) => line !== '')
+        .map((line) => (JSON.parse(line) as { key: string }).key);
+      expect({
+        code: resumed.code,
+        stderr: resumed.stderr,
+        status: readStatus(dir),
+        hold: existsSync(join(dir, 'HOLD')),
+        executions: stubExecutions(repo.dir).filter((key) => key === 'implement#1'),
+        journaled: journal.filter((key) => key === 'implement#1'),
+      }).toEqual({
+        code: 0,
+        stderr: '',
+        status: { status: 'completed' },
+        hold: false,
+        executions: ['implement#1', 'implement#1'],
+        journaled: ['implement#1'],
+      });
+    } finally {
+      if (running.exitCode === null) killOne(running.pid, 'SIGKILL');
+      for (const pid of pids) killOne(pid, 'SIGKILL');
+    }
+  });
+}, 90_000);

@@ -11,7 +11,12 @@
 // Every live group is also kept in a process-wide set, so `stopLiveGroups` can end what a call left before sail exits.
 // A harness adapter registers the groups it spawns there too, with `trackGroup`.
 //
-// POSIX process groups only. A descendant that calls `setsid` leaves the group, and survives the stop.
+// A stop also ends the groups the leader's descendants are in, looked up before the signal and again just before the
+// leader's group gets SIGKILL, so a group a descendant starts in the grace period is killed too. A descendant whose
+// parent chain to the leader is already broken (a double fork), one that starts a group after the leader has exited
+// in the grace period, or one left in another group by a script that exited by itself, survives.
+//
+// POSIX process groups only. A descendant that calls `setsid` leaves the group, and survives unless that look saw it.
 import { closeSync, openSync } from 'node:fs';
 
 /** How long a stopped group has between SIGTERM and SIGKILL. */
@@ -69,15 +74,20 @@ function signalGroup(pgid: number, signal: NodeJS.Signals | 0): 'gone' | 'sent' 
   }
 }
 
-/** SIGTERM to the group, a wait of up to `graceMs` for it to empty, then SIGKILL to whatever is left. */
-export async function stopGroup(pgid: number, graceMs: number): Promise<void> {
+/**
+ * SIGTERM to the group, a wait of up to `graceMs` for it to empty, then SIGKILL to whatever is left. `beforeKill` runs
+ * just before that SIGKILL, while the group's members are still alive, and the groups it returns are killed with it.
+ */
+export async function stopGroup(pgid: number, graceMs: number, beforeKill?: () => number[]): Promise<void> {
   if (signalGroup(pgid, 'SIGTERM') === 'gone') return;
   const deadline = performance.now() + graceMs;
   while (performance.now() < deadline) {
     await Bun.sleep(POLL_MS);
     if (signalGroup(pgid, 0) === 'gone') return;
   }
+  const late = beforeKill?.() ?? [];
   signalGroup(pgid, 'SIGKILL');
+  for (const group of late) signalGroup(group, 'SIGKILL');
 }
 
 /**
@@ -90,6 +100,37 @@ export async function stopLiveGroups(graceMs: number = DEFAULT_GRACE_MS): Promis
     for (const pgid of fresh) stopped.add(pgid);
     await Promise.all(fresh.map((pgid) => stopGroup(pgid, graceMs)));
   }
+}
+
+/** Every process's pid, parent and group, from `ps`; none when it can't be run. */
+export function processTable(): { pid: number; ppid: number; pgid: number }[] {
+  try {
+    const listed = Bun.spawnSync(['ps', '-A', '-o', 'pid=,ppid=,pgid='], { stdout: 'pipe', stderr: 'ignore' });
+    return listed.stdout
+      .toString()
+      .split('\n')
+      .map((line) => line.trim().split(/\s+/).map(Number))
+      .filter((row) => row.length === 3 && row.every((n) => Number.isInteger(n) && n > 0))
+      .map(([pid, ppid, pgid]) => ({ pid: pid as number, ppid: ppid as number, pgid: pgid as number }));
+  } catch {
+    return [];
+  }
+}
+
+/** The groups `leader`'s descendants are in, other than its own and sail's. */
+export function descendantGroups(leader: number): number[] {
+  const table = processTable();
+  const own = table.find((row) => row.pid === process.pid)?.pgid;
+  const found = new Set<number>();
+  const below = [leader];
+  for (let at = below.shift(); at !== undefined; at = below.shift()) {
+    for (const row of table) {
+      if (row.ppid !== at || below.includes(row.pid)) continue;
+      below.push(row.pid);
+      if (row.pgid !== leader && row.pgid !== own && row.pgid > 1) found.add(row.pgid);
+    }
+  }
+  return [...found];
 }
 
 export async function runProcess(options: ProcessOptions): Promise<ProcessEnd> {
@@ -122,9 +163,24 @@ export async function runProcess(options: ProcessOptions): Promise<ProcessEnd> {
   trackGroup(pgid);
   let timedOut = false;
   let aborted = false;
-  let stopping: Promise<void> | undefined;
+  let stopping: Promise<unknown> | undefined;
+  /** The groups the leader's descendants were in when it was stopped. */
+  const found = new Set<number>();
+  /** The descendants' groups not found before, each tracked. */
+  const look = (): number[] => {
+    const fresh = descendantGroups(pgid).filter((group) => !found.has(group));
+    for (const group of fresh) {
+      found.add(group);
+      trackGroup(group);
+    }
+    return fresh;
+  };
   const stop = () => {
-    stopping ??= stopGroup(pgid, graceMs);
+    if (stopping !== undefined) return;
+    // A look before the signal, while the parent chain is whole, and another before the leader's SIGKILL, for a group
+    // a descendant started in the grace period: those it finds get the SIGKILL too.
+    look();
+    stopping = Promise.all([stopGroup(pgid, graceMs, look), ...[...found].map((group) => stopGroup(group, graceMs))]);
   };
   const timer = setTimeout(() => {
     timedOut = true;
@@ -148,6 +204,7 @@ export async function runProcess(options: ProcessOptions): Promise<ProcessEnd> {
     await stopGroup(pgid, graceMs); // whatever the leader left running
   } finally {
     untrackGroup(pgid);
+    for (const group of found) untrackGroup(group);
   }
   return { started: true, code: child.exitCode, signal: child.signalCode ?? null, timedOut, aborted };
 }

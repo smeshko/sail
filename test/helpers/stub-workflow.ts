@@ -9,7 +9,8 @@
 //
 // `sleepAt` names a call that sleeps the first time it runs, until something stops its process group. The sleeping
 // script writes its own pid and its `sleep`'s to `.stub/sleeping`, so a test can interrupt it there and check that
-// neither process survives.
+// neither process survives. With `.stub/sleep-ignores-term` the script ignores SIGTERM, which its `sleep` inherits; with
+// `.stub/sleep-own-group` the `sleep` leads a process group of its own (bash's `set -m`), out of the script's group.
 //
 // `setHoldAt()` names a call that holds at a gate, in every run of the repository, until `releaseHeld()` opens it. A held
 // script writes its pid to `.stub/held/<run id>.<try>`, so a test knows which runs are in flight and where, and waits
@@ -113,10 +114,12 @@ echo "$STAGE#$CALL" >>"$STUB/executions.log"
 if [ -f "$STUB/sleep-at" ] && [ "$(cat "$STUB/sleep-at")" = "$STAGE#$CALL" ]; then
   rm "$STUB/sleep-at"
   if [ -f "$STUB/sleep-ignores-term" ]; then trap '' TERM; fi
+  if [ -f "$STUB/sleep-own-group" ]; then set -m; fi
   sleep 30 &
   echo "$$ $!" >"$STUB/sleeping.tmp"
   mv "$STUB/sleeping.tmp" "$STUB/sleeping"
   wait
+  set +m
 fi
 if [ -f "$STUB/hold-at" ] && [ "$(cat "$STUB/hold-at")" = "$STAGE#$CALL" ] && [ ! -f "$STUB/release" ]; then
   mkdir -p "$STUB/held"

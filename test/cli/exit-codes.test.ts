@@ -4,6 +4,7 @@ import {
   EXIT_INTERNAL,
   EXIT_OK,
   EXIT_REFUSED,
+  EXIT_RESTART,
   EXIT_SUSPENDED,
   EXIT_WAITING,
   exitCodeFor,
@@ -11,6 +12,10 @@ import {
 
 test('the exit codes are design.md §4 codes 0 to 4', () => {
   expect([EXIT_OK, EXIT_FAILED, EXIT_SUSPENDED, EXIT_REFUSED, EXIT_INTERNAL]).toEqual([0, 1, 2, 3, 4]);
+});
+
+test('a login service that stopped itself because sail changed exits 6, apart from every failure', () => {
+  expect(EXIT_RESTART).toBe(6);
 });
 
 test('a ticket waiting on an open prerequisite exits 5, apart from every refusal', () => {

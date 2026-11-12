@@ -12,6 +12,8 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  descendantGroups,
+  liveGroups,
   type ProcessEnd,
   type ProcessOptions,
   runProcess,
@@ -315,4 +317,119 @@ test('stopLiveGroups also ends a group registered while it waits out another', a
     stubborn.kill('SIGKILL');
     late.kill('SIGKILL');
   }
+});
+
+/** The process group `pid` is in. */
+function groupOf(pid: number): number {
+  return Number(
+    Bun.spawnSync(['ps', '-o', 'pgid=', '-p', String(pid)])
+      .stdout.toString()
+      .trim(),
+  );
+}
+
+/** A script that starts a `sleep` in a process group of its own, writes its pid into `pidFile`, then waits. */
+function ownGroupSleeper(s: Scratch, pidFile: string, ignoreTerm = false): string {
+  return s.script(
+    'own-group.sh',
+    `${ignoreTerm ? "trap '' TERM\n" : ''}set -m\nsleep 30 &\necho $! > "${pidFile}.tmp"\nmv "${pidFile}.tmp" "${pidFile}"\nwait`,
+  );
+}
+
+/** Kills `pid` if it is still there, so a failing test leaves no sleeper. */
+function reap(pid: number): void {
+  try {
+    process.kill(pid, 'SIGKILL');
+  } catch {}
+}
+
+test('an abort ends a descendant that leads a process group of its own', async () => {
+  const s = scratch();
+  const pidFile = join(s.dir, 'sleeper.pid');
+  const { end } = await stoppedWhenReady(s.options([ownGroupSleeper(s, pidFile)]), pidFile);
+  const sleeper = pidIn(pidFile);
+  const stillAlive = alive(sleeper);
+  reap(sleeper);
+  expect(end).toMatchObject({ started: true, aborted: true });
+  expect(stillAlive).toBe(false);
+  expect(liveGroups()).toEqual([]);
+});
+
+test('a descendant in its own group that ignores SIGTERM is killed after the grace', async () => {
+  const s = scratch();
+  const pidFile = join(s.dir, 'sleeper.pid');
+  const { end, ms } = await stoppedWhenReady(s.options([ownGroupSleeper(s, pidFile, true)], { graceMs: 500 }), pidFile);
+  const sleeper = pidIn(pidFile);
+  // SIGKILL is sent as the stop returns, and the kernel takes a moment to reap what it kills.
+  const deadline = performance.now() + 2_000;
+  while (alive(sleeper) && performance.now() < deadline) await Bun.sleep(20);
+  const stillAlive = alive(sleeper);
+  reap(sleeper);
+  expect(end).toMatchObject({ started: true, aborted: true });
+  expect(ms).toBeGreaterThanOrEqual(500);
+  expect(ms).toBeLessThan(3000);
+  expect(stillAlive).toBe(false);
+});
+
+test('a timeout ends a descendant that leads a process group of its own', async () => {
+  const s = scratch();
+  const pidFile = join(s.dir, 'sleeper.pid');
+  // The pid file only appears once the sleeper is up, so a loaded machine can't beat the timeout to it.
+  const run = s.script(
+    'own-group-timeout.sh',
+    `set -m\nsleep 30 &\necho $! > "${pidFile}.tmp"\nmv "${pidFile}.tmp" "${pidFile}"\nwait`,
+  );
+  const end = await runProcess(s.options([run], { timeoutMs: 1500 }));
+  const sleeper = pidIn(pidFile);
+  const stillAlive = alive(sleeper);
+  reap(sleeper);
+  expect(end).toMatchObject({ started: true, timedOut: true });
+  expect(stillAlive).toBe(false);
+  expect(liveGroups()).toEqual([]);
+});
+
+test("descendantGroups names the groups below a leader, never the leader's own or sail's", async () => {
+  const s = scratch();
+  const pidFile = join(s.dir, 'pids');
+  const leader = Bun.spawn(
+    [
+      '/bin/bash',
+      '-c',
+      `sleep 30 &\nsame=$!\nset -m\nsleep 30 &\necho "$same $!" > "${pidFile}.tmp"\nmv "${pidFile}.tmp" "${pidFile}"\nwait`,
+    ],
+    { detached: true, stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' },
+  );
+  let pids: number[] = [];
+  try {
+    while (!existsSync(pidFile)) await Bun.sleep(20);
+    pids = readFileSync(pidFile, 'utf8').trim().split(' ').map(Number);
+    const [same, own] = pids as [number, number];
+    expect(groupOf(same)).toBe(leader.pid);
+    expect(groupOf(own)).not.toBe(leader.pid);
+    expect(descendantGroups(leader.pid)).toEqual([groupOf(own)]);
+  } finally {
+    for (const pid of pids) reap(pid);
+    reap(leader.pid);
+  }
+});
+
+test('a stop ends a process group a descendant starts during the grace period', async () => {
+  const s = scratch();
+  const ready = join(s.dir, 'ready');
+  const pidFile = join(s.dir, 'late.pid');
+  // The leader traps SIGTERM, and once its first own-group child is stopped it starts another group, in the grace.
+  const run = s.script(
+    'late-group.sh',
+    `trap : TERM\nset -m\nsleep 30 &\nfirst=$!\ntouch "${ready}"\nwait $first\nsleep 30 &\necho $! > "${pidFile}.tmp"\nmv "${pidFile}.tmp" "${pidFile}"\nwait`,
+  );
+  const { end } = await stoppedWhenReady(s.options([run], { graceMs: 1500 }), ready);
+  expect(existsSync(pidFile)).toBe(true);
+  const late = pidIn(pidFile);
+  const deadline = performance.now() + 2_000;
+  while (alive(late) && performance.now() < deadline) await Bun.sleep(20);
+  const stillAlive = alive(late);
+  reap(late);
+  expect(end).toMatchObject({ started: true, signal: 'SIGKILL', aborted: true });
+  expect(stillAlive).toBe(false);
+  expect(liveGroups()).toEqual([]);
 });

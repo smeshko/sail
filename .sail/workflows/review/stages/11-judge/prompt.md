@@ -3,7 +3,8 @@ request is described at `{{brief}}`, and what it should do at `{{requirements}}`
 
 **Nobody stands between you and the merge.** Once the findings you send to `fix` are fixed and validation passes, the
 pull request merges into `staging` on its own. A finding you `drop` ships as it is, and a review you trust is the only
-look that part of the change gets.
+look that part of the change gets. A `fix` at low severity is fixed only when a finding at medium or above starts a fix
+pass; otherwise it ships as it is, listed in the review as a nit.
 
 `$STAGE_IN/findings.json` holds every finding, numbered: `V1` when validation (`bun run gate`) failed, `L<n>` for each
 tracker-key prefix or denylist term the leak check found, with its count and example locations, and for each line its Jev pass flagged, `B<n>` for each avoided word the banned-words check flagged, `D<n>` for each acceptance criterion the demonstration couldn't show, and `R<n>` from the
@@ -54,7 +55,7 @@ hands the pull request to a human, so name one only for a real gap, never for a 
 A finding that only rewords a comment, a header, a help line, a doc or glossary phrasing is `drop`, as taste, unless
 the text as it stands is wrong in a way that would mislead a reader or the next agent: a comment that names a
 behaviour the code doesn't have, a help line that gives a wrong flag, a glossary term the change misuses. Then it is
-`fix`, at its own severity, and the fix stage commits the minor ones together.
+`fix`, at its own severity, and the fix stage commits the minor ones together when a pass runs.
 
 A failed validation and an unshown criterion are `fix` unless the problem lies outside the change. Never `drop` a real
 problem in scope to keep the pull request moving.

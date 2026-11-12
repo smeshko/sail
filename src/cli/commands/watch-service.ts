@@ -1,0 +1,267 @@
+// `sail watch --install`, `--uninstall` and `--restart`: the watcher as a login service, a launchd agent per repository
+// (macOS only; see `service.ts`). `watchCommand()` calls `serviceCommand()` before anything else.
+//
+// - `--install [<workflow>...]` writes and loads `sail.watcher.<name>`, whose arguments are `watch --service` and the
+//   names, in this clone. It refuses a name that is no watched workflow, no names with no watched workflow, and a live
+//   watcher of the repository that no installed agent could own (none is installed): it names its pid and
+//   `sail unwatch`, so the agent doesn't loop on "a live watcher in the way".
+// - `--install --all` installs one agent, with no names, for each registry entry whose `.sail/` still declares a watch,
+//   and prints one line for each entry it skips, with the reason. It refuses when it installed none.
+// - `--uninstall [--all]` unloads the agent of this repository, or every installed one, and deletes its plist.
+// - `--restart [<repository>|--all]` kicks the installed agent of one repository, or of every one, so launchd ends its
+//   watcher and starts it again. With a repository name or `--all` it reads only HOME, so an agent's shell runs it from
+//   any directory; with none it needs this clone's `.sail/project.yaml`. After the kick it waits up to the apply timeout
+//   for the registry to record a live watcher of another pid, and prints both pids.
+//
+// At most one of the three is taken; then the platform is checked, then, for `--restart` and `--uninstall`, that an agent
+// is installed, so a refusal never reaches `launchctl`. Every refusal is exit code 3.
+import { existsSync } from 'node:fs';
+import { isAlive as processIsAlive } from '../../adapters/leases';
+import { readConfig } from '../../engine/config';
+import { readWatch, readWatches } from '../../watch/poll';
+import { liveWatcher, machineDir, readEntry, readRegistry, registryDir as registryDirOf } from '../../watch/registry';
+import { EXIT_OK, EXIT_REFUSED, type ExitCode } from '../exit-codes';
+import type { Io, Parsed } from '../index';
+import { repositoryEntry } from '../registration';
+import {
+  agentEnvironment,
+  installAgent,
+  installedWatchers,
+  logPath,
+  platformRefusal,
+  plistPath,
+  restartAgent,
+  type ServiceDeps,
+  serviceDeps,
+  uninstallAgent,
+  watcherLabel,
+} from '../service';
+import { findProject, refuseAs } from './run-workflow';
+import type { WatchDeps } from './watch';
+
+const COMMAND = 'sail watch';
+
+/** The line `--restart` and `--uninstall` refuse with when nothing is installed for `name`, or at all. */
+const notInstalled = (name?: string): string =>
+  name === undefined
+    ? `no login service is installed: ${COMMAND} --install installs one`
+    : `no login service is installed for '${name}': ${COMMAND} --install installs it`;
+
+/**
+ * Handles `--install`, `--uninstall` and `--restart`: the exit code, or undefined when none of them is given.
+ */
+export async function serviceCommand(
+  deps: WatchDeps,
+  args: Parsed,
+  io: Io,
+  isAlive: (pid: number) => boolean = processIsAlive,
+): Promise<ExitCode | undefined> {
+  const refuse = refuseAs(io, COMMAND);
+  const wanted = (['install', 'uninstall', 'restart'] as const).filter((option) => args.values[option] === true);
+  const all = args.values.all === true;
+  if (wanted.length === 0) return all ? refuse('--all goes with --install, --uninstall or --restart') : undefined;
+  if (wanted.length > 1) return refuse('take one of --install, --uninstall and --restart');
+  const env = io.env ?? process.env;
+  const service = serviceDeps(env, deps.service);
+  const platform = platformRefusal(service.platform);
+  if (platform !== undefined) return refuse(platform);
+  const names = [...new Set(args.positionals)];
+  const operation = wanted[0];
+  if (operation === 'install')
+    return all ? installAll(service, names, io, isAlive) : install(service, names, io, isAlive);
+  if (operation === 'uninstall') return uninstall(service, all, names, io);
+  return restart(deps, service, all, names, io, isAlive);
+}
+
+/** Installs this clone's watcher agent. */
+async function install(
+  service: ServiceDeps,
+  names: string[],
+  io: Io,
+  isAlive: (pid: number) => boolean,
+): Promise<ExitCode> {
+  const refuse = refuseAs(io, COMMAND);
+  const project = await findProject(io, COMMAND, { ports: [] });
+  if (typeof project === 'number') return project;
+  const { sailDir, config } = project;
+  if (names.length === 0) {
+    const read = await readWatches({ sailDir, config });
+    if ('refused' in read) return refuse(read.refused);
+    if (read.watches.length === 0) return refuse('no workflow declares a watch');
+  } else {
+    for (const name of names) {
+      const watch = await readWatch({ sailDir, config, name });
+      if ('refused' in watch) return refuse(watch.refused);
+    }
+  }
+  const entry = await repositoryEntry(io, project);
+  const label = watcherLabel(entry.name);
+  const recorded = readEntry(registryDirOf(machineDir(io.env ?? process.env)), entry.name);
+  const live = recorded === undefined ? undefined : liveWatcher(recorded, isAlive);
+  if (live !== undefined && !existsSync(plistPath(service.home, label))) {
+    return refuse(
+      `a watcher for '${entry.name}' already runs outside launchd (pid ${live.pid}): sail unwatch stops it first`,
+    );
+  }
+  const result = await installAgent(service, {
+    label,
+    args: ['watch', '--service', ...names],
+    workingDirectory: entry.clone,
+    environment: agentEnvironment(io.env ?? process.env),
+    log: logPath(machineDir(io.env ?? process.env), label),
+  });
+  if ('refused' in result) return refuse(result.refused);
+  io.stdout(installedLine(label, result));
+  return EXIT_OK;
+}
+
+const installedLine = (label: string, result: { plist: string; log: string }): string =>
+  `${COMMAND}: installed the login service '${label}' (${result.plist}); its log is ${result.log}; it reads its credentials from the keychain and gh auth token\n`;
+
+/** Installs one agent for each registered repository that declares a watch. */
+async function installAll(
+  service: ServiceDeps,
+  names: string[],
+  io: Io,
+  isAlive: (pid: number) => boolean,
+): Promise<ExitCode> {
+  const refuse = refuseAs(io, COMMAND);
+  if (names.length > 0) return refuse('--all takes no workflow');
+  const env = io.env ?? process.env;
+  const skipped = (name: string, why: string) => io.stdout(`${COMMAND}: skipped '${name}': ${why}\n`);
+  let failed = false;
+  let installed = 0;
+  for (const entry of readRegistry(registryDirOf(machineDir(env))).entries) {
+    const label = watcherLabel(entry.name);
+    if (!existsSync(entry.sailDir)) {
+      skipped(entry.name, `${entry.sailDir} is gone`);
+      continue;
+    }
+    const config = readConfig(entry.sailDir);
+    if ('issues' in config) {
+      skipped(entry.name, `its project.yaml is invalid: ${config.issues[0]?.message ?? 'see sail check'}`);
+      continue;
+    }
+    const read = await readWatches({ sailDir: entry.sailDir, config });
+    if ('refused' in read) {
+      skipped(entry.name, read.refused);
+      continue;
+    }
+    if (read.watches.length === 0) {
+      skipped(entry.name, 'no workflow declares a watch');
+      continue;
+    }
+    const live = liveWatcher(entry, isAlive);
+    if (live !== undefined && !existsSync(plistPath(service.home, label))) {
+      skipped(entry.name, `a watcher already runs outside launchd (pid ${live.pid})`);
+      continue;
+    }
+    const result = await installAgent(service, {
+      label,
+      args: ['watch', '--service'],
+      workingDirectory: entry.clone,
+      environment: agentEnvironment(env),
+      log: logPath(machineDir(env), label),
+    });
+    if ('refused' in result) {
+      io.stderr(`${COMMAND}: '${entry.name}': ${result.refused}\n`);
+      failed = true;
+    } else {
+      io.stdout(installedLine(label, result));
+      installed += 1;
+    }
+  }
+  if (failed) return EXIT_REFUSED;
+  return installed === 0 ? refuse('installed no login service: no registered repository declares a watch') : EXIT_OK;
+}
+
+/** Unloads this clone's watcher agent, or with `all` every installed one, and deletes the plists. */
+async function uninstall(service: ServiceDeps, all: boolean, names: string[], io: Io): Promise<ExitCode> {
+  const refuse = refuseAs(io, COMMAND);
+  if (all) {
+    if (names.length > 0) return refuse('--all takes no workflow');
+    const installed = installedWatchers(service.home);
+    if (installed.length === 0) return refuse(notInstalled());
+    let failed = false;
+    for (const name of installed) {
+      const result = await uninstallAgent(service, watcherLabel(name), notInstalled(name));
+      if (result.refused !== undefined) {
+        io.stderr(`${COMMAND}: ${result.refused}\n`);
+        failed = true;
+      } else {
+        io.stdout(`${COMMAND}: uninstalled the login service '${watcherLabel(name)}'\n`);
+      }
+    }
+    return failed ? EXIT_REFUSED : EXIT_OK;
+  }
+  if (names.length > 0) return refuse(`--uninstall takes no repository: ${COMMAND} --uninstall [--all]`);
+  const project = await findProject(io, COMMAND, { ports: [] });
+  if (typeof project === 'number') return project;
+  const { name } = project.config;
+  const result = await uninstallAgent(service, watcherLabel(name), notInstalled(name));
+  if (result.refused !== undefined) return refuse(result.refused);
+  io.stdout(`${COMMAND}: uninstalled the login service '${watcherLabel(name)}'\n`);
+  return EXIT_OK;
+}
+
+/** Restarts one repository's agent, or `--all` of them, from any directory when a repository or `--all` is named. */
+async function restart(
+  deps: WatchDeps,
+  service: ServiceDeps,
+  all: boolean,
+  names: string[],
+  io: Io,
+  isAlive: (pid: number) => boolean,
+): Promise<ExitCode> {
+  const refuse = refuseAs(io, COMMAND);
+  if (all && names.length > 0) return refuse('--all takes no repository');
+  if (names.length > 1) return refuse('--restart takes one repository');
+  const env = io.env ?? process.env;
+  const registry = registryDirOf(machineDir(env));
+  const one = async (name: string): Promise<string | undefined> => {
+    const label = watcherLabel(name);
+    const before = readEntry(registry, name);
+    const old = before === undefined ? undefined : liveWatcher(before, isAlive)?.pid;
+    const result = await restartAgent(service, label, notInstalled(name));
+    if (result.refused !== undefined) return result.refused;
+    const deadline = performance.now() + (deps.applyTimeoutMs ?? 15_000);
+    let now: number | undefined;
+    for (;;) {
+      const entry = readEntry(registry, name);
+      const pid = entry === undefined ? undefined : liveWatcher(entry, isAlive)?.pid;
+      if (pid !== undefined && pid !== old) {
+        now = pid;
+        break;
+      }
+      if (performance.now() >= deadline) break;
+      await Bun.sleep(deps.pollMs ?? 200);
+    }
+    io.stdout(
+      now === undefined
+        ? `${COMMAND}: restarted the login service of '${name}': no watcher has recorded itself yet: its log is ${logPath(machineDir(env), label)}\n`
+        : `${COMMAND}: restarted the watcher of '${name}' (pid ${old ?? 'none'} → ${now})\n`,
+    );
+    return undefined;
+  };
+  if (!all) {
+    let name = names[0];
+    if (name === undefined) {
+      const project = await findProject(io, COMMAND, { ports: [] });
+      if (typeof project === 'number') return project;
+      name = project.config.name;
+    }
+    const refused = await one(name);
+    return refused === undefined ? EXIT_OK : refuse(refused);
+  }
+  const installed = installedWatchers(service.home);
+  if (installed.length === 0) return refuse(notInstalled());
+  let failed = false;
+  for (const name of installed) {
+    const refused = await one(name);
+    if (refused !== undefined) {
+      io.stderr(`${COMMAND}: ${refused}\n`);
+      failed = true;
+    }
+  }
+  return failed ? EXIT_REFUSED : EXIT_OK;
+}

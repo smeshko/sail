@@ -180,3 +180,12 @@ test("the usage lists sail watch and sail unwatch, and not --dispatch, which is 
   );
   expect(stdout).not.toContain('--dispatch');
 });
+
+test("the usage lists the login service forms of sail watch, and not --service, which is the installed agent's", async () => {
+  const { stdout } = await runCaptured(['--help']);
+  expect(stdout).toMatch(/^ {2}sail watch --install \[<workflow>\.\.\.\] \| --install --all {2,}\S/m);
+  expect(stdout).toMatch(/^ {2}sail watch --restart \[<repository>\|--all\] {2,}\S/m);
+  expect(stdout).toMatch(/^ {2}sail watch --uninstall \[--all\] {2,}\S/m);
+  expect(stdout).toContain('  sail dashboard --install [--port <n>] | --restart | --uninstall\n');
+  expect(stdout).not.toContain('--service');
+});
