@@ -1,6 +1,6 @@
 // bin/shims/mktemp, run by name through a PATH that starts with its folder. Every spawn takes an explicit environment.
 import { expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, statSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { SESSION_ENV_FILE, SHIMS_DIR } from '../../src/engine/shims';
@@ -10,7 +10,7 @@ const SYSTEM_PATH = '/usr/bin:/bin';
 
 /** Runs `mktemp <args>` through `PATH` in `env`, from a directory of its own. */
 function mktemp(args: string[], env: Record<string, string>) {
-  const child = Bun.spawnSync(['mktemp', ...args], { env, stdout: 'pipe', stderr: 'pipe', cwd: '/' });
+  const child = Bun.spawnSync(['mktemp', ...args], { env, stdout: 'pipe', stderr: 'pipe', cwd: '/', timeout: 5000 });
   return { code: child.exitCode, out: child.stdout.toString().trim(), err: child.stderr.toString() };
 }
 
@@ -73,6 +73,25 @@ test('the shim never runs itself', () => {
     expect([twice.code, dirname(twice.out)]).toEqual([0, tmp]);
     const alone = mktemp([], { PATH: SHIMS_DIR, TMPDIR: tmp });
     expect([alone.code, dirname(alone.out)]).toEqual([0, tmp]);
+  });
+});
+
+test('two different copies of the shim on one PATH find the real mktemp, not each other', () => {
+  withDirs((tmp, other) => {
+    const copies = [join(other, 'a'), join(other, 'b')];
+    for (const folder of copies) {
+      mkdirSync(folder);
+      copyFileSync(join(SHIMS_DIR, 'mktemp'), join(folder, 'mktemp'));
+      chmodSync(join(folder, 'mktemp'), 0o755);
+    }
+    const env = { PATH: `${copies.join(':')}:${SYSTEM_PATH}`, TMPDIR: tmp };
+    const bare = mktemp([], env);
+    expect([bare.code, dirname(bare.out)]).toEqual([0, tmp]);
+    const kept = mktemp([`${other}/k.XXXXXX`], env);
+    expect([kept.code, dirname(kept.out)]).toEqual([0, other]);
+    const unset = mktemp([], { PATH: env.PATH });
+    expect(unset.code).toBe(0);
+    rmSync(unset.out, { force: true });
   });
 });
 

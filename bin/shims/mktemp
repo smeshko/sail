@@ -1,14 +1,25 @@
 #!/bin/sh
+# sail-mktemp-shim
 # A mktemp that puts every file whose directory it picks itself in $TMPDIR, the step's scratch folder. macOS's mktemp
-# ignores TMPDIR for a bare call and for -t. Any other form goes to the real mktemp unchanged.
+# ignores TMPDIR for a bare call and for -t. Any other form goes to the real mktemp unchanged. The marker on line 2
+# lets one copy of this shim pass over another copy (another sail checkout's), so two never exec each other.
 
 self=$0
 real=
+
+# True when $1 is a copy of this shim: its second line is the marker.
+is_shim() {
+  [ "$1" -ef "$self" ] && return 0
+  marker=
+  { read -r _first && read -r marker; } < "$1" 2>/dev/null
+  [ "$marker" = "# sail-mktemp-shim" ]
+}
+
 oldifs=$IFS
 IFS=:
 for dir in $PATH; do
   candidate="${dir:-.}/mktemp"
-  if [ -x "$candidate" ] && [ ! "$candidate" -ef "$self" ]; then
+  if [ -x "$candidate" ] && ! is_shim "$candidate"; then
     real=$candidate
     break
   fi
@@ -16,7 +27,7 @@ done
 IFS=$oldifs
 if [ -z "$real" ]; then
   for candidate in /usr/bin/mktemp /bin/mktemp; do
-    if [ -x "$candidate" ] && [ ! "$candidate" -ef "$self" ]; then
+    if [ -x "$candidate" ] && ! is_shim "$candidate"; then
       real=$candidate
       break
     fi
