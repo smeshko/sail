@@ -407,7 +407,10 @@ interface Payloads {
     skipped?: string[];
     durationMs: number;
   };
-  /** `ref` is where a removed workspace's commits are kept, at `head`, when its `HEAD` had moved past its base. */
+  /**
+   * `ref` is where the released workspace's commits are kept, at `head`, when its `HEAD` had moved past its base: a
+   * workspace that was removed, or a standing one that was freed and left in place, which says `kept: true`.
+   */
   'workspace:released': { path: string; kept: boolean; ref?: string; head?: string };
 }
 
