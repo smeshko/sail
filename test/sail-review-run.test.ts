@@ -1360,6 +1360,11 @@ test("a criterion the demonstration didn't show reaches the judge as evidence, n
   await withTempRepo(async (repo) => {
     setUp(repo);
     const { dir } = await review(repo);
+    // A run under this rule records review@13, apart from the runs that made a D finding of each unshown criterion.
+    expect(JSON.parse(readFileSync(join(dir, 'run.json'), 'utf8')).workflow).toMatchObject({
+      name: 'review',
+      version: 13,
+    });
     const { findings } = callInput(dir, 'judge', 'findings');
     expect(findings.filter((each: { source: string }) => each.source === 'demonstrate')).toEqual([]);
     const { criteria } = callInput(dir, 'judge', 'evidence').demonstration;

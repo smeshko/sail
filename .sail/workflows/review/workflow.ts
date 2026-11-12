@@ -68,7 +68,7 @@ export default workflow(
   'review',
   {
     intake: pr,
-    version: 12,
+    version: 13,
     watch: { every: '5m' },
     // Two pull requests at a time, though each merge moves the base the other is being reviewed against.
     maxConcurrentRuns: 2,
