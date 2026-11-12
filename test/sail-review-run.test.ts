@@ -1183,7 +1183,59 @@ test('review-tests is asked for medium and high findings only', async () => {
   });
 }, 120_000);
 
-test('each reviewer runs on its model: architecture and bugs on the frontier model, requirements, tests and security on Sonnet, conventions on Haiku', async () => {
+test('review-bugs is asked the security checks, and its coverage of them reaches the judge', async () => {
+  await withTempRepo(async (repo) => {
+    setUp(repo);
+    const { code, stderr, dir } = await review(repo);
+    expect({ code, stderr: code === 0 ? '' : stderr }).toEqual({ code: 0, stderr: '' });
+    const folder = readdirSync(dir).find((name) => name.replace(/^\d+-/, '') === 'review-bugs');
+    const prompt = readFileSync(join(dir, folder ?? '', 'call-1', 'prompt.md'), 'utf8');
+    for (const item of [
+      '- Untrusted input stays marked and is never built into a command, path, regex, URL or prompt unwrapped.',
+      '- No argument injection, path escape or shell.',
+      '- Every permission the least its step needs.',
+      '- No secret leaves its own host and header.',
+      '- New hosts and dependencies vetted.',
+    ]) {
+      expect(prompt).toContain(item);
+    }
+    expect(prompt).toContain('6. Find where untrusted input enters the change');
+    expect(prompt).toContain('per spawn, path, request or permission it adds or changes');
+    expect(prompt).toContain('checklist item above, the security ones included');
+    const evidence: { reviews: { lens: string; coverage: { what: string }[] }[] } = callInput(dir, 'judge', 'evidence');
+    const bugs = evidence.reviews.find((each) => each.lens === 'bugs');
+    expect(bugs?.coverage.map((each) => each.what)).toEqual([
+      'footer(calls)',
+      'Untrusted input',
+      'Permissions and secrets',
+    ]);
+  });
+}, 120_000);
+
+test('a review runs five reviewers, and none is review-security', async () => {
+  await withTempRepo(async (repo) => {
+    setUp(repo);
+    const { code, stderr, keys, dir } = await review(repo);
+    expect({ code, stderr: code === 0 ? '' : stderr }).toEqual({ code: 0, stderr: '' });
+    const reviewers = ['requirements', 'architecture', 'bugs', 'tests', 'conventions'];
+    const started = readEvents(dir)
+      .filter((event) => event.type === 'stage:start')
+      .map((event) => (event as unknown as { stage: string }).stage)
+      .filter((stage) => stage.startsWith('review-'));
+    expect(started.sort()).toEqual(reviewers.map((lens) => `review-${lens}`).sort());
+    expect(keys).not.toContain('review-security#1');
+    const { stages } = JSON.parse(readFileSync(join(dir, 'run.json'), 'utf8'));
+    expect(Object.keys(stages)).not.toContain('review-security');
+    const answers = JSON.parse(readFileSync(join(repo.dir, '.sail', 'fake', 'harness.json'), 'utf8'));
+    expect(Object.keys(answers)).not.toContain('review-security');
+    const evidence: { reviews: { lens: string; summary: string }[] } = callInput(dir, 'judge', 'evidence');
+    expect(evidence.reviews.map(({ lens, summary }) => ({ lens, summary }))).toEqual(
+      reviewers.map((lens) => ({ lens, summary: answers[`review-${lens}`][0].output.summary })),
+    );
+  });
+}, 120_000);
+
+test('each reviewer runs on its model: architecture and bugs on the frontier model, requirements and tests on Sonnet, conventions on Haiku', async () => {
   await withTempRepo(async (repo) => {
     setUp(repo);
     const { code, stderr, dir } = await review(repo);
@@ -1199,7 +1251,6 @@ test('each reviewer runs on its model: architecture and bugs on the frontier mod
       'review-architecture': 'claude-fable-5-2',
       'review-bugs': 'claude-fable-5-2',
       'review-tests': 'claude-sonnet-5-5',
-      'review-security': 'claude-sonnet-5-5',
       'review-conventions': 'claude-haiku-5-5',
     });
   });
@@ -1237,7 +1288,6 @@ test("only the stages that write get CONTEXT.md, and a read-only reviewer's prom
       'review-architecture#1',
       'review-bugs#1',
       'review-tests#1',
-      'review-security#1',
       'judge#1',
       'demonstrate#1',
       'check-fix#1',
@@ -1247,7 +1297,7 @@ test("only the stages that write get CONTEXT.md, and a read-only reviewer's prom
     expect(conventionsOf(dir, 'review-conventions#1')).toEqual(['AGENTS.md', 'CONTEXT.md']);
     expect(keys).toContain('fix#1');
     expect(conventionsOf(dir, 'fix#1')).toEqual(['AGENTS.md', 'CONTEXT.md']);
-    const folder = readdirSync(dir).find((name) => name.endsWith('-review-security')) ?? 'missing';
+    const folder = readdirSync(dir).find((name) => name.endsWith('-review-bugs')) ?? 'missing';
     const prompt = readFileSync(join(dir, folder, 'call-1', 'prompt.md'), 'utf8');
     expect(prompt).toContain('# AGENTS.md');
     expect(Buffer.byteLength(prompt)).toBeLessThan(20_000);

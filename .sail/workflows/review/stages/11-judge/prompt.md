@@ -8,7 +8,7 @@ pass; otherwise it ships as it is, listed in the review as a nit.
 
 `$STAGE_IN/findings.json` holds every finding, numbered: `V1` when validation (`bun run gate`) failed, `L<n>` for each
 tracker-key prefix or denylist term the leak check found, with its count and example locations, and for each line its Jev pass flagged, `B<n>` for each avoided word the banned-words check flagged, `D<n>` for each acceptance criterion the demonstration couldn't show, and `R<n>` from the
-six reviewers, each with the reviewer it came from. `$STAGE_IN/evidence.json` holds how each check went as a whole:
+five reviewers, each with the reviewer it came from. `$STAGE_IN/evidence.json` holds how each check went as a whole:
 validation's output, the demonstration's criteria and transcript, and each reviewer's summary and coverage: what it
 checked, how, and with what result.
 
@@ -40,7 +40,7 @@ something else, is quoted as a word, or is a name the change can't rename. A rea
 
 Read each reviewer's coverage against the change. A review is thin when its coverage leaves out what this change
 needed checked under its question: an acceptance criterion with no entry, a changed function the bugs review never
-traced, a new spawn the security review never looked at, an entry whose `how` shows nothing was read or run, or
+traced, a new spawn the bugs review never looked at, an entry whose `how` shows nothing was read or run, or
 `unchecked` entries on what matters. List each thin review with what it left out. A thin review stops the merge and
 hands the pull request to a human, so name one only for a real gap, never for a short review of a small change.
 

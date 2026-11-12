@@ -378,6 +378,16 @@
             "what": "footer(calls)",
             "how": "traced 0 calls, 1 call, costs of 0.005 and 1.005",
             "status": "finding"
+          },
+          {
+            "what": "Untrusted input",
+            "how": "the footer prints numbers from summary.json only",
+            "status": "holds"
+          },
+          {
+            "what": "Permissions and secrets",
+            "how": "no stage, permission or credential changes",
+            "status": "holds"
           }
         ],
         "findings": [
@@ -414,35 +424,6 @@
           {
             "what": "The footer line",
             "how": "test/cli/show.test.ts asserts the exact line; reverting show.ts turns it red",
-            "status": "holds"
-          }
-        ],
-        "findings": []
-      },
-      "turns": 20,
-      "usage": {
-        "inputTokens": 0,
-        "cacheReadTokens": 0,
-        "cacheWriteTokens": 0,
-        "outputTokens": 0,
-        "costUsd": 0.8
-      }
-    }
-  ],
-  "review-security": [
-    {
-      "outcome": "done",
-      "output": {
-        "summary": "Nothing reaches a command, path or prompt.",
-        "coverage": [
-          {
-            "what": "Untrusted input",
-            "how": "the footer prints numbers from summary.json only",
-            "status": "holds"
-          },
-          {
-            "what": "Permissions and secrets",
-            "how": "no stage, permission or credential changes",
             "status": "holds"
           }
         ],

@@ -1,6 +1,6 @@
 Review this pull request for one question: does the change fit the codebase: its layers, its contracts, what already
-exists? Five other reviewers cover requirements, bugs, tests, security and conventions at the same time, and validation
-runs the typecheck, lint and the affected tests: stay on your question.
+exists? Four other reviewers cover requirements, bugs, tests and conventions at the same time, and validation runs the
+typecheck, lint and the affected tests: stay on your question.
 
 The change is `git diff {{base}}...HEAD`, its commits are `git log {{base}}..HEAD`, the pull request is described at
 `{{brief}}`, and what it should do at `{{requirements}}`. Read past the diff: the code around each change, its callers

@@ -125,7 +125,8 @@ test('the plan a groom run attaches is the plan a factory run on the same ticket
     const groomRun = readdirSync(join(repo.dir, '.sail-runs')).find((name) => name.startsWith('FAKE-2'));
 
     // A process of its own: Bun can't reload the workflow's modules in this one.
-    const built = await sail(repo.dir, repo.env, ['FAKE-2']);
+    // Groom blocked FAKE-2 by FAKE-1, whose plan changes the same file, so the start passes the prerequisite by.
+    const built = await sail(repo.dir, repo.env, ['FAKE-2', '--ignore-prerequisites']);
     expect({ code: built.code, stderr: built.stderr }).toEqual({ code: EXIT_OK, stderr: '' });
     const factoryRun = readdirSync(join(repo.dir, '.sail-runs')).find(
       (name) => name.startsWith('FAKE-2') && name !== groomRun,

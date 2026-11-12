@@ -17,7 +17,7 @@ export const Finding = z.object({
 });
 
 /** The reviewers, one stage each. */
-export const Lens = z.enum(['requirements', 'architecture', 'bugs', 'tests', 'security', 'conventions']);
+export const Lens = z.enum(['requirements', 'architecture', 'bugs', 'tests', 'conventions']);
 
 /**
  * What found it: validation, the leak check, the banned-words check (`B<n>`), the demonstration, one reviewer, check-fix reviewing the fixes, or the

@@ -5,7 +5,7 @@ import { chmodSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from '
 import { basename, join } from 'node:path';
 import { createFakeCodeHost } from '../src/adapters/fake/code-host';
 import { createFakeTicketSource } from '../src/adapters/fake/ticket-source';
-import { EXIT_FAILED, EXIT_OK, EXIT_REFUSED, EXIT_SUSPENDED } from '../src/cli/exit-codes';
+import { EXIT_FAILED, EXIT_OK, EXIT_REFUSED, EXIT_SUSPENDED, EXIT_WAITING } from '../src/cli/exit-codes';
 import { readJournal } from '../src/engine/journal';
 import { readStatus } from '../src/engine/run-dir';
 import { readEvents } from '../src/events/consumers/ndjson';
@@ -555,7 +555,7 @@ test('groom plans a ticket with no open question: attaches plan.md with its trai
       readJournal(dir)
         .entries.map((entry) => entry.key)
         .slice(4),
-    ).toEqual(['decide#1', 'plan#1', 'act#1']);
+    ).toEqual(['decide#1', 'plan#1', 'overlap#1', 'act#1']);
     const planned = readEvents(dir).find((event) => event.type === 'prompt:rendered' && event.key === 'plan#1');
     expect((planned as { conventions?: string[] } | undefined)?.conventions).toEqual(['AGENTS.md', 'CONTEXT.md']);
     expect(JSON.parse(readFileSync(join(dir, 'run.json'), 'utf8')).stages.plan.conventions).toEqual([
@@ -613,6 +613,206 @@ test('groom plans a ticket with no open question: attaches plan.md with its trai
     expect(labelEvents(repo.dir, 'ticket:labelled')).toEqual(['planned', 'factory']);
     const act = readJournal(dir).entries.find((entry) => entry.key === 'act#1');
     expect(act?.output).toMatchObject({ labelled: ['planned', 'factory'], attached: attached?.url });
+
+    // FAKE-1 is open and planned, and its plan changes the file this plan changes: FAKE-2 waits on it.
+    expect(overlapOf(repo.dir)).toEqual({
+      blockedBy: 'FAKE-1',
+      why: 'its plan also changes `src/cli/commands/show.ts`',
+      shared: ['src/cli/commands/show.ts'],
+      compared: [{ ticketKey: 'FAKE-1', attachedAt: '2026-11-01T09:00:00.000Z', shared: ['src/cli/commands/show.ts'] }],
+      notes: [],
+    });
+    expect(ticket.prerequisites as unknown).toEqual(['FAKE-1']);
+    expect(relatedIn(repo.dir)).toEqual([
+      expect.objectContaining({ ticketKey: 'FAKE-1', kind: 'blocks', to: 'FAKE-2' }),
+    ]);
+    expect(comment).toContain('- applied: blocked_by FAKE-1 (its plan also changes `src/cli/commands/show.ts`)');
+
+    // The start of the ticket is held while FAKE-1 is open. A process of its own: Bun can't reload the workflows here.
+    const held = await sail(repo.dir, repo.env, ['FAKE-2', '--dry-run']);
+    expect(held.code).toBe(EXIT_WAITING);
+    expect(held.stderr).toContain('the ticket waits on FAKE-1');
+  });
+}, 120_000);
+
+/** The overlap stage's output in the repository's only run, or undefined when the stage never ran. */
+const overlapOf = (repoDir: string) =>
+  readJournal(onlyRun(repoDir)).entries.find((entry) => entry.key === 'overlap#1')?.output as
+    | Record<string, unknown>
+    | undefined;
+
+/** The ticket:related events of the repository's only run. */
+const relatedIn = (repoDir: string) => readEvents(onlyRun(repoDir)).filter((event) => event.type === 'ticket:related');
+
+interface SeededTicket {
+  ticketKey: string;
+  state: { type: string; name: string };
+  labels: string[];
+  prerequisites?: string[];
+  attachments: { name: string; url: string; content: string }[];
+}
+
+/** Changes the fake's seeded tickets before a run. */
+function seedTickets(sailDir: string, change: (tickets: SeededTicket[]) => void): void {
+  const path = join(sailDir, 'fake', 'tickets.json');
+  const world = JSON.parse(readFileSync(path, 'utf8')) as { tickets: SeededTicket[] };
+  change(world.tickets);
+  writeFileSync(path, `${JSON.stringify(world, null, 2)}\n`);
+}
+
+const seeded = (tickets: SeededTicket[], ticketKey: string): SeededTicket => {
+  const found = tickets.find((each) => each.ticketKey === ticketKey);
+  if (found === undefined) throw new Error(`no seeded ${ticketKey}`);
+  return found;
+};
+
+/**
+ * Seeds FAKE-3: FAKE-1 again, in progress, its plan attached a day after FAKE-1's, so both plans change
+ * `src/cli/commands/show.ts`.
+ */
+function seedThird(sailDir: string, prerequisites?: string[]): void {
+  seedTickets(sailDir, (tickets) => {
+    const third = structuredClone(seeded(tickets, 'FAKE-1'));
+    third.ticketKey = 'FAKE-3';
+    third.state = { type: 'started', name: 'In Progress' };
+    if (prerequisites !== undefined) third.prerequisites = prerequisites;
+    for (const each of third.attachments) {
+      each.url = each.url.replace('FAKE-1', 'FAKE-3');
+      each.content = each.content.replace('2026-11-01T09:00:00.000Z', '2026-11-02T09:00:00.000Z');
+    }
+    tickets.push(third);
+  });
+}
+
+/** A groom run of FAKE-2 that reaches its plan: the judge confirms no question. */
+async function groomToPlan(repo: TempRepo, sailDir: string): Promise<void> {
+  reseed(sailDir, 'decide', (output) => {
+    output.questions = [];
+  });
+  const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
+  expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+}
+
+test('groom adds no prerequisite when the plans share only CONTEXT.md', async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeGroomRepo(repo);
+    const [answer] = JSON.parse(readFileSync(join(sailDir, 'fake', 'harness.json'), 'utf8')).plan;
+    const files = 'Files: `src/cli/commands/show.ts`, the footer.';
+    expect(answer.files['plan.md']).toContain(files);
+    answer.files['plan.md'] = answer.files['plan.md'].replace(
+      files,
+      'Files: `CONTEXT.md`, a term, and `src/cli/commands/list.ts`.',
+    );
+    seedHarness(sailDir, 'plan', [answer]);
+    // FAKE-1's plan names CONTEXT.md too, so the glossary is the one path the two share.
+    seedTickets(sailDir, (tickets) => {
+      for (const each of seeded(tickets, 'FAKE-1').attachments) {
+        each.content = each.content.replace(files, 'Files: `src/cli/commands/show.ts` and `CONTEXT.md`, the footer.');
+      }
+    });
+    await groomToPlan(repo, sailDir);
+
+    expect(overlapOf(repo.dir)).toMatchObject({
+      blockedBy: null,
+      shared: [],
+      compared: [{ ticketKey: 'FAKE-1', shared: [] }],
+    });
+    expect(relatedIn(repo.dir)).toEqual([]);
+    expect(fakeTicket(repo.dir, 'FAKE-2').prerequisites ?? []).toEqual([]);
+    expect(lastComment(repo.dir)).not.toContain('blocked_by');
+  });
+}, 120_000);
+
+test('with two open planned tickets whose plans overlap, groom blocks the ticket by the one planned last alone', async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeGroomRepo(repo);
+    seedThird(sailDir);
+    await groomToPlan(repo, sailDir);
+
+    expect(overlapOf(repo.dir)).toMatchObject({ blockedBy: 'FAKE-3', shared: ['src/cli/commands/show.ts'] });
+    expect(fakeTicket(repo.dir, 'FAKE-2').prerequisites as unknown).toEqual(['FAKE-3']);
+    expect(relatedIn(repo.dir)).toEqual([
+      expect.objectContaining({ ticketKey: 'FAKE-3', kind: 'blocks', to: 'FAKE-2' }),
+    ]);
+  });
+}, 120_000);
+
+test('groom never blocks the ticket by one that already waits on it', async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeGroomRepo(repo);
+    patchTicket(sailDir, 'FAKE-1', { prerequisites: ['FAKE-2'] });
+    await groomToPlan(repo, sailDir);
+
+    expect(overlapOf(repo.dir)).toMatchObject({ blockedBy: null, notes: ['FAKE-1: already waits on FAKE-2'] });
+    expect(relatedIn(repo.dir)).toEqual([]);
+    expect(fakeTicket(repo.dir, 'FAKE-2').prerequisites ?? []).toEqual([]);
+  });
+}, 120_000);
+
+test('groom never blocks the ticket by one that waits on it through another ticket', async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeGroomRepo(repo);
+    patchTicket(sailDir, 'FAKE-1', { prerequisites: ['FAKE-2'] });
+    seedThird(sailDir, ['FAKE-1']);
+    await groomToPlan(repo, sailDir);
+
+    expect(overlapOf(repo.dir)).toMatchObject({
+      blockedBy: null,
+      notes: ['FAKE-3: already waits on FAKE-2', 'FAKE-1: already waits on FAKE-2'],
+    });
+    expect(relatedIn(repo.dir)).toEqual([]);
+    expect(fakeTicket(repo.dir, 'FAKE-2').prerequisites ?? []).toEqual([]);
+  });
+}, 120_000);
+
+test.each([
+  [
+    'is not labelled planned',
+    (tickets: SeededTicket[]) => {
+      seeded(tickets, 'FAKE-1').labels = ['factory'];
+    },
+    [],
+  ],
+  [
+    'has no plan attached',
+    (tickets: SeededTicket[]) => {
+      for (const each of seeded(tickets, 'FAKE-1').attachments) {
+        each.content = each.content.replace(/\n<!-- sail:plan .* -->\n$/, '');
+      }
+    },
+    ['FAKE-1: no plan attached'],
+  ],
+])(
+  'groom adds no prerequisite when the other ticket %s',
+  async (_, change, notes) => {
+    await withTempRepo(async (repo) => {
+      const sailDir = writeGroomRepo(repo);
+      seedTickets(sailDir, change);
+      await groomToPlan(repo, sailDir);
+
+      expect(overlapOf(repo.dir)).toMatchObject({ blockedBy: null, compared: [], notes });
+      expect(relatedIn(repo.dir)).toEqual([]);
+      expect(fakeTicket(repo.dir, 'FAKE-2').prerequisites ?? []).toEqual([]);
+    });
+  },
+  120_000,
+);
+
+test("a blocked_by the judge names and the overlap stage's for the same ticket are applied once", async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeGroomRepo(repo);
+    reseed(sailDir, 'decide', (output) => {
+      output.actions = [{ kind: 'blocked_by', to: 'FAKE-1' }];
+    });
+    await groomToPlan(repo, sailDir);
+
+    expect(overlapOf(repo.dir)).toMatchObject({ blockedBy: 'FAKE-1' });
+    expect(relatedIn(repo.dir)).toHaveLength(1);
+    expect(fakeTicket(repo.dir, 'FAKE-2').prerequisites as unknown).toEqual(['FAKE-1']);
+    const applied = lastComment(repo.dir)
+      .split('\n')
+      .filter((line) => line.includes('blocked_by'));
+    expect(applied).toEqual(['- applied: blocked_by FAKE-1']);
   });
 }, 120_000);
 
@@ -638,6 +838,9 @@ test("groom attaches no plan while the planner asks: it labels the ticket open-q
     expect(comment).toContain('Labelled `open-questions`.');
     expect(labelEvents(repo.dir, 'ticket:labelled')).toEqual(['open-questions']);
     expect(readEvents(onlyRun(repo.dir)).map((event) => event.type)).not.toContain('ticket:attached');
+    // No plan is attached, so nothing is compared: the next grooming compares.
+    expect(readJournal(onlyRun(repo.dir)).entries.map((entry) => entry.key)).not.toContain('overlap#1');
+    expect(relatedIn(repo.dir)).toEqual([]);
   });
 }, 120_000);
 

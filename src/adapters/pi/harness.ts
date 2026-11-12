@@ -8,7 +8,7 @@ import type { Env } from '../../ports/adapter';
 import type { Harness, HarnessEvent, HarnessRequest } from '../../ports/harness';
 import type { HarnessCapabilities, HarnessResult } from '../../ports/types';
 import { type BudgetTimers, createBudgetWatch } from '../claude-code/budget';
-import { whereYouWork } from '../claude-code/harness';
+import { sessionPrompt, stepGuide } from '../claude-code/harness';
 import { renderTranscript } from '../claude-code/transcript';
 import { createGate, gateExtension } from './gate';
 import { createPiSessionReader, type PiEvent, type PiSessionReader } from './messages';
@@ -67,6 +67,7 @@ export function createPiHarness(options: PiHarnessOptions): Harness {
 
   async function converse(
     request: HarnessRequest,
+    prompt: string,
     session: PiSession,
     reader: PiSessionReader,
     progress: Progress,
@@ -129,7 +130,7 @@ export function createPiHarness(options: PiHarnessOptions): Harness {
     });
     try {
       watch.start();
-      if (!stopped()) await session.prompt(request.prompt);
+      if (!stopped()) await session.prompt(prompt);
     } catch (error) {
       thrown ??= { error };
     } finally {
@@ -246,6 +247,7 @@ export function createPiHarness(options: PiHarnessOptions): Harness {
       try {
         let submission: Submitted | undefined;
         const tools = sessionTools(request.permissions);
+        const hasShell = tools.includes('bash');
         const gate = createGate({
           permissions: request.permissions,
           // An empty root makes decide() deny, never allow.
@@ -263,7 +265,8 @@ export function createPiHarness(options: PiHarnessOptions): Harness {
           cwd: request.cwd,
           model: request.model,
           ...(request.effort === undefined ? {} : { effort: request.effort }),
-          systemPrompt: [whereYouWork(request, tools.includes('bash')), '', SUBMIT_CONTRACT].join('\n'),
+          // The same text for every call: the call's own values end the prompt it is sent.
+          systemPrompt: [stepGuide(hasShell, (request.env.TMPDIR ?? '') !== ''), '', SUBMIT_CONTRACT].join('\n'),
           tools,
           gate: gateExtension(gate),
           submit: submitTool(request.outputSchema, (found) => {
@@ -283,7 +286,7 @@ export function createPiHarness(options: PiHarnessOptions): Harness {
           live.abort().catch(() => undefined);
         };
         request.signal?.addEventListener('abort', onAbort, { once: true });
-        return await converse(request, live, reader, progress, () => submission);
+        return await converse(request, sessionPrompt(request, hasShell), live, reader, progress, () => submission);
       } catch (error) {
         // A harness never rejects (ADR-0008).
         return failedOutright(request, reader, progress, error);
