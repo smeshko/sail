@@ -12,7 +12,7 @@
 
 ## Duplicates
 
-{{duplicates: each candidate the duplicates check named, with its confidence and your verdict on it; or that none was named}}
+{{duplicates: each candidate Jev ranked, with its score and your verdict on it; or that none was ranked; or that the check could not run, and why}}
 
 ## Staleness
 

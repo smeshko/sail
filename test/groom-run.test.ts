@@ -1338,7 +1338,7 @@ test('with a Jev that answers 500, groom completes and its duplicates check says
   });
 }, 120_000);
 
-test("decide's findings carry the duplicates output", async () => {
+test("decide's findings carry the duplicates output, and its prompt calls the candidates a ranking", async () => {
   await withTempRepo(async (repo) => {
     writeGroomRepo(repo);
     const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
@@ -1348,6 +1348,9 @@ test("decide's findings carry the duplicates output", async () => {
     expect(JSON.parse(readFileSync(join(call, 'in', 'findings.json'), 'utf8')).duplicates).toEqual(
       duplicatesCall(dir).output,
     );
+    const prompt = readFileSync(join(call, 'prompt.md'), 'utf8');
+    expect(prompt).toContain('a ranking to check, not a verdict');
+    expect(prompt).toContain('unchecked');
   });
 }, 120_000);
 

@@ -1,6 +1,7 @@
 Groom this ticket: judge three checks of it, write the report, and choose what to do to the ticket. The ticket is at
 `{{brief}}`, and the team's other open tickets are at `{{others}}`. `$STAGE_IN/findings.json` holds what the three checks
-found: `duplicates` (candidates with a confidence), `worth` (keep or cancel, the tickets to merge with, each with a
+found: `duplicates` (up to three open tickets Jev ranked closest to this one, each with Jev's score as its `confidence`,
+and `unchecked`, the reason Jev could not be asked, in which case the list is empty and no ticket was compared), `worth` (keep or cancel, the tickets to merge with, each with a
 confidence, and `stale` with its `staleEvidence`) and `questions`. `questions` is empty when the worth check said cancel, since the questions check
 didn't run.
 
@@ -16,6 +17,11 @@ work that one pull request would naturally do; a staleness claim needs evidence 
 repository answers is not open. That includes `docs/`, a local copy of the design docs (ADRs in `docs/adr/`, plans and
 their decisions in `docs/artifacts/plans/`, epics in `docs/artifacts/epics/`): drop a question a decision there answers,
 and quote the decision.
+
+The duplicates candidates are a ranking to check, not a verdict: read each one in `others.md` and decide yourself
+whether it is the same work. A score rarely reaches 0.8 even for the same work, so when a candidate is the same work and
+the worth check names it too, choose `merge`. When `unchecked` is set, say in the report that the duplicates check did
+not run and why, and look through `others.md` yourself.
 
 ## 2. Write the report
 
