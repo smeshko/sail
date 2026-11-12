@@ -99,8 +99,12 @@ One body inside a stage, run in order with its siblings. Every stage has at leas
 _Avoid_: sub-stage, action, unit
 
 **Scratch folder**:
-A try's `tmp/`, beside its `out/`, which the step's `TMPDIR`, `TMP` and `TEMP` name. It is open to the step's reads and writes whatever its permissions, though a write under `.git` there is denied, and the engine removes it when the try ends. A `mktemp` that names no directory of its own makes its file there, on macOS too, through the `mktemp` sail puts first on the step's `PATH`.
+A try's `tmp/`, beside its `out/`, which the step's `TMPDIR`, `TMP` and `TEMP` name. It is open to the step's reads and writes whatever its permissions, though a write under `.git` there is denied, and the engine removes it when the try ends. A `mktemp` that names no directory of its own makes its file there, on macOS too, through the `mktemp` shim.
 _Avoid_: temp dir, tmp folder, sandbox
+
+**Shim**:
+A program in sail's `bin/shims/` that sail puts first on the `PATH` of a step's shell, in place of the system's command of the same name, which it runs: so far `mktemp`, which makes a file whose directory it picks itself in the scratch folder. A script step and a pi session get the folder first on their `PATH`, and a Claude Code session through `bin/session-env.sh`, its `CLAUDE_ENV_FILE`, which `SAIL_SHIMS` points at the folder. A shim passes over another copy of itself on the `PATH`. It is never one of the editor declarations.
+_Avoid_: wrapper, stub, shim (for the editor declarations)
 
 **Kind**:
 What a step is. v1 ships two kinds: `agent` and `script`. Kinds belong to steps; a stage has steps, not a kind. Kinds are an extension point: a new kind implements one interface. A built-in intake's call records the kind `builtin`, though no step runs: the engine runs its body in process.
@@ -270,7 +274,7 @@ _Avoid_: extra harness, secondary harness, provider (the external system behind 
 
 **Editor declarations**:
 The two generated files in `.sail/`, `sail.d.ts` and `sail-intakes.d.ts`, through which an editor resolves `sail` and `sail/intakes` to this machine's sail. `sail init` writes them, `sail check` rewrites them when they are missing or stale, and git ignores them. `sail check` itself type-checks against sail's own declarations and never reads a repository's `tsconfig.json`.
-_Avoid_: stubs, typings, shims
+_Avoid_: stubs, typings, shims (a shim is a `bin/shims/` program)
 
 ### Runs
 
