@@ -25,14 +25,29 @@ interface Lib {
   bannedLines(diff: string): Line[];
   messageContext(lines: Omit<Line, 'context'>[]): Line[];
   bannedCandidates(lines: Line[], glossary: Entry[]): Candidate[];
-  bannedState(candidates: Candidate[]): unknown;
-  bannedQuestions(candidates: Candidate[]): Record<string, { type: string; instructions: string }>;
+  bannedPattern(word: string): RegExp;
+  bannedMatches(pattern: RegExp, text: string): boolean;
+  bannedState(candidates: Candidate[], start?: number): unknown;
+  BANNED_BATCH: number;
+  JS_KEYWORDS: Set<string>;
+  bannedSelect(candidates: Candidate[]): { selected: Candidate[]; keyword: number; repeat: number };
+  bannedRequests(candidates: Candidate[]): {
+    requests: { candidates: Candidate[]; state: unknown; questions: Record<string, unknown> }[];
+    asked: Candidate[];
+    oversized: number;
+  };
+  bannedQuestions(candidates: Candidate[], start?: number): Record<string, { type: string; instructions: string }>;
+  bannedAsk<R, A extends { asked?: boolean; failed?: boolean; note?: string }>(
+    requests: R[],
+    ask: (request: R, i: number) => A,
+    options?: { deadlineMs?: number; now?: () => number },
+  ): { results: A[]; unasked: number; reason: string };
 }
 const lib = (await import(join(import.meta.dir, '../../.sail/lib/jev-check.mjs'))) as Lib;
 const entry = { term: 'Call', definition: 'One invocation.', avoid: ['invocation'] };
 const glossary = '**Call**:\nOne invocation.\n_Avoid_: invocation\n';
 const doc = '+++ b/note.md\n@@ -0,0 +1 @@\n+Each invocation of a stage\n';
-function stage(repo: TempRepo, diff: string, base = repo.git('rev-parse', 'HEAD').trim()) {
+function stage(repo: TempRepo, diff: string, base = repo.git('rev-parse', 'HEAD').trim(), first = '') {
   const out = join(repo.home, 'out');
   mkdirSync(out);
   const patch = join(repo.home, 'diff');
@@ -43,7 +58,7 @@ function stage(repo: TempRepo, diff: string, base = repo.git('rev-parse', 'HEAD'
     cwd: repo.dir,
     env: {
       ...repo.env,
-      PATH: `${join(import.meta.dir, '../../bin')}:${repo.env.PATH}`,
+      PATH: `${first ? `${first}:` : ''}${join(import.meta.dir, '../../bin')}:${repo.env.PATH}`,
       SAIL_BUN: process.execPath,
       SAIL_CONFIG: join(repo.dir, '.sail/project.yaml'),
       SAIL_HOME: repo.home,
@@ -52,7 +67,12 @@ function stage(repo: TempRepo, diff: string, base = repo.git('rev-parse', 'HEAD'
       INPUT_BASE: baseFile,
     },
   });
-  return { code: child.exitCode, output: JSON.parse(child.stdout.toString()), request: join(out, 'jev-request.json') };
+  return {
+    code: child.exitCode,
+    stderr: child.stderr.toString(),
+    output: JSON.parse(child.stdout.toString()),
+    request: join(out, 'jev-request.json'),
+  };
 }
 function setup(repo: TempRepo, answers?: Record<string, number>) {
   writeOwnSail(repo, answers === undefined ? {} : { jev: nouls(answers) });
@@ -66,7 +86,15 @@ test('the stage, with Jev answering word-1 0.97, reports the hit with its word a
     expect(result.output).toEqual({
       hits: [{ file: 'note.md', line: 1, word: 'invocation', term: 'Call', yes: 0.97 }],
       glossary: { entries: 1, words: 1 },
-      jev: { asked: true, failed: false, note: '', threshold: 0.8, candidates: 1 },
+      jev: {
+        asked: true,
+        failed: false,
+        note: '',
+        threshold: 0.8,
+        candidates: 1,
+        requests: 1,
+        skipped: { keyword: 0, repeat: 0, oversized: 0 },
+      },
     });
   });
 });
@@ -81,29 +109,54 @@ test('the stage reports no hit for an allowed shell invocation when Jev answers 
     );
   });
 });
-test('large changes have bounded Jev questions and request bytes, with omissions reported', async () => {
+function requestFiles(out: string) {
+  return [1, 2, 3, 4, 5, 6].map((n) => join(out, n === 1 ? 'jev-request.json' : `jev-request-${n}.json`));
+}
+test('the stage asks 40 candidates in requests of 16, 16 and 8 numbered across them', async () => {
   await withTempRepo((repo) => {
-    setup(repo, Object.fromEntries(Array.from({ length: 1000 }, (_, i) => [`word-${i + 1}`, i === 0 ? 0.97 : 0.05])));
-    const diff = `+++ b/note.md\n@@ -0,0 +1,1000 @@\n${'+invocation\n'.repeat(1000)}`;
-    const result = stage(repo, diff);
-    const request = readFileSync(result.request, 'utf8');
-    expect(Object.keys(JSON.parse(request).questions).length).toBeLessThanOrEqual(64);
-    expect(Buffer.byteLength(request)).toBeLessThanOrEqual(64_000);
-    expect(result.output.jev.note).toContain('omitted');
-    expect(result.output.hits).toEqual([{ file: 'note.md', line: 1, word: 'invocation', term: 'Call', yes: 0.97 }]);
+    setup(repo, Object.fromEntries(Array.from({ length: 40 }, (_, i) => [`word-${i + 1}`, i === 32 ? 0.97 : 0.05])));
+    const files = Array.from({ length: 40 }, (_, i) => `+++ b/f${i + 1}.md\n@@ -0,0 +1 @@\n+invocation\n`).join('');
+    const result = stage(repo, files);
+    const [one, two, three, four] = requestFiles(join(repo.home, 'out'));
+    expect(existsSync(one as string) && existsSync(two as string) && existsSync(three as string)).toBe(true);
+    expect(existsSync(four as string)).toBe(false);
+    const names = [one, two, three].map((f) => Object.keys(JSON.parse(readFileSync(f as string, 'utf8')).questions));
+    expect(names[0]).toEqual(Array.from({ length: 16 }, (_, i) => `word-${i + 1}`));
+    expect(names[1]).toEqual(Array.from({ length: 16 }, (_, i) => `word-${i + 17}`));
+    expect(names[2]).toEqual(Array.from({ length: 8 }, (_, i) => `word-${i + 33}`));
+    expect(result.output.jev).toEqual({
+      asked: true,
+      failed: false,
+      note: '',
+      threshold: 0.8,
+      candidates: 40,
+      requests: 3,
+      skipped: { keyword: 0, repeat: 0, oversized: 0 },
+    });
+    expect(result.output.hits).toEqual([{ file: 'f33.md', line: 1, word: 'invocation', term: 'Call', yes: 0.97 }]);
   });
-});
-test('request byte limit stops below the question limit for long multibyte lines', async () => {
+}, 120_000);
+test('the stage splits long multibyte lines into requests under the byte limit and asks them all', async () => {
   await withTempRepo((repo) => {
-    setup(repo, {});
-    const diff = `+++ b/note.md\n@@ -0,0 +1,30 @@\n${`+invocation ${'界'.repeat(1000)}\n`.repeat(30)}`;
-    const result = stage(repo, diff);
-    const request = readFileSync(result.request, 'utf8');
-    expect(Buffer.byteLength(request)).toBeLessThanOrEqual(64_000);
-    expect(Object.keys(JSON.parse(request).questions).length).toBeLessThan(30);
-    expect(result.output.jev.note).toContain('omitted');
+    setup(repo, Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`word-${i + 1}`, 0.05])));
+    const files = Array.from(
+      { length: 30 },
+      (_, i) => `+++ b/f${i + 1}.md\n@@ -0,0 +1 @@\n+invocation ${'界'.repeat(2000)}\n`,
+    ).join('');
+    const result = stage(repo, files);
+    const present = requestFiles(join(repo.home, 'out')).filter((f) => existsSync(f));
+    const names: string[] = [];
+    for (const f of present) {
+      const text = readFileSync(f, 'utf8');
+      expect(Buffer.byteLength(text)).toBeLessThanOrEqual(64_000);
+      const keys = Object.keys(JSON.parse(text).questions);
+      expect(keys.length).toBeLessThan(16);
+      names.push(...keys);
+    }
+    expect(names).toEqual(Array.from({ length: 30 }, (_, i) => `word-${i + 1}`));
+    expect(result.output.jev.note).toBe('');
   });
-});
+}, 120_000);
 test('Jev state includes a repeated definition and line context only once', () => {
   const candidates = lib.bannedCandidates(
     [{ ...line, text: 'invocation execution' }],
@@ -120,6 +173,8 @@ test('a single oversized candidate makes no Jev request and reports the omission
     expect(existsSync(result.request)).toBe(false);
     expect(result.output.jev.asked).toBe(false);
     expect(result.output.jev.note).toContain('1 candidates omitted');
+    expect(result.output.jev.requests).toBe(0);
+    expect(result.output.jev.skipped.oversized).toBe(1);
   });
 });
 
@@ -133,6 +188,8 @@ test('the stage asks Jev nothing when no added line holds an avoided word', asyn
       note: 'no avoided word on an added line',
       threshold: 0.8,
       candidates: 0,
+      requests: 0,
+      skipped: { keyword: 0, repeat: 0, oversized: 0 },
     });
     expect(existsSync(result.request)).toBe(false);
   });
@@ -191,7 +248,7 @@ test('the Jev request holds the glossary entry, added line and its context', asy
 test('the stage includes answers exactly at the threshold but excludes answers just below it', async () => {
   await withTempRepo((repo) => {
     setup(repo, { 'word-1': 0.8, 'word-2': 0.799 });
-    const result = stage(repo, `${doc}+invocation\n`);
+    const result = stage(repo, `${doc}+++ b/other.md\n@@ -0,0 +1 @@\n+invocation\n`);
     expect(result.output.hits).toEqual([{ file: 'note.md', line: 1, word: 'invocation', term: 'Call', yes: 0.8 }]);
     expect(result.output.jev.candidates).toBe(2);
   });
@@ -207,6 +264,8 @@ test('the stage with no CONTEXT.md makes no Jev request', async () => {
       note: 'no CONTEXT.md',
       threshold: 0.8,
       candidates: 0,
+      requests: 0,
+      skipped: { keyword: 0, repeat: 0, oversized: 0 },
     });
     expect(result.output.glossary).toEqual({ entries: 0, words: 0 });
     expect(existsSync(result.request)).toBe(false);
@@ -224,6 +283,8 @@ test('the stage with no glossary entries makes no Jev request', async () => {
       note: 'no avoided word on an added line',
       threshold: 0.8,
       candidates: 0,
+      requests: 0,
+      skipped: { keyword: 0, repeat: 0, oversized: 0 },
     });
     expect(existsSync(result.request)).toBe(false);
   });
@@ -313,15 +374,19 @@ test('Jev receives the full Avoid wording, including sense qualifiers', () => {
   expect(JSON.stringify(lib.bannedState(candidates))).toContain('invocation (as a noun), execution');
 });
 
-test('bannedCandidates matches whole words ignoring case but not plurals or hyphen joins', () => {
-  const glossary = [entry, { term: 'sail', definition: 'Tool.', avoid: ['ADW', 'loop', 'retry loop', 'a.b'] }];
-  expect(lib.bannedCandidates([line], glossary)).toEqual([{ ...line, ...entry, word: 'invocation' }]);
-  expect(lib.bannedCandidates([{ ...line, text: 'invocations ADW-387 run-loop axb' }], glossary)).toEqual([]);
-  expect(lib.bannedCandidates([{ ...line, text: 'retry  loop a.b' }], glossary).map((c) => c.word)).toEqual([
-    'loop',
-    'retry loop',
-    'a.b',
-  ]);
+test('bannedCandidates matches an avoided word as a camelCase part, a kebab part and a plural', () => {
+  const glossary = [
+    { term: 'T', definition: 'D.', avoid: ['nav', 'notice', 'ADW', 'loop', 'retry loop', 'a.b', 'stage run'] },
+  ];
+  const words = (text: string) => lib.bannedCandidates([{ ...line, text }], glossary).map((c) => c.word);
+  for (const text of ['navCounts', 'sideNav', 'side-nav', 'NAV', 'navs']) expect(words(text)).toContain('nav');
+  expect(words('notices')).toEqual(['notice']);
+  expect(words('run-loop')).toEqual(['loop']);
+  for (const text of ['retry  loop', 'retry-loop', 'retryLoop']) expect(words(text)).toContain('retry loop');
+  expect(words('stageRun')).toEqual(['stage run']);
+  expect(words('a.b')).toEqual(['a.b']);
+  expect(words('axb')).toEqual([]);
+  for (const text of ['ADW-387', 'navigate', 'canvas', 'nav_counts', 'noticed']) expect(words(text)).toEqual([]);
 });
 test('bannedCandidates keeps one candidate per word and entry, even for repeated words', () => {
   expect(
@@ -385,6 +450,26 @@ test('messageContext uses only nearby lines from the same commit', () => {
     { file: 'commit def', line: 1, text: 'other', context: [] },
   ]);
 });
+test('bannedRequests makes requests of 16, numbering word-n across them', () => {
+  const small = { ...line, ...entry, word: 'invocation' };
+  const result = lib.bannedRequests(Array.from({ length: 17 }, () => small));
+  expect(result.requests.map((r) => r.candidates.length)).toEqual([lib.BANNED_BATCH, 1]);
+  expect(Object.keys(result.requests[1]?.questions ?? {})).toEqual(['word-17']);
+  expect(result.asked).toHaveLength(17);
+  expect(result.oversized).toBe(0);
+});
+test('bannedRequests leaves out a candidate too large for any request and keeps the rest in one', () => {
+  const small = { ...line, ...entry, word: 'invocation' };
+  const huge = { ...small, text: 'x'.repeat(100_000) };
+  const result = lib.bannedRequests([small, huge, small]);
+  expect(result.oversized).toBe(1);
+  expect(result.requests).toHaveLength(1);
+  expect(Object.keys(result.requests[0]?.questions ?? {})).toEqual(['word-1', 'word-2']);
+});
+test('bannedQuestions with a start names the candidates from word-<start + 1>', () => {
+  const candidate = { ...line, ...entry, word: 'invocation' };
+  expect(Object.keys(lib.bannedQuestions([candidate], 16))).toEqual(['word-17']);
+});
 test('bannedState and bannedQuestions name each candidate word-n with a noul and glossary sense', () => {
   const candidate = { ...line, ...entry, word: 'invocation' };
   expect(lib.bannedState([candidate])).toEqual({
@@ -399,4 +484,154 @@ test('bannedState and bannedQuestions name each candidate word-n with a noul and
     'In candidates.word-2, read its location in lines and its glossary entry in entries (including avoidText). Is "invocation" used in the sense that entry forbids, where "Call" should be used instead?',
   );
   expect(lib.BANNED_YES).toBe(0.8);
+});
+
+const kinds: Entry[] = [
+  { term: 'Kind', definition: 'D.', avoid: ['type'] },
+  { term: 'Shadowing', definition: 'D.', avoid: ['extend'] },
+  { term: 'Call', definition: 'D.', avoid: ['invocation'] },
+];
+function select(...rows: [string, string][]) {
+  const candidates = rows.flatMap(([file, text]) =>
+    lib.bannedCandidates([{ file, line: 1, text, context: [] }], kinds),
+  );
+  return lib.bannedSelect(candidates);
+}
+test('bannedSelect leaves out a JS keyword on a code line of a TypeScript file', () => {
+  expect(select(['a.ts', 'type Foo = string;'])).toMatchObject({ selected: [], keyword: 1, repeat: 0 });
+  expect(select(['a.ts', 'class A extends B {}'])).toMatchObject({ selected: [], keyword: 1 });
+});
+test('bannedSelect keeps an identifier, a comment, a doc line and a commit message that hold the word', () => {
+  expect(select(['a.ts', 'const stepType = 1;']).selected).toHaveLength(1);
+  expect(select(['a.ts', '// which type of step']).selected).toHaveLength(1);
+  expect(select(['note.md', 'type Foo = string;']).selected).toHaveLength(1);
+  expect(select(['commit abc1234', 'return type;']).selected).toHaveLength(1);
+});
+test('bannedSelect asks one candidate per word, entry and file, the first', () => {
+  const result = select(
+    ['a.ts', 'invocation one'],
+    ['a.ts', 'invocation two'],
+    ['a.ts', 'invocation three'],
+    ['b.ts', 'invocation one'],
+  );
+  expect(result.selected.map((c) => [c.file, c.text])).toEqual([
+    ['a.ts', 'invocation one'],
+    ['b.ts', 'invocation one'],
+  ]);
+  expect(result.repeat).toBe(2);
+});
+test('bannedSelect lets a keyword line not take the place of a later comment line', () => {
+  const result = select(['a.ts', 'type Foo = string;'], ['a.ts', '// the type of it']);
+  expect(result.selected.map((c) => c.text)).toEqual(['// the type of it']);
+  expect(result.keyword).toBe(1);
+});
+test('the stage asks one question for three lines of a TypeScript file and reports the two skipped', async () => {
+  await withTempRepo((repo) => {
+    setup(repo, { 'word-1': 0.97 });
+    writeFileSync(join(repo.dir, 'CONTEXT.md'), '**Kind**:\nWhat a step is.\n_Avoid_: type\n');
+    const diff = '+++ b/a.ts\n@@ -0,0 +1,3 @@\n+type Foo = string;\n+// which type of step\n+const stepType = 1;\n';
+    const out = join(repo.home, 'out');
+    const result = stage(repo, diff);
+    expect(Object.keys(JSON.parse(readFileSync(join(out, 'jev-request.json'), 'utf8')).questions)).toEqual(['word-1']);
+    expect(result.output.hits).toEqual([{ file: 'a.ts', line: 2, word: 'type', term: 'Kind', yes: 0.97 }]);
+    expect(result.output.jev).toEqual({
+      asked: true,
+      failed: false,
+      note: '',
+      threshold: 0.8,
+      candidates: 3,
+      requests: 1,
+      skipped: { keyword: 1, repeat: 1, oversized: 0 },
+    });
+    expect(result.stderr).toContain('not asked: 1 keyword, 1 repeat');
+  });
+});
+/**
+ * A `sail` ahead of the checkout's on the PATH that fails its `failing`-th `port jev ask`, as an unreachable Jev does,
+ * and passes every other call through; `asks()` counts the asks it saw.
+ */
+function failingJev(repo: TempRepo, failing: number[]) {
+  const dir = join(repo.home, 'failing-jev');
+  mkdirSync(dir);
+  const count = join(dir, 'count');
+  writeFileSync(
+    join(dir, 'sail'),
+    [
+      '#!/bin/sh',
+      `n=$(($(cat '${count}' 2>/dev/null || echo 0) + 1))`,
+      `echo "$n" > '${count}'`,
+      `case " ${failing.join(' ')} " in *" $n "*) echo "jev ask: Jev could not be reached" >&2; exit 1;; esac`,
+      `exec '${join(import.meta.dir, '../../bin/sail')}' "$@"`,
+      '',
+    ].join('\n'),
+    { mode: 0o755 },
+  );
+  return { dir, asks: () => Number(readFileSync(count, 'utf8').trim()) };
+}
+const low = (n: number, high: Record<string, number>) => ({
+  ...Object.fromEntries(Array.from({ length: n }, (_, i) => [`word-${i + 1}`, 0.05])),
+  ...high,
+});
+const candidateFiles = (n: number) =>
+  Array.from({ length: n }, (_, i) => `+++ b/f${i + 1}.md\n@@ -0,0 +1 @@\n+invocation\n`).join('');
+test('the stage keeps the first request’s hits and notes the second, refused, as not asked', async () => {
+  await withTempRepo((repo) => {
+    setup(repo, low(17, { 'word-2': 0.97, 'word-17': 0.97 }));
+    const jev = failingJev(repo, [2]);
+    const result = stage(repo, candidateFiles(17), undefined, jev.dir);
+    expect(result.code).toBe(0);
+    expect(jev.asks()).toBe(2);
+    expect(result.output.hits).toEqual([{ file: 'f2.md', line: 1, word: 'invocation', term: 'Call', yes: 0.97 }]);
+    expect(result.output.jev).toMatchObject({ asked: true, failed: false, requests: 2 });
+    expect(result.output.jev.note).toBe('1 of 2 requests not asked: jev ask: Jev could not be reached');
+  });
+}, 120_000);
+test('the stage reports a failed check when every request it asked was refused', async () => {
+  await withTempRepo((repo) => {
+    setup(repo, low(17, { 'word-1': 0.97 }));
+    const jev = failingJev(repo, [1, 2]);
+    const result = stage(repo, candidateFiles(17), undefined, jev.dir);
+    expect(result.code).toBe(0);
+    expect(result.output.hits).toEqual([]);
+    expect(result.output.jev).toMatchObject({
+      asked: false,
+      failed: true,
+      note: 'jev ask: Jev could not be reached',
+    });
+  });
+}, 120_000);
+test('the stage stops asking at the first request Jev fails, leaving the rest not asked', async () => {
+  await withTempRepo((repo) => {
+    setup(repo, low(40, { 'word-1': 0.97, 'word-40': 0.97 }));
+    const jev = failingJev(repo, [2]);
+    const result = stage(repo, candidateFiles(40), undefined, jev.dir);
+    expect(jev.asks()).toBe(2);
+    expect(result.output.hits).toEqual([{ file: 'f1.md', line: 1, word: 'invocation', term: 'Call', yes: 0.97 }]);
+    expect(result.output.jev.note).toBe('2 of 3 requests not asked: jev ask: Jev could not be reached');
+  });
+}, 120_000);
+test('bannedAsk asks no request once its deadline has passed, and counts the rest not asked', () => {
+  let clock = 0;
+  const asked: number[] = [];
+  const { results, unasked, reason } = lib.bannedAsk(
+    ['a', 'b', 'c', 'd'],
+    (_request, i) => {
+      asked.push(i);
+      clock += 200_000;
+      return { asked: true, answers: {} };
+    },
+    { deadlineMs: 400_000, now: () => clock },
+  );
+  expect(asked).toEqual([0, 1]);
+  expect(results).toHaveLength(2);
+  expect(unasked).toBe(2);
+  expect(reason).toBe('the stage’s 400 s for asking Jev ran out');
+});
+test('bannedAsk stops at the first failed ask and asks every request when none fails', () => {
+  const failing = lib.bannedAsk([1, 2, 3], (_r, i) => (i === 0 ? { asked: false, failed: true, note: 'down' } : {}));
+  expect(failing).toMatchObject({ unasked: 2, reason: 'down' });
+  expect(failing.results).toHaveLength(1);
+  const all = lib.bannedAsk([1, 2, 3], () => ({ asked: true, answers: {} }));
+  expect(all).toMatchObject({ unasked: 0, reason: '' });
+  expect(all.results).toHaveLength(3);
 });

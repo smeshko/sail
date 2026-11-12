@@ -231,8 +231,11 @@ export function triageVerdict(finding, answer) {
 
 // --- leak-check: does each added line name another project?
 
-/** Provisional until ADW-416 calibrates it. */
-export const LEAK_YES = 0.8;
+/**
+ * Measured on 160 synthetic leak lines in real requests: it catches 147 at 0.8, 154 at 0.65 and 158 at 0.5, flagging 1,
+ * 1 and 7 of 4,391 real lines, and no real line of 5,952 scored over 0.63.
+ */
+export const LEAK_YES = 0.65;
 export const SAIL_NOTE =
   'sail is a public open-source software factory. Its own names are sail, its Linear team ADW, ADW-<n> issues and test keys such as FAKE-1. Its providers and tools include Linear, GitHub, Anthropic, Claude, Claude Code, TypeSafe, Jev, System One, pi, OpenAI, Codex, ChatGPT, Jira, Bun, Node, TypeScript, Biome, Zod, git and macOS.';
 
@@ -335,11 +338,14 @@ export function leakRequests(lines) {
 
 // --- banned-words: is each avoided word used in the sense the glossary forbids?
 
-/** Provisional until ADW-416 calibrates it. */
+/** Measured on real requests: it stays 0.8, in requests of BANNED_BATCH candidates. */
 export const BANNED_YES = 0.8;
 export const BANNED_CONTEXT = 3;
-/** Bound both question count and serialized request bytes; omitted candidates are reported, not judged. */
-export const BANNED_MAX_QUESTIONS = 64;
+/**
+ * Candidates to a request. The same real lines score 0.55-0.60 in a request of 64 and 0.85-0.86 in one of 16, and
+ * requests of 4 or 1 flag more wrong lines at 1.5 to 2.5 times the tokens.
+ */
+export const BANNED_BATCH = 16;
 export const BANNED_MAX_REQUEST_BYTES = MAX_REQUEST_BYTES;
 
 export function parseGlossary(text) {
@@ -441,22 +447,28 @@ export function messageContext(lines) {
   }));
 }
 
+/** An avoided word, with an optional plural s, that touches no letter, digit or `_`, and is no ticket key (`ADW-387`). */
+export function bannedPattern(word) {
+  const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '[\\s-]+');
+  return new RegExp(`(?<![A-Za-z0-9_])${escaped}s?(?![A-Za-z0-9_]|-\\d)`, 'i');
+}
+/** Whether the pattern matches the text as written, or with a space put at each camelCase boundary. */
+export function bannedMatches(pattern, text) {
+  if (pattern.test(text)) return true;
+  const spaced = text.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/([A-Z])([A-Z][a-z])/g, '$1 $2');
+  return spaced !== text && pattern.test(spaced);
+}
 export function bannedCandidates(lines, glossary) {
   const patterns = glossary.flatMap((entry) =>
-    entry.avoid.map((word) => ({
-      entry,
-      word,
-      pattern: new RegExp(
-        `(?<![\\w-])${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+')}(?![\\w-])`,
-        'i',
-      ),
-    })),
+    entry.avoid.map((word) => ({ entry, word, pattern: bannedPattern(word) })),
   );
   return lines.flatMap((line) =>
-    patterns.filter(({ pattern }) => pattern.test(line.text)).map(({ entry, word }) => ({ ...line, ...entry, word })),
+    patterns
+      .filter(({ pattern }) => bannedMatches(pattern, line.text))
+      .map(({ entry, word }) => ({ ...line, ...entry, word })),
   );
 }
-export function bannedState(candidates) {
+export function bannedState(candidates, start = 0) {
   const entries = new Map();
   const lines = new Map();
   const locations = new Map();
@@ -468,7 +480,7 @@ export function bannedState(candidates) {
       locations.set(location, id);
       lines.set(id, { file, line, text, context });
     }
-    return [`word-${i + 1}`, { word, entry: term, location: locations.get(location) }];
+    return [`word-${start + i + 1}`, { word, entry: term, location: locations.get(location) }];
   });
   return {
     entries: Object.fromEntries(entries),
@@ -477,35 +489,118 @@ export function bannedState(candidates) {
   };
 }
 
-/** Select a bounded prefix without cutting any line, context or glossary sense mid-text. */
-export function bannedRequest(candidates) {
-  let selected = [];
-  let state = bannedState(selected);
-  let questions = bannedQuestions(selected);
-  for (const candidate of candidates.slice(0, BANNED_MAX_QUESTIONS)) {
-    const next = [...selected, candidate];
-    const nextState = bannedState(next);
-    const nextQuestions = bannedQuestions(next);
-    if (Buffer.byteLength(JSON.stringify({ state: nextState, questions: nextQuestions })) > BANNED_MAX_REQUEST_BYTES)
-      break;
-    selected = next;
-    state = nextState;
-    questions = nextQuestions;
-  }
-  const omitted = candidates.length - selected.length;
-  return {
-    candidates: selected,
-    state,
-    questions,
-    note: omitted ? `${omitted} candidates omitted (request limits)` : '',
-  };
+/** ECMAScript reserved words and TypeScript's keywords: a line of code holds them as syntax, not as prose. */
+export const JS_KEYWORDS = new Set(
+  (
+    'break case catch class const continue debugger default delete do else enum export extends false finally for function if ' +
+    'import in instanceof new null return super switch this throw true try typeof var void while with yield let static async ' +
+    'await of as from get set type interface implements package private protected public readonly declare namespace module ' +
+    'abstract override satisfies keyof infer is'
+  ).split(' '),
+);
+const JS_FILE = /\.(js|jsx|ts|tsx|mjs|cjs|mts|cts)$/;
+
+function isKeyword({ word, file, text }) {
+  if (!JS_FILE.test(file) || /^(\/\/|\/\*|\*)/.test(text.trim())) return false;
+  const forms = [word, `${word}s`].filter((form) => JS_KEYWORDS.has(form));
+  if (!forms.length) return false;
+  const standalone = new RegExp(`(?<![\\w$-])(?:${forms.join('|')})(?![\\w$-])`, 'g');
+  return !bannedMatches(bannedPattern(word), text.replace(standalone, ' '));
 }
-export function bannedQuestions(candidates) {
+
+/**
+ * Leaves out a candidate that is only a JS keyword on a non-comment line of a JS or TypeScript file (`keyword`), then
+ * every one after the first of the same word, entry and file (`repeat`): `{ selected, keyword, repeat }`.
+ */
+export function bannedSelect(candidates) {
+  const seen = new Set();
+  const selected = [];
+  let keyword = 0;
+  let repeat = 0;
+  for (const candidate of candidates) {
+    if (isKeyword(candidate)) {
+      keyword++;
+      continue;
+    }
+    const key = JSON.stringify([candidate.word, candidate.term, candidate.file]);
+    if (seen.has(key)) repeat++;
+    else {
+      seen.add(key);
+      selected.push(candidate);
+    }
+  }
+  return { selected, keyword, repeat };
+}
+
+const bannedBytes = (candidates, start) =>
+  Buffer.byteLength(
+    JSON.stringify({ state: bannedState(candidates, start), questions: bannedQuestions(candidates, start) }),
+  );
+
+/**
+ * Every candidate in requests of at most BANNED_BATCH that each fit BANNED_MAX_REQUEST_BYTES, numbered `word-<n>`
+ * across them: `{ requests: [{ candidates, state, questions }], asked, oversized }`. A candidate too large to fit a
+ * request alone is in none and counted in `oversized`; `asked[n - 1]` is `word-<n>`.
+ */
+export function bannedRequests(candidates) {
+  const requests = [];
+  const asked = [];
+  let oversized = 0;
+  let open = [];
+  const close = () => {
+    if (!open.length) return;
+    const start = asked.length;
+    requests.push({ candidates: open, state: bannedState(open, start), questions: bannedQuestions(open, start) });
+    asked.push(...open);
+    open = [];
+  };
+  for (const candidate of candidates) {
+    if (bannedBytes([candidate], asked.length) > BANNED_MAX_REQUEST_BYTES) {
+      oversized++;
+      continue;
+    }
+    if (
+      open.length >= BANNED_BATCH ||
+      (open.length && bannedBytes([...open, candidate], asked.length) > BANNED_MAX_REQUEST_BYTES)
+    )
+      close();
+    open.push(candidate);
+  }
+  close();
+  return { requests, asked, oversized };
+}
+/**
+ * How long the banned-words stage asks Jev for, in ms: under the script kind's 600 s default, by more than one ask's
+ * worst case (three 10 s attempts and their pauses), so a large change ends with a note rather than a timeout.
+ */
+export const BANNED_ASK_MS = 480_000;
+/**
+ * Asks each request in turn with `ask(request, i)`, stopping after the first whose result is `failed` (Jev unreachable
+ * or refusing, as the next would be too) and before any once `deadlineMs` has passed since the first:
+ * `{ results, unasked, reason }`, `unasked` counting the requests not asked and `reason` saying why.
+ */
+export function bannedAsk(requests, ask, { deadlineMs = BANNED_ASK_MS, now = Date.now } = {}) {
+  const start = now();
+  const results = [];
+  for (let i = 0; i < requests.length; i++) {
+    if (i > 0 && now() - start >= deadlineMs)
+      return {
+        results,
+        unasked: requests.length - i,
+        reason: `the stage’s ${Math.round(deadlineMs / 1000)} s for asking Jev ran out`,
+      };
+    const result = ask(requests[i], i);
+    results.push(result);
+    if (result.failed === true) return { results, unasked: requests.length - i - 1, reason: result.note ?? '' };
+  }
+  return { results, unasked: 0, reason: '' };
+}
+export function bannedQuestions(candidates, start = 0) {
   return Object.fromEntries(
     candidates.map((candidate, i) => [
-      `word-${i + 1}`,
+      `word-${start + i + 1}`,
       noul(
-        `In candidates.word-${i + 1}, read its location in lines and its glossary entry in entries (including avoidText). Is "${candidate.word}" used in the sense that entry forbids, where "${candidate.term}" should be used instead?`,
+        `In candidates.word-${start + i + 1}, read its location in lines and its glossary entry in entries (including avoidText). Is "${candidate.word}" used in the sense that entry forbids, where "${candidate.term}" should be used instead?`,
         'The word names what the glossary entry defines, so the entry’s term belongs there.',
         'The word means something else, is mentioned as a word, or is a name the line cannot change, such as a language keyword or another system’s API.',
       ),

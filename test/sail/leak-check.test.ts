@@ -61,6 +61,14 @@ test('the stage, with Jev answering a doc line 0.97, adds a jev hit with its yes
     expect(result.output.hits).toEqual([{ file: 'note.md', line: 1, match: 'Some project', kind: 'jev', yes: 0.97 }]);
   });
 });
+test('the stage reports a Jev hit at 0.65 and none at 0.649', async () => {
+  await withTempRepo((repo) => {
+    writeOwnSail(repo, { jev: nouls({ 'leak-1': 0.65, 'leak-2': 0.649 }) });
+    const result = stage(repo, '+++ b/note.md\n@@ -0,0 +1,2 @@\n+Some project\n+Other project\n');
+    expect(result.output.hits).toEqual([{ file: 'note.md', line: 1, match: 'Some project', kind: 'jev', yes: 0.65 }]);
+    expect(result.output.jev.threshold).toBe(0.65);
+  });
+});
 test('the stage, with Jev answering every line 0.05, adds no jev hit', async () => {
   await withTempRepo((repo) => {
     writeOwnSail(repo, { jev: nouls({ 'leak-1': 0.05 }) });
@@ -108,21 +116,27 @@ test('the stage, with no adapters.jev, exits 0 with the exact scan’s hits', as
     expect(typeof result.output.jev.note).toBe('string');
   });
 });
-test('the stage passes placeholder keys under test/ and still flags other keys there', async () => {
+test('the stage passes every tracker key under test/', async () => {
   await withTempRepo((repo) => {
     writeOwnSail(repo);
     const result = stage(
       repo,
-      '+++ b/test/x.test.ts\n@@ -0,0 +1,2 @@\n+const a = "OTHER-1";\n+const b = "OPS-4 ACME-7";\n',
+      '+++ b/test/x.test.ts\n@@ -0,0 +1,3 @@\n+const a = "OTHER-1";\n+const b = "OPS-4 ACME-7";\n+const c = "NOPE-1";\n',
     );
-    expect(result.output.hits).toEqual([{ file: 'test/x.test.ts', line: 2, match: 'ACME-7', kind: 'key' }]);
+    expect(result.output.hits).toEqual([]);
   });
 });
-test('the stage flags placeholder keys outside test/', async () => {
+test('the stage flags a key outside test/', async () => {
   await withTempRepo((repo) => {
     writeOwnSail(repo);
-    const result = stage(repo, '+++ b/src/x.ts\n@@ -0,0 +1 @@\n+const a = "OTHER-1";\n');
-    expect(result.output.hits).toEqual([{ file: 'src/x.ts', line: 1, match: 'OTHER-1', kind: 'key' }]);
+    const result = stage(
+      repo,
+      '+++ b/src/x.ts\n@@ -0,0 +1 @@\n+const a = "OTHER-1";\n+++ b/src/test/x.ts\n@@ -0,0 +1 @@\n+const a = "NOPE-1";\n',
+    );
+    expect(result.output.hits).toEqual([
+      { file: 'src/x.ts', line: 1, match: 'OTHER-1', kind: 'key' },
+      { file: 'src/test/x.ts', line: 1, match: 'NOPE-1', kind: 'key' },
+    ]);
   });
 });
 test('the stage flags a denylist term beside a placeholder key under test/', async () => {
@@ -187,7 +201,7 @@ test('leakQuestions asks one noul per line named leak-<n>', () => {
   expect(Object.keys(questions)).toEqual(['leak-1', 'leak-2']);
   expect(questions['leak-1']?.type).toBe('noul');
   expect(questions['leak-2']?.instructions).toContain('lines.leak-2');
-  expect(lib.LEAK_YES).toBe(0.8);
+  expect(lib.LEAK_YES).toBe(0.65);
 });
 test('leakRequests splits the lines into requests under the byte limit, each as full as it can be, numbered across them', () => {
   const many = Array.from({ length: 900 }, (_, i) => ({
