@@ -19,6 +19,8 @@ export const plan = agent('plan', {
     ]),
   },
   output: Planned,
+  // The plan's identifiers and commit subjects carry the vocabulary.
+  conventions: ['AGENTS.md', 'CONTEXT.md'],
   model: 'frontier',
   permissions: withTools(readonly, ['WebFetch']),
   budget: { maxTurns: 80, maxUsd: 6, maxMinutes: 45 },

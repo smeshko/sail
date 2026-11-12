@@ -1202,3 +1202,19 @@ test('each reviewer runs on its model: architecture and bugs on the frontier mod
     });
   });
 }, 120_000);
+
+test("the stages that write name CONTEXT.md as their own conventions, and a read-only reviewer names none, in the run's roster", async () => {
+  await withTempRepo(async (repo) => {
+    setUp(repo);
+    const { dir } = await review(repo);
+    const { stages } = JSON.parse(readFileSync(join(dir, 'run.json'), 'utf8'));
+    const glossary = ['AGENTS.md', 'CONTEXT.md'];
+    expect(stages['review-conventions'].conventions).toEqual(glossary);
+    expect(stages.fix.conventions).toEqual(glossary);
+    expect(stages['resolve-conflicts'].conventions).toEqual(glossary);
+    expect(stages['review-bugs'].conventions).toBeUndefined();
+    expect(stages['review-bugs'].budget.maxUsd).toBe(6);
+    expect(stages['review-architecture'].budget.maxUsd).toBe(6);
+    expect(stages['review-tests'].budget.maxUsd).toBe(3);
+  });
+}, 120_000);

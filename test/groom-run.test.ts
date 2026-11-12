@@ -556,6 +556,10 @@ test('groom plans a ticket with no open question: attaches plan.md with its trai
         .entries.map((entry) => entry.key)
         .slice(4),
     ).toEqual(['decide#1', 'plan#1', 'act#1']);
+    expect(JSON.parse(readFileSync(join(dir, 'run.json'), 'utf8')).stages.plan.conventions).toEqual([
+      'AGENTS.md',
+      'CONTEXT.md',
+    ]);
     // The planner plans the ticket as the applied actions leave it: here, the judge's title edit.
     const actions = JSON.parse(readFileSync(join(dir, '05-plan', 'call-1', 'in', 'actions.json'), 'utf8'));
     expect(actions).toEqual([{ kind: 'edit', title: NEW_TITLE }]);

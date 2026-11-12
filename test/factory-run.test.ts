@@ -438,3 +438,12 @@ test('a task with no commit stays accepted on its first evidence when a later pa
     expect(written).toContain('bun run types: types/ is unchanged');
   });
 }, 120_000);
+
+test("implement names CONTEXT.md as its own conventions in the run's roster", async () => {
+  await withTempRepo(async (repo) => {
+    writeOwnSail(repo);
+    const { dir } = await factory(repo);
+    const { stages } = JSON.parse(readFileSync(join(dir, 'run.json'), 'utf8'));
+    expect(stages.implement.conventions).toEqual(['AGENTS.md', 'CONTEXT.md']);
+  });
+}, 120_000);
