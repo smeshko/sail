@@ -1,7 +1,7 @@
 Review this pull request for one question: does the change work on every input and path, not only the ones its tests
-take, and can untrusted input, a widened permission or a leaked secret turn it against its user? Five other reviewers
-cover requirements, architecture, tests, security and conventions at the same time, and validation runs the typecheck,
-lint and the affected tests: stay on your question.
+take, and can untrusted input, a widened permission or a leaked secret turn it against its user? Four other reviewers
+cover requirements, architecture, tests and conventions at the same time, and validation runs the typecheck, lint and
+the affected tests: stay on your question.
 
 The change is `git diff {{base}}...HEAD`, its commits are `git log {{base}}..HEAD`, the pull request is described at
 `{{brief}}`, and what it should do at `{{requirements}}`. Read past the diff: the code around each change, its callers

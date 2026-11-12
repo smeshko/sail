@@ -1,6 +1,6 @@
-// reviewer(): one of review's six reviewers, each a stage of its own with its own prompt: what every one of them reads,
+// reviewer(): one of review's five reviewers, each a stage of its own with its own prompt: what every one of them reads,
 // may run and may spend, and each names the model alias it runs on and, where the alias costs more, its dollar cap. A reviewer reads the change and never writes to it,
-// so all six run beside each other. A reviewer may name its own conventions, which replace the config's list; the others take it.
+// so all five run beside each other. A reviewer may name its own conventions, which replace the config's list; the others take it.
 import { agent, file, value, z } from 'sail';
 import { readonly } from '../../lib/permissions';
 import { Reviewed } from './schemas';

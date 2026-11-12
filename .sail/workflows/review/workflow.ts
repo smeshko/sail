@@ -1,5 +1,5 @@
 // review: a factory-labelled pull request in, merged out. Validation, the leak check (including its Jev pass), the
-// banned-words check, the demonstration and six reviewers look at it at once; Jev triages clear findings, then a judge
+// banned-words check, the demonstration and five reviewers look at it at once; Jev triages clear findings, then a judge
 // decides what each finding becomes (fixed here, filed as a ticket, or dropped)
 // and which reviews are too thin to trust. Up to three fix passes follow, each checked by the agent, with Jev's answers as its hint, beside fresh
 // validation; a pass that commits nothing and leaves the same findings open ends them early. A pass starts only for a
@@ -29,7 +29,6 @@ import { reviewRequirements } from './stages/05-review-requirements/stage';
 import { reviewArchitecture } from './stages/06-review-architecture/stage';
 import { reviewBugs } from './stages/07-review-bugs/stage';
 import { reviewTests } from './stages/08-review-tests/stage';
-import { reviewSecurity } from './stages/09-review-security/stage';
 import { reviewConventions } from './stages/10-review-conventions/stage';
 import { jevTriage } from './stages/11-jev-triage/stage';
 import { judge } from './stages/11-judge/stage';
@@ -50,14 +49,9 @@ import { gateFiles } from './stages/22-gate-files/stage';
 const LABEL = 'factory';
 
 /** The reviewers' lenses, in the order the group calls their stages. */
-const LENSES = [
-  'requirements',
-  'architecture',
-  'bugs',
-  'tests',
-  'security',
-  'conventions',
-] as const satisfies readonly z.infer<typeof Lens>[];
+const LENSES = ['requirements', 'architecture', 'bugs', 'tests', 'conventions'] as const satisfies readonly z.infer<
+  typeof Lens
+>[];
 
 const FIX_PASSES = 3;
 
@@ -71,12 +65,12 @@ export default workflow(
   'review',
   {
     intake: pr,
-    version: 10,
+    version: 11,
     watch: { every: '5m' },
     // Two pull requests at a time, though each merge moves the base the other is being reviewed against.
     maxConcurrentRuns: 2,
     description:
-      'validate, leak-check, banned-words, demonstrate and review six ways at once, judge, fix in rounds, merge',
+      'validate, leak-check, banned-words, demonstrate and review five ways at once, judge, fix in rounds, merge',
   },
   async (run) => {
     const brief = run.intake.files['brief.md'];
@@ -101,7 +95,6 @@ export default workflow(
       [reviewArchitecture, reading],
       [reviewBugs, reading],
       [reviewTests, reading],
-      [reviewSecurity, reading],
       [reviewConventions, reading],
     ]);
     if (shown.outcome === 'blocked') return handOff(`demonstrate blocked: ${shown.reason}`);
