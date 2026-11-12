@@ -18,13 +18,23 @@ const lines = deniedCommands().split('\n');
 const bullets = lines.filter((line) => line.startsWith('- '));
 
 describe('the section', () => {
-  test('starts with its heading and has five bullets', () => {
+  test('starts with its heading and has six bullets', () => {
     expect(lines[0]).toBe('## Commands the permissions deny');
-    expect(bullets).toHaveLength(5);
+    expect(bullets).toHaveLength(6);
+  });
+});
+
+describe('the scratch line', () => {
+  test('sends scratch files to $TMPDIR', () => {
+    expect(bullets.some((line) => line.includes('`$TMPDIR`'))).toBe(true);
   });
 
-  test('names no TMPDIR', () => {
-    expect(deniedCommands()).not.toContain('TMPDIR');
+  test('allows a write to $TMPDIR with no write globs', () => {
+    expect(decide('echo notes > $TMPDIR/notes.txt').allow).toBe(true);
+  });
+
+  test('denies the same write outside the workspace', () => {
+    expect(decide('echo notes > <elsewhere>/notes.txt').allow).toBe(false);
   });
 });
 
@@ -33,14 +43,14 @@ describe('the deny-set line', () => {
     const names = [...DENY_SET.map((e) => e.name), 'curl | sh', 'environment override'];
     expect(denySetNames()).toEqual(names);
     expect(names).toHaveLength(14);
-    expect(bullets[3]).toBe(
+    expect(bullets.find((line) => line.startsWith('- No step may run these'))).toBe(
       `- No step may run these, whatever its permissions: ${names.map((n) => `\`${n}\``).join(', ')}.`,
     );
   });
 
   test('lists the entries a session meets most', () => {
     for (const name of ['rm -rf', 'git checkout', 'find -delete', 'git -c'])
-      expect(bullets[3]).toContain(`\`${name}\``);
+      expect(deniedCommands()).toContain(`\`${name}\``);
   });
 });
 
