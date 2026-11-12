@@ -450,6 +450,24 @@ test('the setup runs on the first and the second lease of one standing workspace
   });
 }, 20_000);
 
+test('a standing workspace that could not be used is named, with why, in workspace:created', async () => {
+  await withTempRepo(async (repo) => {
+    withOrigin(repo);
+    const w = world(repo);
+    const { emit, events } = captureEvents();
+    mkdirSync(join(w.runsDir, 'standing', 'demo-0'), { recursive: true });
+    writeFileSync(join(w.runsDir, 'standing', 'demo-0', 'LEASE'), 'garbage');
+    const on = adapterOf(repo, w, { emit, standing: true });
+    await on.create({ ...runIn(w.runsDir, 'r1'), workflow: 'demo' }, { branch: BRANCH });
+    const created = events.find((event) => event.type === 'workspace:created') as
+      | { standing?: string; skipped?: string[] }
+      | undefined;
+    expect(created?.standing).toBe('none_free');
+    expect(created?.skipped).toHaveLength(1);
+    expect(created?.skipped?.[0]).toContain(join('standing', 'demo-0', 'LEASE'));
+  });
+}, 20_000);
+
 test("with the option off or no workflow named, workspace:created has no standing field and the workspace is the run's own", async () => {
   await withTempRepo(async (repo) => {
     withOrigin(repo);

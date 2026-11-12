@@ -221,7 +221,10 @@ export function createGitWorktreeWorkspace(options: GitWorktreeOptions): Workspa
         }
       }
       const carried = startSha === undefined ? {} : { startSha };
-      const standing = made.standing === undefined ? {} : { standing: made.standing };
+      const standing = {
+        ...(made.standing === undefined ? {} : { standing: made.standing }),
+        ...(made.skipped === undefined ? {} : { skipped: [...made.skipped] }),
+      };
       emit({
         type: 'workspace:created',
         path,

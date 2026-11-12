@@ -14,6 +14,7 @@ import {
   dropStanding,
   heldByRun,
   readStanding,
+  restoreStanding,
   STANDING_DIR,
   type StandingLease,
   standingDir,
@@ -96,9 +97,10 @@ const runsDirOf = (run: { runDir: string }): string => dirname(resolve(run.runDi
  * below `run.maxConcurrentRuns ?? 1`, takes the first lease it can, keeps the head of a stale holder it took over at
  * that run's run ref first, then adds the worktree (`--force`, so one removed by hand is made again) or checks out in
  * place. A directory that can't be used, a folder that is no worktree among them, is skipped and its lease dropped; one
- * whose lease can't be read or taken is skipped and its lease left. A link at `standing/`, at the directory or at its
- * worktree is skipped untouched.
- * Undefined when none is free, or when `run` names no workflow.
+ * whose lease can't be read or taken is skipped and its lease left. A takeover whose stale holder's head can't be kept
+ * gives that run its lease back, so its head is never checked out over. A link at `standing/`, at the directory or at
+ * its worktree is skipped untouched. Each skip is told to `onSkip`, naming the directory and why; one a live run holds
+ * is no skip. Undefined when none is free, or when `run` names no workflow.
  */
 export function leaseStanding(options: {
   repo: string;
@@ -106,16 +108,23 @@ export function leaseStanding(options: {
   sha: string;
   env?: Env;
   now?: Date;
+  onSkip?: (why: string) => void;
 }): { path: string; raw: { dir: string; took?: StandingLease } } | undefined {
   const { repo, run, sha, env } = options;
   if (run.workflow === undefined) return undefined;
+  const skip = (dir: string, why: unknown) =>
+    options.onSkip?.(`${dir}: ${why instanceof Error ? why.message : String(why)}`);
   const runsDir = runsDirOf(run);
   const holder = { runId: run.runId, runDir: resolve(run.runDir), pid: process.pid };
   for (let n = 0; n < (run.maxConcurrentRuns ?? 1); n++) {
     const dir = standingDir(runsDir, run.workflow, n);
     const path = join(dir, 'workspace');
     // A link is never looked into: a checkout through one would discard the work of whatever checkout it names.
-    if ([join(runsDir, STANDING_DIR), dir, path].some(isLink)) continue;
+    const link = [join(runsDir, STANDING_DIR), dir, path].find(isLink);
+    if (link !== undefined) {
+      skip(dir, `${link} is a link`);
+      continue;
+    }
     // A lease that can't be read or taken (no JSON, a directory that can't be made, one that kept changing hands) is
     // no free workspace: the walk goes on, and a start is never refused because of the option.
     let taken: ReturnType<typeof takeStanding>;
@@ -123,15 +132,19 @@ export function leaseStanding(options: {
       taken = takeStanding(dir, holder, options.now);
     } catch (error) {
       if (!(error instanceof PortError)) throw error;
+      skip(dir, error);
       continue;
     }
     if (!taken.taken) continue;
-    try {
-      if (taken.took !== undefined) {
-        const kept = keepHead(repo, taken.took, path, env);
-        if (kept !== undefined && 'failed' in kept)
-          throw new PortError('workspace', 'create', 'unavailable', kept.failed);
+    if (taken.took !== undefined) {
+      const kept = keepHead(repo, taken.took, path, env);
+      if (kept !== undefined && 'failed' in kept) {
+        if (!restoreStanding(dir, run.runId, taken.took)) dropStanding(dir, run.runId);
+        skip(dir, kept.failed);
+        continue;
       }
+    }
+    try {
       if (!existsSync(path)) {
         const added = gitSync(repo, [...NO_HOOKS, 'worktree', 'add', '--force', '--detach', path, sha], env);
         if (added.code !== 0) throw new PortError('workspace', 'create', 'unavailable', added.stderr);
@@ -140,8 +153,9 @@ export function leaseStanding(options: {
       } else {
         throw new PortError('workspace', 'create', 'unavailable', `${path} is no git worktree`);
       }
-    } catch {
+    } catch (error) {
       dropStanding(dir, run.runId);
+      skip(dir, error);
       continue;
     }
     return { path, raw: taken.took === undefined ? { dir } : { dir, took: taken.took } };
@@ -194,12 +208,14 @@ export interface Started {
   readonly path: string;
   readonly raw: NonNullable<unknown> | null;
   readonly standing?: 'leased' | 'none_free';
+  /** The standing workspaces the start could not use, each naming its directory and why: none when it skipped none. */
+  readonly skipped?: readonly string[];
 }
 
 /**
  * The workspace of `run`'s start at `sha`: with `standing` on and `run.workflow` named, a standing workspace of its
- * workflow, else, when none is free, a detached worktree at `<runDir>/workspace`. With `standing` off, the latter alone,
- * and no `standing` field.
+ * workflow, else, when none is free, a detached worktree at `<runDir>/workspace`, `skipped` naming each standing
+ * workspace that could not be used and why. With `standing` off, the latter alone, and no `standing` field.
  */
 export function startWorkspace(options: {
   repo: string;
@@ -211,16 +227,19 @@ export function startWorkspace(options: {
 }): Started {
   const { repo, run, sha, env } = options;
   if (options.standing && run.workflow !== undefined) {
+    const skipped: string[] = [];
     const leased = leaseStanding({
       repo,
       run,
       sha,
       ...(env === undefined ? {} : { env }),
       ...(options.now === undefined ? {} : { now: options.now }),
+      onSkip: (why) => skipped.push(why),
     });
-    if (leased !== undefined) return { path: leased.path, raw: leased.raw, standing: 'leased' };
+    const said = skipped.length === 0 ? {} : { skipped };
+    if (leased !== undefined) return { path: leased.path, raw: leased.raw, standing: 'leased', ...said };
     const path = join(run.runDir, 'workspace');
-    return { path, raw: addDetached(repo, path, sha, env), standing: 'none_free' };
+    return { path, raw: addDetached(repo, path, sha, env), standing: 'none_free', ...said };
   }
   const path = join(run.runDir, 'workspace');
   return { path, raw: addDetached(repo, path, sha, env) };

@@ -111,6 +111,14 @@ export function takeStanding(
   throw new PortError('workspace', 'lease', 'conflict', `${dir}: the lease kept changing hands`);
 }
 
+/**
+ * Puts `lease` back on `dir` in place of `runId`'s, only while `runId` holds it: for a takeover that could not keep the
+ * stale holder's head, so the next start tries again. Answers whether it did.
+ */
+export function restoreStanding(dir: string, runId: string, lease: StandingLease): boolean {
+  return takeRecord(leaseFileOf(dir), lease, standingKind, (held) => held.runId !== runId).taken;
+}
+
 /** Whether `runId` holds the lease on `dir`. */
 export function heldByRun(dir: string, runId: string): boolean {
   return readStanding(dir)?.runId === runId;

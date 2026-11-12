@@ -23,7 +23,12 @@ import {
   standingPath,
   takeStanding,
 } from '../../../src/adapters/workspace/standing';
-import { leaseStanding, releaseStanding, reopenStanding } from '../../../src/adapters/workspace/standing-tree';
+import {
+  leaseStanding,
+  releaseStanding,
+  reopenStanding,
+  startWorkspace,
+} from '../../../src/adapters/workspace/standing-tree';
 import { type Status, writeStatus } from '../../../src/engine/run-dir';
 import type { RunRef } from '../../../src/ports/workspace';
 import { type TempRepo, withTempRepo } from '../../helpers/temp-repo';
@@ -315,6 +320,43 @@ test('a standing directory whose LEASE cannot be read is skipped, and the walk g
     const got = leaseStanding({ repo: repo.dir, run: next('run-a'), sha, env: repo.env });
     expect(got?.path).toBe(standingPath(runsDir, 'demo', 1));
     expect(read(standingDir(runsDir, 'demo', 0), 'LEASE')).toBe('garbage');
+  });
+});
+
+test('a takeover whose stale holder head cannot be kept gives that run its lease back, and the start says why it fell back', async () => {
+  await standingRepo(({ repo, runsDir, sha, next }) => {
+    const old = { ...next('run-a'), maxConcurrentRuns: 1 };
+    const path = leaseStanding({ repo: repo.dir, run: old, sha, env: repo.env })?.path ?? '';
+    writeFileSync(join(old.runDir, 'run.json'), JSON.stringify({ repository: { baseSha: sha } }));
+    writeFileSync(join(path, 'tracked.txt'), 'work\n');
+    gitSync(path, ['commit', '-qam', 'work'], repo.env);
+    const head = gitSync(path, ['rev-parse', 'HEAD'], repo.env).stdout.trim();
+    writeStatus(old.runDir, 'failed', 'workflow_failed');
+    // A file where the run refs' folder goes: the run ref can't be written.
+    mkdirSync(join(repo.dir, '.git', 'refs', 'sail'), { recursive: true });
+    writeFileSync(join(repo.dir, '.git', 'refs', 'sail', 'runs'), '');
+
+    const started = startWorkspace({
+      repo: repo.dir,
+      run: { ...next('run-b'), maxConcurrentRuns: 1 },
+      sha,
+      standing: true,
+      env: repo.env,
+    });
+    expect(started.standing).toBe('none_free');
+    expect(started.skipped).toHaveLength(1);
+    expect(started.skipped?.[0]).toContain(standingDir(runsDir, 'demo', 0));
+    expect(started.skipped?.[0]).toContain('were not kept');
+    expect(readStanding(standingDir(runsDir, 'demo', 0))?.runId).toBe('run-a');
+    expect(gitSync(path, ['rev-parse', 'HEAD'], repo.env).stdout.trim()).toBe(head);
+  });
+});
+
+test('a start that leases a standing workspace with nothing skipped says nothing was skipped', async () => {
+  await standingRepo(({ repo, sha, next }) => {
+    const started = startWorkspace({ repo: repo.dir, run: next('run-a'), sha, standing: true, env: repo.env });
+    expect(started.standing).toBe('leased');
+    expect(started.skipped).toBeUndefined();
   });
 });
 
