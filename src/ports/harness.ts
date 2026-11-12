@@ -27,6 +27,11 @@ export interface HarnessRequest {
   readonly key: string;
   readonly try: number;
   readonly prompt: string;
+  /**
+   * The repository's conventions as the engine rendered them, left out when the step has none. A harness puts it in
+   * its session's system prompt, after its own static text, and never in the prompt it sends.
+   */
+  readonly conventions?: string;
   readonly cwd: string;
   /** The call's preamble: `STAGE_IN`, `STAGE_OUT` and `INPUT_*`. */
   readonly env: Readonly<Record<string, string>>;
