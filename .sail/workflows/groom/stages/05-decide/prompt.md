@@ -5,6 +5,11 @@ and `unchecked`, the reason Jev could not be asked, in which case the list is em
 confidence, and `stale` with its `staleEvidence`) and `questions`. `questions` is empty when the worth check said cancel, since the questions check
 didn't run.
 
+When the ticket's `## Rulings` answered every question the last grooming asked, the three checks did not run: `findings`
+then holds no candidates, a `keep` whose `why` says the checks were skipped, and no questions. Write the report's sections
+from the earlier report in the brief's comments and from the rulings, verifying what you rely on as you would a check's
+finding. A `cancel`, a `merge` or a `duplicate` you choose is not applied on such a run, as no check backs it.
+
 Be hard on the ticket. Every ticket in the backlog must earn its place: a small, useless one should not exist, and work
 that one pull request would do belongs in one ticket. Prefer, in this order: merging the ticket with another, canceling
 it, then keeping it.
