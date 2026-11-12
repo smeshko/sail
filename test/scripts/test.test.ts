@@ -29,7 +29,7 @@ console.log('held');
 ${extra}
 while (!(await Bun.file(${JSON.stringify(release)}).exists())) await Bun.sleep(50);`,
     ],
-    { cwd: repo.dir, env: { ...repo.env, TMPDIR: join(repo.home, 'tmp') }, stdout: 'pipe', stderr: 'pipe' },
+    { cwd: repo.dir, env: { ...repo.env, SAIL_HOME: join(repo.home, 'tmp') }, stdout: 'pipe', stderr: 'pipe' },
   );
   const reader = child.stdout.getReader();
   await reader.read();
@@ -46,7 +46,7 @@ while (!(await Bun.file(${JSON.stringify(release)}).exists())) await Bun.sleep(5
 function launch(repo: TempRepo, args: string[], env: Record<string, string> = {}, cwd = repo.dir) {
   return Bun.spawn([process.execPath, LAUNCHER, ...args], {
     cwd,
-    env: { ...repo.env, TMPDIR: join(repo.home, 'tmp'), SAIL_TEST_LOCK_SECONDS: '2', ...env },
+    env: { ...repo.env, SAIL_HOME: join(repo.home, 'tmp'), SAIL_TEST_LOCK_SECONDS: '2', ...env },
     stdout: 'pipe',
     stderr: 'pipe',
   });
@@ -144,7 +144,7 @@ process.exit(await child.exited === 2 ? 2 : 0);`,
       ],
       {
         cwd: repo.dir,
-        env: { ...repo.env, TMPDIR: join(repo.home, 'tmp'), SAIL_TEST_LOCK_SECONDS: '2', RUN_ID: 'ADW-1-x' },
+        env: { ...repo.env, SAIL_HOME: join(repo.home, 'tmp'), SAIL_TEST_LOCK_SECONDS: '2', RUN_ID: 'ADW-1-x' },
         stdout: 'pipe',
         stderr: 'pipe',
       },
