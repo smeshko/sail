@@ -1,5 +1,5 @@
 // groom's contracts, shared by its intake, stages and workflow: the ticket it reads, what each check finds, what the
-// judge decides, what the planner wrote, and what the act step did.
+// judge decides, what the planner wrote, which ticket's plan overlaps it, and what the act step did.
 import { untrusted, z } from 'sail';
 import { PlanOutput } from '../../lib/plan';
 
@@ -73,7 +73,11 @@ export const Action = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('related'), to: z.string() }),
   z.object({ kind: z.literal('blocks'), to: z.string() }),
   /** `to` must land before this ticket can start: written as `to`'s `blocks` relation, which the watcher waits on. */
-  z.object({ kind: z.literal('blocked_by'), to: z.string() }),
+  /**
+   * `why` is what the comment says beside it: the overlap stage's reason, the files both tickets' plans change. The
+   * judge's own carries none.
+   */
+  z.object({ kind: z.literal('blocked_by'), to: z.string(), why: z.string().optional() }),
   /**
    * The ticket is real work but not the factory's: it needs no code change, needs a measurement or a person's
    * walkthrough, or belongs in another repository. It is labelled `manual` and never planned.
@@ -119,6 +123,19 @@ export const Verdict = z.object({
   outcome: z.enum(['groomed', 'manual', 'open-questions', 'planned']),
   /** The plan's structured part when the outcome is `planned`, and null otherwise. */
   plan: PlanOutput.nullable(),
+});
+
+/**
+ * What the overlap stage found for a newly planned ticket: the open planned ticket it must wait on, or null, with the
+ * paths both plans name and the reason as the comment words it; every ticket whose plan it compared; and why a ticket
+ * was not compared or was passed over.
+ */
+export const Overlap = z.object({
+  blockedBy: z.string().nullable(),
+  why: z.string().nullable(),
+  shared: z.array(z.string()),
+  compared: z.array(z.object({ ticketKey: z.string(), attachedAt: z.string(), shared: z.array(z.string()) })),
+  notes: z.array(z.string()),
 });
 
 export const Acted = z.object({
