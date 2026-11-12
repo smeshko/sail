@@ -101,11 +101,15 @@ const retryable = (status: number): boolean => status === 429 || status >= 500;
 /** A PortError's message without its `jev.ask: ` prefix, which a new PortError puts back. */
 const bare = (error: PortError): string => error.message.slice(`${error.port}.${error.op}: `.length);
 
-/** A `retry-after` header in milliseconds: whole seconds, or an HTTP date read against `at`. Undefined when unreadable. */
+/**
+ * A `retry-after` header in milliseconds: whole seconds, or an HTTP date read against `at`. Undefined when unreadable,
+ * such as `1.5` or `-5`, which `Date.parse` would read as a date long past: an HTTP date always names its day and month.
+ */
 function retryAfterMs(header: string | null, at: Date): number | undefined {
   if (header === null) return undefined;
   const value = header.trim();
   if (/^\d+$/.test(value)) return Number(value) * 1000;
+  if (!/[a-z]{3}/i.test(value)) return undefined;
   const date = Date.parse(value);
   return Number.isNaN(date) ? undefined : Math.max(0, date - at.getTime());
 }

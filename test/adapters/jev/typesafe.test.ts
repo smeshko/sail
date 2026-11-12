@@ -646,10 +646,10 @@ test('a retry-after of 60 seconds fails unavailable after one send and no wait',
   });
 });
 
-test('a retry-after that cannot be read is ignored', async () => {
+test.each(['soon', '1.5', '-5'])('a retry-after of %p cannot be read and is ignored', async (header) => {
   let calls = 0;
   const answering = scripted(() =>
-    ++calls === 1 ? new Response('{}', { status: 429, headers: { 'retry-after': 'soon' } }) : json(DOCS_ANSWER),
+    ++calls === 1 ? new Response('{}', { status: 429, headers: { 'retry-after': header } }) : json(DOCS_ANSWER),
   );
   const { sleep, waits } = waiting();
   await asking(answering.fetch, { sleep }).ask(THREE_QUESTIONS);
