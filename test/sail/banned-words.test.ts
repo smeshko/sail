@@ -272,6 +272,21 @@ test('parseGlossary reads real Call and Branch entries without long prose words'
   expect(entries.find((e) => e.term === 'Branch')?.avoid).toEqual(['branch']);
   expect(entries.flatMap((e) => e.avoid).filter((word) => word.split(/\s+/).length > 3)).toEqual([]);
 });
+test('a real definition written one sentence per line is one entry, and none of its lines passes 1,000 characters', () => {
+  const text = readFileSync(join(import.meta.dir, '../../CONTEXT.md'), 'utf8');
+  const entries = lib.parseGlossary(text);
+  expect(entries.length).toBe(text.split('\n').filter((row) => /^\*\*(.+?)\*\*:\s*$/.test(row)).length);
+  const dashboard = entries.find((e) => e.term === 'Dashboard')?.definition.split('\n') ?? [];
+  expect(dashboard.length).toBeGreaterThan(10);
+  expect(dashboard.filter((row) => row === '')).toEqual([]);
+  const long = entries.flatMap((e) =>
+    e.definition
+      .split('\n')
+      .filter((row) => row.length > 1000)
+      .map(() => e.term),
+  );
+  expect(long).toEqual([]);
+});
 test('Jev receives the full Avoid wording, including sense qualifiers', () => {
   const glossary = lib.parseGlossary('**Call**:\nOne invocation.\n_Avoid_: invocation (as a noun), execution\n');
   const candidates = lib.bannedCandidates([line], glossary);

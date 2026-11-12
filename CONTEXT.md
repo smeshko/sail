@@ -2,6 +2,9 @@
 
 sail is a software factory: a ticket goes in and a pull request comes out, along a workflow the repository defines. The engine, the SDK, the ports and every adapter share this language, and every identifier, schema and event name follows it.
 
+An entry is its term, its definition and its `_Avoid_` line.
+A definition longer than 300 characters is written one sentence per line, with no blank line between them, so two pull requests that edit different sentences of one entry merge without a conflict.
+
 ## Language
 
 ### Product
