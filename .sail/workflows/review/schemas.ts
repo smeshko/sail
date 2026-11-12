@@ -68,11 +68,16 @@ export const Checked = z.object({
   status: z.enum(['holds', 'finding', 'unchecked']),
 });
 
+/** Something below medium a reviewer names for the report. Nobody judges or fixes it. */
+export const Nit = z.object({ file: z.string(), title: z.string(), detail: z.string() });
+
 export const Reviewed = z.object({
   summary: z.string(),
   /** Everything the lens's checklist asked of this change, each checked or said why not. */
   coverage: z.array(Checked).min(1),
   findings: z.array(Finding),
+  /** Up to three things below medium the reviewer names for the report, which lists them and nobody acts on. */
+  nits: z.array(Nit).max(3).optional(),
 });
 
 /** What the judge read beside the findings: how each check went as a whole. */
@@ -166,6 +171,6 @@ export const ReviewRecord = z.object({
   /** The reviews the judge found too thin to trust: each stops the merge. */
   thin: Judgement.shape.thin,
   open: z.array(z.object({ finding: z.string(), detail: z.string() })),
-  /** The findings to fix that no pass was started for: all low, with none at medium or above beside them. */
-  nits: z.array(z.string()),
+  /** What the reviewers named below medium, three at most each: listed in the report, neither judged nor fixed. */
+  nits: z.array(Nit.extend({ lens: Lens })),
 });

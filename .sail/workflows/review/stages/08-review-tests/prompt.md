@@ -41,6 +41,9 @@ Give each finding a severity: `high` for one that ships broken, wrong or unsafe 
 narrow trigger or that will cost the next change. Report only `high` and `medium` findings: leave out a test gap that
 lets no failure through, however small, and say in your coverage why that item holds.
 
+You may name up to three of those as `nits` instead, each with its file, a one-line title and its detail. The review's
+report lists them and nobody acts on them: name only what a maintainer would want to see.
+
 ## Coverage
 
 Submit, beside your findings, what you checked: one entry per behaviour the change adds or changes, naming the test that
@@ -55,4 +58,4 @@ pull request waits for a human instead of merging. Nothing to report is a fine a
 ## Submit
 
 Submit a one-paragraph summary of what you found through your question, your coverage, and every finding with its
-severity, file, a one-line title and its detail.
+severity, file, a one-line title and its detail, and your nits, if any, three at most.
