@@ -4,7 +4,7 @@
 //   nor does a run seeded from it lease its own;
 //   no queue item names it, in any state; its branch has no open pull request, asked of the code host only when the
 //   remote has the branch, and never for a pull-request run, whose branches it keeps; and the archive destination is free. A check that can't be answered refuses the run.
-// - **Removals, in order:** its worktree, local branch, remote branch and run ref. One already gone is skipped. One that
+// - **Removals, in order:** its worktree (a standing workspace is freed and left where it is, and not listed), local branch, remote branch and run ref. One already gone is skipped. One that
 //   fails is reported and the rest still run. A run started from a pull request keeps both branches: they are the pull
 //   request's head, which sail never made.
 // - **Archive:** only when every removal succeeded, the run directory moves to
@@ -26,7 +26,7 @@ import { isPlainName } from './call-dir';
 import { type Clock, systemClock } from './clock';
 import { machineDir } from './machine-dir';
 import { readOpening, readStatus, runsDir } from './run-dir';
-import { RUN_HEADER_FILE, type RunHeader, readRunHeader } from './run-header';
+import { ownsWorkspace, RUN_HEADER_FILE, type RunHeader, readRunHeader } from './run-header';
 import { claimedBy } from './source';
 
 export interface CleanRunOptions {
@@ -218,10 +218,8 @@ export async function cleanRun(options: CleanRunOptions): Promise<Cleaned> {
   if (repository !== undefined) {
     const path = join(dir, header.workspace ?? 'workspace');
     if (existsSync(path)) {
-      await attempt('worktree', async () => {
-        await workspace.release(run, false);
-        return true;
-      });
+      // A standing workspace is freed and left in place: the release says `kept`, and nothing is removed.
+      await attempt('worktree', async () => !(await workspace.release(run, false)).kept);
     }
   }
   // A pull request's run works on the pull request's head, its author's branch and not sail's: it is never deleted.
@@ -259,7 +257,9 @@ export async function checkClean(options: CleanRunOptions): Promise<{ refused: s
   const { header, present, dir, archived } = checked;
   const { branch, repository } = header;
   const removes: string[] = [];
-  if (repository !== undefined && existsSync(join(dir, header.workspace ?? 'workspace'))) removes.push('worktree');
+  if (repository !== undefined && ownsWorkspace(header) && existsSync(join(dir, header.workspace ?? 'workspace'))) {
+    removes.push('worktree');
+  }
   if (branch !== undefined && repository !== undefined) {
     if (header.source.kind !== 'pr') {
       if (present.local) removes.push(`branch ${branch}`);

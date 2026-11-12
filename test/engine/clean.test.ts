@@ -4,6 +4,7 @@ import { expect, test } from 'bun:test';
 import { chmodSync, existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createGitWorktreeWorkspace } from '../../src/adapters/workspace/git-worktree';
+import { readStanding, standingDir, standingPath, takeStanding } from '../../src/adapters/workspace/standing';
 import { type Cleaned, checkClean, cleanedMessage, cleanRun, resetTicket } from '../../src/engine/clean';
 import { writeOpening, writeStatus } from '../../src/engine/run-dir';
 import { readRunHeader } from '../../src/engine/run-header';
@@ -15,6 +16,7 @@ import type { TicketSource } from '../../src/ports/ticket-source';
 import type { WorkspacePort } from '../../src/ports/workspace';
 import { queueItemsNaming } from '../../src/watch/queue-store';
 import { fakeAdapters } from '../helpers/adapters';
+import { edit } from '../helpers/fixture';
 import { withOrigin } from '../helpers/origin';
 import { writeStub } from '../helpers/stub-workflow';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
@@ -23,8 +25,16 @@ const NOW = () => new Date(2026, 10, 1, 12, 0, 0);
 const DAY = '2026-11-01';
 
 /** The stub's run of FAKE-1 in `repo`, suspended with `until` after `spec#1`. */
-async function suspendedRun(repo: TempRepo, ticket = 'FAKE-1'): Promise<RunEnd> {
+async function suspendedRun(repo: TempRepo, ticket = 'FAKE-1', standing = false): Promise<RunEnd> {
   writeStub(repo.dir);
+  if (standing) {
+    edit(
+      join(repo.dir, '.sail'),
+      'project.yaml',
+      'workspace: { use: fake }',
+      'workspace: { use: fake, standing: true }',
+    );
+  }
   mkdirSync(join(repo.dir, '.sail', 'fake'), { recursive: true });
   writeFileSync(
     join(repo.dir, '.sail', 'fake', 'prs.json'),
@@ -43,8 +53,8 @@ async function suspendedRun(repo: TempRepo, ticket = 'FAKE-1'): Promise<RunEnd> 
 }
 
 /** A run that failed with its worktree and lease as the run left them: STATUS alone says it ended. */
-async function failedRun(repo: TempRepo): Promise<{ end: RunEnd; branch: string }> {
-  const end = await suspendedRun(repo);
+async function failedRun(repo: TempRepo, standing = false): Promise<{ end: RunEnd; branch: string }> {
+  const end = await suspendedRun(repo, 'FAKE-1', standing);
   writeStatus(end.dir, 'failed', 'workflow_failed');
   const branch = readRunHeader(end.dir).branch;
   if (branch === undefined) throw new Error('the run has no branch');
@@ -492,7 +502,77 @@ async function check(repo: TempRepo, runId: string, more: { workspace?: Workspac
   });
 }
 
-test('checkClean of a failed run gives the plan in removal order and removes nothing', async () => {
+// ---- A standing workspace is left where it is (ADW-554) ----
+
+/** A failed run that used a standing workspace, with an ignored file the run left in it. */
+async function failedStanding(repo: TempRepo) {
+  const failed = await failedRun(repo, true);
+  const runs = join(repo.dir, '.sail-runs');
+  const path = standingPath(runs, 'ticket-to-pr', 0);
+  mkdirSync(join(path, 'cache'));
+  writeFileSync(join(path, 'cache', 'warm'), 'warm');
+  repo.git('update-ref', `refs/heads/${failed.branch}`, 'HEAD');
+  repo.git('update-ref', `refs/sail/runs/${failed.end.runId}`, 'HEAD');
+  return { ...failed, runs, path, dir: standingDir(runs, 'ticket-to-pr', 0) };
+}
+
+test('cleaning a failed run that used a standing workspace leaves the worktree and its ignored file, frees it, removes the branch and run ref, and archives the run; no worktree is listed', async () => {
+  await withTempRepo(async (repo) => {
+    const { end, branch, path, dir } = await failedStanding(repo);
+    expect(readStanding(dir)?.runId).toBe(end.runId);
+    const cleaned = await clean(repo, end.runId);
+    expect(cleaned).toEqual({
+      cleaned: {
+        runId: end.runId,
+        removed: [`branch ${branch}`, 'run ref'],
+        archived: join(sailHome(repo), 'failed-runs', DAY, end.runId),
+        source: { kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: [] },
+      },
+    });
+    expect(existsSync(join(path, 'cache', 'warm'))).toBe(true);
+    expect(existsSync(join(path, '.git'))).toBe(true);
+    expect(readStanding(dir)).toBeUndefined();
+    expect(ref(repo, `refs/heads/${branch}`)).toBe(false);
+    expect(ref(repo, `refs/sail/runs/${end.runId}`)).toBe(false);
+    expect(existsSync(end.dir)).toBe(false);
+  });
+}, 60_000);
+
+test('checkClean of a failed run that used a standing workspace lists no worktree', async () => {
+  await withTempRepo(async (repo) => {
+    const { end, branch } = await failedStanding(repo);
+    expect(await check(repo, end.runId)).toEqual({
+      plan: {
+        runId: end.runId,
+        removes: [`branch ${branch}`, 'remote branch', 'run ref'],
+        archive: join(sailHome(repo), 'failed-runs', DAY, end.runId),
+      },
+    });
+  });
+}, 60_000);
+
+test("cleaning a failed run whose standing workspace another run has taken leaves that run's lease and uncommitted file untouched", async () => {
+  await withTempRepo(async (repo) => {
+    const { end, path, dir, runs } = await failedStanding(repo);
+    // The failed run no longer holds its lease; another run takes the workspace and works in it.
+    const other = join(runs, 'other-run');
+    mkdirSync(other);
+    writeStatus(other, 'running');
+    expect(readStanding(dir)?.runId).toBe(end.runId);
+    expect(takeStanding(dir, { runId: 'other-run', runDir: other, pid: process.pid })).toMatchObject({
+      taken: true,
+      took: { runId: end.runId },
+    });
+    writeFileSync(join(path, 'wip.txt'), 'other run work');
+    const cleaned = await clean(repo, end.runId);
+    expect('cleaned' in cleaned).toBe(true);
+    expect(readStanding(dir)?.runId).toBe('other-run');
+    expect(existsSync(join(path, 'wip.txt'))).toBe(true);
+    expect(existsSync(join(path, 'cache', 'warm'))).toBe(true);
+  });
+}, 60_000);
+
+test('checkClean of a failed run in removal order and removes nothing', async () => {
   await withTempRepo(async (repo) => {
     const { end, branch } = await failedRun(repo);
     repo.git('update-ref', `refs/heads/${branch}`, 'HEAD');

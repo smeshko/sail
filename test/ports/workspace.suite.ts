@@ -881,6 +881,21 @@ function standingCases(label: string, make: MakeWorkspace): void {
     expect(created(capture).at(-1)).toMatchObject({ startSha: head, standing: 'leased' });
   });
 
+  test(`${label}: standing: sweep removes the per-run workspace of an ended run and leaves a standing workspace of another, listing no path for it`, async () => {
+    const { adapter, world } = await start();
+    const standingRun = asStart(await world.run('r1', 'completed'));
+    const standing = await adapter.create(standingRun, { base: world.base, branch: BRANCH });
+    writeHeader(world, standingRun, '../standing/demo-0/workspace');
+    const own = await world.run('r2', 'completed');
+    const perRun = await adapter.create({ runId: own.runId, runDir: own.runDir }, { base: world.base, branch: BRANCH });
+
+    const swept = await adapter.sweep(world.runsDir);
+    expect(swept.paths).toEqual([perRun.path]);
+    expect(swept.failed).toEqual([]);
+    expect(existsSync(standing.path)).toBe(true);
+    expect(existsSync(perRun.path)).toBe(false);
+  });
+
   test(`${label}: a run that names no workflow gets its own workspace, and the event has no standing field`, async () => {
     const { adapter, world, capture } = await start();
     const r1 = await world.run('r1');

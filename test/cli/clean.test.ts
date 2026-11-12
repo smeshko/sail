@@ -106,6 +106,27 @@ test('sail clean <failed> <completed> cleans the first, refuses the second and e
   });
 });
 
+test('sail clean of a failed run that used a standing workspace prints no worktree among what it removed, and leaves the worktree', async () => {
+  await withTempRepo(async (repo) => {
+    project(repo);
+    edit(
+      join(repo.dir, '.sail'),
+      'project.yaml',
+      'workspace: { use: fake }',
+      'workspace: { use: fake, standing: true }',
+    );
+    const failed = await run(repo, 'FAKE-1', 'failed');
+    const path = join(repo.dir, '.sail-runs', 'standing', 'ticket-to-pr-0', 'workspace');
+    expect(existsSync(join(path, '.git'))).toBe(true);
+    const result = await sail(repo, 'clean', failed);
+    expect(result.code).toBe(EXIT_OK);
+    expect(result.stdout).toMatch(new RegExp(`^cleaned ${failed}: nothing left to remove; run directory -> `));
+    expect(result.stdout).not.toContain('worktree');
+    expect(existsSync(join(path, '.git'))).toBe(true);
+    expect(exists(repo, failed)).toBe(false);
+  });
+});
+
 test('sail clean --failed cleans only the failed runs, and says so when there are none', async () => {
   await withTempRepo(async (repo) => {
     project(repo);

@@ -2,7 +2,7 @@
 // validated before the run directory exists, so a header that breaks `sail.run.v1` never reaches disk and a refusal
 // leaves nothing behind. Resume and budget raises only ever read it.
 import { readFileSync, statSync } from 'node:fs';
-import { dirname, join, relative, sep } from 'node:path';
+import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 import pkg from '../../package.json' with { type: 'json' };
 import type { TicketState } from '../ports/types';
 import { runBudgetOf } from './budget';
@@ -118,6 +118,15 @@ export interface HeaderFields {
   definitionsSha?: string;
   /** The run's workspace, once it exists. Left out, the header holds no `branch`, `repository` or `workspace`. */
   workspace?: HeaderWorkspace;
+}
+
+/**
+ * Whether the run's workspace is inside its run directory, so a clean or a sweep may remove it. A standing workspace, which
+ * the header records outside it (`../standing/...`), is never the run's to remove.
+ */
+export function ownsWorkspace(header: Pick<RunHeader, 'workspace'>): boolean {
+  const path = header.workspace ?? 'workspace';
+  return path !== '' && !isAbsolute(path) && !path.split('/').includes('..');
 }
 
 /** The header fields of `workspace`, in the order `run.json` holds them. */
