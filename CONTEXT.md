@@ -247,7 +247,7 @@ The engine appends both shared fragments, about untrusted input and submitting, 
 The harness puts them in the session's system prompt after its own static text, so sessions with the same conventions and tools share it.
 `prompt.md` records the conventions and the prompt together.
 A harness ends the prompt it sends a session with the call's own values, under "Where you work".
-_Avoid_: system prompt, instructions file
+_Avoid_: instructions file; "system prompt" for the prompt (it names the harness's own session text, where the conventions go)
 
 **Fragment**:
 A piece of prompt text sail appends to every agent step's prompt: one about untrusted input, one about submitting. Each is a built-in that a repository may shadow.

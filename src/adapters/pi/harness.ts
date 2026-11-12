@@ -265,7 +265,7 @@ export function createPiHarness(options: PiHarnessOptions): Harness {
           cwd: request.cwd,
           model: request.model,
           ...(request.effort === undefined ? {} : { effort: request.effort }),
-          // The same text for every call: the call's own values end the prompt it is sent.
+          // The same text for every call with the same tools and conventions: the call's own values end the prompt it is sent.
           systemPrompt: systemText(
             stepGuide(hasShell, (request.env.TMPDIR ?? '') !== ''),
             SUBMIT_CONTRACT,
