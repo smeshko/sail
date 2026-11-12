@@ -18,6 +18,15 @@ import type {
 export interface RunRef {
   readonly runId: string;
   readonly runDir: string;
+  /** The workflow the run belongs to. A start passes it, so an adapter that keeps standing workspaces can pick one. */
+  readonly workflow?: string;
+  /** The workflow's `maxConcurrentRuns`, when it declares one: how many standing workspaces it has. One when left out. */
+  readonly maxConcurrentRuns?: number;
+  /**
+   * The run's workspace relative to its run directory, for a run whose header is not written yet. Left out, an adapter
+   * reads it from the header's `workspace`, else it is `workspace`.
+   */
+  readonly workspace?: string;
 }
 
 export interface WorkspacePort {
@@ -44,6 +53,10 @@ export interface WorkspacePort {
    * its run ref. It applies only when that commit differs from the base and descends from it; one that does not descend
    * is `invalid`. `baseSha` stays the base, and `startSha` (on the workspace and on `workspace:created`) names the
    * commit checked out, only when it was carried.
+   *
+   * An adapter with standing workspaces may give a run one it keeps between runs (`run.workflow` names the workflow, and
+   * `run.maxConcurrentRuns` how many there are), its commit checked out in place, and a per-run workspace when none is
+   * free. A standing workspace is never removed: `release` frees it and reports `kept: true`.
    */
   create(
     run: RunRef,
@@ -75,7 +88,8 @@ export interface WorkspacePort {
   }): Promise<{ moved: true; from: string; to: string } | { moved: false; blocked?: string }>;
   /**
    * The run's existing workspace, once checked to be a checkout whose `HEAD` descends from `baseSha`. One that is gone,
-   * or has lost its base, is `invalid`. Emits nothing.
+   * or has lost its base, is `invalid`, and so is a standing workspace another run now holds. It is found where the run's
+   * header records it, which may be outside the run directory. Emits nothing.
    */
   reopen(run: RunRef, from: { readonly branch: string; readonly baseSha: string }): Promise<Workspace>;
   /**

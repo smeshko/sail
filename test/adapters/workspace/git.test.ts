@@ -18,6 +18,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  carriedHead,
   copyTree,
   diffWorkingTree,
   fetchRemote,
@@ -26,7 +27,9 @@ import {
   removeWorktree,
   stripUserinfo,
   sweepEnded,
+  workspaceOf,
 } from '../../../src/adapters/workspace/git';
+import { dropStanding, standingDir, standingPath, takeStanding } from '../../../src/adapters/workspace/standing';
 import { writeStatus } from '../../../src/engine/run-dir';
 import { PortError } from '../../../src/ports/errors';
 import { messageOf, portFailure } from '../../helpers/ports';
@@ -344,5 +347,59 @@ test('copyTree of a sha that names no commit is invalid, and copies nothing', as
     } finally {
       rmSync(into, { recursive: true, force: true });
     }
+  });
+});
+
+// ---- Where a run's workspace is ----
+
+test('workspaceOf reads the header path, prefers run.workspace, defaults to workspace, and refuses a path outside the run directory and standing/', () => {
+  const runs = mkdtempSync(join(tmpdir(), 'sail-workspace-of-'));
+  try {
+    const runDir = join(runs, 'run-a');
+    mkdirSync(runDir);
+    const run = { runId: 'run-a', runDir };
+    expect(workspaceOf(run)).toBe(join(runDir, 'workspace'));
+
+    writeFileSync(join(runDir, 'run.json'), JSON.stringify({ workspace: '../standing/demo-0/workspace' }));
+    expect(workspaceOf(run)).toBe(join(runs, 'standing', 'demo-0', 'workspace'));
+    expect(workspaceOf({ ...run, workspace: 'workspace' })).toBe(join(runDir, 'workspace'));
+
+    for (const bad of ['../elsewhere/workspace', '../standing/demo-0/deeper/workspace', '/tmp/workspace', 'other']) {
+      expect(() => workspaceOf({ ...run, workspace: bad })).toThrow('neither workspace nor a standing');
+    }
+  } finally {
+    rmSync(runs, { recursive: true, force: true });
+  }
+});
+
+test("carriedHead of a run whose standing workspace another run holds gives the run's ref, not that worktree's HEAD", async () => {
+  await withTempRepo((repo) => {
+    const base = repo.git('rev-parse', 'HEAD');
+    const runs = join(repo.dir, '.sail-runs');
+    const dir = standingDir(runs, 'demo', 0);
+    const path = standingPath(runs, 'demo', 0);
+    const runDir = join(runs, 'run-a');
+    mkdirSync(runDir, { recursive: true });
+    writeFileSync(join(runDir, 'run.json'), JSON.stringify({ workspace: '../standing/demo-0/workspace' }));
+    mkdirSync(dir, { recursive: true });
+    repo.git('worktree', 'add', '--detach', path);
+    writeFileSync(join(path, 'other.txt'), 'someone else');
+    gitSync(path, ['add', 'other.txt'], repo.env);
+    gitSync(path, ['commit', '-qm', 'someone elses'], repo.env);
+    const theirs = gitSync(path, ['rev-parse', 'HEAD'], repo.env).stdout.trim();
+    repo.git('commit', '--allow-empty', '-qm', 'own');
+    const own = repo.git('rev-parse', 'HEAD');
+    repo.git('update-ref', 'refs/sail/runs/run-a', own);
+    repo.git('reset', '-q', '--hard', base);
+    // The worktree descends from base, as does the ref: only the lease tells whose HEAD is whose.
+    takeStanding(dir, { runId: 'run-b', runDir: join(runs, 'run-b'), pid: process.pid });
+    const run = { runId: 'run-a', runDir };
+    expect(carriedHead(repo.dir, run, base, repo.env)).toBe(own);
+    expect(own).not.toBe(theirs);
+
+    // While the run holds it, the worktree's own HEAD is the one carried.
+    dropStanding(dir, 'run-b');
+    takeStanding(dir, { runId: 'run-a', runDir, pid: process.pid });
+    expect(carriedHead(repo.dir, run, base, repo.env)).toBe(theirs);
   });
 });
