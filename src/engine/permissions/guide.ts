@@ -1,7 +1,7 @@
 // The section of a session's system prompt on the commands its permissions deny, so the agent writes commands that
 // pass rather than learning each rule from a denial. Its hand-written lines describe commands.ts's cd() and git(),
 // shell.ts's refusal of a parameter expansion with an operator and paths.ts's scratch region, and change with them: test/engine/permissions/
-// guide.test.ts ties each to decideCommand()'s verdict on an example. The deny-set line is built from deny.ts.
+// guide.test.ts ties each to decideCommand()'s verdict on an example. The deny-set line is built from deny.ts, each name with its hint.
 import { DENY_SET, ENVIRONMENT_OVERRIDE, PIPE_TO_SHELL } from './deny';
 
 /** The name of each entry of the deny set, then `curl | sh` and `environment override`. */
@@ -11,8 +11,8 @@ export function denySetNames(): readonly string[] {
 
 /** The section `## Commands the permissions deny`, as lines joined with a newline. */
 export function deniedCommands(): string {
-  const names = denySetNames()
-    .map((name) => `\`${name}\``)
+  const names = [...DENY_SET, PIPE_TO_SHELL, ENVIRONMENT_OVERRIDE]
+    .map((entry) => (entry.hint === undefined ? `\`${entry.name}\`` : `\`${entry.name}\` (${entry.hint})`))
     .join(', ');
   return [
     '## Commands the permissions deny',

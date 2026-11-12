@@ -4,12 +4,13 @@
 export interface DenyEntry {
   /**
    * What a reason quotes, such as `git checkout`. guide.ts also lists it, in backticks, among the commands a session is
-   * told no step may run, so a name reads best as the command it denies; a rule's label, such as `git program option`,
-   * tells the agent less.
+   * told no step may run, so a name that is no command, such as `git program option`, needs a `hint`.
    */
   readonly name: string;
   /** Why it is denied, in one clause. */
   readonly why: string;
+  /** What guide.ts says beside a name that is no command: what it denies, with examples. */
+  readonly hint?: string;
 }
 
 /** An entry matched on one simple command's argv. */
@@ -171,6 +172,7 @@ export const DENY_SET: readonly CommandEntry[] = [
   {
     name: 'git program option',
     why: 'the option names a program, or a template of hooks, for git to run',
+    hint: 'an option that names a program, or a template of hooks, for git to run, as in `git push --receive-pack=…` or `git grep -O`',
     matches: (argv) => {
       if (commandName(argv[0] ?? '') !== 'git') return false;
       const { subcommand, args } = gitInvocation(argv);
@@ -296,6 +298,7 @@ export function deniedPipeline(argvs: readonly (readonly string[])[]): DenyEntry
 export const ENVIRONMENT_OVERRIDE: DenyEntry = {
   name: 'environment override',
   why: 'the variable changes which program runs, or makes one run another command',
+  hint: 'a variable that changes which program runs, or makes one run another command, such as `GIT_SSH_COMMAND=…` or `LD_PRELOAD=…`',
 };
 
 const OVERRIDES = new Set([

@@ -43,8 +43,17 @@ describe('the deny-set line', () => {
     const names = [...DENY_SET.map((e) => e.name), 'curl | sh', 'environment override'];
     expect(denySetNames()).toEqual(names);
     expect(names).toHaveLength(14);
-    expect(bullets.find((line) => line.startsWith('- No step may run these'))).toBe(
-      `- No step may run these, whatever its permissions: ${names.map((n) => `\`${n}\``).join(', ')}.`,
+    const line = deniedCommands().replaceAll('\n  ', ' ');
+    for (const name of names) expect(line).toContain(`\`${name}\``);
+  });
+
+  test('says what the names that are no command deny', () => {
+    const text = deniedCommands().replaceAll('\n  ', ' ');
+    expect(text).toContain(
+      '`git program option` (an option that names a program, or a template of hooks, for git to run, as in `git push --receive-pack=…` or `git grep -O`)',
+    );
+    expect(text).toContain(
+      '`environment override` (a variable that changes which program runs, or makes one run another command, such as `GIT_SSH_COMMAND=…` or `LD_PRELOAD=…`)',
     );
   });
 
@@ -121,6 +130,17 @@ describe('the operator line', () => {
 });
 
 describe('the deny-set line, by example', () => {
+  test.each([
+    ['git push --receive-pack=x origin', 'git program option'],
+    ['git grep -O foo', 'git program option'],
+    ['GIT_SSH_COMMAND=x git fetch', 'environment override'],
+    ['LD_PRELOAD=x ls', 'environment override'],
+  ])('denies %s, naming %s', (command, name) => {
+    const decision = decide(command);
+    expect(decision.allow).toBe(false);
+    if (!decision.allow) expect(decision.reason).toContain(`default deny: ${name}`);
+  });
+
   test('denies rm -rf, naming it', () => {
     const decision = decide('rm -rf build');
     expect(decision.allow).toBe(false);
