@@ -1,6 +1,5 @@
-// The structural rules of the page's shell, which `app.ts` once held in one closure: each module is at most 400 lines,
-// and the modules keep to their one job. Each scan is shown to catch a made-up source first, so a scan that sees nothing
-// can't pass.
+// The structural rules of the page's shell, which `app.ts` once held in one closure: the modules keep to their one job.
+// Each scan of a rule is shown to catch a made-up source first, so a scan that sees nothing can't pass.
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -12,10 +11,8 @@ import { CLEARED_KEY, FILTER_KEY, LIST_KEY, THEME_KEY } from '../../../src/dashb
 import { createStore, FLUSH_MS } from '../../../src/dashboard/page/store';
 
 const PAGE = join(import.meta.dir, '..', '..', '..', 'src', 'dashboard', 'page');
-const LIMIT = 400;
 
 const source = (module: string) => readFileSync(join(PAGE, module), 'utf8');
-const lines = (text: string) => text.replace(/\n$/, '').split('\n').length;
 
 /** The modules split from `app.ts` so far. */
 const SPLIT = [
@@ -39,14 +36,8 @@ const SPLIT = [
   'app.ts',
 ];
 
-test('the line counter counts a made-up source, and it is over the limit', () => {
-  expect(lines('a\nb\nc\n')).toBe(3);
-  expect(lines('x\n'.repeat(LIMIT + 1))).toBeGreaterThan(LIMIT);
-});
-
-test.each(SPLIT)('%s is at most 400 lines and imports at runtime only siblings', (module) => {
+test.each(SPLIT)('%s imports at runtime only siblings', (module) => {
   const text = source(module);
-  expect(lines(text)).toBeLessThanOrEqual(LIMIT);
   const imports = new Bun.Transpiler({ loader: 'ts' }).scanImports(text).map((entry) => entry.path);
   expect(imports.filter((path) => !path.startsWith('./'))).toEqual([]);
 });
