@@ -359,6 +359,6 @@ test("sail's own project.yaml, with adapters.jev, validates against sail.project
   const config = Bun.YAML.parse(readFileSync(join(OWN_SAIL, 'project.yaml'), 'utf8')) as {
     adapters: { jev?: unknown };
   };
-  expect(config.adapters.jev).toEqual({ use: 'typesafe' });
+  expect(config.adapters.jev).toEqual({ use: 'typesafe', model: 'jev-1.14.0' });
   expect(validateDocument('sail.project.v1', config)).toEqual([]);
 });
