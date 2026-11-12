@@ -61,6 +61,14 @@ test('the stage, with Jev answering a doc line 0.97, adds a jev hit with its yes
     expect(result.output.hits).toEqual([{ file: 'note.md', line: 1, match: 'Some project', kind: 'jev', yes: 0.97 }]);
   });
 });
+test('the stage reports a Jev hit at 0.65 and none at 0.649', async () => {
+  await withTempRepo((repo) => {
+    writeOwnSail(repo, { jev: nouls({ 'leak-1': 0.65, 'leak-2': 0.649 }) });
+    const result = stage(repo, '+++ b/note.md\n@@ -0,0 +1,2 @@\n+Some project\n+Other project\n');
+    expect(result.output.hits).toEqual([{ file: 'note.md', line: 1, match: 'Some project', kind: 'jev', yes: 0.65 }]);
+    expect(result.output.jev.threshold).toBe(0.65);
+  });
+});
 test('the stage, with Jev answering every line 0.05, adds no jev hit', async () => {
   await withTempRepo((repo) => {
     writeOwnSail(repo, { jev: nouls({ 'leak-1': 0.05 }) });
@@ -187,7 +195,7 @@ test('leakQuestions asks one noul per line named leak-<n>', () => {
   expect(Object.keys(questions)).toEqual(['leak-1', 'leak-2']);
   expect(questions['leak-1']?.type).toBe('noul');
   expect(questions['leak-2']?.instructions).toContain('lines.leak-2');
-  expect(lib.LEAK_YES).toBe(0.8);
+  expect(lib.LEAK_YES).toBe(0.65);
 });
 test('leakRequests splits the lines into requests under the byte limit, each as full as it can be, numbered across them', () => {
   const many = Array.from({ length: 900 }, (_, i) => ({
