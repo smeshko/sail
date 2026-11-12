@@ -26,7 +26,7 @@ export const EXIT_INTERNAL = 4;
 export const EXIT_WAITING = 5;
 
 /**
- * 6: a login service stopped itself because sail's code changed, so launchd starts it again on the new code. Only
+ * 6: a login service stopped itself because sail's code changed (`src/`, `package.json` or `bun.lock`), so launchd starts it again on the new code. Only
  * `--service` returns it.
  */
 export const EXIT_RESTART = 6;

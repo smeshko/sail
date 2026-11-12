@@ -21,9 +21,10 @@
 // at the default branch's tip (`committedWatches()`), and applies a change with no restart.
 //
 // `sail watch --service` is the watcher an installed login service runs (hidden, like `--dispatch`): the same
-// watcher, which also reads sail's code version at start and every minute, and once it changes stops as on SIGTERM,
-// prints a line starting `sail watch: sail changed (`, and exits 6, so launchd starts the new code. Its runs carry on,
-// and the next watcher adopts them. Without `--service` a watcher keeps running through a change.
+// watcher, which also reads sail's code version at start and every minute, and once it changes in `src/`,
+// `package.json` or `bun.lock` stops as on SIGTERM, prints a line starting `sail watch: sail changed (`, and exits 6,
+// so launchd starts the new code. Its runs carry on, and the next watcher adopts them. Without `--service` a watcher
+// keeps running through such a change and prints one line saying it needs a restart.
 //
 // `sail watch --install [<workflow>...]`, `--install --all`, `--uninstall [--all]` and `--restart` run the watcher as a
 // login service, a launchd agent (macOS only): see `watch-service.ts`. At most one of the three is taken, and none of
@@ -70,7 +71,7 @@ import { holderRefusal, startWatcher } from '../../watch/watcher';
 import { EXIT_OK, EXIT_RESTART, type ExitCode } from '../exit-codes';
 import type { Command, Io, Parsed } from '../index';
 import { repositoryEntry } from '../registration';
-import { type ReadVersion, sailVersion, watchSailChange } from '../sail-change';
+import { type CodeChanged, type ReadVersion, sailCodeChanged, sailVersion, watchSailChange } from '../sail-change';
 import type { ServiceDeps } from '../service';
 import { at, findProject, refuseAs } from './run-workflow';
 import { serviceCommand } from './watch-service';
@@ -91,10 +92,12 @@ export interface WatchDeps {
   pid?: number;
   /** Where the re-read of the committed `.sail/` makes its scratch directory: the system's temp directory by default. */
   tmp?: string;
-  /** Reads sail's code version, for a watcher started with `--service`: its checkout's `HEAD` by default. */
+  /** Reads sail's code version, for every watcher: its checkout's `HEAD` by default. */
   sailVersion?: ReadVersion;
-  /** How often a `--service` watcher reads it: 60 000 ms by default. */
+  /** How often a watcher reads it: 60 000 ms by default. */
   sailVersionEveryMs?: number;
+  /** Whether two code versions differ in sail's code: `sailCodeChanged` on its checkout by default. */
+  sailChanged?: CodeChanged;
   /** What `--install`, `--uninstall` and `--restart` run on: the system's launchd unless a test hands its own. */
   service?: Partial<ServiceDeps>;
 }
@@ -313,20 +316,26 @@ export function watchCommand(deps: WatchDeps = {}): Command {
       const unregister = onInterrupt(() => {
         void started.stop();
       });
-      if (args.values.service === true) {
-        stopChange = watchSailChange({
-          read: deps.sailVersion ?? (() => sailVersion()),
-          everyMs: deps.sailVersionEveryMs ?? 60_000,
-          timers: deps.timers ?? systemTimers,
-          onChange(before, after) {
-            changed = true;
+      const service = args.values.service === true;
+      stopChange = watchSailChange({
+        read: deps.sailVersion ?? (() => sailVersion()),
+        everyMs: deps.sailVersionEveryMs ?? 60_000,
+        timers: deps.timers ?? systemTimers,
+        changed: deps.sailChanged ?? ((before, after) => sailCodeChanged(before, after)),
+        onChange(before, after) {
+          if (!service) {
             io.stdout(
-              `${command}: sail changed (${before.slice(0, 7)} → ${after.slice(0, 7)}): stopping, so the login service starts the new code\n`,
+              `${command}: sail's code changed (${before.slice(0, 7)} → ${after.slice(0, 7)}): this watcher still runs the old code, restart it to run the new\n`,
             );
-            void started.stop();
-          },
-        });
-      }
+            return;
+          }
+          changed = true;
+          io.stdout(
+            `${command}: sail changed (${before.slice(0, 7)} → ${after.slice(0, 7)}): stopping, so the login service starts the new code\n`,
+          );
+          void started.stop();
+        },
+      });
       await started.done;
       unregister();
     } finally {
