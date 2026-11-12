@@ -1,8 +1,8 @@
 // The claude-code Harness: one isolated Agent SDK `query()` session per request. The session gets the step's model,
-// the workspace, the paths its preamble names (D23), the submission envelope and the turn and dollar budgets, and none
-// of the user's own Claude Code settings, skills, memory or MCP servers (D8). Its messages become events as they come,
-// every session that started ends once, and every failure, an abort included, is the `error` outcome: run() never
-// rejects.
+// the workspace, the paths its preamble names (D23), which end its prompt, the submission envelope and the turn and
+// dollar budgets, and none of the user's own Claude Code settings, skills, memory or MCP servers (D8). Its messages
+// become events as they come, every session that started ends once, and every failure, an abort included, is the
+// `error` outcome: run() never rejects.
 //
 // Every tool call passes the gate first (7.3 D1): its PreToolUse hook asks the permission engine, and canUseTool denies
 // whatever still reaches it. The session is offered only the tools its step can use (D2). The CLI scrubs the provider's
@@ -98,20 +98,62 @@ export function sessionEnv(preamble: Readonly<Record<string, string>>, env: Env)
   };
 }
 
+/** Whether `request`'s session is offered the Bash tool. */
+const hasBash = (request: HarnessRequest) => sessionTools(request.permissions).tools.includes('Bash');
+
 /**
- * The text appended to the preset system prompt: where the session works, then how it submits. A session without a
- * shell can't read its environment: a prompt that names `$STAGE_OUT` resolves only through the values given here (D23).
- * A session with one has them in its environment too (D16), and is told the commands its permissions deny.
+ * The text appended to the preset system prompt: how a step handles files and commands, then how it submits. It is
+ * the same for every call whose session has the same tools, whatever its run, stage, call or try, so sessions share it
+ * in the prompt cache: the call's own values end the prompt the session is sent instead (sessionPrompt()).
  */
 export function appendedSystemPrompt(request: HarnessRequest): string {
-  return [whereYouWork(request, sessionTools(request.permissions).tools.includes('Bash')), '', SUBMIT_CONTRACT].join(
-    '\n',
-  );
+  return [stepGuide(hasBash(request), (request.env.TMPDIR ?? '') !== ''), '', SUBMIT_CONTRACT].join('\n');
 }
 
 /**
- * Where the session works, the same text for any harness: `hasShell` is whether the session is offered a shell. A
- * session with one is also told the commands its permissions deny.
+ * The section of the system prompt on files and commands, the same text for any harness and any call: it names
+ * variables and never a value. `hasShell` is whether the session is offered a shell, `hasScratch` whether its try has
+ * a scratch folder. A session with a shell is also told the commands its permissions deny.
+ */
+export function stepGuide(hasShell: boolean, hasScratch: boolean): string {
+  const variables = hasShell
+    ? [
+        'Your working directory is the workspace, `$WORKSPACE`. Your prompt ends with a "Where you work" section, which',
+        'gives the value of each environment variable a prompt names: the same values are in your environment.',
+      ]
+    : [
+        'Your working directory is the workspace, `$WORKSPACE`. Your prompt ends with a "Where you work" section, which',
+        "gives the value of each environment variable a prompt names. You have no shell, so you can't read them from",
+        'your environment.',
+      ];
+  const temporary =
+    hasShell && hasScratch
+      ? [
+          '',
+          [
+            'A temporary file goes in `$TMPDIR`, which is removed when the step ends. Run `mktemp` (or `mktemp -d`) in one',
+            'command and use the path it prints in the next, or name the file yourself: `mktemp "$TMPDIR/name.XXXXXX"` or',
+            '`"$TMPDIR/name"`. A command that writes to a variable set from `$(mktemp)`, as in',
+            '`f=$(mktemp); echo ok > "$f"`, is denied: its path can\'t be read before it runs.',
+          ].join(' '),
+        ]
+      : [];
+  return [
+    '## Files and commands',
+    '',
+    ...variables,
+    '',
+    'A file the step produces goes straight into `$STAGE_OUT` under its own name, as `$STAGE_OUT/<name>`, not into a',
+    'directory below it.',
+    ...temporary,
+    ...(hasShell ? ['', deniedCommands()] : []),
+  ].join('\n');
+}
+
+/**
+ * The call's own values, the same text for any harness: the workspace's path and a line for every preamble variable.
+ * A session without a shell can't read its environment: a prompt that names `$STAGE_OUT` resolves only through the
+ * values given here (D23). A session with one has them in its environment too (D16).
  */
 export function whereYouWork(request: HarnessRequest, hasShell: boolean): string {
   const variables = Object.entries(request.env).map(([name, value]) => `- \`$${name}\`: ${value}`);
@@ -124,30 +166,15 @@ export function whereYouWork(request: HarnessRequest, hasShell: boolean): string
         `Your working directory is the workspace, ${request.cwd}. You have no shell, so you can't read environment`,
         'variables: where a prompt names one of these, it means the value given.',
       ];
-  const temporary =
-    hasShell && (request.env.TMPDIR ?? '') !== ''
-      ? [
-          '',
-          [
-            'A temporary file goes in `$TMPDIR`, which is removed when the step ends. Run `mktemp` (or `mktemp -d`) in one',
-            'command and use the path it prints in the next, or name the file yourself: `mktemp "$TMPDIR/name.XXXXXX"` or',
-            '`"$TMPDIR/name"`. A command that writes to a variable set from `$(mktemp)`, as in',
-            '`f=$(mktemp); echo ok > "$f"`, is denied: its path can\'t be read before it runs.',
-          ].join(' '),
-        ]
-      : [];
-  return [
-    '## Where you work',
-    '',
-    ...shell,
-    '',
-    ...variables,
-    '',
-    'A file the step produces goes straight into `$STAGE_OUT` under its own name, as `$STAGE_OUT/<name>`, not into a',
-    'directory below it.',
-    ...temporary,
-    ...(hasShell ? ['', deniedCommands()] : []),
-  ].join('\n');
+  return ['## Where you work', '', ...shell, '', ...variables].join('\n');
+}
+
+/**
+ * The prompt a session is sent: the engine's text, then the call's own values. They come last because they differ
+ * for every call, and whatever follows them could be read from the prompt cache by no other session.
+ */
+export function sessionPrompt(request: HarnessRequest, hasShell: boolean): string {
+  return `${request.prompt.trimEnd()}\n\n${whereYouWork(request, hasShell)}\n`;
 }
 
 /** The SDK options of `request`'s session, with a controller of its own and the gate. */
@@ -297,7 +324,7 @@ export function createClaudeCodeHarness(options: ClaudeCodeHarnessOptions): Harn
       // The SDK is imported by the first session, not with the CLI: it is most of what a sail process would load at
       // start, and only an agent step needs it.
       const query = options.query ?? (await import('@anthropic-ai/claude-agent-sdk')).query;
-      running = query({ prompt: request.prompt, options: sessionAt });
+      running = query({ prompt: sessionPrompt(request, hasBash(request)), options: sessionAt });
       for await (const message of running) {
         tap(request, message);
         for (const event of reader.read(message)) emit(event);

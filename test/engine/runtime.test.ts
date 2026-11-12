@@ -1745,13 +1745,15 @@ test('an agent call is journaled once, with the output, the files and the result
       prompt: { path: '02-spec/call-1/try-2/prompt.md', untrusted: 2, conventions: ['AGENTS.md'] },
       usage: usageOf(0.25),
     });
-    // The prompt the second session was sent: the ticket's title wrapped, the brief where this try holds it, the
-    // repository's conventions and what the first try got wrong.
+    // The prompt the second session's harness was given: the repository's conventions first, then the ticket's title
+    // wrapped, the brief where this try holds it, and what the first try got wrong.
     const prompt = specFile(end.dir, 'prompt.md', 2) ?? '';
     const title = '<untrusted-input source="ticket.title">Add a --shout flag</untrusted-input>';
     const brief = join(specDir(end.dir, 2), 'in', 'brief.md');
-    expect(prompt).toStartWith(`Write a spec for FAKE-1: ${title}\n\nRead the brief at ${brief}.`);
-    expect([prompt.includes('Indent with tabs.'), prompt.includes(NO_TASKS_MESSAGE)]).toEqual([true, true]);
+    expect(prompt).toStartWith(
+      `## Repository conventions: AGENTS.md\n\nIndent with tabs.\n\n## Your task\n\nWrite a spec for FAKE-1: ${title}\n\nRead the brief at ${brief}.`,
+    );
+    expect(prompt.includes(NO_TASKS_MESSAGE)).toBe(true);
     // publish read the file the journal holds: the second try's.
     const publish = JSON.parse(readFileSync(join(end.dir, '03-publish', 'call-1', 'result.json'), 'utf8'));
     expect(publish.consumed).toEqual({ spec: '02-spec/call-1/try-2/out/spec.md' });

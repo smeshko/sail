@@ -5,6 +5,7 @@ import { afterAll, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { whereYouWork } from '../../../src/adapters/claude-code/harness';
 import { createPiHarness } from '../../../src/adapters/pi/harness';
 import type { HarnessEvent, HarnessRequest } from '../../../src/ports/harness';
 import type { HarnessResult } from '../../../src/ports/types';
@@ -68,7 +69,11 @@ const SUITE: Record<string, readonly Step[]> = {
   overTurns: [start, say('one'), turn, say('two'), turn, say('three'), turn],
 };
 const sessions = (extra: Record<string, readonly Step[]> = {}) =>
-  scriptedSessions((prompt) => extra[prompt] ?? SUITE[prompt] ?? []);
+  scriptedSessions((sent) => {
+    // A script is named by the engine's text: what precedes the prompt's `## Where you work` section.
+    const prompt = sent.slice(0, sent.lastIndexOf('\n\n## Where you work\n'));
+    return extra[prompt] ?? SUITE[prompt] ?? [];
+  });
 
 async function play(
   prompt: string,
@@ -128,27 +133,69 @@ test('the session is given pi’s model, the workspace, the tools its step can u
     permissions: { read: ['**'], write: ['$STAGE_OUT/**'], commands: ['git status'] },
   });
   const [call] = scripted.calls;
+  const system = call?.params.systemPrompt ?? '';
+  const sent = call?.prompts[0] ?? '';
   expect({
     model: call?.params.model,
     tools: call?.params.tools,
     submit: call?.params.submit.name,
-    prompt: call?.params.systemPrompt.includes('## Where you work'),
-    shell: call?.params.systemPrompt.includes('same values are in your environment'),
-    denied: call?.params.systemPrompt.includes('## Commands the permissions deny'),
-    beforeSubmit:
-      (call?.params.systemPrompt.indexOf('## Commands the permissions deny') ?? -1) <
-      (call?.params.systemPrompt.indexOf('by calling the `submit` tool') ?? -1),
+    guide: system.startsWith('## Files and commands\n'),
+    values: system.includes('## Where you work'),
+    prompts: call?.prompts.length,
+    prompt: sent.startsWith('done\n\n## Where you work\n'),
+    shell:
+      sent.includes('same values are in your environment') && system.includes('same values are in your environment'),
+    denied: system.includes('## Commands the permissions deny'),
+    beforeSubmit: system.indexOf('## Commands the permissions deny') < system.indexOf('by calling the `submit` tool'),
     disposed: call?.disposed,
   }).toEqual({
     model: PI_MODEL,
     tools: ['read', 'grep', 'find', 'ls', 'write', 'edit', 'bash'],
     submit: 'submit',
+    guide: true,
+    values: false,
+    prompts: 1,
     prompt: true,
     shell: true,
     denied: true,
     beforeSubmit: true,
     disposed: true,
   });
+});
+
+test('pi’s system prompt is identical for two calls that differ in run, stage, call, try, workspace and stage paths, with a shell and without', async () => {
+  for (const commands of [[], ['git status']]) {
+    const permissions = { read: ['**'], write: ['$STAGE_OUT/**'], commands };
+    const one = await play('done', { permissions });
+    const two = await play('done', {
+      permissions,
+      key: 'review:bugs#3',
+      try: 2,
+      cwd: join(base, 'elsewhere', 'work'),
+      env: { STAGE_IN: '/other/in', STAGE_OUT: '/other/out', TRY: '2', RUN_ID: 'run-9', STAGE: 'review', CALL: '3' },
+    });
+    const [first, second] = [one, two].map(({ scripted }) => scripted.calls[0]?.params.systemPrompt ?? '');
+    expect(first).not.toBe('');
+    expect(second).toBe(first as string);
+    expect(['/other/', 'run-9', base].filter((value) => `${first}${second}`.includes(value))).toEqual([]);
+  }
+});
+
+test('the prompt a pi session is sent ends with Where you work, after the stage prompt and Fix your last output, and a session with no shell gets every variable there', async () => {
+  const engine = '## Your task\n\nWrite the spec.\n\n## Fix your last output\n\nYour last output was rejected.\n';
+  const made = request(engine);
+  const req = { ...made, env: { ...made.env, RUN_ID: 'run-7', STAGE: 'spec', CALL: '1' } };
+  const scripted = scriptedSessions(() => SUITE.done ?? []);
+  await createPiHarness({ env: { GROQ_API_KEY: 'gsk_x' }, ...scripted }).run(req);
+  const sent = scripted.calls[0]?.prompts[0] ?? '';
+  expect(sent).toBe(`${engine.trimEnd()}\n\n${whereYouWork(req, false)}\n`);
+  const section = sent.slice(sent.indexOf('## Where you work'));
+  expect(sent.indexOf('## Fix your last output')).toBeLessThan(sent.indexOf('## Where you work'));
+  expect(section).toContain(`Your working directory is the workspace, ${req.cwd}. You have no shell`);
+  expect(Object.entries(req.env).filter(([name, value]) => !section.includes(`- \`$${name}\`: ${value}\n`))).toEqual(
+    [],
+  );
+  expect(sent.endsWith('- `$CALL`: 1\n')).toBe(true);
 });
 
 test('a pi session with bash and a scratch folder gets the temp-file paragraph in its system prompt, and one without a scratch folder does not', async () => {
@@ -175,7 +222,8 @@ test('the session is told to submit through the submit tool, not through structu
 test('a step with no shell is told it has none', async () => {
   const { scripted } = await play('done');
   const prompt = scripted.calls[0]?.params.systemPrompt ?? '';
-  expect(prompt).toContain("You have no shell, so you can't read environment");
+  expect(prompt).toContain("You have no shell, so you can't read them from");
+  expect(scripted.calls[0]?.prompts[0]).toContain("You have no shell, so you can't read environment");
   expect(prompt).not.toContain('## Commands the permissions deny');
 });
 

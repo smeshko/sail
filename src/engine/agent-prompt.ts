@@ -1,6 +1,8 @@
-// prepareAgentPrompt(): an agent step's prompt as its harness receives it. The step's `prompt.md` and the shared fragments
-// are rendered with the call's bindings, then the repository's convention files and a corrective try's feedback are
-// appended: neither is read as a template, and the feedback goes inside an untrusted-input block.
+// prepareAgentPrompt(): an agent step's prompt as its harness receives it. The repository's convention files come
+// first, so two steps with the same conventions start with the same text, which a session can read from the prompt
+// cache. Then the step's `prompt.md` and the shared fragments, rendered with the call's bindings, then a corrective
+// try's feedback. Neither the conventions nor the feedback is read as a template, and the feedback goes inside an
+// untrusted-input block. Nothing that differs per call comes before the step's prompt.
 import { readFileSync, realpathSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { inputVar, type PreparedBindings } from './bindings';
@@ -8,11 +10,14 @@ import { type FragmentName, renderPrompt } from './prompt';
 import { type RenderValues, wrapUntrusted } from './render';
 import { markUntrusted } from './untrusted';
 
-/** The convention files appended when `project.yaml` names none, in order. One that doesn't exist is skipped. */
+/** The convention files a prompt starts with when `project.yaml` names none, in order. One that doesn't exist is skipped. */
 export const DEFAULT_CONVENTIONS = ['AGENTS.md', 'CLAUDE.md'] as const;
 
 /** The `source` of the untrusted-input block that holds a corrective try's problems. */
 export const FEEDBACK_SOURCE = 'the problems found in your last output';
+
+/** The heading of the step's own prompt, there only when a convention precedes it. */
+export const TASK_HEADING = '## Your task';
 
 export interface AgentPromptOptions {
   /** The repository's `.sail/`. The workspace is the directory that holds it. */
@@ -22,7 +27,7 @@ export interface AgentPromptOptions {
   bindings: PreparedBindings;
   /** The `INPUT_<NAME>` variables: where this try's `$STAGE_IN` holds each binding. */
   inputs: Readonly<Record<string, string>>;
-  /** `project.yaml`'s `conventions`, each relative to the workspace. Left out, the defaults are appended. */
+  /** `project.yaml`'s `conventions`, each relative to the workspace. Left out, the defaults are used. */
   conventions?: readonly string[];
   /** The messages of the validation failure this try corrects, appended last inside one untrusted-input block. */
   feedback?: readonly string[];
@@ -35,7 +40,7 @@ export type AgentPrompt =
       /** The untrusted values the prompt prints. */
       untrusted: number;
       fragments: { name: FragmentName; origin: string }[];
-      /** The convention files appended, each relative to the workspace, in order. */
+      /** The convention files the prompt starts with, each relative to the workspace, in order. */
       conventions: string[];
     }
   /** Why there is no prompt: a file that can't be read, a template that can't be rendered. */
@@ -111,10 +116,9 @@ export function prepareAgentPrompt(options: AgentPromptOptions): AgentPrompt {
   } catch (error) {
     return { ok: false, message: messageOf(error) };
   }
-  const parts = [rendered.text.trimEnd()];
-  for (const { path, text } of conventions.files) {
-    parts.push(`## Repository conventions: ${path}\n\n${text.trimEnd()}`);
-  }
+  const parts = conventions.files.map(({ path, text }) => `## Repository conventions: ${path}\n\n${text.trimEnd()}`);
+  // A step's prompt has no heading of its own: after a convention it would read as that file's closing lines.
+  parts.push(parts.length > 0 ? `${TASK_HEADING}\n\n${rendered.text.trimEnd()}` : rendered.text.trimEnd());
   if (feedback.length > 0) {
     const intro = 'Your last output was rejected. Fix each problem below, then submit again.';
     const problems = wrapUntrusted(feedback.map((message) => message.trimEnd()).join('\n\n'), FEEDBACK_SOURCE);

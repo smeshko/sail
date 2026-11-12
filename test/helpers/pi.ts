@@ -84,6 +84,8 @@ export interface ScriptedCall {
   readonly params: PiSessionParams;
   aborted: boolean;
   disposed: boolean;
+  /** Each prompt the session was sent, whole. */
+  readonly prompts: string[];
   /** What the gate answered, per `gate` step. */
   readonly blocks: unknown[];
   /** What the submit tool replied, per `submit` step. */
@@ -93,7 +95,7 @@ export interface ScriptedCall {
 export function scriptedSessions(scripts: (prompt: string) => readonly Step[]) {
   const calls: ScriptedCall[] = [];
   const createSession: PiSessionFactory = async (params) => {
-    const call: ScriptedCall = { params, aborted: false, disposed: false, blocks: [], replies: [] };
+    const call: ScriptedCall = { params, aborted: false, disposed: false, prompts: [], blocks: [], replies: [] };
     calls.push(call);
     const listeners: ((event: PiEvent) => void)[] = [];
     const controller = new AbortController();
@@ -114,6 +116,7 @@ export function scriptedSessions(scripts: (prompt: string) => readonly Step[]) {
         };
       },
       async prompt(text) {
+        call.prompts.push(text);
         for (const step of scripts(text)) {
           if (controller.signal.aborted) return;
           if (step.act === 'emit') {

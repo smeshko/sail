@@ -242,7 +242,9 @@ A check the engine runs on a document after the step ends, such as required sect
 _Avoid_: linter, assertion, gate, check
 
 **Prompt**:
-An agent step's instructions, rendered with the step's bindings. The engine appends both shared fragments, about untrusted input and submitting, to every prompt, and then the repository's conventions.
+An agent step's instructions, rendered with the step's bindings.
+The engine puts the repository's conventions before them and appends both shared fragments, about untrusted input and submitting, so steps with the same conventions start with the same text.
+A harness ends the prompt it sends a session with the call's own values, under "Where you work".
 _Avoid_: system prompt, instructions file
 
 **Fragment**:
@@ -251,8 +253,8 @@ _Avoid_: partial, include, snippet, footer
 
 **Conventions**:
 The repository's own instruction files for agents, such as `AGENTS.md`.
-The engine appends each one as it is, after the fragments, to every agent step's prompt.
-The config lists them, and an empty list appends none.
+The engine puts each one as it is at the start of every agent step's prompt, before the step's own text and the fragments.
+The config lists them, and an empty list adds none.
 With no list, they are `AGENTS.md` and `CLAUDE.md`, where those exist.
 An agent step may name its own list, which replaces the config's for that step.
 _Avoid_: rules, guidelines, context files, memory

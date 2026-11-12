@@ -1,10 +1,15 @@
-// prepareAgentPrompt(): an agent step's prompt as its harness receives it. The step's prompt and the shared fragments,
-// rendered with the call's prepared bindings, then the repository's convention files as they are and a corrective try's
-// feedback, appended wrapped as untrusted input.
+// prepareAgentPrompt(): an agent step's prompt as its harness receives it. The repository's convention files as they
+// are, then the step's prompt and the shared fragments, rendered with the call's prepared bindings, then a corrective
+// try's feedback, wrapped as untrusted input.
 import { expect, test } from 'bun:test';
 import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { type AgentPromptOptions, FEEDBACK_SOURCE, prepareAgentPrompt } from '../../src/engine/agent-prompt';
+import {
+  type AgentPromptOptions,
+  FEEDBACK_SOURCE,
+  prepareAgentPrompt,
+  TASK_HEADING,
+} from '../../src/engine/agent-prompt';
 import { materialisePrepared, prepareBindings, type Supplied } from '../../src/engine/bindings';
 import { readFragment } from '../../src/engine/prompt';
 import { type Consumes, file, untrusted, value, z } from '../../src/sdk/index';
@@ -187,7 +192,7 @@ test("a prompt that prints a pull request's title, body and comments from a valu
   });
 });
 
-test('with no conventions configured, AGENTS.md then CLAUDE.md are appended after the fragments where they exist, as they are', async () => {
+test('with no conventions configured, AGENTS.md then CLAUDE.md come before the prompt and its fragments where they exist, as they are', async () => {
   await withTempRepo((repo) => {
     const s = scratch(repo);
     const none = s.prepare('Write the spec.\n');
@@ -200,19 +205,21 @@ test('with no conventions configured, AGENTS.md then CLAUDE.md are appended afte
     write(join(repo.dir, 'CLAUDE.md'), `${claude}\n`);
     const one = s.prepare('Write the spec.\n');
     expect(one.ok && one.conventions).toEqual(['CLAUDE.md']);
-    expect(places(textOf(one), FINISH_HEADING, claude).every((place) => place >= 0)).toBe(true);
+    const lone = places(textOf(one), claude, 'Write the spec.', FINISH_HEADING);
+    expect(lone).not.toContain(-1);
+    expect(lone).toEqual(ascending(lone));
 
     write(join(repo.dir, 'AGENTS.md'), `${agents}\n`);
     const both = s.prepare('Write the spec.\n');
     expect(both.ok && both.conventions).toEqual(['AGENTS.md', 'CLAUDE.md']);
-    const at = places(textOf(both), 'Write the spec.', UNTRUSTED_HEADING, FINISH_HEADING, agents, claude);
+    const at = places(textOf(both), agents, claude, TASK_HEADING, 'Write the spec.', UNTRUSTED_HEADING, FINISH_HEADING);
     expect(at).not.toContain(-1);
     expect(at).toEqual(ascending(at));
     expect(both.ok && both.fragments).toEqual(BUILTIN);
   });
 });
 
-test('a conventions list replaces the defaults and is appended in its own order, and an empty one appends nothing', async () => {
+test('a conventions list replaces the defaults and comes first in its own order, and an empty one adds nothing', async () => {
   await withTempRepo((repo) => {
     const s = scratch(repo);
     write(join(repo.dir, 'AGENTS.md'), 'Indent with tabs.\n');
@@ -222,7 +229,13 @@ test('a conventions list replaces the defaults and is appended in its own order,
 
     const listed = s.prepare('Write the spec.\n', { conventions: ['docs/STYLE.md', 'docs/REVIEW.md'] });
     expect(listed.ok && listed.conventions).toEqual(['docs/STYLE.md', 'docs/REVIEW.md']);
-    const at = places(textOf(listed), FINISH_HEADING, 'Sentence case in headings.', 'Review in pairs.');
+    const at = places(
+      textOf(listed),
+      'Sentence case in headings.',
+      'Review in pairs.',
+      'Write the spec.',
+      FINISH_HEADING,
+    );
     expect(at).not.toContain(-1);
     expect(at).toEqual(ascending(at));
     expect(places(textOf(listed), 'Indent with tabs.', 'Ask before deleting.')).toEqual([-1, -1]);
@@ -233,7 +246,43 @@ test('a conventions list replaces the defaults and is appended in its own order,
   });
 });
 
-test('a convention file is appended once, under the first name that leads to it, however many do', async () => {
+test('two prompts with the same conventions start with the same text, through the last convention and the task heading', async () => {
+  await withTempRepo((repo) => {
+    const s = scratch(repo);
+    write(join(repo.dir, 'AGENTS.md'), 'Indent with tabs.\n');
+    write(join(repo.dir, 'CLAUDE.md'), 'Ask before deleting.\n\n');
+    const shared = [
+      '## Repository conventions: AGENTS.md\n\nIndent with tabs.',
+      '## Repository conventions: CLAUDE.md\n\nAsk before deleting.',
+      `${TASK_HEADING}\n\n`,
+    ].join('\n\n');
+
+    const spec = textOf(s.prepare('Write the spec.\n'));
+    const review = textOf(s.prepare('Review the diff, line by line.\n'));
+    expect([spec.startsWith(`${shared}Write the spec.`), review.startsWith(`${shared}Review the diff`)]).toEqual([
+      true,
+      true,
+    ]);
+    // A corrective try shares it too: the feedback comes after the prompt.
+    const corrective = textOf(s.prepare('Write the spec.\n', { feedback: ['no summary'] }));
+    expect(corrective.startsWith(`${shared}Write the spec.`)).toBe(true);
+  });
+});
+
+test('a prompt with no convention is the rendered prompt and its fragments alone, with no task heading', async () => {
+  await withTempRepo((repo) => {
+    const s = scratch(repo);
+    const untrustedInput = readFragment(s.sailDir, 'untrusted-input').text.trimEnd();
+    const finish = readFragment(s.sailDir, 'finish').text.trimEnd();
+    const empty = textOf(s.prepare('Write the spec.\n', { conventions: [] }));
+    const none = textOf(s.prepare('Write the spec.\n'));
+    expect(empty).toBe(`Write the spec.\n\n${untrustedInput}\n\n${finish}\n`);
+    expect(none).toBe(empty);
+    expect(empty).not.toContain(TASK_HEADING);
+  });
+});
+
+test('a convention file is read once, under the first name that leads to it, however many do', async () => {
   await withTempRepo((repo) => {
     const s = scratch(repo);
     write(join(repo.dir, 'AGENTS.md'), 'Indent with tabs.\n');
@@ -287,7 +336,7 @@ test('a prompt that cannot be rendered fails with its file, line and path, and o
 
 const FEEDBACK_INTRO = 'Your last output was rejected. Fix each problem below, then submit again.';
 
-test('the feedback of a corrective try is appended last, wrapped as untrusted input after the conventions, and none of it is rendered', async () => {
+test('the feedback of a corrective try is appended last, wrapped as untrusted input after the conventions and the prompt, and none of it is rendered', async () => {
   await withTempRepo((repo) => {
     const s = scratch(repo);
     write(join(repo.dir, 'AGENTS.md'), 'Indent with tabs.\n');
@@ -298,7 +347,7 @@ test('the feedback of a corrective try is appended last, wrapped as untrusted in
     const first = s.prepare('Write the spec.\n');
     const corrective = s.prepare('Write the spec.\n', { feedback });
     const text = textOf(corrective);
-    const at = places(text, FINISH_HEADING, 'Indent with tabs.', '## Fix your last output');
+    const at = places(text, 'Indent with tabs.', 'Write the spec.', FINISH_HEADING, '## Fix your last output');
     expect(at).not.toContain(-1);
     expect(at).toEqual(ascending(at));
     expect(
