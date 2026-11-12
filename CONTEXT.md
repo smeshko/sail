@@ -415,10 +415,18 @@ The checkout a run works in, on its own branch. How it is made (a branch in the 
 _Avoid_: worktree (one mechanism), checkout, sandbox, working copy
 
 **Workspace setup**:
-The shell command the `git-worktree` adapter runs in each workspace it makes, before any stage runs: its `setup` option, such as `bun install --frozen-lockfile`.
+The shell command the `git-worktree` adapter runs in each workspace it makes or leases, before any stage runs: its `setup` option, such as `bun install --frozen-lockfile`.
 Every run gets it, a seeded run included, whose new workspace holds the commits it carried but none of what the setup installed.
 A setup that fails refuses the run.
 _Avoid_: bootstrap, install step, setup stage
+
+**Standing workspace**:
+A worktree the `git-worktree` adapter keeps at `.sail-runs/standing/<workflow>-<n>/workspace` when its `standing` option is on: one per place under the workflow's `maxConcurrentRuns`, one for a workflow with none.
+A run's start takes a free one and checks its commit out in place: tracked files as committed, untracked files that are not ignored removed, and what git ignores kept, such as build caches, which the adapter does not vouch for.
+It is held by the `LEASE` beside it while its run is running or suspended, and free once that run has ended.
+A release, a clean and a sweep never remove it: a release keeps the run's head at its run ref.
+A start that finds none free gets a per-run workspace instead.
+_Avoid_: slot, cached worktree, shared worktree
 
 **Base**:
 The commit a run's workspace starts from: the default branch's tip on the remote after a fetch, or, when the run's branch is already on the remote, that branch's tip, recorded as `baseSha`.
@@ -660,7 +668,7 @@ The ChatGPT subscription the pi harness runs `openai-codex` models on.
 _Avoid_: Codex key, Codex API key
 
 **Workspace port**:
-The port that gives a run its workspace and takes it away again. v1 adapter: `git-worktree`, one worktree per run, so runs execute in parallel.
+The port that gives a run its workspace and takes it away again. v1 adapter: `git-worktree`, one worktree per run (or a standing workspace, when its option is on), so runs execute in parallel.
 _Avoid_: worktree manager, checkout service
 
 **Adapter**:
