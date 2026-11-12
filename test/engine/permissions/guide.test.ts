@@ -55,7 +55,13 @@ describe('the deny-set line', () => {
 });
 
 describe('the cd line', () => {
-  test.each(['cd <elsewhere>', 'cd -', 'cd ~', 'cd "$(pwd)"'])('denies %s', (command) => {
+  test('names a bare cd and a cd to a path that is no directory', () => {
+    const text = deniedCommands().replaceAll('\n  ', ' ');
+    expect(text).toContain('a bare `cd`');
+    expect(text).toContain('a path that is no directory');
+  });
+
+  test.each(['cd <elsewhere>', 'cd -', 'cd ~', 'cd "$(pwd)"', 'cd', 'cd src/a.ts'])('denies %s', (command) => {
     expect(decide(command).allow).toBe(false);
   });
 
@@ -77,8 +83,24 @@ describe('the git line', () => {
     if (!decision.allow) expect(decision.reason).toContain("git's arguments hold an expansion");
   });
 
+  test('says a variable it cannot resolve is denied, and one assigned a literal is fine', () => {
+    const text = deniedCommands().replaceAll('\n  ', ' ');
+    expect(text).toContain('a variable the guard cannot resolve');
+    expect(text).toContain('assigned a literal in the same command');
+  });
+
+  test.each(['git diff $HOME', 'git diff $BASE...HEAD'])('denies %s, a variable it cannot resolve', (command) => {
+    const decision = decide(command);
+    expect(decision.allow).toBe(false);
+    if (!decision.allow) expect(decision.reason).toContain("git's arguments hold an expansion");
+  });
+
   test('allows the value written out', () => {
     expect(decide('git diff abc1234...HEAD').allow).toBe(true);
+  });
+
+  test('allows a variable assigned a literal in the same command', () => {
+    expect(decide('B=abc1234; git diff $B...HEAD').allow).toBe(true);
   });
 
   test('allows a variable of "Where you work"', () => {
