@@ -8,7 +8,9 @@
 //
 // On CI, or with SAIL_TEST_SILENCE_SECONDS, the child's output goes through this process, and a run that prints nothing
 // for 600 s (that variable's value; 0 is off) is stopped: a worker blocked in a synchronous call never reaches its own
-// timeout. The child's process tree goes to stderr, then is killed, and the exit code is 1. Locally the child inherits stdio.
+// timeout. The child's process tree goes to stderr, then the test file each process of it was in (scripts/test-running.ts,
+// a preload the launcher passes only while the watchdog is on, writes a marker per worker under the throwaway HOME),
+// then it is killed, and the exit code is 1. Locally the child inherits stdio.
 //
 // Inside a sail run (RUN_ID set), a broad run (see broadRun) takes the machine's gate lock first, the one validate holds
 // while its gate runs: one broad run goes at a time, so several runs' test files don't overload the machine. It waits up
@@ -18,7 +20,7 @@ import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { availableParallelism, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { broadRun, fullSuiteAllowed, wholeSuite } from './full-suite';
-import { descendants, silenceSeconds } from './test-watchdog';
+import { descendants, RUNNING_ENV, runningFiles, silenceSeconds, workerFiles } from './test-watchdog';
 
 const args = process.argv.slice(2);
 if (wholeSuite(args) && !fullSuiteAllowed(process.env)) {
@@ -124,8 +126,11 @@ function timings(): string[] {
   return [`--timings=${join(common.stdout.toString().trim(), 'sail-test-timings.json')}`, '--update-timings'];
 }
 
-const command = [process.execPath, 'test', ...timeout, ...parallel, ...args];
 const silence = silenceSeconds(process.env);
+const runningDir = join(home, '.sail-test-running');
+if (silence !== undefined) env[RUNNING_ENV] = runningDir;
+const preload = silence === undefined ? [] : ['--preload', join(import.meta.dir, 'test-running.ts')];
+const command = [process.execPath, 'test', ...timeout, ...parallel, ...preload, ...args];
 
 if (silence === undefined) {
   const child = Bun.spawn(command, { env, stdio: ['inherit', 'inherit', 'inherit'] });
@@ -175,6 +180,9 @@ const listing = Bun.spawnSync(['ps', '-A', '-o', 'pid=,ppid=,etime=,stat=,comman
 const tree = listing.exitCode === 0 ? descendants(listing.stdout.toString(), child.pid) : [];
 if (listing.exitCode === 0) console.error(tree.join('\n'));
 else console.error('(ps could not list the processes)');
+const inside = workerFiles(tree, runningFiles(runningDir), realpathSync(process.cwd()));
+console.error('The test file each was in:');
+console.error(inside.length > 0 ? inside.join('\n') : '(no test file was running)');
 for (const line of tree.reverse()) {
   const pid = Number(line.trim().split(/\s+/)[0]);
   try {

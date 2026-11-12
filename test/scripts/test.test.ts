@@ -190,6 +190,34 @@ test('a run that prints nothing for SAIL_TEST_SILENCE_SECONDS is stopped with ex
   });
 }, 60_000);
 
+test('a run the watchdog stops names the test file its worker was in, and not one that ended', async () => {
+  await withTempRepo(async (repo) => {
+    lockDir(repo);
+    mkdirSync(join(repo.dir, 'test'), { recursive: true });
+    writeFileSync(
+      join(repo.dir, 'test/hang.test.ts'),
+      `import { test } from 'bun:test';\ntest('hangs', () => { Bun.spawnSync(['sleep', '${61 + (process.pid % 1000) / 1000}']); });\n`,
+    );
+    writeFileSync(
+      join(repo.dir, 'test/pass.test.ts'),
+      "import { expect, test } from 'bun:test';\ntest('passes', () => { expect(1).toBe(1); });\n",
+    );
+    const run = await finish(
+      launch(repo, ['./test/hang.test.ts', './test/pass.test.ts'], { SAIL_TEST_SILENCE_SECONDS: '2' }),
+    );
+    expect(run.code).toBe(1);
+    const lines = run.stderr.split('\n');
+    const at = lines.indexOf('The test file each was in:');
+    expect(at).toBeGreaterThan(0);
+    const after = lines.slice(at + 1);
+    const named = after.find((line) => /^\s+\d+\s+test\/hang\.test\.ts$/.test(line));
+    expect(named).toBeDefined();
+    const pid = named?.trim().split(/\s+/)[0];
+    expect(lines.slice(0, at).some((line) => line.trim().split(/\s+/)[0] === pid)).toBe(true);
+    expect(after.some((line) => line.includes('pass.test.ts'))).toBe(false);
+  });
+}, 60_000);
+
 test('a run that keeps printing is not stopped by the watchdog', async () => {
   await withTempRepo(async (repo) => {
     lockDir(repo);
@@ -202,6 +230,7 @@ test('a run that keeps printing is not stopped by the watchdog', async () => {
     expect(run.code).toBe(0);
     expect(run.stdout + run.stderr).toContain('1 pass');
     expect(run.stderr).not.toContain('printed nothing');
+    expect(run.stderr).not.toContain('The test file each was in:');
   });
 }, 60_000);
 
