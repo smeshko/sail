@@ -190,6 +190,42 @@ test('a worktree left in a conflicted merge is clean at the new commit after the
   });
 });
 
+test('a worktree left mid-rebase, mid-cherry-pick or mid-revert has none of it left after the next lease', async () => {
+  await standingRepo(({ repo, sha, next }) => {
+    const path = leaseStanding({ repo: repo.dir, run: next('run-a'), sha, env: repo.env })?.path ?? '';
+    const git = (...args: string[]) => gitSync(path, args, repo.env);
+    git('checkout', '-q', '-b', 'side');
+    writeFileSync(join(path, 'tracked.txt'), 'side\n');
+    git('commit', '-qam', 'side');
+    const side = git('rev-parse', 'HEAD').stdout.trim();
+    git('checkout', '-q', '-b', 'mine', sha);
+    writeFileSync(join(path, 'tracked.txt'), 'main\n');
+    git('commit', '-qam', 'main');
+    const gitDir = git('rev-parse', '--absolute-git-dir').stdout.trim();
+    // The run that holds the lease completes, and the next one leases the same worktree.
+    const after = (holderId: string, nextId: string) => {
+      writeStatus(next(holderId).runDir, 'completed');
+      const again = leaseStanding({ repo: repo.dir, run: next(nextId), sha, env: repo.env });
+      expect(again?.path).toBe(path);
+      expect(git('status').stdout).not.toMatch(/rebase|cherry-pick|revert/);
+      for (const state of ['rebase-merge', 'rebase-apply', 'sequencer', 'CHERRY_PICK_HEAD', 'REVERT_HEAD']) {
+        expect(existsSync(join(gitDir, state))).toBe(false);
+      }
+      expect(git('rev-parse', 'HEAD').stdout.trim()).toBe(sha);
+    };
+    expect(git('rebase', side).code).not.toBe(0);
+    expect(existsSync(join(gitDir, 'rebase-merge'))).toBe(true);
+    after('run-a', 'run-b');
+    expect(git('rebase', side).code).not.toBe(128);
+
+    git('rebase', '--abort');
+    git('checkout', '-q', '--force', 'mine');
+    expect(git('cherry-pick', side).code).not.toBe(0);
+    expect(existsSync(join(gitDir, 'CHERRY_PICK_HEAD'))).toBe(true);
+    after('run-b', 'run-c');
+  });
+});
+
 test('a lease taken over from a failed run keeps that run head at its run ref before the checkout', async () => {
   await standingRepo(({ repo, sha, next }) => {
     const old = next('run-a');

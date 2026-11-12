@@ -4,7 +4,7 @@
 // An in-place checkout keeps what git ignores, which is the point: tracked files go back to the commit, untracked files
 // that are not ignored are removed (`clean -ffd`, never `-x` or `-X`), and the build caches stay. The adapter does not
 // vouch for them: a stale incremental build is the repository's own gate's to handle.
-import { existsSync, realpathSync } from 'node:fs';
+import { existsSync, realpathSync, rmSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { PortError } from '../../ports/errors';
 import type { Workspace } from '../../ports/types';
@@ -25,11 +25,49 @@ type Env = Readonly<Record<string, string>> | undefined;
 const NO_HOOKS = ['-c', 'core.hooksPath=/dev/null'];
 
 /**
+ * The state a rebase, `am`, cherry-pick, revert or bisect left unfinished in a worktree's own git directory. A per-run
+ * worktree threw it away with the worktree; a standing one keeps it, so it is removed before the next run's checkout.
+ * Removing it moves no ref: an unfinished rebase has not moved its branch yet.
+ */
+const UNFINISHED = [
+  'rebase-merge',
+  'rebase-apply',
+  'sequencer',
+  'CHERRY_PICK_HEAD',
+  'REVERT_HEAD',
+  'BISECT_START',
+  'BISECT_LOG',
+  'BISECT_TERMS',
+  'BISECT_EXPECTED_REV',
+  'BISECT_ANCESTORS_OK',
+  'BISECT_NAMES',
+  'BISECT_HEAD',
+  'BISECT_FIRST_PARENT',
+];
+
+/** Removes what an unfinished rebase, `am`, cherry-pick, revert or bisect left in the worktree at `path`. */
+function clearUnfinished(path: string, env: Env): void {
+  const gitDir = gitSync(path, ['rev-parse', '--absolute-git-dir'], env);
+  if (gitDir.code !== 0) {
+    throw new PortError('workspace', 'create', 'unavailable', `${path}: git rev-parse failed: ${gitDir.stderr}`);
+  }
+  const dir = gitDir.stdout.trim();
+  for (const name of UNFINISHED) {
+    try {
+      rmSync(join(dir, name), { recursive: true, force: true });
+    } catch (error) {
+      throw new PortError('workspace', 'create', 'unavailable', `${path}: ${(error as Error).message}`);
+    }
+  }
+}
+
+/**
  * Checks `sha` out in the worktree at `path`, detached, with the clone's hooks off: tracked files as committed, a merge
- * left half done cleared, untracked files that are not ignored removed, ignored files kept. A failure is `unavailable`,
- * with git's own words.
+ * left half done cleared, a rebase, `am`, cherry-pick, revert or bisect left unfinished cleared, untracked files that are
+ * not ignored removed, ignored files kept. A failure is `unavailable`, with git's own words.
  */
 export function checkOutInPlace(path: string, sha: string, env?: Env): void {
+  clearUnfinished(path, env);
   const steps = [
     ['checkout', '--force', '--detach', sha],
     ['reset', '--hard', sha],
