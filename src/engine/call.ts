@@ -18,7 +18,15 @@ import type { Harness } from '../ports/harness';
 import type { Usage } from '../ports/types';
 import type { AgentStep, ScriptStep, Stage, StageDefinition } from '../sdk/steps';
 import { bindingProblems, materialise, materialisePrepared, prepareBindings, type Supplied } from './bindings';
-import { type CallPaths, callPaths, createCallDir, existingTries, runRelative } from './call-dir';
+import {
+  type CallPaths,
+  callPaths,
+  createCallDir,
+  createScratch,
+  existingTries,
+  removeScratch,
+  runRelative,
+} from './call-dir';
 import { type Clock, systemClock } from './clock';
 import type { ContractError } from './contract';
 import type { JournalEntry } from './journal';
@@ -214,36 +222,42 @@ export async function runScriptTry(
   // Before the call directory exists, so a call that crashes creating it still shows it started.
   emit(at.start);
   createCallDir(paths);
+  createScratch(paths);
   const { inputs, consumed } = materialise(definition.consumes, supplied, paths.stageIn);
   for (const [binding, from] of Object.entries(consumed)) {
     if (from !== null) emit({ type: 'input:materialised', binding, from });
   }
   const clock = request.clock ?? systemClock;
   const startedAt = clock();
-  const run = await KINDS.script.run(definition, {
-    ...(request.redact === undefined ? {} : { redact: request.redact }),
-    runId,
-    runDir,
-    stage: request.definition.name,
-    call,
-    key,
-    try: at.try,
-    stageDir: dirname(request.stageFile),
-    workspace: request.workspace,
-    ...(request.inClone ? { inClone: true } : {}),
-    ...(request.env === undefined ? {} : { env: request.env }),
-    ...(request.portVariables === undefined ? {} : { portVariables: request.portVariables }),
-    ...(request.credentials === undefined ? {} : { credentials: request.credentials }),
-    root: request.root,
-    branch: request.branch,
-    config: request.config,
-    paths,
-    inputs,
-    ...(request.signal === undefined ? {} : { signal: request.signal }),
-    ...(request.graceMs === undefined ? {} : { graceMs: request.graceMs }),
-    emit,
-    clock,
-  });
+  let run: StepRun;
+  try {
+    run = await KINDS.script.run(definition, {
+      ...(request.redact === undefined ? {} : { redact: request.redact }),
+      runId,
+      runDir,
+      stage: request.definition.name,
+      call,
+      key,
+      try: at.try,
+      stageDir: dirname(request.stageFile),
+      workspace: request.workspace,
+      ...(request.inClone ? { inClone: true } : {}),
+      ...(request.env === undefined ? {} : { env: request.env }),
+      ...(request.portVariables === undefined ? {} : { portVariables: request.portVariables }),
+      ...(request.credentials === undefined ? {} : { credentials: request.credentials }),
+      root: request.root,
+      branch: request.branch,
+      config: request.config,
+      paths,
+      inputs,
+      ...(request.signal === undefined ? {} : { signal: request.signal }),
+      ...(request.graceMs === undefined ? {} : { graceMs: request.graceMs }),
+      emit,
+      clock,
+    });
+  } finally {
+    removeScratch(paths);
+  }
   const finishedAt = clock();
   const result = buildResult({
     runId,
@@ -481,38 +495,44 @@ export async function runAgentTries(
     emit(site.start(tryNumber));
     const paths = site.paths(tryNumber);
     createCallDir(paths, { durable: true });
+    createScratch(paths);
     const { inputs, consumed } = materialisePrepared(bindings, paths.stageIn);
     for (const [binding, from] of Object.entries(consumed)) {
       if (from !== null) emit({ type: 'input:materialised', binding, from });
     }
     const startedAt = clock();
-    const ran = await KINDS.agent.run(definition, {
-      ...(request.redact === undefined ? {} : { redact: request.redact }),
-      runId,
-      runDir,
-      stage,
-      call,
-      key,
-      try: tryNumber,
-      stageDir: dirname(request.stageFile),
-      workspace: request.workspace,
-      root: request.root,
-      branch: request.branch,
-      config: request.config,
-      paths,
-      inputs,
-      ...(request.signal === undefined ? {} : { signal: request.signal }),
-      emit,
-      clock,
-      agent: {
-        harness: agent.harness,
-        model: agent.model,
-        bindings,
-        ...(agent.conventions === undefined ? {} : { conventions: agent.conventions }),
-        validationTry: found === undefined ? 1 : 2,
-        ...(found === undefined ? {} : { feedback: found.map((error) => error.message) }),
-      },
-    });
+    let ran: Awaited<ReturnType<typeof KINDS.agent.run>>;
+    try {
+      ran = await KINDS.agent.run(definition, {
+        ...(request.redact === undefined ? {} : { redact: request.redact }),
+        runId,
+        runDir,
+        stage,
+        call,
+        key,
+        try: tryNumber,
+        stageDir: dirname(request.stageFile),
+        workspace: request.workspace,
+        root: request.root,
+        branch: request.branch,
+        config: request.config,
+        paths,
+        inputs,
+        ...(request.signal === undefined ? {} : { signal: request.signal }),
+        emit,
+        clock,
+        agent: {
+          harness: agent.harness,
+          model: agent.model,
+          bindings,
+          ...(agent.conventions === undefined ? {} : { conventions: agent.conventions }),
+          validationTry: found === undefined ? 1 : 2,
+          ...(found === undefined ? {} : { feedback: found.map((error) => error.message) }),
+        },
+      });
+    } finally {
+      removeScratch(paths);
+    }
     const finishedAt = clock();
     // No corrective try starts once the call is aborted: the try keeps its place, and a resume corrects it.
     const corrected =

@@ -98,6 +98,10 @@ _Avoid_: global stage, common stage, public stage
 One body inside a stage, run in order with its siblings. Every stage has at least one step, and most have exactly one and are written as that step. The steps of a stage share its `$STAGE_OUT`, the `out/` of the call's directory, and each step of a multi-step stage is journaled under `stage#call/step` as it finishes, so a resume runs only the steps after it.
 _Avoid_: sub-stage, action, unit
 
+**Scratch folder**:
+A try's `tmp/`, beside its `out/`, which the step's `TMPDIR`, `TMP` and `TEMP` name. It is open to the step's reads and writes whatever its permissions, though a write under `.git` there is denied, and the engine removes it when the try ends.
+_Avoid_: temp dir, tmp folder, sandbox
+
 **Kind**:
 What a step is. v1 ships two kinds: `agent` and `script`. Kinds belong to steps; a stage has steps, not a kind. Kinds are an extension point: a new kind implements one interface. A built-in intake's call records the kind `builtin`, though no step runs: the engine runs its body in process.
 _Avoid_: type, mode, flavour
@@ -127,7 +131,7 @@ The calls one `run.all()` makes at once. Their keys are assigned in the order gi
 _Avoid_: batch, fan-out, parallel block
 
 **Try**:
-One execution of a call's body, in a directory of its own, whose `out/` is its `$STAGE_OUT` and holds only what the body produced: the engine's records of the try (its `result.json`, logs, prompt and session transcript) and a later try's `try-M/` sit beside `out/`, out of a session's reach. A call has a later try when a resume runs it again after an interruption, and one corrective try when the engine rejects what an agent step handed in: invalid output, a missing declared file or a failed validator. A corrective try's prompt ends with the problems of the try it corrects. A try belongs to a call's body, or to one step of a multi-step call: a step's later try sits in that step's own directory, and the call keeps one `out/`.
+One execution of a call's body, in a directory of its own, whose `out/` is its `$STAGE_OUT` and holds only what the body produced, beside a scratch folder that is there for as long as the step runs: the engine's records of the try (its `result.json`, logs, prompt and session transcript) and a later try's `try-M/` sit beside `out/`, out of a session's reach. A call has a later try when a resume runs it again after an interruption, and one corrective try when the engine rejects what an agent step handed in: invalid output, a missing declared file or a failed validator. A corrective try's prompt ends with the problems of the try it corrects. A try belongs to a call's body, or to one step of a multi-step call: a step's later try sits in that step's own directory, and the call keeps one `out/`.
 _Avoid_: attempt, retry (as a noun)
 
 **Key**:
@@ -444,7 +448,7 @@ Masking credential-named values of at least eight characters from the run's envi
 _Avoid_: scrubbing, censoring, sanitising
 
 **Script environment**:
-The environment a script step runs with: the allowlist's names that are no credential, `SSH_AUTH_SOCK`, sail's own `SAIL_*` settings, git's identity and the preamble, plus the variables its `env` names and those the adapters of the ports its `ports` names require. Its `script:exec` lists the names it was given, never their values. A step in the clone keeps git's repository variables too.
+The environment a script step runs with: the allowlist's names that are no credential, `SSH_AUTH_SOCK`, sail's own `SAIL_*` settings, git's identity and the preamble (which sets `TMPDIR`, `TMP` and `TEMP` to its try's scratch folder), plus the variables its `env` names and those the adapters of the ports its `ports` names require. Its `script:exec` lists the names it was given, never their values. A step in the clone keeps git's repository variables too.
 _Avoid_: inherited environment, env passthrough
 
 **Guardrail**:
@@ -452,7 +456,7 @@ Any limit the engine enforces on a run: permissions, budgets, untrusted-input wr
 _Avoid_: policy, safety prompt, rule
 
 **Permissions**:
-What a step may do, declared per step: paths it may read and write, commands it may run and those it never may though its commands match them (`deny`), tools and servers it may reach. Enforced for agents; declared and recorded for scripts. Tools and MCP servers are listed by name (`WebFetch`, `server:tool`, or `server:*` for every tool of a server), and anything not listed is denied. Reads and writes are confined to the run's workspace and the step's `$STAGE_OUT`. A path glob starting with `!` excludes the paths it matches, after the globs without one, in `read` and `write` alike, as in `['**', '!secret/**']`.
+What a step may do, declared per step: paths it may read and write, commands it may run and those it never may though its commands match them (`deny`), tools and servers it may reach. Enforced for agents; declared and recorded for scripts. Tools and MCP servers are listed by name (`WebFetch`, `server:tool`, or `server:*` for every tool of a server), and anything not listed is denied. Reads and writes are confined to the run's workspace, the step's `$STAGE_OUT` and its scratch folder. A path glob starting with `!` excludes the paths it matches, after the globs without one, in `read` and `write` alike, as in `['**', '!secret/**']`.
 _Avoid_: policy, allowlist, sandbox, scope
 
 **Deny set**:

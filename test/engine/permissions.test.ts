@@ -266,6 +266,31 @@ const TABLE: Row[] = [
     want: 'allow',
   },
   {
+    label: 'legit: a shell redirection to $TMPDIR/log under write $STAGE_OUT only',
+    call: bash('echo x > "$TMPDIR/log"'),
+    open: { write: ['$STAGE_OUT/**'], commands: ['*'] },
+    want: 'allow',
+  },
+  {
+    label: 'legit: cd into $TMPDIR and ls',
+    call: bash('cd "$TMPDIR" && ls'),
+    open: { write: ['$STAGE_OUT/**'], commands: ['*'] },
+    want: 'allow',
+  },
+  {
+    label: 'legit: a write call of a file in the scratch folder',
+    call: write(`${layout.scratch}/notes.log`),
+    open: { write: ['$STAGE_OUT/**'] },
+    want: 'allow',
+  },
+  {
+    label: 'hole: a redirection to /tmp/log stays denied beside the scratch folder',
+    call: bash('echo x > /tmp/log'),
+    open: { write: ['$STAGE_OUT/**'], commands: ['*'] },
+    want: 'write',
+    mention: '/tmp/log',
+  },
+  {
     label: 'legit: an edit of src/a.ts under src/**',
     call: edit('src/a.ts'),
     open: { write: ['src/**'] },

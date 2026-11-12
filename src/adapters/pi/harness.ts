@@ -253,6 +253,8 @@ export function createPiHarness(options: PiHarnessOptions): Harness {
             worktree: request.cwd,
             stageOut: request.env.STAGE_OUT ?? '',
             stageIn: request.env.STAGE_IN ?? '',
+            // The try's scratch folder: no region when the request names none.
+            ...(request.env.TMPDIR ? { scratch: request.env.TMPDIR } : {}),
             env: request.env,
           },
           onDenied: (toolCallId, denial) => reader?.markDenied(toolCallId, denial),

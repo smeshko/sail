@@ -14,12 +14,12 @@ test("validate's gate child sees SAIL_GATE_LOCK_HOLDER equal to the pid in the l
     const stub = join(repo.home, 'bun-stub.sh');
     writeFileSync(
       stub,
-      `#!/bin/sh\nif [ "$1 $2" = "run gate" ]; then\n  printf '%s\\n%s' "$SAIL_GATE_LOCK_HOLDER" "$(cat "$TMPDIR/sail-validate.lock/holder")" > ${JSON.stringify(seen)}\nfi\nexit 0\n`,
+      `#!/bin/sh\nif [ "$1 $2" = "run gate" ]; then\n  printf '%s\\n%s' "$SAIL_GATE_LOCK_HOLDER" "$(cat "$SAIL_HOME/sail-validate.lock/holder")" > ${JSON.stringify(seen)}\nfi\nexit 0\n`,
     );
     chmodSync(stub, 0o755);
     const child = Bun.spawn([process.execPath, join(ROOT, '.sail/stages/validate/validate.mjs')], {
       cwd: repo.dir,
-      env: { ...repo.env, TMPDIR: tmp, SAIL_BUN: stub, SAIL_CONFIG: join(ROOT, '.sail/project.yaml') },
+      env: { ...repo.env, SAIL_HOME: tmp, SAIL_BUN: stub, SAIL_CONFIG: join(ROOT, '.sail/project.yaml') },
       stdout: 'pipe',
       stderr: 'pipe',
     });
@@ -49,7 +49,7 @@ test('validate waits without a cap for another holder, printing its wait line, a
     chmodSync(stub, 0o755);
     const child = Bun.spawn([process.execPath, join(ROOT, '.sail/stages/validate/validate.mjs')], {
       cwd: repo.dir,
-      env: { ...repo.env, TMPDIR: tmp, SAIL_BUN: stub, SAIL_CONFIG: join(ROOT, '.sail/project.yaml') },
+      env: { ...repo.env, SAIL_HOME: tmp, SAIL_BUN: stub, SAIL_CONFIG: join(ROOT, '.sail/project.yaml') },
       stdout: 'pipe',
       stderr: 'pipe',
     });

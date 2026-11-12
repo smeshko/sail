@@ -190,6 +190,18 @@ test("describe then open: open's $STAGE_IN holds the title and the body describe
   });
 });
 
+test("a multi-step call's script step sees a TMPDIR in its own step directory, not call-N/tmp, and it is gone once the step has run", async () => {
+  await withTempRepo(async (repo) => {
+    const s = setup(repo);
+    s.script('open.sh', `echo "$TMPDIR" > "$STAGE_OUT/tmpdir.txt"\n${OPENS}`);
+    await runStageCall(s.request(), publish);
+    const seen = (s.read(`${CALL}/out/tmpdir.txt`) ?? '').trim();
+    expect(seen).toEndWith(`${CALL}/steps/2-open/tmp`);
+    expect(existsSync(join(s.runDir, CALL, 'steps', '2-open', 'tmp'))).toBe(false);
+    expect(existsSync(join(s.runDir, CALL, 'tmp'))).toBe(false);
+  });
+});
+
 test("the call's events: its stage:start with its steps, each step's start and end under the step's key, then its stage:end, all valid under sail.event.v1", async () => {
   await withTempRepo(async (repo) => {
     const s = setup(repo);

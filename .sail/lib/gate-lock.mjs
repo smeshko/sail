@@ -4,13 +4,21 @@
 // without removing it, killed at the stage's timeout, leaves it to the next taker to remove. Validate carries its pid in
 // SAIL_GATE_LOCK_HOLDER to the gate it spawns, so the launcher knows the lock it finds is its own parent's.
 import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 export const HOLDER_ENV = 'SAIL_GATE_LOCK_HOLDER';
 
-/** The lock's directory, from the temp directory as it is now, so a test isolates it with TMPDIR. */
-export const lockPath = () => join(tmpdir(), 'sail-validate.lock');
+/**
+ * The lock's directory, in sail's machine directory as it is now (`SAIL_HOME`, or `~/.sail`), so a test isolates it
+ * with SAIL_HOME. Never under TMPDIR: each try of a step has its own, so a lock there would exclude nothing.
+ */
+export const lockPath = () => join(machineDir(), 'sail-validate.lock');
+
+function machineDir() {
+  const home = process.env.SAIL_HOME;
+  return home === undefined || home === '' ? join(process.env.HOME || homedir(), '.sail') : home;
+}
 
 /** The holder of the lock: its pid and workspace, or undefined while it is still writing them. */
 export function holder() {
@@ -84,6 +92,7 @@ export async function lock({ label, waiting, seconds }) {
   const until = Number.isFinite(seconds) ? Date.now() + seconds * 1000 : Number.POSITIVE_INFINITY;
   for (let told = false; ; ) {
     const path = lockPath();
+    mkdirSync(machineDir(), { recursive: true });
     try {
       mkdirSync(path);
       writeFileSync(join(path, 'holder'), `${process.pid} ${process.cwd()}\n`);

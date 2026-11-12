@@ -232,6 +232,29 @@ test('a read inside the step is let through the gate', async () => {
   expect(scripted.calls[0]?.blocks).toEqual([undefined]);
 });
 
+test("a write to the request's TMPDIR is let through the gate, and one to /tmp is blocked", async () => {
+  const req = request();
+  const tmp = join(req.cwd, '..', 'tmp');
+  mkdirSync(tmp, { recursive: true });
+  const { scripted } = await play(
+    'scratch',
+    { env: { ...req.env, TMPDIR: tmp, TMP: tmp, TEMP: tmp } },
+    {
+      scratch: [
+        start,
+        say('a'),
+        { act: 'gate', id: 'w1', name: 'write', input: { path: join(tmp, 'notes.log'), content: 'x' } },
+        { act: 'gate', id: 'w2', name: 'write', input: { path: '/tmp/notes.log', content: 'x' } },
+        ...submitted({ outcome: 'done', output: SPEC }),
+      ],
+    },
+  );
+  expect(scripted.calls[0]?.blocks.map((b) => (b as { block?: boolean } | undefined)?.block)).toEqual([
+    undefined,
+    true,
+  ]);
+});
+
 test('over maxTurns the session is aborted, and ends budget_exceeded naming maxTurns', async () => {
   const { result, capture, scripted } = await play('overTurns', { budget: { maxTurns: 2, maxUsd: 2, maxMinutes: 10 } });
   expect({

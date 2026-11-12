@@ -25,7 +25,7 @@ const script = (body: string) => `import { lock, heldBy, lockPath } from ${JSON.
 function run(repo: TempRepo, body: string, cwd = repo.dir) {
   return Bun.spawn([process.execPath, '-e', script(body)], {
     cwd,
-    env: { ...repo.env, TMPDIR: tmp(repo) },
+    env: { ...repo.env, SAIL_HOME: tmp(repo) },
     stdout: 'pipe',
     stderr: 'pipe',
   });
@@ -131,8 +131,8 @@ console.log((await Bun.file(lockPath() + '/holder').text()).split(' ')[0] === St
 test('heldBy is true for the live holder, false for another pid, and false with no lock', async () => {
   await withTempRepo(async (repo) => {
     const dir = tmp(repo);
-    const before = process.env.TMPDIR;
-    process.env.TMPDIR = dir;
+    const before = process.env.SAIL_HOME;
+    process.env.SAIL_HOME = dir;
     try {
       expect(lib.heldBy(process.pid)).toBe(false);
       const held = await hold(repo);
@@ -144,23 +144,23 @@ test('heldBy is true for the live holder, false for another pid, and false with 
       await held.child.exited;
       expect(lib.heldBy(held.child.pid)).toBe(false);
     } finally {
-      if (before === undefined) delete process.env.TMPDIR;
-      else process.env.TMPDIR = before;
+      if (before === undefined) delete process.env.SAIL_HOME;
+      else process.env.SAIL_HOME = before;
     }
   });
 });
 
-/** Runs `body` in this process with TMPDIR at the repository's own temp directory, so `lockPath()` is under it. */
+/** Runs `body` in this process with SAIL_HOME at the repository's own temp directory, so `lockPath()` is under it. */
 async function inProcess(repo: TempRepo, body: (dir: string) => Promise<void>): Promise<void> {
   const dir = tmp(repo);
-  const before = process.env.TMPDIR;
-  process.env.TMPDIR = dir;
+  const before = process.env.SAIL_HOME;
+  process.env.SAIL_HOME = dir;
   try {
     await body(dir);
   } finally {
     rmSync(join(dir, 'sail-validate.lock'), { recursive: true, force: true });
-    if (before === undefined) delete process.env.TMPDIR;
-    else process.env.TMPDIR = before;
+    if (before === undefined) delete process.env.SAIL_HOME;
+    else process.env.SAIL_HOME = before;
   }
 }
 
@@ -234,4 +234,51 @@ test('in process, a lock with no holder written is waited on while fresh and tak
 
 test('isAlive is true for a process this one may not signal', () => {
   expect(lib.isAlive(1)).toBe(true);
+});
+
+test('two processes whose TMPDIRs differ share one lock in the machine directory', async () => {
+  await withTempRepo(async (repo) => {
+    const machine = tmp(repo);
+    const spawn = (body: string, tmpdir: string) => {
+      mkdirSync(tmpdir, { recursive: true });
+      return Bun.spawn([process.execPath, '-e', script(body)], {
+        cwd: repo.dir,
+        env: { ...repo.env, SAIL_HOME: machine, TMPDIR: tmpdir },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+    };
+    const release = join(repo.home, 'release');
+    const holder = spawn(
+      `await lock({ label: 'holder', waiting: () => 'x' });
+console.log(lockPath());
+while (!(await Bun.file(${JSON.stringify(release)}).exists())) await Bun.sleep(50);`,
+      join(repo.home, 'try-1/tmp'),
+    );
+    const reader = holder.stdout.getReader();
+    const { value } = await reader.read();
+    reader.releaseLock();
+    expect(new TextDecoder().decode(value).trim()).toBe(join(machine, 'sail-validate.lock'));
+    const waiter = spawn(
+      `console.log(await lock({ label: 'probe', waiting: () => 'waiting', seconds: 1 }));`,
+      join(repo.home, 'try-2/tmp'),
+    );
+    const [out] = await Promise.all([new Response(waiter.stdout).text(), waiter.exited]);
+    expect(out.trim()).toBe('false');
+    writeFileSync(release, '');
+    await holder.exited;
+  });
+});
+
+test('without SAIL_HOME the lock is in ~/.sail, made when missing', async () => {
+  await withTempRepo(async (repo) => {
+    const env: Record<string, string> = { ...repo.env, TMPDIR: tmp(repo) };
+    delete env.SAIL_HOME;
+    const child = Bun.spawn(
+      [process.execPath, '-e', script(`console.log(lockPath(), await lock({ label: 'x', waiting: () => 'w' }));`)],
+      { cwd: repo.dir, env, stdout: 'pipe', stderr: 'pipe' },
+    );
+    const [out] = await Promise.all([new Response(child.stdout).text(), child.exited]);
+    expect(out.trim()).toBe(`${join(repo.home, '.sail', 'sail-validate.lock')} true`);
+  });
 });

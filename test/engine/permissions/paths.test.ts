@@ -267,3 +267,61 @@ test('insideRoots resolves a directory for cd and git, and says why one outside 
     { ok: false, reason: expect.stringContaining('outside the workspace') },
   ]);
 });
+
+// The scratch folder: a try's tmp/, open to reads and writes whatever the globs, though never to a write under .git.
+const { scratch } = layout;
+const none = perms();
+
+test('a read and a write of a path in the scratch folder are allowed with no globs, by absolute path and by $TMPDIR', () => {
+  const paths = [join(scratch, 'a', 'b.log'), '$TMPDIR/b.log'];
+  expect(paths.map((path) => checkWrite([path], none, ctx).allow)).toEqual([true, true]);
+  expect(paths.map((path) => checkRead([path], none, ctx).allow)).toEqual([true, true]);
+});
+
+test('a path under .git in the scratch folder is denied for a write: nothing under .git is ever written', () => {
+  const decision = checkWrite([join(scratch, 'r', '.git', 'hooks', 'pre-commit')], none, ctx);
+  expect(verdict(decision, 'nothing under .git is ever written')).toEqual([
+    'write',
+    'nothing under .git is ever written',
+  ]);
+});
+
+test('a link in the scratch folder to elsewhere is denied as outside, for a read and a write', () => {
+  symlinkSync(elsewhere, join(scratch, 'out-link'));
+  const path = join(scratch, 'out-link', 'x');
+  expect([checkWrite([path], none, ctx).allow, checkRead([path], none, ctx).allow]).toEqual([false, false]);
+});
+
+test('with scratch left out, blank or naming a folder that does not exist, the scratch path is outside and nothing throws', () => {
+  const { scratch: _named, ...withoutScratch } = ctx;
+  const path = join(scratch, 'a.log');
+  const contexts = [withoutScratch, { ...ctx, scratch: '  ' }, { ...ctx, scratch: join(scratch, 'missing') }];
+  const results = contexts.map((c) => [checkWrite([path], none, c).allow, checkRead([path], none, c).allow]);
+  expect(results).toEqual([
+    [false, false],
+    [false, false],
+    [false, false],
+  ]);
+});
+
+test('a scratch folder inside the worktree is the scratch region, so a write there is allowed under write: []', () => {
+  const inside = join(worktree, 'tmp-inside');
+  mkdirSync(inside, { recursive: true });
+  const c = { ...ctx, scratch: inside };
+  expect(place(join(inside, 'x'), roots(c))).toBe('scratch');
+  expect(checkWrite([join(inside, 'x')], none, c).allow).toBe(true);
+  expect(checkWrite([join(worktree, 'src', 'a.ts')], none, c).allow).toBe(false);
+});
+
+test('a scratch folder swapped for a link is no region: its target stays outside, for a read and a write', () => {
+  const swapped = join(dirname(scratch), 'tmp-swapped');
+  symlinkSync(elsewhere, swapped);
+  const c = { ...ctx, scratch: swapped, env: { ...ctx.env, TMPDIR: swapped } };
+  expect(roots(c).scratch).toBeUndefined();
+  const paths = [join(swapped, 'x'), '$TMPDIR/x', join(elsewhere, 'x')];
+  expect(paths.map((path) => [checkWrite([path], none, c).allow, checkRead([path], none, c).allow])).toEqual([
+    [false, false],
+    [false, false],
+    [false, false],
+  ]);
+});

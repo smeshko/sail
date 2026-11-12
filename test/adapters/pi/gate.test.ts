@@ -146,3 +146,38 @@ test('the extension registers the tool_call hook, which answers with the gate’
   expect(hooks[0]?.[1](call('bash', { command: 'git status' }))).toBeUndefined();
   expect(hooks[0]?.[1](call('bash', { command: 'rm file' }))).toEqual({ block: true, reason: expect.any(String) });
 });
+
+// The scratch folder: `$TMPDIR`, open to every tool under write: ['$STAGE_OUT/**'], and nothing beside it.
+const scratch = join(base, 'tmp');
+mkdirSync(scratch, { recursive: true });
+const SCRATCH_CTX: DecideContext = {
+  ...CTX,
+  scratch,
+  env: { ...CTX.env, TMPDIR: scratch, TMP: scratch, TEMP: scratch },
+};
+const SCRATCH_STEP: Permissions = { read: [], write: ['$STAGE_OUT/**'], commands: ['*'] };
+
+test('on pi the scratch folder takes write, edit, read and a shell redirection or tee to it, under write $STAGE_OUT only', () => {
+  const g = gate(SCRATCH_STEP, SCRATCH_CTX);
+  const file = join(scratch, 'notes.log');
+  const verdicts = [
+    g.toolCall(call('write', { path: file, content: 'x' })),
+    g.toolCall(call('edit', { path: file, edits: [{ oldText: 'x', newText: 'y' }] })),
+    g.toolCall(call('read', { path: file })),
+    g.toolCall(call('bash', { command: 'mktemp' })),
+    g.toolCall(call('bash', { command: `echo hi > ${scratch}/tmp.Ab12` })),
+    g.toolCall(call('bash', { command: 'echo hi | tee "$TMPDIR/run.log"' })),
+  ];
+  expect(verdicts).toEqual([undefined, undefined, undefined, undefined, undefined, undefined]);
+  expect(g.denials).toEqual([]);
+});
+
+test('on pi a write to /tmp/notes.log is blocked under write, and with no TMPDIR in the context so is one where the scratch folder would be', () => {
+  const withScratch = gate(SCRATCH_STEP, SCRATCH_CTX);
+  const without = gate(SCRATCH_STEP, CTX);
+  expect([
+    withScratch.toolCall(call('write', { path: '/tmp/notes.log', content: 'x' }))?.block,
+    without.toolCall(call('write', { path: join(scratch, 'notes.log'), content: 'x' }))?.block,
+  ]).toEqual([true, true]);
+  expect([withScratch.denials[0]?.[1].rule, without.denials[0]?.[1].rule]).toEqual(['write', 'write']);
+});

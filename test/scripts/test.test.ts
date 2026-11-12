@@ -29,7 +29,7 @@ console.log('held');
 ${extra}
 while (!(await Bun.file(${JSON.stringify(release)}).exists())) await Bun.sleep(50);`,
     ],
-    { cwd: repo.dir, env: { ...repo.env, TMPDIR: join(repo.home, 'tmp') }, stdout: 'pipe', stderr: 'pipe' },
+    { cwd: repo.dir, env: { ...repo.env, SAIL_HOME: join(repo.home, 'tmp') }, stdout: 'pipe', stderr: 'pipe' },
   );
   const reader = child.stdout.getReader();
   await reader.read();
@@ -46,7 +46,7 @@ while (!(await Bun.file(${JSON.stringify(release)}).exists())) await Bun.sleep(5
 function launch(repo: TempRepo, args: string[], env: Record<string, string> = {}, cwd = repo.dir) {
   return Bun.spawn([process.execPath, LAUNCHER, ...args], {
     cwd,
-    env: { ...repo.env, TMPDIR: join(repo.home, 'tmp'), SAIL_TEST_LOCK_SECONDS: '2', ...env },
+    env: { ...repo.env, SAIL_HOME: join(repo.home, 'tmp'), SAIL_TEST_LOCK_SECONDS: '2', ...env },
     stdout: 'pipe',
     stderr: 'pipe',
   });
@@ -144,7 +144,7 @@ process.exit(await child.exited === 2 ? 2 : 0);`,
       ],
       {
         cwd: repo.dir,
-        env: { ...repo.env, TMPDIR: join(repo.home, 'tmp'), SAIL_TEST_LOCK_SECONDS: '2', RUN_ID: 'ADW-1-x' },
+        env: { ...repo.env, SAIL_HOME: join(repo.home, 'tmp'), SAIL_TEST_LOCK_SECONDS: '2', RUN_ID: 'ADW-1-x' },
         stdout: 'pipe',
         stderr: 'pipe',
       },
@@ -241,5 +241,26 @@ test('leaves a process behind', () => {
         }
       }
     }
+  });
+}, 60_000);
+
+test("under RUN_ID, tests and their HOME get a temp directory outside the step's scratch folder", async () => {
+  await withTempRepo(async (repo) => {
+    lockDir(repo);
+    const scratch = join(repo.dir, '.sail-runs/ADW-1-x/01-validate/call-1/tmp');
+    mkdirSync(scratch, { recursive: true });
+    mkdirSync(join(repo.dir, 'test'), { recursive: true });
+    writeFileSync(
+      join(repo.dir, 'test/where.test.ts'),
+      "import { test } from 'bun:test';\nimport { tmpdir } from 'node:os';\ntest('where', () => {\n  console.log('WHERE', JSON.stringify([tmpdir(), process.env.TMP ?? '', process.env.TEMP ?? '', process.env.HOME]));\n});\n",
+    );
+    const run = await finish(
+      launch(repo, ['./test/where.test.ts'], { RUN_ID: 'ADW-1-x', TMPDIR: scratch, TMP: scratch, TEMP: scratch }),
+    );
+    expect(run.code).toBe(0);
+    const line = `${run.stdout}\n${run.stderr}`.split('\n').find((at) => at.startsWith('WHERE '));
+    const paths = JSON.parse(line?.slice('WHERE '.length) ?? '[]') as string[];
+    expect(paths).toHaveLength(4);
+    for (const path of paths) expect(path.startsWith(repo.dir)).toBe(false);
   });
 }, 60_000);

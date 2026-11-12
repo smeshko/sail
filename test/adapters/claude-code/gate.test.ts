@@ -474,3 +474,40 @@ describe("a session's saved tool output", () => {
     ]).toEqual([deniedByRead, deniedByRead]);
   });
 });
+
+// The scratch folder: `$TMPDIR`, open to every tool under write: ['$STAGE_OUT/**'], and nothing beside it.
+const scratch = join(base, 'tmp');
+mkdirSync(scratch, { recursive: true });
+const SCRATCH_CTX: DecideContext = {
+  ...CTX,
+  scratch,
+  env: { ...CTX.env, TMPDIR: scratch, TMP: scratch, TEMP: scratch },
+};
+const SCRATCH_STEP: Permissions = { read: [], write: ['$STAGE_OUT/**'], commands: ['*'] };
+const verdictOf = async (g: ReturnType<typeof gate>, tool: string, input: unknown): Promise<string | undefined> =>
+  (await ask(g, pre(tool, input))).hookSpecificOutput?.permissionDecision;
+
+test('on Claude Code the scratch folder takes Write, Edit and Read, and a shell redirection or tee to it, under write $STAGE_OUT only', async () => {
+  const g = gate(SCRATCH_STEP, SCRATCH_CTX);
+  const file = join(scratch, 'notes.log');
+  const decisions = [
+    await verdictOf(g, 'Write', { file_path: file, content: 'x' }),
+    await verdictOf(g, 'Edit', { file_path: file, old_string: 'x', new_string: 'y' }),
+    await verdictOf(g, 'Read', { file_path: file }),
+    await verdictOf(g, 'Bash', { command: 'mktemp' }),
+    await verdictOf(g, 'Bash', { command: `echo hi > ${scratch}/tmp.Ab12` }),
+    await verdictOf(g, 'Bash', { command: 'echo hi | tee "$TMPDIR/run.log"' }),
+  ];
+  expect(decisions).toEqual(['allow', 'allow', 'allow', 'allow', 'allow', 'allow']);
+  expect(g.denials).toEqual([]);
+});
+
+test('on Claude Code a Write to /tmp/notes.log is denied by write, and with no TMPDIR in the context so is one where the scratch folder would be', async () => {
+  const withScratch = gate(SCRATCH_STEP, SCRATCH_CTX);
+  const without = gate(SCRATCH_STEP, CTX);
+  expect([
+    await verdictOf(withScratch, 'Write', { file_path: '/tmp/notes.log', content: 'x' }),
+    await verdictOf(without, 'Write', { file_path: join(scratch, 'notes.log'), content: 'x' }),
+  ]).toEqual(['deny', 'deny']);
+  expect([withScratch.denials[0]?.[1].rule, without.denials[0]?.[1].rule]).toEqual(['write', 'write']);
+});

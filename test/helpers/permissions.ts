@@ -5,6 +5,7 @@
 //   <root>/clone/.sail-runs/r1/worktree/             the run's worktree: src/a.ts, src/deep/, sub/, lib/
 //   <root>/clone/.sail-runs/r1/01-spec/call-1/       $STAGE_OUT
 //   <root>/clone/.sail-runs/r1/01-spec/call-1/in/    $STAGE_IN, with brief.md
+//   <root>/clone/.sail-runs/r1/01-spec/call-1/tmp/   the scratch folder, $TMPDIR
 //   <root>/elsewhere/                                outside everything
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -18,6 +19,7 @@ export interface Layout {
   readonly worktree: string;
   readonly stageOut: string;
   readonly stageIn: string;
+  readonly scratch: string;
   readonly elsewhere: string;
   readonly ctx: DecideContext;
   /** Creates an empty file, and its directories, at `path` (absolute, or relative to the worktree). */
@@ -34,6 +36,7 @@ export function makeLayout(): Layout {
   const callDir = join(clone, '.sail-runs', 'r1', '01-spec', 'call-1');
   const stageOut = join(callDir, 'out');
   const stageIn = join(callDir, 'in');
+  const scratch = join(callDir, 'tmp');
   const elsewhere = join(root, 'elsewhere');
   const at = (path: string): string => (path.startsWith('/') ? path : join(worktree, path));
   const file = (path: string): string => {
@@ -48,6 +51,7 @@ export function makeLayout(): Layout {
     join(worktree, 'lib'),
     stageIn,
     stageOut,
+    scratch,
     elsewhere,
   ]) {
     mkdirSync(dir, { recursive: true });
@@ -56,15 +60,23 @@ export function makeLayout(): Layout {
   file('src/a.ts');
   file('lib/a.dart');
   file(join(stageIn, 'brief.md'));
-  const env = { STAGE_OUT: stageOut, STAGE_IN: stageIn, WORKSPACE: worktree, RUN_ID: 'r1', STAGE: 'spec' };
+  const env = {
+    STAGE_OUT: stageOut,
+    STAGE_IN: stageIn,
+    WORKSPACE: worktree,
+    RUN_ID: 'r1',
+    STAGE: 'spec',
+    TMPDIR: scratch,
+  };
   return {
     root,
     clone,
     worktree,
     stageOut,
     stageIn,
+    scratch,
     elsewhere,
-    ctx: { worktree, stageOut, stageIn, env },
+    ctx: { worktree, stageOut, stageIn, scratch, env },
     file,
     link: (path, target) => {
       const full = at(path);

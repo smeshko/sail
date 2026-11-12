@@ -28,6 +28,8 @@ export interface DecideContext {
   readonly stageOut: string;
   /** `$STAGE_IN`. */
   readonly stageIn: string;
+  /** The try's scratch folder, `$TMPDIR`: open to reads and writes whatever the globs. Left out, there is none. */
+  readonly scratch?: string;
   /** The preamble, for `$VAR` in paths. */
   readonly env: Readonly<Record<string, string>>;
 }
