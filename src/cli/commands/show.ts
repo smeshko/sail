@@ -48,6 +48,24 @@ function jevText(jev: JevTotals): string {
   );
 }
 
+/** One `port error` row per failed port call: its key (the step's when a step holds it), its code and its message. */
+function portErrorRows(summary: Summary): string[][] {
+  return summary.calls.flatMap((call) => {
+    const stepped = (call.steps ?? []).flatMap((step) =>
+      (step.portErrors ?? []).map((error) => ({ key: step.key, error })),
+    );
+    // The call lists its steps' errors too: each is printed once, under its step's key.
+    const pool = [...stepped];
+    const own = (call.portErrors ?? []).flatMap((error) => {
+      const at = pool.findIndex((held) => JSON.stringify(held.error) === JSON.stringify(error));
+      if (at === -1) return [{ key: call.key, error }];
+      pool.splice(at, 1);
+      return [];
+    });
+    return [...own, ...stepped].map(({ key, error }) => ['port error', `${key} · ${error.code} · ${error.message}`]);
+  });
+}
+
 /** The run as `sail show` prints it: a title, the calls, then how the run stopped, its loops, totals and cost. */
 function render(summary: Summary): string[] {
   const { stopReason, message, totals } = summary;
@@ -73,6 +91,7 @@ function render(summary: Summary): string[] {
       ].join(' · '),
     ],
     ...(totals.jev === undefined ? [] : [['jev', jevText(totals.jev)]]),
+    ...portErrorRows(summary),
     [
       'cost',
       `${formatUsd(totals.usage.costUsd)}${budget === undefined ? '' : ` of ${formatUsd(budget.maxUsd)} (${budget.usedPct}%)`}`,

@@ -227,6 +227,17 @@ test('quiet prints an error end with its duration and each message, a later line
 });
 
 test.each(['quiet', 'normal'] as const)(
+  'at %s, a Jev port error that says the account has no credits prints under its key',
+  (verbosity) => {
+    const message = 'jev.ask: the TypeSafe account has no credits: TypeSafe answered 402 Payment Required: x';
+    const events = stream([
+      { type: 'error:port', key: 'ask-jev#1', port: 'jev', op: 'ask', code: 'payment_required', message },
+    ]);
+    expect(render(events, verbosity).split('\n')).toContain(head('ask-jev#1', `✗ error:port: ${message}`));
+  },
+);
+
+test.each(['quiet', 'normal'] as const)(
   'at %s, crashes, consumer failures and other errors each print their message',
   (verbosity) => {
     const events = stream([

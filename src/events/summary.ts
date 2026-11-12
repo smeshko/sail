@@ -28,6 +28,11 @@
 // the key holds one, and the run's totals; one with no key counts in the totals alone. A call that starts again starts
 // its count over, as it does its other facts, from the steps it keeps. A run that asked Jev nothing has no `jev`
 // anywhere.
+//
+// A script step's `sail port <port> <operation>` that failed leaves an `error:port` under its key. Each one is listed,
+// in event order, on the call and on the step its key names, as `portErrors`: the run says which call couldn't reach a
+// provider and why. One with no key, or under a call that never started, is listed nowhere. A call that starts again
+// keeps the errors of the steps it keeps, as it does their Jev calls. A run with none has no `portErrors`.
 // Stalled steps are listed only until their next keyed event, or the run ends or suspends.
 import { INTAKE_KEY } from '../engine/intake';
 import type { JournalEntry } from '../engine/journal';
@@ -45,6 +50,14 @@ export interface JevTotals {
   outputTokens?: number;
 }
 
+/** One failed port call, as its `error:port` event said it. */
+export interface PortErrorEntry {
+  port: 'ticketSource' | 'codeHost' | 'jev';
+  op: string;
+  code: string;
+  message: string;
+}
+
 /** One step of a multi-step call. */
 export interface StepEntry {
   key: string;
@@ -57,6 +70,7 @@ export interface StepEntry {
   toolCalls?: number;
   costUsd?: number;
   jev?: JevTotals;
+  portErrors?: PortErrorEntry[];
   files?: string[];
   summary?: string;
 }
@@ -78,6 +92,7 @@ export interface CallEntry {
   costUsd?: number;
   commits?: number;
   jev?: JevTotals;
+  portErrors?: PortErrorEntry[];
   feedbackFrom?: string;
   files?: string[];
   summary?: string;
@@ -164,6 +179,7 @@ interface StepState {
   facts: Facts;
   files: string[];
   jev?: JevTotals;
+  portErrors: PortErrorEntry[];
 }
 
 /** A call at its latest try: a new try starts it over, in the same place. */
@@ -181,6 +197,7 @@ interface CallState {
   files: string[];
   steps: Map<string, StepState>;
   jev?: JevTotals;
+  portErrors: PortErrorEntry[];
 }
 
 /** The fold so far. Opaque: start it with emptyState(), feed it with foldEvent() and read it with toSummary(). */
@@ -294,6 +311,9 @@ export function foldEvent(state: SummaryState, event: SailEvent): void {
     case 'jev:asked':
       foldJev(state, event);
       break;
+    case 'error:port':
+      foldPortError(state, event);
+      break;
     case 'ticket:fetched':
       if (event.key === INTAKE_KEY) state.ticket ??= { ticketKey: event.ticketKey, title: event.title, url: event.url };
       break;
@@ -372,6 +392,7 @@ function startCall(state: SummaryState, event: EventOf<'intake:start'> | EventOf
     ...(feedback === undefined ? {} : { feedback }),
     files: [...new Set(kept.flatMap(([, step]) => step.files))],
     steps: new Map(kept),
+    portErrors: kept.flatMap(([, step]) => step.portErrors),
     ...(jev === undefined ? {} : { jev }),
   });
 }
@@ -408,6 +429,7 @@ function reuseCall(state: SummaryState, event: EventOf<'journal:append'>, fromRu
     facts: {},
     files: [],
     steps: new Map(),
+    portErrors: [],
   });
 }
 
@@ -419,6 +441,7 @@ function startStep(state: SummaryState, event: EventOf<'step:start'>): void {
     startedAt: event.ts,
     facts: {},
     files: [],
+    portErrors: [],
   });
 }
 
@@ -489,6 +512,16 @@ function foldJev(state: SummaryState, event: EventOf<'jev:asked'>): void {
   call.jev = addJev(call.jev, event);
   const step = call.steps.get(event.key);
   if (step !== undefined) step.jev = addJev(step.jev, event);
+}
+
+/** A failed port call is listed on the call and step its key names. */
+function foldPortError(state: SummaryState, event: EventOf<'error:port'>): void {
+  if (event.key === undefined) return;
+  const call = state.calls.get(callKeyOf(event.key));
+  if (call === undefined) return;
+  const entry: PortErrorEntry = { port: event.port, op: event.op, code: event.code, message: event.message };
+  call.portErrors.push(entry);
+  call.steps.get(event.key)?.portErrors.push({ ...entry });
 }
 
 /** Frontier events repeat after a resume, so a loop keeps the highest iteration any of them reported. */
@@ -586,6 +619,7 @@ function callEntry(state: SummaryState, call: CallState): CallEntry {
     denials: facts.denials,
     costUsd: facts.costUsd,
     jev: call.jev === undefined ? undefined : { ...call.jev },
+    portErrors: call.portErrors.length > 0 ? call.portErrors.map((error) => ({ ...error })) : undefined,
     // A pointer names a result and a place in it: the call is the one whose result it names.
     feedbackFrom: pointer === undefined ? undefined : (state.results.get(pointer.split('#')[0] ?? '') ?? pointer),
     files: call.files.length > 0 ? [...call.files] : undefined,
@@ -605,6 +639,7 @@ function stepEntry(step: StepState & { end: Ended }): StepEntry {
     toolCalls: step.facts.toolCalls,
     costUsd: step.facts.costUsd,
     jev: step.jev === undefined ? undefined : { ...step.jev },
+    portErrors: step.portErrors.length > 0 ? step.portErrors.map((error) => ({ ...error })) : undefined,
     files: step.files.length > 0 ? [...step.files] : undefined,
   });
 }

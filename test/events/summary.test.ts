@@ -975,3 +975,87 @@ test('a run without a jev:asked has no jev in any call, step or total', () => {
   const summary = folded(stamp([0, runStart()], [100, start('spec#1')], [200, end('spec#1', 'passed', 100)]));
   expect(JSON.stringify(summary)).not.toContain('jev');
 });
+
+const portError = (key: string | undefined, message = 'jev.ask: no credits'): NewEvent =>
+  ({
+    type: 'error:port',
+    ...(key === undefined ? {} : { key }),
+    port: 'jev',
+    op: 'ask',
+    code: 'payment_required',
+    message,
+  }) as NewEvent;
+
+const credits = { port: 'jev', op: 'ask', code: 'payment_required', message: 'jev.ask: no credits' } as const;
+
+test('an error:port under a single-step call key is listed on the call', () => {
+  const summary = folded(
+    stamp(
+      [0, runStart()],
+      [100, start('ask-jev#1')],
+      [110, portError('ask-jev#1')],
+      [200, end('ask-jev#1', 'passed', 100)],
+    ),
+  );
+  expect(summary?.calls[0]?.portErrors).toEqual([credits]);
+});
+
+test('an error:port under a step key is listed on the step and on its call, and a run with none has no portErrors', () => {
+  const events = (withError: boolean) =>
+    stamp(
+      [0, runStart()],
+      [100, start('publish#1', { kind: 'stage', steps: ['describe', 'open'] })],
+      [110, stepStart('publish#1/describe', 1, 2, 'script')],
+      [200, stepEnd('publish#1/describe', 1, 'passed')],
+      [210, stepStart('publish#1/open', 2, 2, 'script')],
+      ...(withError ? [[220, portError('publish#1/open')] as [number, NewEvent]] : []),
+      [300, stepEnd('publish#1/open', 2, 'passed')],
+      [310, end('publish#1', 'passed', 210)],
+    );
+  const [publish] = folded(events(true))?.calls ?? [];
+  expect(publish?.portErrors).toEqual([credits]);
+  expect(publish?.steps?.map((step) => [step.key, step.portErrors])).toEqual([
+    ['publish#1/describe', undefined],
+    ['publish#1/open', [credits]],
+  ]);
+  expect(JSON.stringify(folded(events(false)))).not.toContain('portErrors');
+});
+
+test('an error:port with no key, or under a call that never started, is listed nowhere', () => {
+  const summary = folded(
+    stamp(
+      [0, runStart()],
+      [100, start('spec#1')],
+      [110, portError(undefined)],
+      [120, portError('ghost#1')],
+      [200, end('spec#1', 'passed', 100)],
+    ),
+  );
+  expect(JSON.stringify(summary)).not.toContain('portErrors');
+});
+
+test('a call that starts again keeps the port errors of the steps it ended, and starts the others over', () => {
+  const summary = folded(
+    stamp(
+      [0, runStart()],
+      [100, start('publish#1', { kind: 'stage', steps: ['describe', 'open'] })],
+      [110, stepStart('publish#1/describe', 1, 2, 'script')],
+      [120, portError('publish#1/describe', 'jev.ask: first')],
+      [200, stepEnd('publish#1/describe', 1, 'passed')],
+      [210, stepStart('publish#1/open', 2, 2, 'script')],
+      [220, portError('publish#1/open', 'jev.ask: lost')],
+      [300, runEnd('suspended', 1, { stopReason: 'interrupted' })],
+      [5000, start('publish#1', { kind: 'stage', steps: ['describe', 'open'] })],
+      [5100, stepStart('publish#1/open', 2, 2, 'script')],
+      [5600, stepEnd('publish#1/open', 2, 'passed')],
+      [5700, end('publish#1', 'passed', 600)],
+      [5800, runEnd('completed', 1)],
+    ),
+  );
+  const [publish] = summary?.calls ?? [];
+  expect(publish?.portErrors).toEqual([{ ...credits, message: 'jev.ask: first' }]);
+  expect(publish?.steps?.map((step) => [step.key, step.portErrors?.length])).toEqual([
+    ['publish#1/describe', 1],
+    ['publish#1/open', undefined],
+  ]);
+});

@@ -592,3 +592,36 @@ test('a run with Jev calls shows a jev row after its totals: calls, questions, l
     });
   });
 });
+
+test('a run with a port error shows a port error row holding its key, its code and its message', async () => {
+  await withTempRepo(async (repo) => {
+    emptySailDir(repo.dir);
+    runWith(
+      repo.dir,
+      ndjson(
+        stamp(
+          [0, runStart()],
+          [50, start('spec#1')],
+          [
+            100,
+            {
+              type: 'error:port',
+              key: 'spec#1',
+              port: 'jev',
+              op: 'ask',
+              code: 'payment_required',
+              message: 'jev.ask: the TypeSafe account has no credits: TypeSafe answered 402 Payment Required: x',
+            },
+          ],
+          [1450, end('spec#1', 'passed', 1400)],
+          [1460, journal('spec#1', 1, 'passed')],
+          [1500, runEnd('completed', 2)],
+        ),
+      ),
+    );
+    const { stdout } = await runCaptured(['show', GOLDEN_RUN_ID], repo.dir);
+    expect(stdout.split('\n').filter((line) => line.startsWith('port error'))).toEqual([
+      'port error  spec#1 · payment_required · jev.ask: the TypeSafe account has no credits: TypeSafe answered 402 Payment Required: x',
+    ]);
+  });
+});

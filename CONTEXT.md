@@ -538,7 +538,7 @@ The move a workflow made after a call: the outcome it received and what it did n
 _Avoid_: branch, transition, edge
 
 **Summary**:
-The rolled-up view of a run derived from its events: calls, loops, totals, and cost against budget. It is rewritten after every call for people and dashboards and never read for resume.
+The rolled-up view of a run derived from its events: calls, loops, totals, and cost against budget, and for a call or step the port calls that failed under it, as `portErrors`. It is rewritten after every call for people and dashboards and never read for resume.
 _Avoid_: report, status file, digest
 
 **Usage**:
