@@ -41,6 +41,7 @@ if (answer.asked) {
 const glossary = { entries: entries.length, words: entries.reduce((sum, entry) => sum + entry.avoid.length, 0) };
 const jev = {
   asked: answer.asked,
+  failed: answer.failed === true,
   note: [answer.asked ? '' : answer.note, note].filter(Boolean).join('; '),
   threshold: BANNED_YES,
   candidates: allCandidates.length,

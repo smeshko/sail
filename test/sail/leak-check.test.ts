@@ -89,6 +89,15 @@ test('the Jev request never holds the denylist or its path', async () => {
     expect(request.includes(repo.home)).toBe(false);
   });
 });
+test('the stage, with a Jev answering 402, exits 0 and reports the port failure with the credits message', async () => {
+  await withTempRepo((repo) => {
+    writeOwnSail(repo, { jev: { error: { status: 402, detail: 'billing_error' } } });
+    const result = stage(repo, doc);
+    expect(result.code).toBe(0);
+    expect(result.output.jev).toMatchObject({ asked: false, failed: true, lines: 1 });
+    expect(result.output.jev.note).toContain('the TypeSafe account has no credits');
+  });
+});
 test('the stage, with no adapters.jev, exits 0 with the exact scan’s hits', async () => {
   await withTempRepo((repo) => {
     writeOwnSail(repo);
@@ -223,6 +232,7 @@ test('the stage keeps the answers of the requests Jev answered and notes the one
       yes: 0.97,
     });
     expect(result.output.jev.asked).toBe(true);
+    expect(result.output.jev.failed).toBe(false);
     expect(result.output.jev.note).toStartWith('1 of 2 requests not asked: the request is ');
   });
 });

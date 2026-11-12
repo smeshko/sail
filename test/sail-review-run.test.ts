@@ -205,6 +205,28 @@ test.each([
   120_000,
 );
 
+test('a review run whose Jev answers 402 names both Jev checks as incomplete in its comment, and lists the port errors in its summary', async () => {
+  await withTempRepo(async (repo) => {
+    setUp(
+      repo,
+      { error: { status: 402, detail: 'billing_error' } },
+      '**Edit**:\nAn alteration.\n_Avoid_: change\n',
+      undefined,
+      {
+        'doc.md': 'A doc line\n',
+      },
+    );
+    const { dir } = await review(repo);
+    const comment = (await pullRequest(repo)).comments.find((body) => body.includes('## sail review')) ?? '';
+    expect(comment).toContain('Jev check incomplete (leak-check, banned-words):');
+    expect(comment).toContain('the TypeSafe account has no credits');
+    expect(comment).not.toContain('Banned-words check incomplete');
+    const summary = JSON.parse(readFileSync(join(dir, 'summary.json'), 'utf8')) as Summary;
+    const codes = (key: string) => summary.calls.find((call) => call.key === key)?.portErrors?.map((e) => e.code);
+    expect([codes('leak-check#1'), codes('banned-words#1')]).toEqual([['payment_required'], ['payment_required']]);
+  });
+}, 120_000);
+
 type TriageHint = {
   decided: { finding: string; verdict: string; rationale: string }[];
   answers: { id: string; supported: number; verdict: string; confidence: number }[];

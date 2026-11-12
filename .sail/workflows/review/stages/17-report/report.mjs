@@ -95,6 +95,11 @@ function build(level) {
       '',
     );
   if (record.judgement) lines.push(text(record.judgement.summary), '');
+  const incomplete = new Map();
+  for (const { stage, note } of record.jevIncomplete ?? [])
+    incomplete.set(note, [...(incomplete.get(note) ?? []), stage]);
+  for (const [note, stages] of incomplete)
+    lines.push(`Jev check incomplete (${stages.join(', ')}): ${cell(note)}.`, '');
   if (record.bannedWordsNote) lines.push(`Banned-words check incomplete: ${cell(record.bannedWordsNote)}.`, '');
   if (record.findings.length === 0) {
     lines.push(

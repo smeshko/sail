@@ -7,7 +7,13 @@ export const Banned = z.object({
     z.object({ file: z.string(), line: z.number().int(), word: z.string(), term: z.string(), yes: z.number() }),
   ),
   glossary: z.object({ entries: z.number(), words: z.number() }),
-  jev: z.object({ asked: z.boolean(), note: z.string(), threshold: z.number(), candidates: z.number() }),
+  jev: z.object({
+    asked: z.boolean(),
+    failed: z.boolean(),
+    note: z.string(),
+    threshold: z.number(),
+    candidates: z.number(),
+  }),
 });
 
 export const bannedWords = script('banned-words', {
