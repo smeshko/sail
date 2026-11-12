@@ -3,7 +3,7 @@
 // decides what each finding becomes (fixed here, filed as a ticket, or dropped)
 // and which reviews are too thin to trust. Up to three fix passes follow, each checked by the agent, with Jev's answers as its hint, beside fresh
 // validation; a pass that commits nothing and leaves the same findings open ends them early. A pass starts only for a
-// finding at medium or above, and low findings alone are listed as nits. Then
+// finding, and every finding is at medium or above: a reviewer's low finding is dropped. Then
 // the fixes are pushed, the tickets filed, the demonstration attached to the ticket, the review commented, and the pull
 // request merged once its checks pass. Landing has up to three merges of its own, whatever the fix rounds used: each
 // retry merges the base in, an agent resolving any conflict, and sends checks still red after a rerun to fix as
@@ -65,7 +65,7 @@ export default workflow(
   'review',
   {
     intake: pr,
-    version: 11,
+    version: 12,
     watch: { every: '5m' },
     // Two pull requests at a time, though each merge moves the base the other is being reviewed against.
     maxConcurrentRuns: 2,
@@ -169,7 +169,8 @@ export default workflow(
       const lens = LENSES[index] ?? 'bugs';
       if (reviewed.outcome === 'blocked') return handOff(`review-${lens} blocked: ${reviewed.reason}`);
       summaries.push({ lens, summary: reviewed.output.summary, coverage: reviewed.output.coverage });
-      for (const finding of reviewed.output.findings) {
+      // A reviewer is asked for medium and above; a low finding it submits anyway never reaches triage or the judge.
+      for (const finding of reviewed.output.findings.filter((each) => each.severity !== 'low')) {
         findings.push({
           ...finding,
           id: `R${findings.filter((each) => each.id.startsWith('R')).length + 1}`,
@@ -203,17 +204,12 @@ export default workflow(
     const decided = new Map(judgement.decisions.map((each) => [each.finding, each]));
     const undecided = findings.filter((finding) => !decided.has(finding.id)).map((finding) => finding.id);
     if (undecided.length > 0) return run.fail(`judge left ${undecided.join(', ')} undecided`);
-    // A fix pass costs a validation, a push and a wait on the checks, so one starts only for a finding at medium or
-    // above, the low ones riding along in it; low findings alone are reported as nits.
+    // Every finding here is at medium or above: reviewers' low findings are dropped above, and check-fix's below.
     const kept = findings.filter((finding) => decided.get(finding.id)?.verdict === 'fix');
-    const worth = kept.some((finding) => finding.severity !== 'low');
-    let targets = worth ? kept : [];
-    const nits = worth ? [] : kept.map((finding) => finding.id);
-    // A low-severity finding is never worth a ticket of its own, whatever the judge chose.
+    let targets = kept;
     const tickets: z.infer<typeof FollowUp>[] = [];
     for (const decision of judgement.decisions) {
-      const severity = findings.find((finding) => finding.id === decision.finding)?.severity;
-      if (decision.verdict === 'ticket' && decision.ticket !== null && severity !== 'low')
+      if (decision.verdict === 'ticket' && decision.ticket !== null)
         tickets.push({ ...decision.ticket, fromReview: true });
     }
     const { thin } = judgement;
@@ -330,7 +326,7 @@ export default workflow(
         rounds,
         resolved,
         open,
-        nits,
+        nits: [],
         thin,
         bannedWordsNote: banned.output.jev.candidates > 0 ? banned.output.jev.note : '',
       },
