@@ -20,7 +20,7 @@ import { pr } from 'sail/intakes';
 import type { FollowUp } from '../../stages/file-follow-ups/stage';
 import { fileFollowUps } from '../../stages/file-follow-ups/stage';
 import { redTests, validate } from '../../stages/validate/stage';
-import { noSurface } from './demonstration';
+import { NO_SURFACE, noSurface } from './demonstration';
 import type { Demonstrated, Judgement, Lens, NumberedFinding, Reviewed, ReviewRecord, Triaged } from './schemas';
 import { FixFeedback } from './schemas';
 import { requirements } from './stages/01-requirements/stage';
@@ -197,6 +197,7 @@ export default workflow(
     }
 
     // The demonstration is evidence for the judge, not a source of findings: the judge may raise a criterion it didn't show.
+    // A skip reaches it as NO_SURFACE: the body's words are untrusted, and the brief holds them wrapped.
     // The judge decides what each finding becomes, and which reviews it can't trust. It runs with no findings too: a
     // clean review is only as good as what its coverage says it checked.
     const triaged = await run.stage(jevTriage, { findings: { findings }, diff: run.intake.files['diff.patch'] });
@@ -206,7 +207,11 @@ export default workflow(
       brief,
       requirements: reading.requirements,
       findings: { findings },
-      evidence: { validation: validated.output, demonstration, reviews: summaries },
+      evidence: {
+        validation: validated.output,
+        demonstration: skipped === null ? demonstration : { ...demonstration, skipped: NO_SURFACE },
+        reviews: summaries,
+      },
     });
     if (judged.outcome === 'blocked') return handOff(`judge blocked: ${judged.reason}`);
     // A criterion the judge raised: the demonstration didn't show it and no test does. Each is a high finding the fix pass
