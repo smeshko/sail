@@ -1530,3 +1530,39 @@ test('download refuses a body whose Content-Length is over the cap without readi
   ]);
   expect(pulled.chunks).toBeLessThan(3);
 });
+
+test('a source made with retryDelayMs: 1 reads past a dropped connection in under a second', async () => {
+  const world = createLinearWorld(SEED);
+  let drops = 0;
+  const source = createLinearTicketSource({
+    team: 'ADW',
+    endpoint: LINEAR_ENDPOINT,
+    apiKey: KEY,
+    retryDelayMs: 1,
+    fetch: (input, init) => {
+      drops += 1;
+      return drops <= 1 ? Promise.reject(new TypeError('fetch failed')) : world.fetch(input, init);
+    },
+  });
+  const started = performance.now();
+  expect((await source.get('ADW-1')).ticketKey).toBe('ADW-1');
+  expect(drops).toBeGreaterThanOrEqual(2);
+  expect(performance.now() - started).toBeLessThan(1000);
+});
+
+describe('the definition takes retryDelayMs', () => {
+  test('and accepts a non-negative integer', () => {
+    expect(() =>
+      linearTicketSource.create({ team: 'ADW', retryDelayMs: 1 }, context({ LINEAR_API_KEY: KEY })),
+    ).not.toThrow();
+  });
+
+  test.each<[unknown]>([[-1], ['fast']])('and refuses %j before any request, naming the option', async (value) => {
+    const error = await rejection(
+      Promise.resolve().then(() =>
+        linearTicketSource.create({ team: 'ADW', retryDelayMs: value }, context({ LINEAR_API_KEY: KEY })),
+      ),
+    );
+    expect(messageOf(error).startsWith('linear ticketSource: option retryDelayMs: ')).toBe(true);
+  });
+});

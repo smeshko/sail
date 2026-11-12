@@ -52,6 +52,8 @@ export interface GitHubCodeHostOptions extends ProviderOptions {
   readonly env: Readonly<Record<string, string>>;
   readonly fetch?: Fetch;
   readonly pushTimeoutMs?: number;
+  /** The pause before a read's first retry, which the client doubles for the next two. 1 s unless given. */
+  readonly retryDelayMs?: number;
 }
 
 const NUMBER = /^#?([1-9]\d*)$/;
@@ -77,6 +79,7 @@ export function createGitHubCodeHost(options: GitHubCodeHostOptions): CodeHost {
     owner,
     repo,
     ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
+    ...(options.retryDelayMs === undefined ? {} : { retryDelayMs: options.retryDelayMs }),
   });
   const emit = (event: ProviderEvent) => options.emit?.(redact.value(event));
   const pullUrl = new RegExp(`^${literal(`${webUrl}/${owner}/${repo}/pull/`)}([1-9]\\d*)(?:/|#.*)?$`);
@@ -424,6 +427,7 @@ const GitHubOptions = z.strictObject({
     .optional(),
   remote: z.string().min(1).optional(),
   draft: z.boolean().optional(),
+  retryDelayMs: z.number().int().nonnegative().optional(),
 });
 
 /** The environment without its unset variables. */
@@ -431,7 +435,7 @@ const defined = (env: Readonly<Record<string, string | undefined>>): Record<stri
   Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined));
 
 /**
- * `github` in `project.yaml`: `repository`, `remote` and `draft` are optional, the token comes from `SAIL_GITHUB_TOKEN`
+ * `github` in `project.yaml`: `repository`, `remote`, `draft` and `retryDelayMs` are optional, the token comes from `SAIL_GITHUB_TOKEN`
  * or else `GITHUB_TOKEN` (D7), and the endpoint from `SAIL_GITHUB_API_URL` (D6).
  */
 export const githubCodeHost: AdapterDefinition<CodeHost> = {
@@ -467,6 +471,7 @@ export const githubCodeHost: AdapterDefinition<CodeHost> = {
       webUrl: GITHUB_WEB_URL,
       remote,
       ...(parsed.data.draft === undefined ? {} : { draft: parsed.data.draft }),
+      ...(parsed.data.retryDelayMs === undefined ? {} : { retryDelayMs: parsed.data.retryDelayMs }),
       env,
       ...(context.emit === undefined ? {} : { emit: context.emit }),
       ...(context.now === undefined ? {} : { now: context.now }),
