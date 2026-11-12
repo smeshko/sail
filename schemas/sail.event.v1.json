@@ -1164,7 +1164,9 @@
         "key": true,
         "port": { "enum": ["ticketSource", "codeHost", "jev"] },
         "op": { "type": "string", "minLength": 1 },
-        "code": { "enum": ["not_found", "unauthorized", "forbidden", "conflict", "invalid", "unavailable"] },
+        "code": {
+          "enum": ["not_found", "unauthorized", "forbidden", "conflict", "invalid", "unavailable", "payment_required"]
+        },
         "message": { "type": "string", "minLength": 1 }
       },
       "required": ["port", "op", "code", "message"],
@@ -1804,7 +1806,9 @@
       "properties": {
         "port": { "enum": ["ticketSource", "codeHost"] },
         "adapter": { "type": "string" },
-        "code": { "enum": ["not_found", "unauthorized", "forbidden", "conflict", "invalid", "unavailable"] },
+        "code": {
+          "enum": ["not_found", "unauthorized", "forbidden", "conflict", "invalid", "unavailable", "payment_required"]
+        },
         "message": { "type": "string" },
         "paused": { "type": "boolean" },
         "retryInMs": { "type": "integer", "minimum": 0 }

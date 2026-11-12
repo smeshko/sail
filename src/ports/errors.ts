@@ -10,6 +10,7 @@ export const PORT_ERROR_CODES = [
   'conflict',
   'invalid',
   'unavailable',
+  'payment_required',
 ] as const;
 export type PortErrorCode = (typeof PORT_ERROR_CODES)[number];
 

@@ -203,6 +203,7 @@ A result lists each problem with its reason: `invalid_output`, `missing_file`, `
 The `port` reason covers a port call that failed and a port events file that holds something that is no provider event.
 An `exit_code` error carries the code `signalled` when a signal sail didn't send (SIGTERM, SIGKILL, SIGHUP or SIGINT) ended the script, and such a step suspends the run as `interrupted`, unless its call passed `{ onError: 'return' }`, whose workflow takes the error.
 A `port` error carries the code `unavailable` when the provider could not be reached; the GitHub and Linear adapters first send a read up to three more times, pausing 1, 2 and 4 seconds, after no answer or a 5xx answer, and never send a write twice: a step that doesn't pass on it is an error, whatever its exit code, and suspends the run, unless its call passed `{ onError: 'return' }`, whose workflow takes the error.
+A `port` error carries the code `payment_required` when TypeSafe answers that the account has no credits: it is never retried and never suspends the run.
 A dispatched run so suspended (`port_unavailable`) has its item held and the run resumed by its watcher on a growing back-off of 1, 2, 5, 10 and 30 minutes, and parked with the last port error once it is suspended past that schedule; a resume that gets past the call resets the count.
 _Avoid_: crash, exception, failed
 

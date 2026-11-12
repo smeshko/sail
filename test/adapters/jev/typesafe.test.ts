@@ -213,6 +213,27 @@ test('a 401 fails unauthorized, a 429 and a 503 unavailable, each with its statu
   });
 });
 
+test('a 402 fails at once with the credits message, after one send', async () => {
+  const answering = scripted(() => json({ detail: 'billing_error' }, 402));
+  const error = (await rejection(asking(answering.fetch).ask(THREE_QUESTIONS))) as PortError;
+  expect({ code: error.code, message: error.message, sends: answering.sent.length }).toEqual({
+    code: 'payment_required',
+    message: 'jev.ask: the TypeSafe account has no credits: TypeSafe answered 402 Payment Required: billing_error',
+    sends: 1,
+  });
+});
+
+test('a 413 and a 415 fail invalid with their status text', async () => {
+  expect(await failure(413, { detail: 'too large' })).toMatchObject({
+    code: 'invalid',
+    message: 'jev.ask: TypeSafe answered 413 Payload Too Large: too large',
+  });
+  expect(await failure(415, { detail: 'not json' })).toMatchObject({
+    code: 'invalid',
+    message: 'jev.ask: TypeSafe answered 415 Unsupported Media Type: not json',
+  });
+});
+
 test('a 403 fails forbidden, a 404 not_found and a 409 conflict, each with its status in the message', async () => {
   expect(await failure(403, { detail: 'no access to this model' })).toEqual({
     port: 'jev',

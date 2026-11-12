@@ -911,6 +911,14 @@ test('event: a run:suspended on an unavailable port names its call, and takes no
   });
 });
 
+test('event: an error:port may carry the code payment_required', () => {
+  const sample = { ...envelope, type: 'error:port', port: 'jev', op: 'ask', message: 'jev.ask: no credits' };
+  expect({
+    credits: paths('sail.event.v1', { ...sample, code: 'payment_required' }),
+    unknown: paths('sail.event.v1', { ...sample, code: 'broke' }),
+  }).toEqual({ credits: [], unknown: ['/code'] });
+});
+
 test('result: a port error may carry the code unavailable, and no other code', () => {
   const failing = { ...scriptResult, outcome: 'error' };
   const port = { reason: 'port', message: 'codeHost.push: GitHub is unreachable' };

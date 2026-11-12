@@ -1041,6 +1041,31 @@ test('a script whose sail port jev ask is answered 429 and which exits with its 
   ]);
 });
 
+test('a script whose sail port jev ask is answered 402 ends failed by its exit code, with no port error, and passes when it carries on', async () => {
+  const credits = 'jev.ask: the TypeSafe account has no credits: TypeSafe answered 402 Payment Required: billing_error';
+  const failing = setup();
+  withJev(failing, { error: { status: 402, detail: 'billing_error' } });
+  failing.run(
+    `echo '${JEV_BODY}' | sail port jev ask >/dev/null || { ${JUNIT}; echo '${FAILING}'; exit 1; }\necho '${PASSING}'`,
+  );
+  const first = collecting(failing);
+  const failed = await scriptKind.run(tests(), first.context);
+  expect([failed.outcome, failed.errors]).toEqual(['failed', []]);
+  expect(first.events.filter((event) => event.type === 'error:port')).toEqual([
+    { type: 'error:port', port: 'jev', op: 'ask', code: 'payment_required', message: credits },
+  ]);
+
+  const carrying = setup();
+  withJev(carrying, { error: { status: 402, detail: 'billing_error' } });
+  carrying.run(`echo '${JEV_BODY}' | sail port jev ask >/dev/null || true\n${JUNIT}\necho '${PASSING}'`);
+  const second = collecting(carrying);
+  const passed = await scriptKind.run(tests(), second.context);
+  expect([passed.outcome, passed.errors]).toEqual(['passed', []]);
+  expect(second.events.filter((event) => event.type === 'error:port').map((event) => event.type)).toEqual([
+    'error:port',
+  ]);
+});
+
 test.each<[string, string, number | undefined, string, string[]]>([
   ['times out', 'sleep 5', 1, 'error', ['script:exec', 'codehost:pushed', 'script:exit', 'error:timeout']],
   [
