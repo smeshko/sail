@@ -68,11 +68,16 @@ export const Checked = z.object({
   status: z.enum(['holds', 'finding', 'unchecked']),
 });
 
+/** Something below medium a reviewer names for the report. Nobody judges or fixes it. */
+export const Nit = z.object({ file: z.string(), title: z.string(), detail: z.string() });
+
 export const Reviewed = z.object({
   summary: z.string(),
   /** Everything the lens's checklist asked of this change, each checked or said why not. */
   coverage: z.array(Checked).min(1),
   findings: z.array(Finding),
+  /** Up to three things below medium the reviewer names for the report, which lists them and nobody acts on. */
+  nits: z.array(Nit).max(3).optional(),
 });
 
 /** What the judge read beside the findings: how each check went as a whole. */

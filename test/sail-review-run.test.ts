@@ -1170,16 +1170,52 @@ test("the pull request's description reaches fix and check-fix wrapped as untrus
   });
 }, 120_000);
 
-test('review-tests is asked for medium and high findings only', async () => {
+test('every reviewer is asked for medium and above, and up to three nits', async () => {
   await withTempRepo(async (repo) => {
     setUp(repo);
     const { code, stderr, dir } = await review(repo);
     expect({ code, stderr: code === 0 ? '' : stderr }).toEqual({ code: 0, stderr: '' });
-    const folder = readdirSync(dir).find((name) => name.replace(/^\d+-/, '') === 'review-tests');
-    const prompt = readFileSync(join(dir, folder ?? '', 'call-1', 'prompt.md'), 'utf8');
-    expect(prompt).toContain('`medium` for one with a\nnarrow trigger or that will cost the next change');
-    expect(prompt).toContain('Report only `high` and `medium` findings');
-    expect(prompt).not.toContain('`low` for the rest');
+    for (const lens of ['requirements', 'architecture', 'bugs', 'tests', 'conventions']) {
+      const folder = readdirSync(dir).find((name) => name.replace(/^\d+-/, '') === `review-${lens}`);
+      const prompt = readFileSync(join(dir, folder ?? '', 'call-1', 'prompt.md'), 'utf8');
+      expect(prompt).toContain('`medium` for one with a\nnarrow trigger or that will cost the next change');
+      expect(prompt).toContain('Report only `high` and `medium` findings');
+      expect(prompt).toContain('up to three');
+      expect(prompt).not.toContain('`low` for the rest');
+    }
+  });
+}, 120_000);
+
+/** Seeds `review-conventions` with `nits` and no findings. */
+function seedNits(repo: TempRepo, count: number): void {
+  const sail = join(repo.dir, '.sail');
+  const harness = JSON.parse(readFileSync(join(sail, 'fake/harness.json'), 'utf8'));
+  const answer = harness['review-conventions'][0];
+  answer.output.nits = Array.from({ length: count }, (_, i) => ({ file: 'notes.txt', title: `nit ${i}`, detail: 'y' }));
+  seedHarness(sail, 'review-conventions', [answer]);
+}
+
+test('a reviewer that names four nits is rejected', async () => {
+  await withTempRepo(async (repo) => {
+    setUp(repo);
+    seedNits(repo, 4);
+    const { code, dir } = await review(repo);
+    expect(code).not.toBe(0);
+    const folder = readdirSync(dir).find((name) => name.replace(/^\d+-/, '') === 'review-conventions');
+    const result = JSON.parse(readFileSync(join(dir, folder ?? '', 'call-1', 'result.json'), 'utf8'));
+    expect(result.outcome).toBe('error');
+    expect(result.errors.map((e: { reason: string }) => e.reason)).toContain('invalid_output');
+  });
+}, 120_000);
+
+test("a reviewer's three nits are accepted", async () => {
+  await withTempRepo(async (repo) => {
+    setUp(repo);
+    seedNits(repo, 3);
+    const { code, dir } = await review(repo);
+    expect(code).toBe(0);
+    const entry = readJournal(dir).entries.find((e) => e.key === 'review-conventions#1');
+    expect(entry?.outcome).toBe('done');
   });
 }, 120_000);
 
