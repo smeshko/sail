@@ -1,5 +1,5 @@
 // leak-check: exact matches and Jev judgments about the public repository's naming rule. It scans added lines for
-// tracker keys other than sail's own and terms of a private denylist kept outside git, and reports every exact hit.
+// tracker keys other than sail's own and terms of a private denylist kept outside git, and reports every exact hit. The key scan leaves files under `test/` out: their placeholder keys are no leak.
 // Jev also checks added comment, doc and commit-message lines; the judge gets one finding per group of hits (a tracker-key prefix,
 // a denylist term, a Jev line), and every hit stays in the output and in `leak-locations.txt`.
 import { file, script, value, z } from 'sail';

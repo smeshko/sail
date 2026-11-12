@@ -116,21 +116,27 @@ test('the stage, with no adapters.jev, exits 0 with the exact scan’s hits', as
     expect(typeof result.output.jev.note).toBe('string');
   });
 });
-test('the stage passes placeholder keys under test/ and still flags other keys there', async () => {
+test('the stage passes every tracker key under test/', async () => {
   await withTempRepo((repo) => {
     writeOwnSail(repo);
     const result = stage(
       repo,
-      '+++ b/test/x.test.ts\n@@ -0,0 +1,2 @@\n+const a = "OTHER-1";\n+const b = "OPS-4 ACME-7";\n',
+      '+++ b/test/x.test.ts\n@@ -0,0 +1,3 @@\n+const a = "OTHER-1";\n+const b = "OPS-4 ACME-7";\n+const c = "NOPE-1";\n',
     );
-    expect(result.output.hits).toEqual([{ file: 'test/x.test.ts', line: 2, match: 'ACME-7', kind: 'key' }]);
+    expect(result.output.hits).toEqual([]);
   });
 });
-test('the stage flags placeholder keys outside test/', async () => {
+test('the stage flags a key outside test/', async () => {
   await withTempRepo((repo) => {
     writeOwnSail(repo);
-    const result = stage(repo, '+++ b/src/x.ts\n@@ -0,0 +1 @@\n+const a = "OTHER-1";\n');
-    expect(result.output.hits).toEqual([{ file: 'src/x.ts', line: 1, match: 'OTHER-1', kind: 'key' }]);
+    const result = stage(
+      repo,
+      '+++ b/src/x.ts\n@@ -0,0 +1 @@\n+const a = "OTHER-1";\n+++ b/src/test/x.ts\n@@ -0,0 +1 @@\n+const a = "NOPE-1";\n',
+    );
+    expect(result.output.hits).toEqual([
+      { file: 'src/x.ts', line: 1, match: 'OTHER-1', kind: 'key' },
+      { file: 'src/test/x.ts', line: 1, match: 'NOPE-1', kind: 'key' },
+    ]);
   });
 });
 test('the stage flags a denylist term beside a placeholder key under test/', async () => {
