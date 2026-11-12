@@ -461,8 +461,12 @@ test("a step's own conventions replace the project's in its prompt, in its own o
   const narrowed = prepared(['CONTEXT.md']);
   await agentKind.run(narrowed.step, narrowed.s.context(narrowed.harness, project));
   expect(conventionsOf(narrowed.s.events)).toEqual([['CONTEXT.md']]);
-  expect(narrowed.harness.requests[0]?.prompt).toContain('## Repository conventions: CONTEXT.md');
-  expect(narrowed.harness.requests[0]?.prompt).not.toContain('Indent with tabs.');
+  expect(narrowed.harness.requests[0]?.conventions).toContain('## Repository conventions: CONTEXT.md');
+  expect(narrowed.harness.requests[0]?.conventions).not.toContain('Indent with tabs.');
+  expect(narrowed.harness.requests[0]?.prompt).not.toContain('## Repository conventions');
+  expect(narrowed.harness.requests[0]?.prompt).not.toContain('## Your task');
+  expect(narrowed.s.read('prompt.md')).toContain('## Repository conventions: CONTEXT.md');
+  expect(narrowed.s.read('prompt.md')).toContain('## Your task');
 
   // A step may name a file the project's list doesn't: each is read as a path inside the repository either way.
   const reordered = prepared(['CONTEXT.md', 'AGENTS.md']);
@@ -472,6 +476,7 @@ test("a step's own conventions replace the project's in its prompt, in its own o
   const none = prepared([]);
   await agentKind.run(none.step, none.s.context(none.harness, project));
   expect(conventionsOf(none.s.events)).toEqual([[]]);
+  expect(none.harness.requests[0] && 'conventions' in none.harness.requests[0]).toBe(false);
   expect(none.harness.requests[0]?.prompt).not.toContain('## Repository conventions');
   expect(none.s.read('prompt.md')).not.toContain('Indent with tabs.');
 });

@@ -312,7 +312,8 @@ async function run(step: AgentStep, context: StepContext): Promise<StepRun> {
     const { result, reasonless, broken, reported } = await ask(agent.harness, {
       key,
       try: context.try,
-      prompt: prompt.text,
+      prompt: prompt.message,
+      ...(prompt.conventionsText === undefined ? {} : { conventions: prompt.conventionsText }),
       cwd: context.workspace,
       // The preamble alone: what sail's own process inherited, credentials included, is not the session's to read.
       env: Object.fromEntries(preamble(context).map(({ name, value }) => [name, value])),

@@ -6,7 +6,7 @@
 //   NN-<stage>/call-N/stdout.log  what it printed, in full
 //   NN-<stage>/call-N/stderr.log
 //   NN-<stage>/call-N/result.json the engine's record of the call
-//   NN-<stage>/call-N/prompt.md   an agent step's prompt, as its harness was given it
+//   NN-<stage>/call-N/prompt.md   the conventions and the prompt the engine gave an agent step's harness
 //   NN-<stage>/call-N/session.log an agent step's transcript
 //   NN-<stage>/call-N/port-events.ndjson a script step's port events file
 //   NN-<stage>/call-N/try-M/      a later try of the same call, after an interruption or to correct an agent step's

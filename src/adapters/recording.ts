@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 import { z } from 'zod';
+import { promptRecord } from '../engine/agent-prompt';
 import { readJournal } from '../engine/journal';
 import { redactor } from '../engine/redact';
 import type { Harness, HarnessEvent, HarnessRequest } from '../ports/harness';
@@ -172,10 +173,13 @@ export function maskPaths(
   return value;
 }
 
-/** The hex sha256 of the prompt with the request's own paths masked, so it is the same on every machine. */
+/**
+ * The hex sha256 of the conventions and the prompt, composed as the engine's `prompt.md` record (so a recording made
+ * before the conventions moved keeps its hash), with the request's own paths masked, so it is the same on every machine.
+ */
 export const promptSha256 = (request: HarnessRequest): string =>
   createHash('sha256')
-    .update(maskPaths(requestRoots(request))(request.prompt))
+    .update(maskPaths(requestRoots(request))(promptRecord(request.conventions, request.prompt)))
     .digest('hex');
 
 /** Each file under `out` that isn't under `skip`, by its path relative to `out` → the sha256 of its bytes. */
