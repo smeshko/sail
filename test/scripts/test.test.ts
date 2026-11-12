@@ -243,3 +243,24 @@ test('leaves a process behind', () => {
     }
   });
 }, 60_000);
+
+test("under RUN_ID, tests and their HOME get a temp directory outside the step's scratch folder", async () => {
+  await withTempRepo(async (repo) => {
+    lockDir(repo);
+    const scratch = join(repo.dir, '.sail-runs/ADW-1-x/01-validate/call-1/tmp');
+    mkdirSync(scratch, { recursive: true });
+    mkdirSync(join(repo.dir, 'test'), { recursive: true });
+    writeFileSync(
+      join(repo.dir, 'test/where.test.ts'),
+      "import { test } from 'bun:test';\nimport { tmpdir } from 'node:os';\ntest('where', () => {\n  console.log('WHERE', JSON.stringify([tmpdir(), process.env.TMP ?? '', process.env.TEMP ?? '', process.env.HOME]));\n});\n",
+    );
+    const run = await finish(
+      launch(repo, ['./test/where.test.ts'], { RUN_ID: 'ADW-1-x', TMPDIR: scratch, TMP: scratch, TEMP: scratch }),
+    );
+    expect(run.code).toBe(0);
+    const line = `${run.stdout}\n${run.stderr}`.split('\n').find((at) => at.startsWith('WHERE '));
+    const paths = JSON.parse(line?.slice('WHERE '.length) ?? '[]') as string[];
+    expect(paths).toHaveLength(4);
+    for (const path of paths) expect(path.startsWith(repo.dir)).toBe(false);
+  });
+}, 60_000);

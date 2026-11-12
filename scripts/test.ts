@@ -72,6 +72,13 @@ if (process.env.RUN_ID && broadRun(args)) {
   }
 }
 
+// A sail step points TMPDIR, TMP and TEMP at its try's scratch folder, inside the clone's run directory. Inherited,
+// the throwaway HOME, every temp repository and a test that needs a folder outside any git repository would sit in the
+// clone's git tree, so inside a run the tests get the system's temp directory instead.
+if (process.env.RUN_ID) {
+  for (const name of ['TMPDIR', 'TMP', 'TEMP']) delete process.env[name];
+}
+
 const home = realpathSync(mkdtempSync(join(tmpdir(), 'sail-test-home-')));
 
 // Git exports GIT_DIR and friends to hooks; inherited, they would point a test's git calls at the real checkout. A
