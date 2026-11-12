@@ -4,7 +4,7 @@
 // An in-place checkout keeps what git ignores, which is the point: tracked files go back to the commit, untracked files
 // that are not ignored are removed (`clean -ffd`, never `-x` or `-X`), and the build caches stay. The adapter does not
 // vouch for them: a stale incremental build is the repository's own gate's to handle.
-import { existsSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { PortError } from '../../ports/errors';
 import type { Workspace } from '../../ports/types';
@@ -83,10 +83,35 @@ export function checkOutInPlace(path: string, sha: string, env?: Env): void {
   }
 }
 
-/** Whether `path` is a worktree of its own, not a directory inside another checkout. */
-function isWorktree(path: string, env: Env): boolean {
+/**
+ * Why `path` is no worktree of `repo` that a checkout may run in, or undefined when it is one. Its `.git` must be a
+ * plain file naming an entry of the clone's own `.git/worktrees/`, and that entry's `gitdir` file must point back at
+ * it: a `.git` rewritten to name the clone's git directory, another worktree's entry or another repository would have
+ * the checkout move that one's `HEAD` and index. A link at `.git` or at the entry is never followed.
+ */
+function notOwnWorktree(repo: string, path: string, env: Env): string | undefined {
+  const no = `${path} is no git worktree`;
+  const gitFile = join(path, '.git');
+  try {
+    if (!lstatSync(gitFile).isFile()) return `${no}: ${gitFile} is no plain file`;
+    const named = /^gitdir: (.+)$/.exec(readFileSync(gitFile, 'utf8').trim())?.[1];
+    if (named === undefined) return `${no}: ${gitFile} names no git directory`;
+    const entry = resolve(path, named);
+    const common = gitSync(repo, ['rev-parse', '--path-format=absolute', '--git-common-dir'], env);
+    if (common.code !== 0) return `${no}: git rev-parse failed: ${common.stderr}`;
+    const entries = join(realpathSync(common.stdout.trim()), 'worktrees');
+    if (isLink(entry) || dirname(realpathSync(entry)) !== entries) {
+      return `${no}: ${gitFile} names ${named}, which is no entry of ${entries}`;
+    }
+    const back = resolve(entry, readFileSync(join(entry, 'gitdir'), 'utf8').trim());
+    if (isLink(back) || realpathSync(back) !== realpathSync(gitFile)) {
+      return `${no}: ${entry} does not point back at ${gitFile}`;
+    }
+  } catch (error) {
+    return `${no}: ${(error as Error).message}`;
+  }
   const top = gitSync(path, ['rev-parse', '--show-toplevel'], env);
-  return top.code === 0 && top.stdout.trim() === realpathSync(path);
+  return top.code === 0 && top.stdout.trim() === realpathSync(path) ? undefined : no;
 }
 
 /** The standing workspaces' parent: the directory that holds the run directories. */
@@ -96,7 +121,8 @@ const runsDirOf = (run: { runDir: string }): string => dirname(resolve(run.runDi
  * Gives `run` the first free standing workspace of its workflow, its commit `sha` checked out. It walks `n` from 0
  * below `run.maxConcurrentRuns ?? 1`, takes the first lease it can, keeps the head of a stale holder it took over at
  * that run's run ref first, then adds the worktree (`--force`, so one removed by hand is made again) or checks out in
- * place. A directory that can't be used, a folder that is no worktree among them, is skipped and its lease dropped; one
+ * place. A directory that can't be used, a folder that is no worktree of the clone whose git entry points back at it
+ * among them, is skipped and its lease dropped; one
  * whose lease can't be read or taken is skipped and its lease left. A takeover whose stale holder's head can't be kept
  * gives that run its lease back, so its head is never checked out over. A link at `standing/`, at the directory or at
  * its worktree is skipped untouched. Each skip is told to `onSkip`, naming the directory and why; one a live run holds
@@ -148,10 +174,10 @@ export function leaseStanding(options: {
       if (!existsSync(path)) {
         const added = gitSync(repo, [...NO_HOOKS, 'worktree', 'add', '--force', '--detach', path, sha], env);
         if (added.code !== 0) throw new PortError('workspace', 'create', 'unavailable', added.stderr);
-      } else if (isWorktree(path, env)) {
-        checkOutInPlace(path, sha, env);
       } else {
-        throw new PortError('workspace', 'create', 'unavailable', `${path} is no git worktree`);
+        const why = notOwnWorktree(repo, path, env);
+        if (why !== undefined) throw new PortError('workspace', 'create', 'unavailable', why);
+        checkOutInPlace(path, sha, env);
       }
     } catch (error) {
       dropStanding(dir, run.runId);

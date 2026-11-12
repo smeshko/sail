@@ -286,6 +286,79 @@ test('a standing directory that holds a plain folder, not a worktree, is skipped
   });
 });
 
+test("a standing worktree whose .git names the clone's own git directory is skipped: the clone's HEAD, index and unfinished cherry-pick are untouched, and the run gets its own workspace saying why", async () => {
+  await standingRepo(({ repo, runsDir, sha, next }) => {
+    const first = { ...next('run-a'), maxConcurrentRuns: 1 };
+    const path = leaseStanding({ repo: repo.dir, run: first, sha, env: repo.env })?.path ?? '';
+    writeStatus(first.runDir, 'completed');
+    // The clone: a later commit on main, a staged change, an unfinished cherry-pick and an untracked file.
+    writeFileSync(join(repo.dir, 'tracked.txt'), 'later\n');
+    repo.git('commit', '-qam', 'later');
+    writeFileSync(join(repo.dir, 'tracked.txt'), 'staged\n');
+    repo.git('add', 'tracked.txt');
+    writeFileSync(join(repo.dir, '.git', 'CHERRY_PICK_HEAD'), `${sha}\n`);
+    writeFileSync(join(repo.dir, 'precious.txt'), 'mine');
+    const clone = () => ({
+      head: repo.git('symbolic-ref', 'HEAD'),
+      tip: repo.git('rev-parse', 'HEAD'),
+      index: repo.git('diff', '--cached', '--raw'),
+      picking: existsSync(join(repo.dir, '.git', 'CHERRY_PICK_HEAD')),
+      file: read(repo.dir, 'tracked.txt'),
+      precious: read(repo.dir, 'precious.txt'),
+    });
+    const before = clone();
+    expect(before.head).toBe('refs/heads/main');
+    writeFileSync(join(path, '.git'), `gitdir: ${join(repo.dir, '.git')}\n`);
+    writeFileSync(join(path, 'left.txt'), 'left');
+
+    const run = { ...next('run-b'), maxConcurrentRuns: 1 };
+    const started = startWorkspace({ repo: repo.dir, run, sha, standing: true, env: repo.env });
+    expect(clone()).toEqual(before);
+    expect(started.standing).toBe('none_free');
+    expect(started.path).toBe(join(run.runDir, 'workspace'));
+    expect(started.skipped).toHaveLength(1);
+    expect(started.skipped?.[0]).toContain(standingDir(runsDir, 'demo', 0));
+    expect(started.skipped?.[0]).toContain('is no git worktree');
+    expect(started.skipped?.[0]).toContain('is no entry of');
+    expect(read(path, 'left.txt')).toBe('left');
+    expect(existsSync(join(standingDir(runsDir, 'demo', 0), 'LEASE'))).toBe(false);
+  });
+});
+
+test("a standing worktree whose .git names another worktree's entry, or is a link, is skipped and never checked out in", async () => {
+  await standingRepo(({ repo, runsDir, sha, next }) => {
+    const a = leaseStanding({ repo: repo.dir, run: next('run-a'), sha, env: repo.env })?.path ?? '';
+    const b = leaseStanding({ repo: repo.dir, run: next('run-b'), sha, env: repo.env })?.path ?? '';
+    expect([a, b]).toEqual([standingPath(runsDir, 'demo', 0), standingPath(runsDir, 'demo', 1)]);
+    writeStatus(next('run-a').runDir, 'completed');
+    writeStatus(next('run-b').runDir, 'completed');
+    writeFileSync(join(b, 'tracked.txt'), 'edit in b\n');
+    const entryOfB = read(b, '.git');
+    // Slot 0 names slot 1's entry, which points back at slot 1; slot 1's `.git` is a link to a copy of itself.
+    writeFileSync(join(a, '.git'), entryOfB);
+    writeFileSync(join(a, 'left.txt'), 'left');
+    const kept = join(tempDir(), 'gitfile');
+    writeFileSync(kept, entryOfB);
+    rmSync(join(b, '.git'));
+    symlinkSync(kept, join(b, '.git'));
+
+    const skipped: string[] = [];
+    const got = leaseStanding({
+      repo: repo.dir,
+      run: next('run-c'),
+      sha,
+      env: repo.env,
+      onSkip: (why) => skipped.push(why),
+    });
+    expect(got).toBeUndefined();
+    expect(skipped).toHaveLength(2);
+    expect(skipped[0]).toContain('does not point back at');
+    expect(skipped[1]).toContain('is no plain file');
+    expect(read(a, 'left.txt')).toBe('left');
+    expect(read(b, 'tracked.txt')).toBe('edit in b\n');
+  });
+});
+
 test('a link at a standing workspace or its directory is skipped and never checked out over', async () => {
   await standingRepo(({ repo, runsDir, sha, next }) => {
     writeFileSync(join(repo.dir, 'precious.txt'), 'mine');
