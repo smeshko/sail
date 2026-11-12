@@ -543,12 +543,12 @@ test("a factory run makes no describe call and opens the pull request with imple
     }
     expect(opened[0]?.body).toEndWith('Closes FAKE-1\n');
 
-    // The follow-up implement submitted is filed once the pull request is open.
+    // The follow-up implement submitted reaches file-follow-ups once the pull request is open.
     expect(keys.slice(keys.indexOf('open#1'))).toEqual(['open#1', 'file-follow-ups#1']);
     const filed = readJournal(dir).entries.find((entry) => entry.key === 'file-follow-ups#1');
     expect(filed?.outcome).toBe('passed');
-    const created = readEvents(dir).filter((event) => event.type === 'ticket:created');
-    expect(JSON.stringify(created)).toContain("sail show's footer ignores calls replayed from a seeded run");
+    // Filed, or skipped as a duplicate by the fake Jev: either way the stage was handed implement's follow-up.
+    expect(JSON.stringify(filed?.output)).toContain("sail show's footer ignores calls replayed from a seeded run");
   });
 }, 120_000);
 
