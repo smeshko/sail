@@ -20,7 +20,7 @@ export const Finding = z.object({
 export const Lens = z.enum(['requirements', 'architecture', 'bugs', 'tests', 'conventions']);
 
 /**
- * What found it: validation, the leak check, the banned-words check (`B<n>`), the demonstration, one reviewer, check-fix reviewing the fixes, or the
+ * What found it: validation, the leak check, the banned-words check (`B<n>`), a criterion the judge raised from the demonstration (`D<n>`), one reviewer, check-fix reviewing the fixes, or the
  * checks, failing at merge.
  */
 export const Source = z.enum([
@@ -35,7 +35,7 @@ export const Source = z.enum([
 
 /**
  * A finding the workflow numbered: `V1` from validation, `L<n>` from the leak check (one per tracker-key prefix, denylist term or Jev line it found), `B<n>` from the banned-words check,
- * `D<n>` from the demonstration,
+ * `D<n>` a criterion the demonstration didn't show, raised by the judge,
  * `R<n>` from a reviewer, `F<round>-<n>` from check-fix, and `C<pass>-<n>` from a check that failed at merge.
  */
 export const NumberedFinding = Finding.extend({ id: z.string(), source: Source });
@@ -110,6 +110,11 @@ export const Judgement = z.object({
   summary: z.string(),
   /** The reviews too thin to trust: a lens whose coverage leaves out what the change needed checked. */
   thin: z.array(z.object({ lens: Lens, why: z.string() })),
+  /**
+   * The acceptance criteria the demonstration didn't show that no test asserts, each with the test that would show it.
+   * The workflow numbers each `D<n>` and sends it to fix.
+   */
+  raised: z.array(z.object({ criterion: z.string(), test: z.string() })).optional(),
   decisions: z.array(
     z.object({
       finding: z.string(),

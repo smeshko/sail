@@ -6,6 +6,8 @@
 // has three merges of its own, whatever the fix rounds used. Every merge is preceded by gate-files; a gate change is handed to a human instead.
 // A fix pass that commits nothing and leaves the same findings open ends the fix loop early. A fix pass starts only for a
 // finding; a reviewer's low finding never reaches triage or the judge.
+// The judge, not the workflow, raises a criterion the demonstration didn't show: the workflow numbers it `D<n>`, decides it
+// `fix` and sends it to the fix pass, after the reviewers' findings.
 // Triage cases show Jev decisions surviving omissions and judge overrides winning.
 import { expect, test } from 'bun:test';
 import { appendFileSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -270,10 +272,10 @@ test.each([
         { id: 'R3', supported: 0.6, verdict: 'drop', confidence: 0.95 },
         { id: 'R4', supported: 0.97, verdict: 'drop', confidence: 0.95 },
       ]);
-      expect(triage.judge).toEqual(['V1', 'D1', 'R2', 'R3']);
+      expect(triage.judge).toEqual(['V1', 'R2', 'R3']);
       expect(triage.decided.every((d) => d.rationale.includes('Jev'))).toBe(true);
       expect(callInput(dir, 'fix', 'findings').findings.map((f: { id: string }) => f.id)).toEqual(
-        overrule ? ['V1', 'D1', 'R2'] : ['V1', 'D1', 'R1', 'R2'],
+        overrule ? ['V1', 'R2', 'D1'] : ['V1', 'R1', 'R2', 'D1'],
       );
       const decisions = callInput(dir, 'report', 'record').judgement.decisions;
       expect(decisions.find((d: { finding: string }) => d.finding === 'R4')).toEqual({
@@ -362,8 +364,8 @@ test('with Jev answering every targeted finding a clear yes, check-fix#1 still r
     expect(keys).toContain('validate#2');
     expect(jevHint(dir, 'check-fix', 1).answers).toEqual([
       { id: 'V1', yes: 0.99 },
-      { id: 'D1', yes: 0.99 },
       { id: 'R2', yes: 0.99 },
+      { id: 'D1', yes: 0.99 },
     ]);
     expect(asked(dir, 'jev-fix#1')).toHaveLength(1);
     const summary = JSON.parse(readFileSync(join(dir, 'summary.json'), 'utf8')) as Summary;
@@ -417,8 +419,8 @@ test.each([
       expect(hint.asked).toBe(true);
       expect(hint.answers).toEqual([
         { id: 'V1', yes: 0.99 },
-        { id: 'D1', yes: 0.99 },
         { id: 'R2', yes },
+        { id: 'D1', yes: 0.99 },
       ]);
       expect(asked(dir, 'jev-fix#1')).toHaveLength(1);
     });
@@ -580,7 +582,7 @@ test('a low finding a reviewer submits reaches neither jev-triage nor the judge'
     expect(code).toBe(0);
     for (const stage of ['jev-triage', 'judge']) {
       const { findings } = callInput(dir, stage, 'findings');
-      expect(findings.map((each: { id: string }) => each.id)).toEqual(['V1', 'D1', 'R1', 'R2', 'R3', 'R4']);
+      expect(findings.map((each: { id: string }) => each.id)).toEqual(['V1', 'R1', 'R2', 'R3', 'R4']);
       expect(findings.find((each: { id: string }) => each.id === 'R4').title).toBe('a real problem');
       expect(findings.map((each: { severity: string }) => each.severity)).not.toContain('low');
     }
@@ -594,6 +596,7 @@ function judgeSeed(repo: TempRepo, verdicts: Record<string, 'fix' | 'drop'>): vo
   answer.output.decisions = answer.output.decisions
     .filter((each: { finding: string }) => each.finding in verdicts)
     .map((each: { finding: string }) => ({ ...each, verdict: verdicts[each.finding], ticket: null }));
+  if (verdicts.D1 !== 'fix') delete answer.output.raised;
   seedHarness(sail, 'judge', [answer]);
 }
 
@@ -937,6 +940,7 @@ function describeOnly(repo: TempRepo) {
   ];
   seedHarness(sail, 'review-requirements', [requirements]);
   const [judge] = seeds.judge;
+  delete judge.output.raised;
   // R1 is the description finding; the others the fakes seed are dropped, so it is the one target.
   const others = judge.output.decisions.filter((each: { finding: string }) => each.finding !== 'R1');
   judge.output.decisions = [
@@ -1347,5 +1351,60 @@ test("a reviewer's nits and low findings are cut to three", async () => {
       ['conventions', 'b'],
       ['conventions', 'c'],
     ]);
+  });
+}, 120_000);
+
+const UNSHOWN = 'A run with no agent calls prints `total $0.00`';
+
+test("a criterion the demonstration didn't show reaches the judge as evidence, not as a finding", async () => {
+  await withTempRepo(async (repo) => {
+    setUp(repo);
+    const { dir } = await review(repo);
+    const { findings } = callInput(dir, 'judge', 'findings');
+    expect(findings.filter((each: { source: string }) => each.source === 'demonstrate')).toEqual([]);
+    const { criteria } = callInput(dir, 'judge', 'evidence').demonstration;
+    expect(criteria.find((each: { criterion: string }) => each.criterion === UNSHOWN).shown).toBe(false);
+    const attached = callInput(dir, 'attach-demonstration', 'demonstration');
+    expect(attached.criteria.map((each: { shown: boolean }) => each.shown)).toEqual([true, false]);
+  });
+}, 120_000);
+
+test('a criterion the judge raises is numbered D1, decided fix and sent to the fix pass', async () => {
+  await withTempRepo(async (repo) => {
+    setUp(repo);
+    oneRound(repo);
+    const { dir } = await review(repo);
+    const { findings } = callInput(dir, 'fix', 'findings');
+    expect(findings.find((each: { id: string }) => each.id === 'D1')).toEqual({
+      id: 'D1',
+      source: 'demonstrate',
+      severity: 'high',
+      file: '',
+      title: `Not shown: ${UNSHOWN}`,
+      detail: 'test/cli/show.test.ts: a run of a one-script workflow ends with `total $0.00`',
+    });
+    const { decisions } = callInput(dir, 'report', 'record').judgement;
+    expect(decisions.find((each: { finding: string }) => each.finding === 'D1')).toEqual({
+      finding: 'D1',
+      verdict: 'fix',
+      rationale: 'Raised by the judge: no test shows this criterion.',
+      ticket: null,
+    });
+    const folder = readdirSync(dir).find((entry) => entry.endsWith('-report')) ?? '';
+    const text = readFileSync(join(dir, folder, 'call-1', 'out', 'REVIEW.md'), 'utf8');
+    expect(text).toContain(`| D1 Not shown: ${UNSHOWN} |`);
+  });
+}, 120_000);
+
+test('a judge that raises nothing leaves the unshown criterion out of the findings', async () => {
+  await withTempRepo(async (repo) => {
+    setUp(repo);
+    seedValidate(repo, [null, null]);
+    judgeSeed(repo, { R1: 'drop', R2: 'drop', R3: 'drop' });
+    const { code, keys, dir } = await review(repo);
+    expect(code).toBe(0);
+    expect(keys.filter((key) => /^fix#/.test(key))).toEqual([]);
+    const { findings } = callInput(dir, 'report', 'record');
+    expect(findings.filter((each: { id: string }) => each.id.startsWith('D'))).toEqual([]);
   });
 }, 120_000);
