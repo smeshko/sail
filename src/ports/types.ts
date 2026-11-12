@@ -259,7 +259,10 @@ export type Repository = z.infer<typeof Repository>;
 export const Diff = z.object({ patch: z.string(), raw: Raw });
 export type Diff = z.infer<typeof Diff>;
 
-/** `ref` is where a removed workspace's commits are kept, at `head`, when its `HEAD` had moved past its base. */
+/**
+ * `ref` is where the released workspace's commits are kept, at `head`, when its `HEAD` had moved past its base: a
+ * workspace that was removed, or a standing one that was freed and left in place, which says `kept: true`.
+ */
 export const WorkspaceReleased = z.object({
   path: z.string(),
   kept: z.boolean(),

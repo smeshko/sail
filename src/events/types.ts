@@ -394,8 +394,23 @@ interface Payloads {
   /** `took` is the stale run whose lease this one replaced. */
   'workspace:leased': { remote: string; branch: string; took?: string };
   'workspace:lease_released': { remote: string; branch: string };
-  'workspace:created': { path: string; branch: string; baseSha: string; startSha?: string; durationMs: number };
-  /** `ref` is where a removed workspace's commits are kept, at `head`, when its `HEAD` had moved past its base. */
+  /**
+   * `standing` is set only with the `standing` option on: `leased` for a standing workspace, `none_free` for a per-run
+   * one. `skipped` names each standing workspace the start could not use, with why, when there was one.
+   */
+  'workspace:created': {
+    path: string;
+    branch: string;
+    baseSha: string;
+    startSha?: string;
+    standing?: 'leased' | 'none_free';
+    skipped?: string[];
+    durationMs: number;
+  };
+  /**
+   * `ref` is where the released workspace's commits are kept, at `head`, when its `HEAD` had moved past its base: a
+   * workspace that was removed, or a standing one that was freed and left in place, which says `kept: true`.
+   */
   'workspace:released': { path: string; kept: boolean; ref?: string; head?: string };
 }
 

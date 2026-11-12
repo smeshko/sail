@@ -13,6 +13,17 @@
 // --frozen-lockfile`, before the workspace is handed out. Every run's workspace gets it, a seeded run's included, whose
 // reused calls can't have left anything in a workspace that is new. A setup that fails, times out or is stopped fails
 // the create, and the workspace is removed again.
+//
+// Its `standing` option (a boolean, off by default) keeps a worktree between runs, so the build caches git ignores are
+// still there for the next one. With it on, a run starts in a standing workspace of its workflow,
+// `.sail-runs/standing/<workflow>-<n>/workspace`, `n` from 0 to the workflow's `maxConcurrentRuns` minus 1 (one for a
+// workflow that declares none), held by the `LEASE` file beside it while its run is running or suspended. A start checks
+// its commit out in place: tracked files as committed and untracked files that are not ignored removed, while ignored
+// files stay. The adapter does not vouch for them: a stale incremental build is the repository's own gate's to handle.
+// The setup still runs on every lease. A start that finds every standing workspace held gets a per-run worktree at
+// `<runDir>/workspace`, and `workspace:created` says `standing: 'none_free'`. A standing workspace is never removed: a
+// release keeps the run's head at `refs/sail/runs/<runId>` and frees it, and neither a clean nor a sweep touches it. A
+// person removes one with `git worktree remove`.
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
@@ -26,7 +37,6 @@ import type { ProviderOptions } from '../../ports/ticket-source';
 import type { WorkspacePort } from '../../ports/workspace';
 import { defaultLeasesDir, heldLease, releaseLease, takeLease } from '../leases';
 import {
-  addDetached,
   carriedHead,
   copyTree,
   deleteLocalBranch,
@@ -43,8 +53,9 @@ import {
   resolveCommit,
   stripUserinfo,
   sweepEnded,
-  WORKSPACE_DIR,
+  workspaceOf,
 } from './git';
+import { abandonStanding, isStandingPath, releaseStanding, reopenStanding, startWorkspace } from './standing-tree';
 
 /** How long a fetch may take before it is killed. */
 export const FETCH_TIMEOUT_MS = 120_000;
@@ -70,6 +81,8 @@ export interface GitWorktreeOptions extends ProviderOptions {
   /** The workspace setup: a shell command run in each new workspace before it is handed out. None when left out. */
   readonly setup?: string;
   readonly setupTimeoutMs?: number;
+  /** Keep standing workspaces between runs of a workflow (see the header comment). Off when left out. */
+  readonly standing?: boolean;
 }
 
 /**
@@ -182,30 +195,46 @@ export function createGitWorktreeWorkspace(options: GitWorktreeOptions): Workspa
           : (fallback ?? `${remote}/${defaultBranch()}`));
       const baseSha = resolveCommit(repo, from, env);
       if (baseSha === undefined) throw new PortError('workspace', 'create', 'invalid', `${from} names no commit`);
-      const path = join(run.runDir, WORKSPACE_DIR);
       const startSha = carry === undefined ? undefined : carriedHead(repo, carry, baseSha, env);
-      const added = addDetached(repo, path, startSha ?? baseSha, env);
+      const made = startWorkspace({
+        repo,
+        run,
+        sha: startSha ?? baseSha,
+        standing: options.standing === true,
+        ...(env === undefined ? {} : { env }),
+        ...(options.standing === true ? { now: now() } : {}),
+      });
+      const { path } = made;
       if (options.setup !== undefined) {
         try {
           await setUp(options.setup, path, env, options.setupTimeoutMs ?? SETUP_TIMEOUT_MS, signal);
         } catch (error) {
           // The setup's failure is the one to report: a removal that fails too leaves a workspace a sweep takes.
-          try {
-            removeWorktree(repo, run.runDir, 'create', env);
-          } catch {}
+          // A standing workspace is never removed: its lease is freed and the worktree stays.
+          if (made.standing === 'leased') abandonStanding(run, path);
+          else {
+            try {
+              removeWorktree(repo, run.runDir, 'create', env);
+            } catch {}
+          }
           throw error;
         }
       }
       const carried = startSha === undefined ? {} : { startSha };
+      const standing = {
+        ...(made.standing === undefined ? {} : { standing: made.standing }),
+        ...(made.skipped === undefined ? {} : { skipped: [...made.skipped] }),
+      };
       emit({
         type: 'workspace:created',
         path,
         branch,
         baseSha,
         ...carried,
+        ...standing,
         durationMs: Math.max(0, now().getTime() - started),
       });
-      return { path, branch, baseSha, ...carried, raw: added };
+      return { path, branch, baseSha, ...carried, raw: made.raw };
     },
     async readTree(into, { paths, base, signal }) {
       if (base === undefined) await fetchRemote(repo, remote, env, options.fetchTimeoutMs ?? FETCH_TIMEOUT_MS, signal);
@@ -220,16 +249,24 @@ export function createGitWorktreeWorkspace(options: GitWorktreeOptions): Workspa
       return fastForwardClone(repo, remote, defaultBranch(), env);
     },
     async reopen(run, { branch, baseSha }) {
-      return reopenWorktree(join(run.runDir, WORKSPACE_DIR), branch, baseSha, env);
+      const path = workspaceOf(run, 'reopen');
+      return isStandingPath(run, path)
+        ? reopenStanding(run, path, { branch, baseSha }, env, now())
+        : reopenWorktree(path, branch, baseSha, env);
     },
     async diff(path, range) {
       return diffWorkingTree(path, range, env);
     },
     async release(run, keep) {
-      const path = join(run.runDir, WORKSPACE_DIR);
+      const path = workspaceOf(run, 'release');
       if (keep) {
         emit({ type: 'workspace:released', path, kept: keep });
         return { path, kept: keep, raw: null };
+      }
+      if (isStandingPath(run, path)) {
+        const { raw, ...commits } = releaseStanding(repo, run, path, env);
+        emit({ type: 'workspace:released', path, kept: true, ...commits });
+        return { path, kept: true, ...commits, raw };
       }
       const { raw, ...commits } = releaseWorktree(repo, run, 'release', env);
       emit({ type: 'workspace:released', path, kept: keep, ...commits });
@@ -266,8 +303,11 @@ function definedEnv(env: Env): Record<string, string> {
 }
 
 /**
- * `workspace: { use: git-worktree }`: options `remote`, `defaultBranch` and `setup`, on the repository the run starts
- * in.
+ * `workspace: { use: git-worktree }`: options `remote`, `defaultBranch`, `setup` and `standing`, on the repository the
+ * run starts in. `standing: true` (off by default) keeps a worktree per workflow place under `maxConcurrentRuns` at
+ * `.sail-runs/standing/<workflow>-<n>/workspace` between runs: a start checks its commit out there in place, keeping
+ * what git ignores (build caches, which the adapter does not vouch for), runs the setup, and falls back to a per-run
+ * worktree when none is free. A release, a clean and a sweep never remove one.
  */
 export const gitWorktreeDefinition: AdapterDefinition<WorkspacePort> = {
   create(options, context) {
@@ -275,6 +315,7 @@ export const gitWorktreeDefinition: AdapterDefinition<WorkspacePort> = {
       remote: z.string().min(1).optional(),
       defaultBranch: z.string().min(1).optional(),
       setup: z.string().min(1).optional(),
+      standing: z.boolean().optional(),
     };
     const parsed = z.strictObject(shape).safeParse(options);
     if (!parsed.success) {
@@ -282,7 +323,7 @@ export const gitWorktreeDefinition: AdapterDefinition<WorkspacePort> = {
       const option = issue?.code === 'unrecognized_keys' ? issue.keys.join(', ') : issue?.path.join('.');
       throw new Error(`git-worktree workspace: option ${option}: ${issue?.message}`);
     }
-    const { remote, defaultBranch, setup } = parsed.data;
+    const { remote, defaultBranch, setup, standing } = parsed.data;
     return createGitWorktreeWorkspace({
       ...(context.emit === undefined ? {} : { emit: context.emit }),
       ...(context.now === undefined ? {} : { now: context.now }),
@@ -290,6 +331,7 @@ export const gitWorktreeDefinition: AdapterDefinition<WorkspacePort> = {
       ...(remote === undefined ? {} : { remote }),
       ...(defaultBranch === undefined ? {} : { defaultBranch }),
       ...(setup === undefined ? {} : { setup }),
+      ...(standing === undefined ? {} : { standing }),
       env: definedEnv(context.env),
     });
   },

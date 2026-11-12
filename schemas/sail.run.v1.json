@@ -67,7 +67,10 @@
       "required": ["url", "defaultBranch", "baseSha"],
       "additionalProperties": false
     },
-    "workspace": { "description": "the run's workspace, relative to the run directory", "type": "string" },
+    "workspace": {
+      "description": "the run's workspace, relative to the run directory: a standing workspace is outside it, at ../standing/<workflow>-<n>/workspace",
+      "type": "string"
+    },
     "sail": {
       "type": "object",
       "properties": {

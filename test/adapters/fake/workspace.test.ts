@@ -76,13 +76,30 @@ function world(): WorkspaceWorld & { leasesDir: string } {
   };
 }
 
-workspaceSuite('fake', async (emit) => {
-  const w = world();
-  return {
-    adapter: createFakeWorkspace({ repo: repo().dir, remote: REMOTE, leasesDir: w.leasesDir, env: repo().env, emit }),
-    world: w,
-  };
-});
+workspaceSuite(
+  'fake',
+  async (emit) => {
+    const w = world();
+    return {
+      adapter: createFakeWorkspace({ repo: repo().dir, remote: REMOTE, leasesDir: w.leasesDir, env: repo().env, emit }),
+      world: w,
+    };
+  },
+  async (emit) => {
+    const w = world();
+    return {
+      adapter: createFakeWorkspace({
+        repo: repo().dir,
+        remote: REMOTE,
+        leasesDir: w.leasesDir,
+        env: repo().env,
+        standing: true,
+        emit,
+      }),
+      world: w,
+    };
+  },
+);
 
 test('the fake adapter emits nothing for a mark', async () => {
   const w = world();

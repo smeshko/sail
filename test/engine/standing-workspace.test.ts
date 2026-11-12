@@ -1,0 +1,292 @@
+// A run on the fake workspace with `standing: true` (ADW-554): a start takes a standing workspace of its workflow, the
+// run header records where it is, a resume finds it there, an end keeps it and frees it, and a start that finds none
+// free gets a workspace of its own. A process opens one run per `.sail/`, so each run is a `sail` process of its own,
+// as the CLI's callers start them. The stub's `ticket-to-pr` declares no `maxConcurrentRuns`: one standing workspace.
+// A watched dispatch is the dispatcher's own `sail <ticket> --dispatch <run id>` process, and a pull-request start is
+// `sail '#<n>'` on a pull-request workflow: each takes the standing workspace of its workflow as a ticket start does.
+import { expect, test } from 'bun:test';
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { readStanding, standingDir, standingPath } from '../../src/adapters/workspace/standing';
+import { EXIT_SUSPENDED } from '../../src/cli/exit-codes';
+import { openRun } from '../../src/engine/open-run';
+import { RUN_HEADER_FILE, readRunHeader } from '../../src/engine/run-header';
+import { listRuns } from '../../src/engine/runs';
+import { formatIssue, validateRunDir } from '../../src/engine/schemas';
+import { readEvents } from '../../src/events/consumers/ndjson';
+import { createDispatcher } from '../../src/watch/dispatch';
+import { openQueue } from '../../src/watch/queue-store';
+import { spawnResume, spawnRun } from '../../src/watch/spawn';
+import { fakeAdapters } from '../helpers/adapters';
+import { edit } from '../helpers/fixture';
+import { commitBranch, seedPullRequests, writePrWorkflow } from '../helpers/pr-workflow';
+import { manualClock, sourceKey } from '../helpers/queue';
+import { writeStub } from '../helpers/stub-workflow';
+import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
+
+const WORKFLOW = 'ticket-to-pr';
+const HEADER_PATH = `../standing/${WORKFLOW}-0/workspace`;
+const MAIN = join(import.meta.dir, '..', '..', 'src', 'cli', 'main.ts');
+
+/** `sail <args>` as a process in `repo`: its exit code and what it printed. */
+function sail(repo: TempRepo, ...args: string[]) {
+  const child = Bun.spawnSync([process.execPath, MAIN, ...args], {
+    cwd: repo.dir,
+    env: repo.env,
+    stdin: 'ignore',
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  return { code: child.exitCode, stdout: child.stdout.toString(), stderr: child.stderr.toString() };
+}
+
+/** The directory of the run of `ticket` `n` (the first by name) in `repo`. */
+function runDirOf(repo: TempRepo, ticket: string): string {
+  const runs = join(repo.dir, '.sail-runs');
+  const name = readdirSync(runs).find((entry) => entry.startsWith(`${ticket}-`));
+  if (name === undefined) throw new Error(`no run of ${ticket} in ${runs}`);
+  return join(runs, name);
+}
+
+/** A temp repository with the stub, its fake workspace standing, and `cache/` ignored. */
+async function standingRepo<T>(
+  fn: (repo: TempRepo, path: string, lease: () => string | undefined) => Promise<T>,
+): Promise<T> {
+  return withTempRepo(async (repo) => {
+    writeStub(repo.dir, { testsPassAt: 1 });
+    edit(
+      join(repo.dir, '.sail'),
+      'project.yaml',
+      'workspace: { use: fake }',
+      'workspace: { use: fake, standing: true }',
+    );
+    mkdirSync(join(repo.dir, '.git', 'info'), { recursive: true });
+    appendFileSync(join(repo.dir, '.git', 'info', 'exclude'), 'cache/\n');
+    const runs = join(repo.dir, '.sail-runs');
+    return fn(repo, standingPath(runs, WORKFLOW, 0), () => readStanding(standingDir(runs, WORKFLOW, 0))?.runId);
+  });
+}
+
+const created = (dir: string) => readEvents(dir).filter((event) => event.type === 'workspace:created');
+const workspaceOf = (dir: string): string => readRunHeader(dir).workspace ?? '';
+
+test('a ticket start records the standing workspace in run.json, runs there, keeps it when it ends and frees it; the next start takes the same path and finds the ignored file', async () => {
+  await standingRepo(async (repo, path, lease) => {
+    expect(sail(repo, 'FAKE-1', '--workflow', WORKFLOW).code).toBe(0);
+    const first = runDirOf(repo, 'FAKE-1');
+    expect(workspaceOf(first)).toBe(HEADER_PATH);
+    expect(validateRunDir(first).issues.map(formatIssue)).toEqual([]);
+    expect(created(first)).toMatchObject([{ path: `.sail-runs/standing/${WORKFLOW}-0/workspace`, standing: 'leased' }]);
+    expect(readEvents(first).filter((event) => event.type === 'workspace:released')).toMatchObject([
+      { path: `.sail-runs/standing/${WORKFLOW}-0/workspace`, kept: true },
+    ]);
+    expect(existsSync(join(path, '.git'))).toBe(true);
+    expect(lease()).toBeUndefined();
+    expect(existsSync(join(first, 'workspace'))).toBe(false);
+
+    mkdirSync(join(path, 'cache'));
+    writeFileSync(join(path, 'cache', 'warm'), 'warm');
+    writeFileSync(join(path, 'left.txt'), 'left');
+    expect(sail(repo, 'FAKE-2', '--workflow', WORKFLOW).code).toBe(0);
+    const second = runDirOf(repo, 'FAKE-2');
+    expect(created(second)).toMatchObject([
+      { path: `.sail-runs/standing/${WORKFLOW}-0/workspace`, standing: 'leased' },
+    ]);
+    expect(readFileSync(join(path, 'cache', 'warm'), 'utf8')).toBe('warm');
+    expect(existsSync(join(path, 'left.txt'))).toBe(false);
+  });
+}, 120_000);
+
+test('a run suspended with --until resumes in the same standing workspace, with its uncommitted file, and makes no new workspace', async () => {
+  await standingRepo(async (repo, path, lease) => {
+    expect(sail(repo, 'FAKE-1', '--workflow', WORKFLOW, '--until', 'spec').code).toBe(EXIT_SUSPENDED);
+    const dir = runDirOf(repo, 'FAKE-1');
+    const runId = dir.split('/').at(-1) ?? '';
+    expect(lease()).toBe(runId);
+    writeFileSync(join(path, 'wip.txt'), 'wip');
+
+    expect(sail(repo, 'resume', runId).code).toBe(0);
+    expect(created(dir)).toHaveLength(1);
+    expect(workspaceOf(dir)).toBe(HEADER_PATH);
+    expect(readEvents(dir).filter((event) => event.type === 'workspace:released')).toMatchObject([{ kept: true }]);
+    expect(existsSync(join(path, 'wip.txt'))).toBe(true);
+    expect(lease()).toBeUndefined();
+  });
+}, 120_000);
+
+test('a second start while the first is suspended, for a workflow with one standing workspace, runs in its own workspace saying none_free, and records workspace', async () => {
+  await standingRepo(async (repo, path, lease) => {
+    expect(sail(repo, 'FAKE-1', '--workflow', WORKFLOW, '--until', 'spec').code).toBe(EXIT_SUSPENDED);
+    const held = runDirOf(repo, 'FAKE-1').split('/').at(-1);
+    expect(sail(repo, 'FAKE-2', '--workflow', WORKFLOW).code).toBe(0);
+    const other = runDirOf(repo, 'FAKE-2');
+    const otherId = other.split('/').at(-1);
+    expect(workspaceOf(other)).toBe('workspace');
+    expect(created(other)).toMatchObject([{ path: `.sail-runs/${otherId}/workspace`, standing: 'none_free' }]);
+    expect(existsSync(join(other, 'workspace'))).toBe(false);
+    expect(lease()).toBe(held);
+    expect(existsSync(path)).toBe(true);
+  });
+}, 120_000);
+
+/** Whether a process with `pid` is alive. */
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+test('a watched dispatch runs in the standing workspace of its workflow, and the next dispatch takes the same path and finds the ignored file', async () => {
+  await standingRepo(async (repo, path, lease) => {
+    // A dispatched run reads the `.sail/` committed on the default branch.
+    repo.git('add', '.sail');
+    repo.git('commit', '-q', '-m', 'definitions');
+    const adapters = await fakeAdapters(repo.dir);
+    const runs = join(repo.dir, '.sail-runs');
+    const clock = manualClock(new Date().toISOString());
+    const store = openQueue({ runsDir: runs, workflow: WORKFLOW, label: 'sail', now: clock });
+    if ('refused' in store) throw new Error(store.refused);
+    const designated = await adapters.ports.ticketSource.listDesignated('sail');
+    store.add(designated.filter((each) => each.ticketKey === 'FAKE-1' || each.ticketKey === 'FAKE-2'));
+    const exits: Promise<number | null>[] = [];
+    const track = <T extends { exited: Promise<number | null> }>(started: T): T => {
+      exits.push(started.exited);
+      return started;
+    };
+    const dispatcher = createDispatcher({
+      workflow: WORKFLOW,
+      label: 'sail',
+      maxConcurrentRuns: 1,
+      branchPrefix: 'sail/',
+      runsDir: runs,
+      root: repo.dir,
+      store,
+      ticketSource: adapters.ports.ticketSource,
+      codeHost: adapters.ports.codeHost,
+      workspace: adapters.ports.workspace,
+      env: repo.env,
+      now: clock,
+      usageLimitBackoffMs: 15 * 60_000,
+      portUnavailableBackoffMs: [60_000],
+      spawn: (options) => track(spawnRun(options)),
+      resume: (options) => track(spawnResume(options)),
+      isAlive: alive,
+    });
+    const item = (ticketKey: string) => store.snapshot().items.find((each) => sourceKey(each) === ticketKey);
+
+    await dispatcher.tick();
+    expect(await Promise.all(exits)).toEqual([0]);
+    const first = join(runs, item('FAKE-1')?.runId ?? 'none');
+    expect(readRunHeader(first).source).toMatchObject({ kind: 'ticket', ticketKey: 'FAKE-1', via: 'watch' });
+    expect(workspaceOf(first)).toBe(HEADER_PATH);
+    expect(created(first)).toMatchObject([{ path: `.sail-runs/standing/${WORKFLOW}-0/workspace`, standing: 'leased' }]);
+    expect(existsSync(join(first, 'workspace'))).toBe(false);
+    expect(existsSync(join(path, '.git'))).toBe(true);
+    expect(lease()).toBeUndefined();
+
+    mkdirSync(join(path, 'cache'));
+    writeFileSync(join(path, 'cache', 'warm'), 'warm');
+    writeFileSync(join(path, 'left.txt'), 'left');
+    // The tick settles the first run and dispatches the second.
+    await dispatcher.tick();
+    expect(await Promise.all(exits)).toEqual([0, 0]);
+    await dispatcher.tick();
+    const second = join(runs, item('FAKE-2')?.runId ?? 'none');
+    expect(second).not.toBe(first);
+    expect(readRunHeader(second).source).toMatchObject({ kind: 'ticket', ticketKey: 'FAKE-2', via: 'watch' });
+    expect(workspaceOf(second)).toBe(HEADER_PATH);
+    expect(created(second)).toMatchObject([
+      { path: `.sail-runs/standing/${WORKFLOW}-0/workspace`, standing: 'leased' },
+    ]);
+    expect(readFileSync(join(path, 'cache', 'warm'), 'utf8')).toBe('warm');
+    expect(existsSync(join(path, 'left.txt'))).toBe(false);
+    expect(store.snapshot().items.map((each) => each.state)).toEqual(['done', 'done']);
+    expect(lease()).toBeUndefined();
+  });
+}, 180_000);
+
+test("a pull-request start runs in the standing workspace of its workflow at the pull request's head, and the next pull request's start takes the same path at its own head and finds the ignored file", async () => {
+  await standingRepo(async (repo) => {
+    const sailDir = join(repo.dir, '.sail');
+    writePrWorkflow(sailDir, 'review-pr');
+    const heads = [commitBranch(repo, 'feature/one', 'one.txt'), commitBranch(repo, 'feature/two', 'two.txt')];
+    seedPullRequests(sailDir, repo, [
+      { number: 1, head: 'feature/one' },
+      { number: 2, head: 'feature/two' },
+    ]);
+    const runs = join(repo.dir, '.sail-runs');
+    const path = standingPath(runs, 'review-pr', 0);
+    const header = '../standing/review-pr-0/workspace';
+    const event = { path: '.sail-runs/standing/review-pr-0/workspace', standing: 'leased' };
+
+    const one = sail(repo, '#1', '--workflow', 'review-pr');
+    expect({ code: one.code, stderr: one.stderr }).toEqual({ code: 0, stderr: '' });
+    const first = runDirOf(repo, 'pr-1');
+    expect(readRunHeader(first).source).toMatchObject({ kind: 'pr', number: 1 });
+    expect(workspaceOf(first)).toBe(header);
+    expect(validateRunDir(first).issues.map(formatIssue)).toEqual([]);
+    expect(created(first)).toMatchObject([{ ...event, branch: 'feature/one', baseSha: heads[0] }]);
+    expect(existsSync(join(first, 'workspace'))).toBe(false);
+    expect(repo.git('-C', path, 'rev-parse', 'HEAD')).toBe(heads[0] ?? '');
+    expect(existsSync(join(path, 'one.txt'))).toBe(true);
+    expect(readStanding(standingDir(runs, 'review-pr', 0))).toBeUndefined();
+    expect(existsSync(standingDir(runs, WORKFLOW, 0))).toBe(false);
+
+    mkdirSync(join(path, 'cache'));
+    writeFileSync(join(path, 'cache', 'warm'), 'warm');
+    writeFileSync(join(path, 'left.txt'), 'left');
+    expect(sail(repo, '#2', '--workflow', 'review-pr').code).toBe(0);
+    const second = runDirOf(repo, 'pr-2');
+    expect(workspaceOf(second)).toBe(header);
+    expect(created(second)).toMatchObject([{ ...event, branch: 'feature/two', baseSha: heads[1] }]);
+    expect(repo.git('-C', path, 'rev-parse', 'HEAD')).toBe(heads[1] ?? '');
+    expect(existsSync(join(path, 'two.txt'))).toBe(true);
+    expect(existsSync(join(path, 'one.txt'))).toBe(false);
+    expect(readFileSync(join(path, 'cache', 'warm'), 'utf8')).toBe('warm');
+    expect(existsSync(join(path, 'left.txt'))).toBe(false);
+    expect(readdirSync(join(runs, 'standing'))).toEqual(['review-pr-0']);
+  });
+}, 120_000);
+
+test('a run.json that cannot be written once the standing workspace is made throws, and leaves the standing workspace free and no run directory', async () => {
+  await standingRepo(async (repo, path, lease) => {
+    const adapters = await fakeAdapters(repo.dir);
+    const { workspace } = adapters.ports;
+    const create = workspace.create.bind(workspace);
+    workspace.create = async (run, options) => {
+      const made = await create(run, options);
+      mkdirSync(join(run.runDir, RUN_HEADER_FILE), { recursive: true });
+      return made;
+    };
+    await expect(openRun({ cwd: repo.dir, adapters, workflow: WORKFLOW, ticket: 'FAKE-1' })).rejects.toThrow(
+      'directory was not written',
+    );
+    expect(lease()).toBeUndefined();
+    expect(existsSync(join(path, '.git'))).toBe(true);
+    expect(readdirSync(join(repo.dir, '.sail-runs')).filter((name) => name !== 'fake' && name !== 'standing')).toEqual(
+      [],
+    );
+  });
+});
+
+test('a runs listing has no entry for .sail-runs/standing/', async () => {
+  await standingRepo(async (repo) => {
+    expect(sail(repo, 'FAKE-1', '--workflow', WORKFLOW).code).toBe(0);
+    const runId = runDirOf(repo, 'FAKE-1').split('/').at(-1) ?? '';
+    expect(listRuns(join(repo.dir, '.sail')).map((run) => run.runId)).toEqual([runId]);
+  });
+}, 120_000);
+
+test('with the option off, run.json records workspace as before and no standing directory exists', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir, { testsPassAt: 1 });
+    expect(sail(repo, 'FAKE-1', '--workflow', WORKFLOW).code).toBe(0);
+    const dir = runDirOf(repo, 'FAKE-1');
+    expect(workspaceOf(dir)).toBe('workspace');
+    expect(created(dir)[0]).not.toHaveProperty('standing');
+    expect(existsSync(join(repo.dir, '.sail-runs', 'standing'))).toBe(false);
+  });
+}, 120_000);

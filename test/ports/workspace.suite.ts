@@ -84,7 +84,7 @@ function expectValidEvents(capture: Pick<Captured<ProviderEvent>, 'stamped'>): v
   expect(eventIssues(capture.stamped())).toEqual([]);
 }
 
-export function workspaceSuite(label: string, make: MakeWorkspace): void {
+export function workspaceSuite(label: string, make: MakeWorkspace, makeStanding?: MakeWorkspace): void {
   const start = async () => {
     const capture = captureEvents();
     return { capture, ...(await make(capture.emit)) };
@@ -725,5 +725,182 @@ export function workspaceSuite(label: string, make: MakeWorkspace): void {
   test(`${label}: capabilities parse`, async () => {
     const { adapter } = await start();
     expect(parseIssues(WorkspaceCapabilities, adapter.capabilities())).toEqual([]);
+  });
+  if (makeStanding !== undefined) standingCases(label, makeStanding);
+}
+
+/** The cases of an adapter whose `standing` option is on. */
+function standingCases(label: string, make: MakeWorkspace): void {
+  const start = async () => {
+    const capture = captureEvents();
+    return { capture, ...(await make(capture.emit)) };
+  };
+  /** The run as a start passes it: its workflow, with room for two standing workspaces unless `cap` says otherwise. */
+  const asStart = <R extends RunRef>(run: R, cap: number | null = 2): RunRef => ({
+    runId: run.runId,
+    runDir: run.runDir,
+    workflow: 'demo',
+    ...(cap === null ? {} : { maxConcurrentRuns: cap }),
+  });
+  /** What a started run's header records: its base and where its workspace is, relative to the run directory. */
+  const writeHeader = (world: WorkspaceWorld, run: RunRef, workspace: string) =>
+    writeFileSync(join(run.runDir, 'run.json'), JSON.stringify({ workspace, repository: { baseSha: world.baseSha } }));
+  const ignoreCache = (world: WorkspaceWorld) => {
+    const exclude = join(world.repoDir, '.git', 'info', 'exclude');
+    mkdirSync(join(world.repoDir, '.git', 'info'), { recursive: true });
+    writeFileSync(exclude, 'cache/\n');
+  };
+  const created = (capture: Captured<ProviderEvent>) =>
+    capture.events.filter((event) => event.type === 'workspace:created');
+
+  test(`${label}: standing: two consecutive runs of a workflow get one path, the ignored file stays, the tracked edit and the untracked file do not`, async () => {
+    const { adapter, world, capture } = await start();
+    ignoreCache(world);
+    const first = asStart(await world.run('r1'));
+    const one = await adapter.create(first, { base: world.base, branch: BRANCH });
+    expect(one.path).toBe(join(world.runsDir, 'standing', 'demo-0', 'workspace'));
+    writeHeader(world, first, '../standing/demo-0/workspace');
+    mkdirSync(join(one.path, 'cache'));
+    writeFileSync(join(one.path, 'cache', 'warm'), 'warm');
+    writeFileSync(join(one.path, world.tracked), 'edited\n');
+    writeFileSync(join(one.path, 'left.txt'), 'left');
+    await adapter.release(first, false);
+
+    const two = await adapter.create(asStart(await world.run('r2')), { base: world.base, branch: BRANCH });
+    expect(two.path).toBe(one.path);
+    expect(readFileSync(join(two.path, 'cache', 'warm'), 'utf8')).toBe('warm');
+    expect(readFileSync(join(two.path, world.tracked), 'utf8')).toBe(
+      world.git(world.repoDir, 'show', `${world.baseSha}:${world.tracked}`).stdout + '\n',
+    );
+    expect(existsSync(join(two.path, 'left.txt'))).toBe(false);
+    expect(created(capture).map((event) => (event as { standing?: string }).standing)).toEqual(['leased', 'leased']);
+    expectValidEvents(capture);
+  });
+
+  test(`${label}: standing: two creates started at once for a cap of 2 get two paths, and a third run gets its own workspace saying none_free`, async () => {
+    const { adapter, world, capture } = await start();
+    const [r1, r2, r3] = [await world.run('r1'), await world.run('r2'), await world.run('r3')];
+    const [a, b] = await Promise.all([
+      adapter.create(asStart(r1), { base: world.base, branch: BRANCH }),
+      adapter.create(asStart(r2), { base: world.base, branch: BRANCH }),
+    ]);
+    expect([a.path, b.path].sort()).toEqual([
+      join(world.runsDir, 'standing', 'demo-0', 'workspace'),
+      join(world.runsDir, 'standing', 'demo-1', 'workspace'),
+    ]);
+    const third = await adapter.create(asStart(r3), { base: world.base, branch: BRANCH });
+    expect(third.path).toBe(join(r3.runDir, 'workspace'));
+    expect(created(capture).map((event) => (event as { standing?: string }).standing)).toEqual([
+      'leased',
+      'leased',
+      'none_free',
+    ]);
+    expectValidEvents(capture);
+  });
+
+  test(`${label}: standing: a workflow that declares no cap has one standing workspace`, async () => {
+    const { adapter, world } = await start();
+    const first = await adapter.create(asStart(await world.run('r1'), null), { base: world.base, branch: BRANCH });
+    const r2 = await world.run('r2');
+    const second = await adapter.create(asStart(r2, null), { base: world.base, branch: BRANCH });
+    expect(first.path).toBe(join(world.runsDir, 'standing', 'demo-0', 'workspace'));
+    expect(second.path).toBe(join(r2.runDir, 'workspace'));
+  });
+
+  test(`${label}: standing: release leaves the directory, says kept, keeps a head past the base at its run ref, and the next create takes the same path`, async () => {
+    const { adapter, world, capture } = await start();
+    const r1 = asStart(await world.run('r1'));
+    const one = await adapter.create(r1, { base: world.base, branch: BRANCH });
+    writeHeader(world, r1, '../standing/demo-0/workspace');
+    writeFileSync(join(one.path, 'work.txt'), 'work\n');
+    world.git(one.path, 'add', 'work.txt');
+    world.git(one.path, 'commit', '-q', '-m', 'work');
+    const head = world.git(one.path, 'rev-parse', 'HEAD').stdout;
+
+    const released = await adapter.release(r1, false);
+    expect(parseIssues(WorkspaceReleased, released)).toEqual([]);
+    expect(bare(released)).toEqual({ path: one.path, kept: true, ref: 'refs/sail/runs/r1', head });
+    expect(existsSync(one.path)).toBe(true);
+    expect(world.git(world.repoDir, 'rev-parse', 'refs/sail/runs/r1').stdout).toBe(head);
+    expect(capture.events.filter((event) => event.type === 'workspace:released')).toEqual([
+      { type: 'workspace:released', path: one.path, kept: true, ref: 'refs/sail/runs/r1', head },
+    ]);
+    expectValidEvents(capture);
+
+    const next = await adapter.create(asStart(await world.run('r2')), { base: world.base, branch: BRANCH });
+    expect(next.path).toBe(one.path);
+  });
+
+  test(`${label}: standing: reopen finds the run's standing workspace through its header, with its uncommitted file and its commit, and is invalid when another run holds it`, async () => {
+    const { adapter, world, capture } = await start();
+    const r1 = asStart(await world.run('r1', 'suspended'));
+    const one = await adapter.create(r1, { base: world.base, branch: BRANCH });
+    writeHeader(world, r1, '../standing/demo-0/workspace');
+    writeFileSync(join(one.path, 'work.txt'), 'work\n');
+    world.git(one.path, 'add', 'work.txt');
+    world.git(one.path, 'commit', '-q', '-m', 'work');
+    writeFileSync(join(one.path, 'wip.txt'), 'wip');
+    const before = capture.events.length;
+
+    // A resume passes only the run directory and the run's id: the header says where the workspace is.
+    const reopened = await settle(
+      adapter.reopen({ runId: 'r1', runDir: r1.runDir }, { branch: BRANCH, baseSha: world.baseSha }),
+    );
+    expect(parseIssues(Workspace, reopened)).toEqual([]);
+    expect(held(reopened)).toEqual({ path: one.path, branch: BRANCH, baseSha: world.baseSha });
+    expect(existsSync(join(one.path, 'wip.txt'))).toBe(true);
+    expect(existsSync(join(one.path, 'work.txt'))).toBe(true);
+    expect(capture.events.length).toBe(before);
+
+    const r2 = await world.run('r2');
+    writeHeader(world, r2, '../standing/demo-0/workspace');
+    const refused = await adapter.reopen(r2, { branch: BRANCH, baseSha: world.baseSha }).catch((error) => error);
+    expect(portFailure(refused)).toEqual({ port: 'workspace', op: 'reopen', code: 'invalid' });
+    expect(messageOf(refused)).toContain('held by run r1');
+  });
+
+  test(`${label}: standing: create with carry naming a run that released its standing workspace starts from its run ref`, async () => {
+    const { adapter, world, capture } = await start();
+    const r1 = asStart(await world.run('r1'));
+    const one = await adapter.create(r1, { base: world.base, branch: BRANCH });
+    writeHeader(world, r1, '../standing/demo-0/workspace');
+    writeFileSync(join(one.path, 'work.txt'), 'work\n');
+    world.git(one.path, 'add', 'work.txt');
+    world.git(one.path, 'commit', '-q', '-m', 'work');
+    const head = world.git(one.path, 'rev-parse', 'HEAD').stdout;
+    await adapter.release(r1, false);
+
+    const two = await adapter.create(asStart(await world.run('r2')), {
+      base: world.base,
+      branch: BRANCH,
+      carry: { runId: 'r1', runDir: r1.runDir },
+    });
+    expect(two.startSha).toBe(head);
+    expect(world.git(two.path, 'rev-parse', 'HEAD').stdout).toBe(head);
+    expect(readFileSync(join(two.path, 'work.txt'), 'utf8')).toBe('work\n');
+    expect(created(capture).at(-1)).toMatchObject({ startSha: head, standing: 'leased' });
+  });
+
+  test(`${label}: standing: sweep removes the per-run workspace of an ended run and leaves a standing workspace of another, listing no path for it`, async () => {
+    const { adapter, world } = await start();
+    const standingRun = asStart(await world.run('r1', 'completed'));
+    const standing = await adapter.create(standingRun, { base: world.base, branch: BRANCH });
+    writeHeader(world, standingRun, '../standing/demo-0/workspace');
+    const own = await world.run('r2', 'completed');
+    const perRun = await adapter.create({ runId: own.runId, runDir: own.runDir }, { base: world.base, branch: BRANCH });
+
+    const swept = await adapter.sweep(world.runsDir);
+    expect(swept.paths).toEqual([perRun.path]);
+    expect(swept.failed).toEqual([]);
+    expect(existsSync(standing.path)).toBe(true);
+    expect(existsSync(perRun.path)).toBe(false);
+  });
+
+  test(`${label}: a run that names no workflow gets its own workspace, and the event has no standing field`, async () => {
+    const { adapter, world, capture } = await start();
+    const r1 = await world.run('r1');
+    const made = await adapter.create({ runId: r1.runId, runDir: r1.runDir }, { base: world.base, branch: BRANCH });
+    expect(made.path).toBe(join(r1.runDir, 'workspace'));
+    expect(created(capture)[0]).not.toHaveProperty('standing');
   });
 }

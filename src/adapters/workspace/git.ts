@@ -27,6 +27,8 @@ import { readStatus } from '../../engine/run-dir';
 import { RUN_HEADER_FILE } from '../../engine/run-header';
 import { PortError } from '../../ports/errors';
 import type { Diff, Workspace } from '../../ports/types';
+import type { RunRef } from '../../ports/workspace';
+import { heldByRun, standingOf } from './standing';
 
 export interface GitResult {
   readonly code: number;
@@ -175,7 +177,7 @@ export function addDetached(
 }
 
 /** Whether `path` is a symbolic link, dangling or not. */
-function isLink(path: string): boolean {
+export function isLink(path: string): boolean {
   try {
     return lstatSync(path).isSymbolicLink();
   } catch {
@@ -276,8 +278,36 @@ function recordedBase(runDir: string): string | undefined {
   }
 }
 
+/** The `workspace` string `run.json` in `runDir` records, or undefined when there is none. */
+function recordedWorkspace(runDir: string): string | undefined {
+  try {
+    const header = JSON.parse(readFileSync(join(runDir, RUN_HEADER_FILE), 'utf8'));
+    return typeof header?.workspace === 'string' ? header.workspace : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The absolute path of the run's workspace: `run.workspace`, else the `workspace` its `run.json` records, else
+ * `workspace`, each relative to the run directory. It is `<runDir>/workspace` or a standing workspace under
+ * `<runsDir>/standing/`, and anything else is `invalid`, so a hand-edited header can't point a release elsewhere.
+ */
+export function workspaceOf(run: RunRef, op = 'create'): string {
+  const runDir = resolve(run.runDir);
+  const recorded = run.workspace ?? recordedWorkspace(run.runDir) ?? WORKSPACE_DIR;
+  const path = resolve(runDir, recorded);
+  if (path === join(runDir, WORKSPACE_DIR) || standingOf(dirname(runDir), path) !== undefined) return path;
+  throw new PortError(
+    'workspace',
+    op,
+    'invalid',
+    `run ${run.runId}'s workspace ${recorded} is neither ${WORKSPACE_DIR} nor a standing workspace`,
+  );
+}
+
 /** The `HEAD` of the worktree at `path`, or undefined when `path` is no worktree of its own (a link's is another checkout's). */
-function workspaceHead(path: string, env?: Readonly<Record<string, string>>): string | undefined {
+export function workspaceHead(path: string, env?: Readonly<Record<string, string>>): string | undefined {
   const shown = gitSync(path, ['rev-parse', '--show-toplevel', 'HEAD'], env);
   const [top, head] = shown.stdout.trim().split('\n');
   if (shown.code !== 0 || top !== realpathSync(path) || head === undefined) return undefined;
@@ -291,13 +321,16 @@ function workspaceHead(path: string, env?: Readonly<Record<string, string>>): st
  */
 export function carriedHead(
   repo: string,
-  run: { runId: string; runDir: string },
+  run: RunRef,
   baseSha: string,
   env?: Readonly<Record<string, string>>,
 ): string | undefined {
-  const path = resolve(run.runDir, WORKSPACE_DIR);
+  const path = workspaceOf(run);
+  const standing = standingOf(dirname(resolve(run.runDir)), path);
+  // A standing workspace's `HEAD` is the run's own only while the run holds it: another run's is not.
+  const readable = standing === undefined || heldByRun(standing, run.runId);
   const head =
-    (isLink(run.runDir) || isLink(path) ? undefined : workspaceHead(path, env)) ??
+    (!readable || isLink(run.runDir) || isLink(path) ? undefined : workspaceHead(path, env)) ??
     resolveCommit(repo, runRef(run.runId), env);
   if (head === undefined || head === baseSha) return undefined;
   if (gitSync(repo, ['merge-base', '--is-ancestor', baseSha, head], env).code !== 0) {
@@ -320,12 +353,12 @@ export function carriedHead(
  * step, and a link is never looked into, since its `HEAD` is another checkout's. It gives the ref and the commit, or
  * what failed when the ref couldn't be written.
  */
-function keepHead(
+export function keepHead(
   repo: string,
   run: { runId: string; runDir: string },
+  path: string,
   env?: Readonly<Record<string, string>>,
 ): { ref: string; head: string } | { failed: string } | undefined {
-  const path = resolve(run.runDir, WORKSPACE_DIR);
   const base = recordedBase(run.runDir);
   if (base === undefined || isLink(run.runDir) || isLink(path)) return undefined;
   const head = workspaceHead(path, env);
@@ -347,7 +380,7 @@ export function releaseWorktree(
   op: string,
   env?: Readonly<Record<string, string>>,
 ): { raw: GitResult; ref?: string; head?: string } {
-  const kept = keepHead(repo, run, env);
+  const kept = keepHead(repo, run, resolve(run.runDir, WORKSPACE_DIR), env);
   const failed = kept !== undefined && 'failed' in kept ? kept.failed : undefined;
   let removed: GitResult;
   try {

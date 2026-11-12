@@ -1,0 +1,281 @@
+// The git side of standing workspaces: leasing one and checking a run's commit out in it in place, releasing it, and
+// reopening it for a resume. The lease itself, and where a standing workspace lives, are `standing.ts`.
+//
+// An in-place checkout keeps what git ignores, which is the point: tracked files go back to the commit, untracked files
+// that are not ignored are removed (`clean -ffd`, never `-x` or `-X`), and the build caches stay. The adapter does not
+// vouch for them: a stale incremental build is the repository's own gate's to handle.
+import { existsSync, lstatSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { PortError } from '../../ports/errors';
+import type { Workspace } from '../../ports/types';
+import type { RunRef } from '../../ports/workspace';
+import { addDetached, type GitResult, gitSync, isLink, keepHead, reopenWorktree } from './git';
+import {
+  dropStanding,
+  heldByRun,
+  readStanding,
+  restoreStanding,
+  STANDING_DIR,
+  type StandingLease,
+  standingDir,
+  standingOf,
+  takeStanding,
+} from './standing';
+
+type Env = Readonly<Record<string, string>> | undefined;
+
+const NO_HOOKS = ['-c', 'core.hooksPath=/dev/null'];
+
+/**
+ * The state a rebase, `am`, cherry-pick, revert or bisect left unfinished in a worktree's own git directory. A per-run
+ * worktree threw it away with the worktree; a standing one keeps it, so it is removed before the next run's checkout.
+ * Removing it moves no ref: an unfinished rebase has not moved its branch yet.
+ */
+const UNFINISHED = [
+  'rebase-merge',
+  'rebase-apply',
+  'sequencer',
+  'CHERRY_PICK_HEAD',
+  'REVERT_HEAD',
+  'BISECT_START',
+  'BISECT_LOG',
+  'BISECT_TERMS',
+  'BISECT_EXPECTED_REV',
+  'BISECT_ANCESTORS_OK',
+  'BISECT_NAMES',
+  'BISECT_HEAD',
+  'BISECT_FIRST_PARENT',
+];
+
+/** Removes what an unfinished rebase, `am`, cherry-pick, revert or bisect left in the worktree at `path`. */
+function clearUnfinished(path: string, env: Env): void {
+  const gitDir = gitSync(path, ['rev-parse', '--absolute-git-dir'], env);
+  if (gitDir.code !== 0) {
+    throw new PortError('workspace', 'create', 'unavailable', `${path}: git rev-parse failed: ${gitDir.stderr}`);
+  }
+  const dir = gitDir.stdout.trim();
+  for (const name of UNFINISHED) {
+    try {
+      rmSync(join(dir, name), { recursive: true, force: true });
+    } catch (error) {
+      throw new PortError('workspace', 'create', 'unavailable', `${path}: ${(error as Error).message}`);
+    }
+  }
+}
+
+/**
+ * Checks `sha` out in the worktree at `path`, detached, with the clone's hooks off: tracked files as committed, a merge
+ * left half done cleared, a rebase, `am`, cherry-pick, revert or bisect left unfinished cleared, untracked files that are
+ * not ignored removed, ignored files kept. A failure is `unavailable`, with git's own words.
+ */
+export function checkOutInPlace(path: string, sha: string, env?: Env): void {
+  clearUnfinished(path, env);
+  const steps = [
+    ['checkout', '--force', '--detach', sha],
+    ['reset', '--hard', sha],
+    ['clean', '-ffd'],
+  ];
+  for (const step of steps) {
+    const done = gitSync(path, [...NO_HOOKS, ...step], env);
+    if (done.code !== 0) {
+      throw new PortError('workspace', 'create', 'unavailable', `${path}: git ${step[0]} failed: ${done.stderr}`);
+    }
+  }
+}
+
+/**
+ * Why `path` is no worktree of `repo` that a checkout may run in, or undefined when it is one. Its `.git` must be a
+ * plain file naming an entry of the clone's own `.git/worktrees/`, and that entry's `gitdir` file must point back at
+ * it: a `.git` rewritten to name the clone's git directory, another worktree's entry or another repository would have
+ * the checkout move that one's `HEAD` and index. A link at `.git` or at the entry is never followed.
+ */
+function notOwnWorktree(repo: string, path: string, env: Env): string | undefined {
+  const no = `${path} is no git worktree`;
+  const gitFile = join(path, '.git');
+  try {
+    if (!lstatSync(gitFile).isFile()) return `${no}: ${gitFile} is no plain file`;
+    const named = /^gitdir: (.+)$/.exec(readFileSync(gitFile, 'utf8').trim())?.[1];
+    if (named === undefined) return `${no}: ${gitFile} names no git directory`;
+    const entry = resolve(path, named);
+    const common = gitSync(repo, ['rev-parse', '--path-format=absolute', '--git-common-dir'], env);
+    if (common.code !== 0) return `${no}: git rev-parse failed: ${common.stderr}`;
+    const entries = join(realpathSync(common.stdout.trim()), 'worktrees');
+    if (isLink(entry) || dirname(realpathSync(entry)) !== entries) {
+      return `${no}: ${gitFile} names ${named}, which is no entry of ${entries}`;
+    }
+    const back = resolve(entry, readFileSync(join(entry, 'gitdir'), 'utf8').trim());
+    if (isLink(back) || realpathSync(back) !== realpathSync(gitFile)) {
+      return `${no}: ${entry} does not point back at ${gitFile}`;
+    }
+  } catch (error) {
+    return `${no}: ${(error as Error).message}`;
+  }
+  const top = gitSync(path, ['rev-parse', '--show-toplevel'], env);
+  return top.code === 0 && top.stdout.trim() === realpathSync(path) ? undefined : no;
+}
+
+/** The standing workspaces' parent: the directory that holds the run directories. */
+const runsDirOf = (run: { runDir: string }): string => dirname(resolve(run.runDir));
+
+/**
+ * Gives `run` the first free standing workspace of its workflow, its commit `sha` checked out. It walks `n` from 0
+ * below `run.maxConcurrentRuns ?? 1`, takes the first lease it can, keeps the head of a stale holder it took over at
+ * that run's run ref first, then adds the worktree (`--force`, so one removed by hand is made again) or checks out in
+ * place. A directory that can't be used, a folder that is no worktree of the clone whose git entry points back at it
+ * among them, is skipped and its lease dropped; one
+ * whose lease can't be read or taken is skipped and its lease left. A takeover whose stale holder's head can't be kept
+ * gives that run its lease back, so its head is never checked out over. A link at `standing/`, at the directory or at
+ * its worktree is skipped untouched. Each skip is told to `onSkip`, naming the directory and why; one a live run holds
+ * is no skip. Undefined when none is free, or when `run` names no workflow.
+ */
+export function leaseStanding(options: {
+  repo: string;
+  run: RunRef;
+  sha: string;
+  env?: Env;
+  now?: Date;
+  onSkip?: (why: string) => void;
+}): { path: string; raw: { dir: string; took?: StandingLease } } | undefined {
+  const { repo, run, sha, env } = options;
+  if (run.workflow === undefined) return undefined;
+  const skip = (dir: string, why: unknown) =>
+    options.onSkip?.(`${dir}: ${why instanceof Error ? why.message : String(why)}`);
+  const runsDir = runsDirOf(run);
+  const holder = { runId: run.runId, runDir: resolve(run.runDir), pid: process.pid };
+  for (let n = 0; n < (run.maxConcurrentRuns ?? 1); n++) {
+    const dir = standingDir(runsDir, run.workflow, n);
+    const path = join(dir, 'workspace');
+    // A link is never looked into: a checkout through one would discard the work of whatever checkout it names.
+    const link = [join(runsDir, STANDING_DIR), dir, path].find(isLink);
+    if (link !== undefined) {
+      skip(dir, `${link} is a link`);
+      continue;
+    }
+    // A lease that can't be read or taken (no JSON, a directory that can't be made, one that kept changing hands) is
+    // no free workspace: the walk goes on, and a start is never refused because of the option.
+    let taken: ReturnType<typeof takeStanding>;
+    try {
+      taken = takeStanding(dir, holder, options.now);
+    } catch (error) {
+      if (!(error instanceof PortError)) throw error;
+      skip(dir, error);
+      continue;
+    }
+    if (!taken.taken) continue;
+    if (taken.took !== undefined) {
+      const kept = keepHead(repo, taken.took, path, env);
+      if (kept !== undefined && 'failed' in kept) {
+        if (!restoreStanding(dir, run.runId, taken.took)) dropStanding(dir, run.runId);
+        skip(dir, kept.failed);
+        continue;
+      }
+    }
+    try {
+      if (!existsSync(path)) {
+        const added = gitSync(repo, [...NO_HOOKS, 'worktree', 'add', '--force', '--detach', path, sha], env);
+        if (added.code !== 0) throw new PortError('workspace', 'create', 'unavailable', added.stderr);
+      } else {
+        const why = notOwnWorktree(repo, path, env);
+        if (why !== undefined) throw new PortError('workspace', 'create', 'unavailable', why);
+        checkOutInPlace(path, sha, env);
+      }
+    } catch (error) {
+      dropStanding(dir, run.runId);
+      skip(dir, error);
+      continue;
+    }
+    return { path, raw: taken.took === undefined ? { dir } : { dir, took: taken.took } };
+  }
+  return undefined;
+}
+
+/**
+ * Frees the standing workspace at `path` for `run`: keeps its head at the run ref, as a release does, and drops the
+ * lease, only while the run holds it. A run that no longer holds it has no head there that is its own, so nothing is
+ * written and the lease is left. A ref that can't be written still drops the lease, and is `unavailable`.
+ */
+export function releaseStanding(
+  repo: string,
+  run: RunRef,
+  path: string,
+  env?: Env,
+): { raw: GitResult | null; ref?: string; head?: string } {
+  const dir = standingOf(runsDirOf(run), path);
+  if (dir === undefined || !heldByRun(dir, run.runId)) return { raw: null };
+  const kept = keepHead(repo, run, path, env);
+  dropStanding(dir, run.runId);
+  if (kept !== undefined && 'failed' in kept) throw new PortError('workspace', 'release', 'unavailable', kept.failed);
+  return { raw: null, ...(kept ?? {}) };
+}
+
+/**
+ * The standing workspace at `path` for a run that resumes: its own lease renewed with this process, then the worktree
+ * checked as `reopenWorktree()` checks one. A workspace another run holds is `invalid`, naming that run.
+ */
+export function reopenStanding(
+  run: RunRef,
+  path: string,
+  from: { branch: string; baseSha: string },
+  env?: Env,
+  now?: Date,
+): Workspace {
+  const dir = standingOf(runsDirOf(run), path);
+  const invalid = (why: string) => new PortError('workspace', 'reopen', 'invalid', `${path}: ${why}`);
+  if (dir === undefined) throw invalid('it is no standing workspace');
+  const held = readStanding(dir);
+  if (held !== undefined && held.runId !== run.runId) throw invalid(`standing workspace held by run ${held.runId}`);
+  const taken = takeStanding(dir, { runId: run.runId, runDir: resolve(run.runDir), pid: process.pid }, now);
+  if (!taken.taken) throw invalid(`standing workspace held by run ${taken.holder.runId}`);
+  return reopenWorktree(path, from.branch, from.baseSha, env);
+}
+
+/** What `startWorkspace()` made: where the run works, how it got there, and the event's `standing` field. */
+export interface Started {
+  readonly path: string;
+  readonly raw: NonNullable<unknown> | null;
+  readonly standing?: 'leased' | 'none_free';
+  /** The standing workspaces the start could not use, each naming its directory and why: none when it skipped none. */
+  readonly skipped?: readonly string[];
+}
+
+/**
+ * The workspace of `run`'s start at `sha`: with `standing` on and `run.workflow` named, a standing workspace of its
+ * workflow, else, when none is free, a detached worktree at `<runDir>/workspace`, `skipped` naming each standing
+ * workspace that could not be used and why. With `standing` off, the latter alone, and no `standing` field.
+ */
+export function startWorkspace(options: {
+  repo: string;
+  run: RunRef;
+  sha: string;
+  standing: boolean;
+  env?: Env;
+  now?: Date;
+}): Started {
+  const { repo, run, sha, env } = options;
+  if (options.standing && run.workflow !== undefined) {
+    const skipped: string[] = [];
+    const leased = leaseStanding({
+      repo,
+      run,
+      sha,
+      ...(env === undefined ? {} : { env }),
+      ...(options.now === undefined ? {} : { now: options.now }),
+      onSkip: (why) => skipped.push(why),
+    });
+    const said = skipped.length === 0 ? {} : { skipped };
+    if (leased !== undefined) return { path: leased.path, raw: leased.raw, standing: 'leased', ...said };
+    const path = join(run.runDir, 'workspace');
+    return { path, raw: addDetached(repo, path, sha, env), standing: 'none_free', ...said };
+  }
+  const path = join(run.runDir, 'workspace');
+  return { path, raw: addDetached(repo, path, sha, env) };
+}
+
+/** Gives up the standing workspace at `path` that `run` took, leaving the worktree: for a start that failed after it. */
+export function abandonStanding(run: RunRef, path: string): void {
+  const dir = standingOf(runsDirOf(run), path);
+  if (dir !== undefined) dropStanding(dir, run.runId);
+}
+
+/** Whether `path` is a standing workspace of the runs directory `run` sits in. */
+export const isStandingPath = (run: RunRef, path: string): boolean => standingOf(runsDirOf(run), path) !== undefined;

@@ -111,13 +111,15 @@ export const fakeAdapters: { [P in Port]: AdapterDefinition<PortAdapters[P]> } =
         repo: z.string().optional(),
         remote: z.string().min(1).optional(),
         defaultBranch: z.string().min(1).optional(),
+        standing: z.boolean().optional(),
       };
-      const { repo, remote, defaultBranch } = parse('workspace', shape, options);
+      const { repo, remote, defaultBranch, standing } = parse('workspace', shape, options);
       return createFakeWorkspace({
         ...provider(context),
         repo: repo === undefined ? context.root : resolve(context.sailDir, repo),
         ...(remote === undefined ? {} : { remote }),
         ...(defaultBranch === undefined ? {} : { defaultBranch }),
+        ...(standing === undefined ? {} : { standing }),
         // Beside the fake ticket and pull request state, so a run on the fakes holds no lease machine-wide (D5).
         leasesDir: resolve(context.runsDir, 'fake/leases'),
         env: definedEnv(context.env),

@@ -561,6 +561,7 @@ async function drive(
       const run = { runId, runDir: dir };
       try {
         // A head past the base is kept at its run ref, pushed or not, which workspace:released names: the message stays the run's.
+        // A standing workspace is kept in place and freed: the header's workspace path says where it is.
         await opened.adapters.workspace.release(run, false);
       } catch (error) {
         if (!(error instanceof PortError)) throw error;
