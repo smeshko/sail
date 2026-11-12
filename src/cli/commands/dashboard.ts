@@ -5,7 +5,7 @@
 // also refuses port 0 and, while no agent is installed, a port another process holds. A
 // restart prints `sail dashboard: restarted the login service`: the dashboard records no pid anywhere. `--service`,
 // which only the installed agent passes, also reads sail's code version at start and every minute and, once it
-// changes, prints a line starting `sail dashboard: sail changed (`, stops the server and exits 6, so launchd starts the
+// changes in `src/`, `package.json` or `bun.lock`, prints a line starting `sail dashboard: sail changed (`, stops the server and exits 6, so launchd starts the
 // new code. It writes nothing but a move command in a live watcher's inbox, when a person moves a queued item, a
 // release of a usage-limit hold in the machine directory, and the runs a person resumes or restarts, which it starts detached with this command's environment. The default port is
 // 3400, and 0 picks a free one. A port that isn't a whole number from 0 to 65535, or one in use, is refused with exit
@@ -18,7 +18,7 @@ import { systemTimers, type Timers } from '../../watch/poll';
 import { machineDir, registryDir as registryDirOf } from '../../watch/registry';
 import { EXIT_OK, EXIT_RESTART, type ExitCode } from '../exit-codes';
 import type { Io, Parsed } from '../index';
-import { type ReadVersion, sailVersion, watchSailChange } from '../sail-change';
+import { type CodeChanged, type ReadVersion, sailCodeChanged, sailVersion, watchSailChange } from '../sail-change';
 import {
   agentEnvironment,
   DASHBOARD_LABEL,
@@ -59,6 +59,8 @@ export interface DashboardDeps {
   sailVersion?: ReadVersion;
   /** How often it reads it: 60 000 ms by default. */
   sailVersionEveryMs?: number;
+  /** Whether two code versions differ in sail's code: `sailCodeChanged` on its checkout by default. */
+  sailChanged?: CodeChanged;
   timers?: Timers;
   /** Whether `--install`'s port is free: `portFree` by default. */
   portFree?: (port: number) => Promise<boolean>;
@@ -140,6 +142,7 @@ export function dashboardCommand(deps: DashboardDeps = {}) {
           read: deps.sailVersion ?? sailVersion,
           everyMs: deps.sailVersionEveryMs ?? 60_000,
           timers: deps.timers ?? systemTimers,
+          changed: deps.sailChanged ?? ((before, after) => sailCodeChanged(before, after)),
           onChange(before, after) {
             changed = true;
             io.stdout(
