@@ -79,7 +79,7 @@ if [ -z "$has_prefix" ]; then
   template="$dir/tmp.XXXXXXXXXX"
 else
   case "$prefix" in
-    *XXX*) template="$dir/$prefix" ;;
+    *XXX) template="$dir/$prefix" ;;
     *) template="$dir/$prefix.XXXXXXXX" ;;
   esac
 fi

@@ -95,6 +95,19 @@ test('two different copies of the shim on one PATH find the real mktemp, not eac
   });
 });
 
+test("a -t prefix with X's not at its end gets a random suffix, so it can be made twice", () => {
+  withDirs((tmp) => {
+    const env = { PATH: `${SHIMS_DIR}:${SYSTEM_PATH}`, TMPDIR: tmp };
+    const first = mktemp(['-t', 'myXXXfile'], env);
+    const second = mktemp(['-t', 'myXXXfile'], env);
+    expect([first.code, second.code]).toEqual([0, 0]);
+    expect(first.out).not.toBe(second.out);
+    for (const made of [first.out, second.out]) {
+      expect([dirname(made), basename(made).startsWith('myXXXfile.')]).toEqual([tmp, true]);
+    }
+  });
+});
+
 /** Runs `script` in a login bash with `env`, as Claude Code runs a Bash command, and gives its lines. */
 function loginBash(script: string, env: Record<string, string>): string[] {
   const child = Bun.spawnSync(['/bin/bash', '-l', '-c', script], { env, cwd: '/', stdout: 'pipe', stderr: 'pipe' });
