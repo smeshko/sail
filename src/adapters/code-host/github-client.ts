@@ -7,6 +7,9 @@ import { PortError, type PortErrorCode } from '../../ports/errors';
 
 export const GITHUB_API_URL = 'https://api.github.com';
 
+/** How many more times a GET is sent after a transport failure or a 5xx answer. */
+const RETRIES = 3;
+
 /** The part of `fetch` the client calls: a test injects its own. */
 export type Fetch = (input: string, init: RequestInit) => Promise<Response>;
 
@@ -18,7 +21,7 @@ export interface GitHubClientOptions {
   readonly fetch?: Fetch;
   /** How long a request may take. 30 s unless given. */
   readonly timeoutMs?: number;
-  /** The pause before a GET's one retry after a transport failure. 1 s unless given. */
+  /** The pause before a GET's first retry; the second and third wait twice and four times as long. 1 s unless given. */
   readonly retryDelayMs?: number;
 }
 
@@ -126,16 +129,20 @@ export function createGitHubClient(options: GitHubClientOptions): GitHubClient {
     return new PortError('codeHost', op, code, `${githubMessage(response.status, parsed)}${reset}`, raw);
   };
   /**
-   * One exchange, and for a GET one more after a transport failure: a long-lived watcher meets dropped keep-alive
-   * sockets and short network blips, and one of those shouldn't fail a dispatch. A write may have landed, so it isn't.
+   * One exchange, and for a GET up to three more, pausing `retryDelayMs`, twice and four times that, after a transport
+   * failure or an answer of 500 or above: a long-lived watcher meets dropped keep-alive sockets and short outages, and
+   * those shouldn't fail a dispatch. The last try's failure is the one reported. A write may have landed, so it isn't sent again.
    */
   const exchange = async (op: string, method: string, path: string, body?: unknown) => {
-    try {
-      return await exchangeOnce(op, method, path, body);
-    } catch (error) {
-      if (method !== 'GET' || !(error instanceof PortError)) throw error;
-      await Bun.sleep(options.retryDelayMs ?? 1_000);
-      return exchangeOnce(op, method, path, body);
+    for (let attempt = 0; ; attempt += 1) {
+      const last = method !== 'GET' || attempt === RETRIES;
+      try {
+        const answer = await exchangeOnce(op, method, path, body);
+        if (last || answer.response.status < 500) return answer;
+      } catch (error) {
+        if (last || !(error instanceof PortError)) throw error;
+      }
+      await Bun.sleep((options.retryDelayMs ?? 1_000) * 2 ** attempt);
     }
   };
   const exchangeOnce = async (op: string, method: string, path: string, body?: unknown) => {
