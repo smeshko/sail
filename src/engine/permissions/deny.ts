@@ -2,7 +2,11 @@
 
 /** One entry of the deny set. */
 export interface DenyEntry {
-  /** What a reason quotes, such as `git checkout`. */
+  /**
+   * What a reason quotes, such as `git checkout`. guide.ts also lists it, in backticks, among the commands a session is
+   * told no step may run, so a name reads best as the command it denies; a rule's label, such as `git program option`,
+   * tells the agent less.
+   */
   readonly name: string;
   /** Why it is denied, in one clause. */
   readonly why: string;
