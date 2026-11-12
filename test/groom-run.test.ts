@@ -32,7 +32,7 @@ test('a groom run on fakes reads FAKE-2 unclaimed, comments the report and swaps
     expect(keys.slice(3)).toEqual(['questions#1', 'decide#1', 'act#1']);
     expect(keys).not.toContain('staleness#1');
     expect(duplicatesCall(dir).output).toEqual({
-      candidates: [{ ticketKey: 'FAKE-1', confidence: 0.6, why: expect.any(String) }],
+      candidates: [{ ticketKey: 'FAKE-1', confidence: 0.6, why: 'ranked 1 of 1 by Jev, score 0.60' }],
     });
 
     const ticket = fakeTicket(repo.dir, 'FAKE-2');
@@ -301,12 +301,17 @@ const NEW_TITLE = "Show the run's total cost in sail show's footer";
 /** The comment groom left on FAKE-2: its last. */
 const lastComment = (repoDir: string) => fakeTicket(repoDir, 'FAKE-2').comments.at(-1)?.body ?? '';
 
-/** Reseeds the duplicates check's answer: FAKE-1 named at `confidence`, or no ticket named without one. */
-function seedDuplicate(sailDir: string, confidence?: number): void {
-  const [answer] = JSON.parse(readFileSync(join(sailDir, 'fake', 'harness.json'), 'utf8')).duplicates;
-  answer.output.candidates =
-    confidence === undefined ? [] : [{ ticketKey: 'FAKE-1', confidence, why: 'the same footer total' }];
-  seedHarness(sailDir, 'duplicates', [answer]);
+/** Sets the fake Jev's noul for the pair `FAKE-2:<other>`, by `other`, in the repository's seed. */
+function seedNouls(sailDir: string, answers: Record<string, number>): void {
+  const path = join(sailDir, 'fake', 'jev.json');
+  const seed = JSON.parse(readFileSync(path, 'utf8')) as { answers: Record<string, unknown> };
+  for (const [other, noul] of Object.entries(answers)) seed.answers[`FAKE-2:${other}`] = { type: 'noul', noul };
+  writeFileSync(path, `${JSON.stringify(seed, null, 2)}\n`);
+}
+
+/** Reseeds the duplicates check's answer: FAKE-1 scored `confidence`, or 0 without one. */
+function seedDuplicate(sailDir: string, confidence = 0): void {
+  seedNouls(sailDir, { 'FAKE-1': confidence });
 }
 
 /** The duplicates call's journal entry. */
@@ -902,7 +907,7 @@ test("groom's checkers and decide get AGENTS.md alone as conventions", async () 
       const folder = readdirSync(dir).find((name) => name.endsWith(`-${stage}`));
       return readFileSync(join(dir, folder ?? `missing-${stage}`, 'call-1', 'prompt.md'), 'utf8');
     };
-    for (const stage of ['duplicates', 'worth', 'questions']) {
+    for (const stage of ['worth', 'questions']) {
       const prompt = promptOf(stage);
       expect({ stage, agents: prompt.includes('# AGENTS.md'), context: prompt.includes('# CONTEXT.md') }).toEqual({
         stage,
@@ -1225,7 +1230,68 @@ test("groom's intake names the sail port command when sail can't start, rather t
   });
 });
 
-test("groom's duplicates check searches a started ticket among the others", async () => {
+/** Adds open tickets FAKE-<n>, copies of FAKE-1, to the fake's seed. */
+function seedOthers(sailDir: string, numbers: number[]): void {
+  seedTickets(sailDir, (tickets) => {
+    for (const n of numbers) tickets.push({ ...structuredClone(seeded(tickets, 'FAKE-1')), ticketKey: `FAKE-${n}` });
+  });
+}
+
+/** The candidates of the repository's only run, as `key score` pairs in order. */
+const ranked = (repoDir: string) =>
+  (
+    duplicatesCall(onlyRun(repoDir)).output as { candidates: { ticketKey: string; confidence: number }[] }
+  ).candidates.map((each) => `${each.ticketKey} ${each.confidence}`);
+
+test('groom ranks the open tickets by Jev score, highest first, and journals duplicates as a script call', async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeGroomRepo(repo);
+    seedOthers(sailDir, [3, 4]);
+    seedNouls(sailDir, { 'FAKE-1': 0.2, 'FAKE-3': 0.6, 'FAKE-4': 0.31 });
+    const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+
+    const dir = onlyRun(repo.dir);
+    expect(ranked(repo.dir)).toEqual(['FAKE-3 0.6', 'FAKE-4 0.31', 'FAKE-1 0.2']);
+    expect(
+      (duplicatesCall(dir).output as { candidates: { why: string }[] }).candidates.map((each) => each.why),
+    ).toEqual([
+      'ranked 1 of 3 by Jev, score 0.60',
+      'ranked 2 of 3 by Jev, score 0.31',
+      'ranked 3 of 3 by Jev, score 0.20',
+    ]);
+    const events = readEvents(dir) as { type: string; key?: string; code?: number; outcome?: string }[];
+    expect(events.filter((event) => event.type === 'jev:asked' && event.key === 'duplicates#1')).toHaveLength(1);
+    expect(events.find((event) => event.type === 'script:exit' && event.key === 'duplicates#1')).toMatchObject({
+      code: 0,
+      outcome: 'passed',
+    });
+  });
+}, 120_000);
+
+test('groom keeps a ticket Jev scores at 0.05 and drops one at 0.04', async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeGroomRepo(repo);
+    seedOthers(sailDir, [3, 4]);
+    seedNouls(sailDir, { 'FAKE-1': 0.6, 'FAKE-3': 0.05, 'FAKE-4': 0.04 });
+    const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    expect(ranked(repo.dir)).toEqual(['FAKE-1 0.6', 'FAKE-3 0.05']);
+  });
+}, 120_000);
+
+test('groom names the top three of four tickets over the floor', async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeGroomRepo(repo);
+    seedOthers(sailDir, [3, 4, 5]);
+    seedNouls(sailDir, { 'FAKE-1': 0.6, 'FAKE-3': 0.5, 'FAKE-4': 0.4, 'FAKE-5': 0.3 });
+    const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    expect(ranked(repo.dir)).toEqual(['FAKE-1 0.6', 'FAKE-3 0.5', 'FAKE-4 0.4']);
+  });
+}, 120_000);
+
+test("groom's duplicates check ranks a started ticket among the others", async () => {
   await withTempRepo(async (repo) => {
     const sailDir = writeGroomRepo(repo);
     edit(
@@ -1237,12 +1303,64 @@ test("groom's duplicates check searches a started ticket among the others", asyn
     repo.git('commit', '-am', 'FAKE-1 is started');
     const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
     expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    expect(ranked(repo.dir)).toEqual(['FAKE-1 0.6']);
+  });
+}, 120_000);
 
-    const call = join(onlyRun(repo.dir), '01-duplicates', 'call-1');
-    const others = readFileSync(join(call, 'in', 'others.md'), 'utf8');
-    expect(others).toContain('## FAKE-1');
-    expect(others).toContain('In Progress');
-    expect(readFileSync(join(call, 'prompt.md'), 'utf8')).toContain(join(call, 'in', 'others.md'));
+/** Runs groom with no way to ask Jev, or with the seed `jev`, and checks it completed with the check unrun. */
+async function groomWithoutJev(repo: TempRepo, jev: false | object, reason: string): Promise<void> {
+  writeGroomRepo(repo, { jev });
+  const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
+  expect(code).toBe(EXIT_OK);
+  expect(stderr).not.toContain('Error');
+  const dir = onlyRun(repo.dir);
+  expect(readStatus(dir)).toEqual({ status: 'completed' });
+  expect(duplicatesCall(dir).output).toEqual({ candidates: [], unchecked: expect.stringContaining(reason) });
+  expect(lastComment(repo.dir)).toContain('## Duplicates');
+  const decided = JSON.parse(
+    readFileSync(
+      join(dir, readdirSync(dir).find((name) => name.endsWith('-decide')) ?? 'x', 'call-1', 'in', 'findings.json'),
+      'utf8',
+    ),
+  );
+  expect(decided.duplicates.unchecked).toContain(reason);
+}
+
+test('with no Jev adapter, groom completes and its duplicates check says it could not ask', async () => {
+  await withTempRepo(async (repo) => {
+    await groomWithoutJev(repo, false, '');
+  });
+}, 120_000);
+
+test('with a Jev that answers 500, groom completes and its duplicates check says why', async () => {
+  await withTempRepo(async (repo) => {
+    await groomWithoutJev(repo, { error: { status: 500, detail: 'down' } }, '500');
+  });
+}, 120_000);
+
+test("decide's findings carry the duplicates output", async () => {
+  await withTempRepo(async (repo) => {
+    writeGroomRepo(repo);
+    const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    const dir = onlyRun(repo.dir);
+    const call = join(dir, readdirSync(dir).find((name) => name.endsWith('-decide')) ?? 'missing-decide', 'call-1');
+    expect(JSON.parse(readFileSync(join(call, 'in', 'findings.json'), 'utf8')).duplicates).toEqual(
+      duplicatesCall(dir).output,
+    );
+  });
+}, 120_000);
+
+test("groom's intake lists the other open tickets unwrapped in others.json", async () => {
+  await withTempRepo(async (repo) => {
+    writeGroomRepo(repo);
+    const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    const text = readFileSync(join(onlyRun(repo.dir), '00-intake', 'call-1', 'out', 'others.json'), 'utf8');
+    const others = JSON.parse(text) as { ticketKey: string; title: string; description: string }[];
+    expect(others.map((each) => each.ticketKey)).toEqual(['FAKE-1']);
+    expect(others[0]?.title).toBe(fakeTicket(repo.dir, 'FAKE-1').title);
+    expect(text).not.toContain('<untrusted-input');
   });
 }, 120_000);
 

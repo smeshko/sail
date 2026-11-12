@@ -16,6 +16,10 @@
       "type": "noul",
       "noul": 0.5
     },
+    "FAKE-2:FAKE-1": {
+      "type": "noul",
+      "noul": 0.6
+    },
     "follow-up-1:FAKE-1": {
       "type": "noul",
       "noul": 0.1

@@ -1,4 +1,4 @@
-// checker(): one of groom's three agent checks, each a stage of its own with its own prompt and output: what every one of
+// checker(): one of groom's two agent checks, `worth` and `questions`, each a stage of its own with its own prompt and output: what every one of
 // them reads, may run and may spend. A checker reads the ticket and the repository and never writes to either. It gets
 // AGENTS.md alone as conventions: it judges a ticket and writes nothing in the vocabulary, as decide does. Groom's plan is
 // the groom stage that gets the glossary. Each names the model alias it runs on:

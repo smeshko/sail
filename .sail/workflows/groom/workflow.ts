@@ -1,7 +1,7 @@
 // groom: a groom-labelled ticket in, one comment out, and for a ticket worth doing, its plan. The ticket is read without
-// a claim, so it stays where it is unless groom cancels it, merges it into another, or marks it a duplicate. Three agent
-// checks look at it (duplicates and worth at once, worth also asking whether it is stale; then open questions, only when
-// worth keeps the ticket); a judge writes the report, chooses actions
+// a claim, so it stays where it is unless groom cancels it, merges it into another, or marks it a duplicate. Two agent
+// checks and a Jev ranking look at it (duplicates and worth at once, worth also asking whether it is stale; then open
+// questions, only when worth keeps the ticket); a judge writes the report, chooses actions
 // from a fixed set and confirms the open questions. A ticket that survives them with none open is planned, as the
 // factory's plan stage did, and a plan that leaves no question open is attached to the ticket. Before it is, the overlap
 // stage reads the plans of the other open `planned` tickets, and the ticket is blocked by the one whose plan changes a
@@ -39,8 +39,8 @@ const REVIEW_CANCEL = { cancel: 0.5, keep: 0.7 };
 const MERGE_CONFIDENCE = 0.65;
 
 /**
- * The confidence the duplicates check must give that two tickets describe the same work for a `duplicate` action, or a
- * `merge` it alone names, to pass.
+ * The score Jev's ranking in the duplicates check must give that two tickets describe the same work for a `duplicate`
+ * action, or a `merge` it alone names, to pass.
  */
 const DUPLICATE_CONFIDENCE = 0.8;
 
@@ -222,7 +222,7 @@ export default workflow(
   'groom',
   {
     intake: readTicket,
-    version: 3,
+    version: 4,
     watch: { every: '15m', label: LABEL },
     // One at a time, so two judgments of duplicates or merges never race each other.
     maxConcurrentRuns: 1,
@@ -241,10 +241,9 @@ export default workflow(
     };
 
     const [dup, earned] = await run.all([
-      [duplicates, { brief, others }],
+      [duplicates, { ticket: run.intake.files['ticket.json'], others: run.intake.files['others.json'] }],
       [worth, { brief, others }],
     ]);
-    if (dup.outcome === 'blocked') return handOff(`duplicates blocked: ${dup.reason}`);
     if (earned.outcome === 'blocked') return handOff(`worth blocked: ${earned.reason}`);
 
     // A ticket worth would cancel needs no questions asked of it: decide sees none.

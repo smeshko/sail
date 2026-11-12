@@ -16,9 +16,11 @@ export const GroomInput = z.object({
   fromReview: z.boolean(),
 });
 
-/** The open tickets that describe the same work as the groomed one, each with how sure the check is. */
+/** The open tickets Jev ranks closest to the groomed one, each with its score. */
 export const Duplicates = z.object({
   candidates: z.array(z.object({ ticketKey: z.string(), confidence: z.number().min(0).max(1), why: z.string() })),
+  /** Why Jev could not be asked, with no candidates; absent when the check ran. */
+  unchecked: z.string().optional(),
 });
 
 /**
