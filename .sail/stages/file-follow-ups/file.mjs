@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const { openTickets, wrapAll, excerpt, sameWork, SAME_WORK, MAX_QUESTIONS, MAX_REQUEST_BYTES } = await import(
+const { openTickets, wrapAll, excerpt, askSameWork, SAME_WORK } = await import(
   pathToFileURL(join(dirname(process.env.SAIL_CONFIG), 'lib', 'duplicates.mjs')).href
 );
 
@@ -65,45 +65,14 @@ function duplicatesOf(candidates) {
   const pairs = [];
   candidates.forEach((_, index) => {
     const a = `follow-up-${index + 1}`;
-    for (const ticket of open) pairs.push({ name: `${a}:${ticket.ticketKey}`, a, b: ticket.ticketKey });
+    for (const ticket of open)
+      pairs.push({ name: `${a}:${ticket.ticketKey}`, a: ['followUps', a], b: ['tickets', ticket.ticketKey] });
     for (let earlier = 0; earlier < index; earlier++) {
       const b = `follow-up-${earlier + 1}`;
-      pairs.push({ name: `${a}:${b}`, a, b });
+      pairs.push({ name: `${a}:${b}`, a: ['followUps', a], b: ['followUps', b] });
     }
   });
-  const answers = {};
-  const empty = () => ({ state: { followUps: {}, tickets: {} }, questions: {} });
-  let request = empty();
-  const ask = () => {
-    const { answer, error } = port(['jev', 'ask'], JSON.stringify(request));
-    if (error !== undefined) throw new Error(error);
-    Object.assign(answers, answer.answers);
-  };
-  for (const { name, a, b } of pairs) {
-    const collection = Object.hasOwn(state.followUps, b) ? 'followUps' : 'tickets';
-    const add = () => {
-      const next = {
-        state: { followUps: { ...request.state.followUps }, tickets: { ...request.state.tickets } },
-        questions: { ...request.questions, [name]: sameWork(`followUps["${a}"]`, `${collection}["${b}"]`) },
-      };
-      next.state.followUps[a] = state.followUps[a];
-      next.state[collection][b] = state[collection][b];
-      return next;
-    };
-    let next = add();
-    if (
-      Object.keys(next.questions).length > MAX_QUESTIONS ||
-      Buffer.byteLength(JSON.stringify(next), 'utf8') > MAX_REQUEST_BYTES
-    ) {
-      if (Object.keys(request.questions).length > 0) ask();
-      request = empty();
-      next = add();
-    }
-    if (Buffer.byteLength(JSON.stringify(next), 'utf8') > MAX_REQUEST_BYTES)
-      throw new Error('one duplicate-check pair exceeds the Jev request byte limit');
-    request = next;
-  }
-  if (Object.keys(request.questions).length > 0) ask();
+  const answers = askSameWork(state, pairs);
   const found = new Map();
   candidates.forEach((_, index) => {
     for (const ticket of open) {
