@@ -346,7 +346,7 @@ test('a leak-check Jev hit reaches the judge as L1', async () => {
     const leak = input.findings.find((finding: { id: string }) => finding.id === 'L1');
     expect(`${leak.title}\n${leak.detail}`).not.toContain('a change');
     expect(leak.detail).toContain('0.97');
-    expect(leak.detail).toContain('0.8');
+    expect(leak.detail).toContain('0.65');
     expect(asked(dir, 'leak-check#1')).toHaveLength(1);
     expect(asked(dir, 'banned-words#1')).toEqual([]);
   });
