@@ -192,3 +192,36 @@ test('askJev throws the port stderr on a non-zero exit', () => {
     spawn.mockRestore();
   }
 });
+
+const scored = (...values: number[]) => values.map((confidence, index) => ({ ticketKey: `T-${index}`, confidence }));
+
+test('closest orders by score, highest first, with a why per rank', () => {
+  expect(lib.closest(scored(0.2, 0.6, 0.31))).toEqual([
+    { ticketKey: 'T-1', confidence: 0.6, why: 'ranked 1 of 3 by Jev, score 0.60' },
+    { ticketKey: 'T-2', confidence: 0.31, why: 'ranked 2 of 3 by Jev, score 0.31' },
+    { ticketKey: 'T-0', confidence: 0.2, why: 'ranked 3 of 3 by Jev, score 0.20' },
+  ]);
+});
+
+test('closest keeps a score of 0.05 and drops 0.049', () => {
+  expect(lib.closest(scored(0.05, 0.049)).map((each: { ticketKey: string }) => each.ticketKey)).toEqual(['T-0']);
+});
+
+test('closest gives the top three of four over the floor', () => {
+  const kept = lib.closest(scored(0.5, 0.9, 0.7, 0.6));
+  expect(kept.map((each: { ticketKey: string }) => each.ticketKey)).toEqual(['T-1', 'T-2', 'T-3']);
+  expect(kept[2].why).toBe('ranked 3 of 4 by Jev, score 0.60');
+});
+
+test('closest keeps the order given for a tie', () => {
+  expect(lib.closest(scored(0.4, 0.4)).map((each: { ticketKey: string }) => each.ticketKey)).toEqual(['T-0', 'T-1']);
+});
+
+test('closest gives nothing when no score reaches the floor', () => {
+  expect(lib.closest(scored(0.04, 0))).toEqual([]);
+  expect(lib.closest([])).toEqual([]);
+});
+
+test('closest has a limit of three and a floor of 0.05', () => {
+  expect([lib.RANK_LIMIT, lib.RANK_FLOOR]).toEqual([3, 0.05]);
+});

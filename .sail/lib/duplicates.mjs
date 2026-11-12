@@ -1,4 +1,5 @@
-// The duplicate check a filer runs: open tickets, untrusted excerpts, and the one same-work question.
+// The duplicate check a filer and groom's duplicates stage run: open tickets, untrusted excerpts, the one same-work
+// question, and the ranking of its scores.
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -110,4 +111,22 @@ export function askSameWork(state, pairs, ask = askJev) {
   }
   flush();
   return answers;
+}
+
+/** How many tickets groom's check names: the ticket's measurement kept 30 of 32 true pairs at 1.8 candidates a run. */
+export const RANK_LIMIT = 3;
+/** The lowest score a ticket is named at, from the same measurement. */
+export const RANK_FLOOR = 0.05;
+
+/**
+ * The closest tickets of `[{ ticketKey, confidence }]`: those at or over the floor, highest first, ties in the order
+ * given, cut to the limit, each with why it is named.
+ */
+export function closest(scores, limit = RANK_LIMIT, floor = RANK_FLOOR) {
+  const kept = scores.filter((each) => each.confidence >= floor).sort((a, b) => b.confidence - a.confidence);
+  return kept.slice(0, limit).map((each, index) => ({
+    ticketKey: each.ticketKey,
+    confidence: each.confidence,
+    why: `ranked ${index + 1} of ${kept.length} by Jev, score ${each.confidence.toFixed(2)}`,
+  }));
 }
