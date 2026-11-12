@@ -1,0 +1,76 @@
+#!/bin/sh
+# A mktemp that puts every file whose directory it picks itself in $TMPDIR, the step's scratch folder. macOS's mktemp
+# ignores TMPDIR for a bare call and for -t. Any other form goes to the real mktemp unchanged.
+
+self=$0
+real=
+oldifs=$IFS
+IFS=:
+for dir in $PATH; do
+  candidate="${dir:-.}/mktemp"
+  if [ -x "$candidate" ] && [ ! "$candidate" -ef "$self" ]; then
+    real=$candidate
+    break
+  fi
+done
+IFS=$oldifs
+if [ -z "$real" ]; then
+  for candidate in /usr/bin/mktemp /bin/mktemp; do
+    if [ -x "$candidate" ] && [ ! "$candidate" -ef "$self" ]; then
+      real=$candidate
+      break
+    fi
+  done
+fi
+if [ -z "$real" ]; then
+  echo "mktemp: no mktemp found beside sail's" >&2
+  exit 127
+fi
+
+if [ -z "${TMPDIR:-}" ]; then
+  exec "$real" "$@"
+fi
+
+flags=
+prefix=
+has_prefix=
+want_prefix=
+for arg in "$@"; do
+  if [ -n "$want_prefix" ]; then
+    prefix=$arg
+    has_prefix=1
+    want_prefix=
+    continue
+  fi
+  case "$arg" in
+    -[dqu]*t)
+      flags="$flags ${arg%t}"
+      want_prefix=1
+      ;;
+    -t)
+      want_prefix=1
+      ;;
+    -[dqu]*)
+      case "$arg" in
+        -*[!dqu]*) exec "$real" "$@" ;;
+      esac
+      flags="$flags $arg"
+      ;;
+    *) exec "$real" "$@" ;;
+  esac
+done
+if [ -n "$want_prefix" ]; then
+  exec "$real" "$@"
+fi
+
+dir=${TMPDIR%/}
+if [ -z "$has_prefix" ]; then
+  template="$dir/tmp.XXXXXXXXXX"
+else
+  case "$prefix" in
+    *XXX*) template="$dir/$prefix" ;;
+    *) template="$dir/$prefix.XXXXXXXX" ;;
+  esac
+fi
+# shellcheck disable=SC2086
+exec "$real" $flags "$template"
