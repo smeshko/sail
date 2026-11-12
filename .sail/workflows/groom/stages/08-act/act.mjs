@@ -102,7 +102,7 @@ function apply(action) {
   if (action.kind === 'blocked_by') {
     // The port writes a blocked-by side from the other ticket: `to` blocks this one.
     port(['ticket-source', 'relate', action.to, '--kind', 'blocks', '--to', ticketKey]);
-    return `blocked_by ${action.to}`;
+    return action.why === undefined ? `blocked_by ${action.to}` : `blocked_by ${action.to} (${action.why})`;
   }
   const other = action.kind === 'duplicate' ? action.of : action.to;
   port(['ticket-source', 'relate', ticketKey, '--kind', action.kind, '--to', other]);

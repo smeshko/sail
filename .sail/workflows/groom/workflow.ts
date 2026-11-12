@@ -3,7 +3,10 @@
 // checks look at it (duplicates and worth at once, worth also asking whether it is stale; then open questions, only when
 // worth keeps the ticket); a judge writes the report, chooses actions
 // from a fixed set and confirms the open questions. A ticket that survives them with none open is planned, as the
-// factory's plan stage did, and a plan that leaves no question open is attached to the ticket. The act step applies what
+// factory's plan stage did, and a plan that leaves no question open is attached to the ticket. Before it is, the overlap
+// stage reads the plans of the other open `planned` tickets, and the ticket is blocked by the one whose plan changes a
+// file its own plan changes (the plan attached last among several), so the factory implements the two in order rather
+// than into pull requests that conflict. The act step applies what
 // the workflow lets through, attaches the plan, comments the report, takes the `groom` label off and puts `groomed` (an
 // action ended the ticket), `open-questions` (a person must answer, then put `groom` back) or `planned` and `factory` on,
 // so the watcher grooms each ticket once and the factory implements the plan. A stage that ends blocked hands the ticket
@@ -18,7 +21,8 @@ import { worth } from './stages/02-worth/stage';
 import { questions } from './stages/04-questions/stage';
 import { decide } from './stages/05-decide/stage';
 import { plan } from './stages/06-plan/stage';
-import { act } from './stages/07-act/stage';
+import { overlap } from './stages/07-overlap/stage';
+import { act } from './stages/08-act/stage';
 
 /** The designation label: a ticket carrying it is groomed, and the run takes it off. */
 const LABEL = 'groom';
@@ -116,7 +120,9 @@ function heldCancel(context: Context): string | undefined {
  * ticket that survives a merge is never canceled. A `cancel` passes the worth check's numbers as `CANCEL` says, a `merge`
  * as `MERGE_CONFIDENCE` and `DUPLICATE_CONFIDENCE` say,
  * never for a kept ticket, and one `merge` and one `labels` apply per run. An `edit` that names nothing to change is reported. A relation of any kind (`related`, `blocks`, `blocked_by`) is applied only to one of `others`,
- * never to `ticketKey` itself: the judge and the checks read the ticket's text, which can name any key.
+ * never to `ticketKey` itself: the judge and the checks read the ticket's text, which can name any key. A planned ticket
+ * is also blocked by the open planned ticket whose plan shares a file with its own, which the workflow adds after the
+ * plan is written, under the same rule.
  */
 function limit(decision: z.infer<typeof Decision>, context: Context): z.infer<typeof Verdict> {
   const { ticketKey, others, kept, findings } = context;
@@ -273,22 +279,35 @@ export default workflow(
     const planned = await run.stage(plan, { brief, report, actions: verdict.apply });
     if (planned.outcome === 'blocked') return handOff(`plan blocked: ${planned.reason}`);
     const { questions: asked, ...written } = planned.output;
-    const acted =
-      asked.length > 0
-        ? await run.stage(act, {
-            ticketKey,
-            report,
-            actions: { ...verdict, questions: asked, outcome: 'open-questions' },
-            label: LABEL,
-            plan: undefined,
-          })
-        : await run.stage(act, {
-            ticketKey,
-            report,
-            actions: { ...verdict, plan: written },
-            label: LABEL,
-            plan: planned.files['plan.md'],
-          });
+    if (asked.length > 0) {
+      const acted = await run.stage(act, {
+        ticketKey,
+        report,
+        actions: { ...verdict, questions: asked, outcome: 'open-questions' },
+        label: LABEL,
+        plan: undefined,
+      });
+      return acted.output;
+    }
+
+    // The plan is going to be attached: the ticket waits on the open planned ticket whose plan changes the same files.
+    const found = await run.stage(overlap, { ticketKey, plan: planned.files['plan.md'] });
+    const { blockedBy, why } = found.output;
+    const waits =
+      blockedBy !== null &&
+      blockedBy !== ticketKey &&
+      run.input.others.includes(blockedBy) &&
+      !verdict.apply.some((each) => each.kind === 'blocked_by' && each.to === blockedBy);
+    const apply: z.infer<typeof Verdict>['apply'] = waits
+      ? [...verdict.apply, { kind: 'blocked_by', to: blockedBy, ...(why === null ? {} : { why }) }]
+      : verdict.apply;
+    const acted = await run.stage(act, {
+      ticketKey,
+      report,
+      actions: { ...verdict, apply, plan: written },
+      label: LABEL,
+      plan: planned.files['plan.md'],
+    });
     return acted.output;
   },
 );
