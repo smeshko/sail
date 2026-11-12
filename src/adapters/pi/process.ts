@@ -8,6 +8,7 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { allowlisted, isCredential } from '../../engine/env-allowlist';
 import { DEFAULT_GRACE_MS, stopGroup, trackGroup, untrackGroup } from '../../engine/process';
+import { shimsFirst } from '../../engine/shims';
 
 /** How long the output of a command that has exited has to arrive, when a descendant still holds its pipes. */
 const FLUSH_MS = 200;
@@ -25,7 +26,8 @@ export interface BashRunner {
   reap(): Promise<void>;
 }
 
-/** A command's environment: the allowlisted names of `env` that are no credential, the preamble, then the shell. */
+/** A command's environment: the allowlisted names of `env` that are no credential, with the shims folder (a `mktemp`
+ * that uses `$TMPDIR`) first on `PATH`, the preamble, then the shell. The bash is no login shell, so that holds. */
 export function bashEnv(
   preamble: Readonly<Record<string, string>>,
   env: Readonly<Record<string, string | undefined>>,
@@ -33,7 +35,8 @@ export function bashEnv(
   const picked = Object.entries(env).filter(
     (entry): entry is [string, string] => entry[1] !== undefined && allowlisted(entry[0]) && !isCredential(entry[0]),
   );
-  return { ...Object.fromEntries(picked), ...preamble, SHELL: '/bin/bash' };
+  const inherited = Object.fromEntries(picked);
+  return { ...inherited, PATH: shimsFirst(inherited.PATH), ...preamble, SHELL: '/bin/bash' };
 }
 
 /** Whether any process is left in the group `pgid` leads. */

@@ -1,11 +1,12 @@
 // The gate every tool call of a pi session passes before it runs: the extension's tool_call hook answers with the
 // permission engine's verdict, a block with the reason the model reads, and each denial is reported with its rule.
 import { afterAll, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { Denial } from '../../../src/adapters/claude-code/tool-call';
 import { createGate, gateExtension, type PiToolCall } from '../../../src/adapters/pi/gate';
+import { bashEnv, createBashRunner } from '../../../src/adapters/pi/process';
 import type { DecideContext } from '../../../src/engine/permissions';
 import type { Permissions } from '../../../src/engine/permissions/types';
 
@@ -180,4 +181,29 @@ test('on pi a write to /tmp/notes.log is blocked under write, and with no TMPDIR
     without.toolCall(call('write', { path: join(scratch, 'notes.log'), content: 'x' }))?.block,
   ]).toEqual([true, true]);
   expect([withScratch.denials[0]?.[1].rule, without.denials[0]?.[1].rule]).toEqual(['write', 'write']);
+});
+
+test('on pi, mktemp in one command and a write to the path it printed in the next are both allowed, and the file is in the scratch folder; the one-command form stays blocked', async () => {
+  const g = gate(SCRATCH_STEP, SCRATCH_CTX);
+  const runner = createBashRunner({ env: bashEnv(SCRATCH_CTX.env, { PATH: process.env.PATH }) });
+  const run = async (command: string) => {
+    let text = '';
+    const { exitCode } = await runner.operations.exec(command, work, { onData: (data) => (text += data.toString()) });
+    return { exitCode, text: text.trim() };
+  };
+  try {
+    expect(g.toolCall(call('bash', { command: 'mktemp' }))).toBeUndefined();
+    const made = await run('mktemp');
+    expect(made.exitCode).toBe(0);
+    expect(realpathSync(dirname(made.text))).toBe(realpathSync(scratch));
+    expect(g.toolCall(call('bash', { command: `echo ok > ${made.text}` }))).toBeUndefined();
+    await run(`echo ok > ${made.text}`);
+    expect(readFileSync(made.text, 'utf8')).toBe('ok\n');
+    expect(g.toolCall(call('write', { path: made.text, content: 'x' }))).toBeUndefined();
+    const one = g.toolCall(call('bash', { command: 'f=$(mktemp); echo ok > "$f"' }));
+    expect(one).toEqual({ block: true, reason: expect.stringContaining("can't be resolved before it runs") });
+    expect(g.denials.map(([, denial]) => denial.rule)).toEqual(['write']);
+  } finally {
+    await runner.reap();
+  }
 });

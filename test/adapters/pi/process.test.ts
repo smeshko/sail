@@ -3,6 +3,7 @@
 import { expect, test } from 'bun:test';
 import { bashEnv, createBashRunner } from '../../../src/adapters/pi/process';
 import { liveGroups, stopLiveGroups } from '../../../src/engine/process';
+import { SHIMS_DIR } from '../../../src/engine/shims';
 import { withTempRepo } from '../../helpers/temp-repo';
 
 const alive = (pid: number): boolean => {
@@ -148,7 +149,12 @@ test('printenv ANTHROPIC_API_KEY through the operations prints nothing when the 
       AWS_SECRET_ACCESS_KEY: 'a',
     },
   );
-  expect(env).toEqual({ PATH: '/bin', HOME: '/home/x', STAGE_OUT: '/out', SHELL: '/bin/bash' });
+  expect(env).toEqual({
+    PATH: `${SHIMS_DIR}:/bin`,
+    HOME: '/home/x',
+    STAGE_OUT: '/out',
+    SHELL: '/bin/bash',
+  });
 });
 
 test('the scrubbed environment reaches the shell: the key is unset there', async () => {
@@ -161,6 +167,10 @@ test('the scrubbed environment reaches the shell: the key is unset there', async
     await runner.reap();
     expect(out.text()).toBe('[/out]\n');
   });
+});
+
+test('with no PATH in the environment the shims folder still comes first, ahead of the system default', () => {
+  expect(bashEnv({}, { HOME: '/home/x' }).PATH).toBe(`${SHIMS_DIR}:/usr/bin:/bin`);
 });
 
 test('the preamble wins over a name the environment also has', () => {
