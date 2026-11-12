@@ -1,5 +1,5 @@
 // report: comments the review on the pull request: the judge's summary, each finding and its verdict, the fix rounds,
-// and what is still open, with the low findings no fix pass was started for listed as nits. The comment is shortened to fit what a host accepts; REVIEW.md keeps the full report. A review that left findings open, or one too thin to trust, also takes the designation label
+// and what is still open, with the reviewers' nits listed. The comment is shortened to fit what a host accepts; REVIEW.md keeps the full report. A review that left findings open, or one too thin to trust, also takes the designation label
 // off, so the watcher doesn't review the pushed head again.
 import { script, value, z } from 'sail';
 import { PullRequestRef } from '../../../../stages/file-follow-ups/stage';

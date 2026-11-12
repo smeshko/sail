@@ -3,7 +3,7 @@
 // decides what each finding becomes (fixed here, filed as a ticket, or dropped)
 // and which reviews are too thin to trust. Up to three fix passes follow, each checked by the agent, with Jev's answers as its hint, beside fresh
 // validation; a pass that commits nothing and leaves the same findings open ends them early. A pass starts only for a
-// finding, and every finding is at medium or above: a reviewer's low finding is dropped. Then
+// finding, and every finding is at medium or above: a reviewer's low finding is dropped, and its nits are listed in the report. Then
 // the fixes are pushed, the tickets filed, the demonstration attached to the ticket, the review commented, and the pull
 // request merged once its checks pass. Landing has up to three merges of its own, whatever the fix rounds used: each
 // retry merges the base in, an agent resolving any conflict, and sends checks still red after a rerun to fix as
@@ -54,6 +54,9 @@ const LENSES = ['requirements', 'architecture', 'bugs', 'tests', 'conventions'] 
 >[];
 
 const FIX_PASSES = 3;
+
+/** The most nits the report lists for one reviewer. */
+const NITS = 3;
 
 /** The most merges landing tries: each but the last may hand back a retry, for a sync with the base and a fix. */
 const LAND_PASSES = 3;
@@ -165,11 +168,17 @@ export default workflow(
     }
     const summaries: ({ lens: (typeof LENSES)[number] } & Pick<z.infer<typeof Reviewed>, 'summary' | 'coverage'>)[] =
       [];
+    const nits: z.infer<typeof ReviewRecord>['nits'] = [];
     for (const [index, reviewed] of reviews.entries()) {
       const lens = LENSES[index] ?? 'bugs';
       if (reviewed.outcome === 'blocked') return handOff(`review-${lens} blocked: ${reviewed.reason}`);
       summaries.push({ lens, summary: reviewed.output.summary, coverage: reviewed.output.coverage });
-      // A reviewer is asked for medium and above; a low finding it submits anyway never reaches triage or the judge.
+      // A reviewer is asked for medium and above; a low finding it submits anyway never reaches triage or the judge,
+      // and is listed in the report as one of its nits, after the ones it named, three at most.
+      const lows = reviewed.output.findings
+        .filter((each) => each.severity === 'low')
+        .map(({ file, title, detail }) => ({ file, title, detail }));
+      for (const nit of [...(reviewed.output.nits ?? []), ...lows].slice(0, NITS)) nits.push({ lens, ...nit });
       for (const finding of reviewed.output.findings.filter((each) => each.severity !== 'low')) {
         findings.push({
           ...finding,
@@ -326,7 +335,7 @@ export default workflow(
         rounds,
         resolved,
         open,
-        nits: [],
+        nits,
         thin,
         bannedWordsNote: banned.output.jev.candidates > 0 ? banned.output.jev.note : '',
       },

@@ -1,7 +1,6 @@
 // Formats the ReviewRecord in $INPUT_RECORD as REVIEW.md, the full report, and comments it on the pull request as
 // COMMENT.md: the same text when it fits 60,000 bytes, a shortened one otherwise that names REVIEW.md in this run's output.
-// Findings to fix that no pass was started for (`record.nits`: low ones, with none at medium or above beside them)
-// read as the verdict `nit` and are said to be unfixed.
+// The reviewers' nits (`record.nits`, below medium, neither judged nor fixed) are listed under `### Nits`.
 // Then, when findings are
 // still open or a review was too thin to trust, swaps the designation label in $INPUT_LABEL for needs-human. Prints
 // whether it removed it.
@@ -26,9 +25,8 @@ const commits = new Map();
 for (const round of record.rounds) {
   for (const each of round.fixed.fixes) if (each.commit) commits.set(each.finding, each.commit.slice(0, 7));
 }
-const nits = new Set(record.nits);
+const nits = record.nits;
 const verdict = (id) => {
-  if (nits.has(id)) return 'nit';
   const decision = decided.get(id);
   if (decision === undefined) return 'fix';
   return decision.verdict;
@@ -87,9 +85,7 @@ function build(level) {
   const lines = ['## sail review', ''];
   lines.push(
     mergeable
-      ? nits.size > 0
-        ? `No finding at medium or above is left to fix, and validation passes. ${plural(nits.size, 'low finding')} ${nits.size === 1 ? 'is' : 'are'} listed as ${nits.size === 1 ? 'a nit' : 'nits'}, not fixed: a fix pass starts only for a finding at medium or above.`
-        : 'Every finding to fix is fixed, and validation passes.'
+      ? 'Every finding to fix is fixed, and validation passes.'
       : `${why.join(', and ')}: this pull request needs a human: its \`${label}\` label is off and \`needs-human\` is on.`,
     '',
   );
@@ -102,7 +98,7 @@ function build(level) {
   if (record.bannedWordsNote) lines.push(`Banned-words check incomplete: ${cell(record.bannedWordsNote)}.`, '');
   if (record.findings.length === 0) {
     lines.push(
-      'No findings: validation passed, the leak check found nothing, the banned-words check returned no flagged hits, the demonstration showed every criterion, and no reviewer found anything.',
+      'No findings: validation passed, the leak check found nothing, the banned-words check returned no flagged hits, the demonstration showed every criterion, and no reviewer found anything at medium or above.',
     );
   } else {
     if (rows.length > 0) {
@@ -117,6 +113,15 @@ function build(level) {
       }
     }
     if (collapsed.length > 0) lines.push(...(rows.length > 0 ? [''] : []), ...counts(collapsed));
+  }
+  if (nits.length > 0) {
+    lines.push('', '### Nits', '', 'Named by the reviewers, below medium: not judged and not fixed.', '');
+    if (level >= 4) lines.push(`${plural(nits.length, 'nit')}: see the full report.`);
+    else
+      for (const nit of nits) {
+        const where = nit.file === '' ? '' : ` (${cell(nit.file)})`;
+        lines.push(`- ${nit.lens}: ${cell(text(nit.title))}${where}: ${cell(text(nit.detail))}`);
+      }
   }
   if (record.rounds.length > 0) {
     lines.push('', '### Fix rounds', '');

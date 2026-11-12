@@ -597,8 +597,6 @@ function judgeSeed(repo: TempRepo, verdicts: Record<string, 'fix' | 'drop'>): vo
   seedHarness(sail, 'judge', [answer]);
 }
 
-const fixIds = (dir: string) => callInput(dir, 'fix', 'findings').findings.map((each: { id: string }) => each.id);
-
 test('a review whose findings are all dropped starts no fix pass and merges', async () => {
   await withTempRepo(async (repo) => {
     setUp(repo);
@@ -1300,5 +1298,54 @@ test("only the stages that write get CONTEXT.md, and a read-only reviewer's prom
     const prompt = readFileSync(join(dir, folder, 'call-1', 'prompt.md'), 'utf8');
     expect(prompt).toContain('# AGENTS.md');
     expect(Buffer.byteLength(prompt)).toBeLessThan(20_000);
+  });
+}, 120_000);
+
+test("a reviewer's nits are listed in the report and reach neither the judge nor fix", async () => {
+  await withTempRepo(async (repo) => {
+    setUp(repo);
+    const { code, stderr, dir } = await review(repo);
+    expect({ code, stderr: code === 0 ? '' : stderr }).toEqual({ code: 0, stderr: '' });
+    const line =
+      '- conventions: `tot` is a terse name (src/cli/commands/show.ts): `tot` reads as a typo; `total` matches the rest of the file.';
+    expect(callInput(dir, 'report', 'record').nits).toEqual([
+      {
+        lens: 'conventions',
+        file: 'src/cli/commands/show.ts',
+        title: '`tot` is a terse name',
+        detail: '`tot` reads as a typo; `total` matches the rest of the file.',
+      },
+    ]);
+    const folder = readdirSync(dir).find((name) => name.endsWith('-report'));
+    const full = readFileSync(join(dir, folder ?? '', 'call-1', 'out', 'REVIEW.md'), 'utf8');
+    const comment = (await pullRequest(repo)).comments.find((body) => body.includes('## sail review')) ?? '';
+    for (const text of [full, comment]) {
+      expect(text).toContain('### Nits');
+      expect(text).toContain(line);
+    }
+    const evidence = callInput(dir, 'judge', 'evidence');
+    for (const entry of evidence.reviews) expect(entry).not.toHaveProperty('nits');
+    expect(JSON.stringify(evidence)).not.toContain('terse name');
+    expect(JSON.stringify(callInput(dir, 'judge', 'findings'))).not.toContain('terse name');
+    expect(JSON.stringify(callInput(dir, 'fix', 'findings'))).not.toContain('terse name');
+  });
+}, 120_000);
+
+test("a reviewer's nits and low findings are cut to three", async () => {
+  await withTempRepo(async (repo) => {
+    setUp(repo);
+    const sail = join(repo.dir, '.sail');
+    const [answer] = JSON.parse(readFileSync(join(sail, 'fake', 'harness.json'), 'utf8'))['review-conventions'];
+    answer.output.nits = ['a', 'b'].map((title) => ({ file: 'notes.txt', title, detail: 'y' }));
+    answer.output.findings = ['c', 'd'].map((title) => ({ severity: 'low', file: 'notes.txt', title, detail: 'y' }));
+    seedHarness(sail, 'review-conventions', [answer]);
+    const { code, dir } = await review(repo);
+    expect(code).toBe(0);
+    const nits = callInput(dir, 'report', 'record').nits;
+    expect(nits.map((each: { lens: string; title: string }) => [each.lens, each.title])).toEqual([
+      ['conventions', 'a'],
+      ['conventions', 'b'],
+      ['conventions', 'c'],
+    ]);
   });
 }, 120_000);
