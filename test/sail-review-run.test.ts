@@ -9,6 +9,7 @@
 // The judge, not the workflow, raises a criterion the demonstration didn't show: the workflow numbers it `D<n>`, decides it
 // `fix` and sends it to the fix pass, after the reviewers' findings.
 // Triage cases show Jev decisions surviving omissions and judge overrides winning.
+// A body whose Demonstration says `Surface: none` starts no demonstrate agent; one that names a surface, or has no section, does.
 import { expect, test } from 'bun:test';
 import { appendFileSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -1392,10 +1393,10 @@ test("a criterion the demonstration didn't show reaches the judge as evidence, n
   await withTempRepo(async (repo) => {
     setUp(repo);
     const { dir } = await review(repo);
-    // A run under this rule records review@13, apart from the runs that made a D finding of each unshown criterion.
+    // A run under this rule records review@14, apart from the runs that made a D finding of each unshown criterion.
     expect(JSON.parse(readFileSync(join(dir, 'run.json'), 'utf8')).workflow).toMatchObject({
       name: 'review',
-      version: 13,
+      version: 14,
     });
     const { findings } = callInput(dir, 'judge', 'findings');
     expect(findings.filter((each: { source: string }) => each.source === 'demonstrate')).toEqual([]);
@@ -1403,6 +1404,53 @@ test("a criterion the demonstration didn't show reaches the judge as evidence, n
     expect(criteria.find((each: { criterion: string }) => each.criterion === UNSHOWN).shown).toBe(false);
     const attached = callInput(dir, 'attach-demonstration', 'demonstration');
     expect(attached.criteria.map((each: { shown: boolean }) => each.shown)).toEqual([true, false]);
+  });
+}, 120_000);
+
+const SKIPPED = 'Surface: none. Nothing a user runs changes.';
+const stageStarts = (dir: string, stage: string) =>
+  readEvents(dir).filter((event) => event.type === 'stage:start' && (event as { stage?: string }).stage === stage);
+
+test('a body whose Demonstration says surface none starts no demonstrate agent', async () => {
+  await withTempRepo(async (repo) => {
+    setUp(repo);
+    editPullRequest(repo, {
+      body: `## Summary\n\nA refactor.\n\n## Demonstration\n\n${SKIPPED}\n\n## Notes\n\nCloses FAKE-1`,
+    });
+    oneRound(repo);
+    const { keys, dir } = await review(repo);
+    expect(keys).not.toContain('demonstrate#1');
+    expect(stageStarts(dir, 'demonstrate')).toEqual([]);
+    const skipped = { criteria: [], skipped: SKIPPED, transcript: '' };
+    expect(callInput(dir, 'judge', 'evidence').demonstration).toEqual(skipped);
+    expect(callInput(dir, 'attach-demonstration', 'demonstration')).toEqual(skipped);
+    const folder = readdirSync(dir).find((entry) => entry.endsWith('-attach-demonstration')) ?? '';
+    expect(readFileSync(join(dir, folder, 'call-1', 'out', 'comment.md'), 'utf8')).toContain(
+      `Nothing to show: ${SKIPPED}`,
+    );
+    const { findings } = callInput(dir, 'fix', 'findings');
+    expect(findings.map((each: { id: string }) => each.id)).toContain('D1');
+  });
+}, 120_000);
+
+test('a body whose Demonstration names a surface runs the demonstrate agent', async () => {
+  await withTempRepo(async (repo) => {
+    setUp(repo);
+    oneRound(repo);
+    const { keys, dir } = await review(repo);
+    expect(keys).toContain('demonstrate#1');
+    const seeds = JSON.parse(readFileSync(join(repo.dir, '.sail', 'fake', 'harness.json'), 'utf8'));
+    expect(callInput(dir, 'judge', 'evidence').demonstration).toEqual(seeds.demonstrate[0].output);
+  });
+}, 120_000);
+
+test('a body with no Demonstration section runs the demonstrate agent', async () => {
+  await withTempRepo(async (repo) => {
+    setUp(repo);
+    editPullRequest(repo, { body: '## Summary\n\nA change.\n\nCloses FAKE-1' });
+    oneRound(repo);
+    const { keys } = await review(repo);
+    expect(keys).toContain('demonstrate#1');
   });
 }, 120_000);
 
