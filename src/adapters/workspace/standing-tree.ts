@@ -95,8 +95,9 @@ const runsDirOf = (run: { runDir: string }): string => dirname(resolve(run.runDi
  * Gives `run` the first free standing workspace of its workflow, its commit `sha` checked out. It walks `n` from 0
  * below `run.maxConcurrentRuns ?? 1`, takes the first lease it can, keeps the head of a stale holder it took over at
  * that run's run ref first, then adds the worktree (`--force`, so one removed by hand is made again) or checks out in
- * place. A directory that can't be used, a folder that is no worktree among them, is skipped and its lease dropped. A
- * link at `standing/`, at the directory or at its worktree is skipped untouched.
+ * place. A directory that can't be used, a folder that is no worktree among them, is skipped and its lease dropped; one
+ * whose lease can't be read or taken is skipped and its lease left. A link at `standing/`, at the directory or at its
+ * worktree is skipped untouched.
  * Undefined when none is free, or when `run` names no workflow.
  */
 export function leaseStanding(options: {
@@ -115,7 +116,15 @@ export function leaseStanding(options: {
     const path = join(dir, 'workspace');
     // A link is never looked into: a checkout through one would discard the work of whatever checkout it names.
     if ([join(runsDir, STANDING_DIR), dir, path].some(isLink)) continue;
-    const taken = takeStanding(dir, holder, options.now);
+    // A lease that can't be read or taken (no JSON, a directory that can't be made, one that kept changing hands) is
+    // no free workspace: the walk goes on, and a start is never refused because of the option.
+    let taken: ReturnType<typeof takeStanding>;
+    try {
+      taken = takeStanding(dir, holder, options.now);
+    } catch (error) {
+      if (!(error instanceof PortError)) throw error;
+      continue;
+    }
     if (!taken.taken) continue;
     try {
       if (taken.took !== undefined) {

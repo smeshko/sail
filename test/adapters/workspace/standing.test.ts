@@ -308,6 +308,16 @@ test('a link at standing/ is never looked into', async () => {
   });
 });
 
+test('a standing directory whose LEASE cannot be read is skipped, and the walk goes on to the next', async () => {
+  await standingRepo(({ repo, runsDir, sha, next }) => {
+    mkdirSync(standingDir(runsDir, 'demo', 0), { recursive: true });
+    writeFileSync(join(standingDir(runsDir, 'demo', 0), 'LEASE'), 'garbage');
+    const got = leaseStanding({ repo: repo.dir, run: next('run-a'), sha, env: repo.env });
+    expect(got?.path).toBe(standingPath(runsDir, 'demo', 1));
+    expect(read(standingDir(runsDir, 'demo', 0), 'LEASE')).toBe('garbage');
+  });
+});
+
 test('a standing worktree removed by hand is made again', async () => {
   await standingRepo(({ repo, runsDir, sha, next }) => {
     const path = leaseStanding({ repo: repo.dir, run: next('run-a'), sha, env: repo.env })?.path ?? '';
