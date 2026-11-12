@@ -166,4 +166,6 @@ export const ReviewRecord = z.object({
   /** The reviews the judge found too thin to trust: each stops the merge. */
   thin: Judgement.shape.thin,
   open: z.array(z.object({ finding: z.string(), detail: z.string() })),
+  /** The findings to fix that no pass was started for: all low, with none at medium or above beside them. */
+  nits: z.array(z.string()),
 });

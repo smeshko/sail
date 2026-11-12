@@ -4,7 +4,8 @@
 // its hint, and a regression it reports goes to the next pass. One is about the tickets it files. The
 // rest are about landing: a check still red after its rerun goes to fix, a rejected merge merges the base in, and landing
 // has three merges of its own, whatever the fix rounds used. Every merge is preceded by gate-files; a gate change is handed to a human instead.
-// A fix pass that commits nothing and leaves the same findings open ends the fix loop early.
+// A fix pass that commits nothing and leaves the same findings open ends the fix loop early. A fix pass starts only for a
+// finding at medium or above: low ones alone are listed as nits and merge, and ride along when a pass runs.
 // Triage cases show Jev decisions surviving omissions and judge overrides winning.
 import { expect, test } from 'bun:test';
 import { appendFileSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -576,6 +577,77 @@ test('a low-severity finding the judge sends to a ticket is not filed, and a med
     expect(output.filed.map((each: { title: string }) => each.title)).toEqual([
       'sail runs sums call costs without rounding',
     ]);
+  });
+}, 120_000);
+
+/** Seeds the judge's answer with only the decisions `verdicts` names, each at its verdict and with no ticket. */
+function judgeSeed(repo: TempRepo, verdicts: Record<string, 'fix' | 'drop'>): void {
+  const sail = join(repo.dir, '.sail');
+  const [answer] = JSON.parse(readFileSync(join(sail, 'fake', 'harness.json'), 'utf8')).judge;
+  answer.output.decisions = answer.output.decisions
+    .filter((each: { finding: string }) => each.finding in verdicts)
+    .map((each: { finding: string }) => ({ ...each, verdict: verdicts[each.finding], ticket: null }));
+  seedHarness(sail, 'judge', [answer]);
+}
+
+const fixIds = (dir: string) => callInput(dir, 'fix', 'findings').findings.map((each: { id: string }) => each.id);
+
+test('a review whose findings to fix are all low starts no fix pass, lists them as nits and merges', async () => {
+  await withTempRepo(async (repo) => {
+    setUp(repo);
+    seedValidate(repo, [null, null]);
+    judgeSeed(repo, { D1: 'drop', R1: 'drop', R2: 'drop', R3: 'drop', R4: 'fix' });
+    const { code, stderr, keys, dir } = await review(repo);
+    expect({ code, stderr }).toEqual({ code: 0, stderr: '' });
+    expect(keys.filter((key) => /^(fix|jev-fix|check-fix)#/.test(key))).toEqual([]);
+    expect(keys).not.toContain('validate#2');
+    expect(keys).toContain('merge#1');
+    expect(
+      readEvents(dir).filter((event) => event.type.startsWith('loop:') && (event as { loop?: string }).loop === 'fix'),
+    ).toEqual([]);
+    const summary = JSON.parse(readFileSync(join(dir, 'summary.json'), 'utf8')) as Summary;
+    expect(summary.loops?.fix).toBeUndefined();
+    expect(callInput(dir, 'report', 'record').nits).toEqual(['R4']);
+    const folder = readdirSync(dir).find((name) => name.endsWith('-report'));
+    const full = readFileSync(join(dir, folder ?? '', 'call-1', 'out', 'REVIEW.md'), 'utf8');
+    const pr = await pullRequest(repo);
+    const comment = pr.comments.find((body) => body.includes('## sail review')) ?? '';
+    for (const text of [full, comment]) {
+      expect(text).toContain('| R4 `tot` is a terse name | conventions | low | nit |');
+      expect(text).toContain('1 low finding is listed as a nit, not fixed');
+    }
+    expect(pr.labels).not.toContain('needs-human');
+  });
+}, 120_000);
+
+test('a low finding to fix beside a medium-or-above one goes into the fix pass with it', async () => {
+  await withTempRepo(async (repo) => {
+    setUp(repo);
+    judgeSeed(repo, { V1: 'fix', D1: 'fix', R1: 'drop', R2: 'fix', R3: 'drop', R4: 'fix' });
+    oneRound(repo, ['R4']);
+    const { code, stderr, keys, dir } = await review(repo);
+    expect({ code, stderr }).toEqual({ code: 0, stderr: '' });
+    expect(fixIds(dir)).toEqual(['V1', 'D1', 'R2', 'R4']);
+    expect(callInput(dir, 'report', 'record').nits).toEqual([]);
+    expect(keys.filter((key) => key.startsWith('fix#'))).toEqual(['fix#1']);
+  });
+}, 120_000);
+
+test('a failed validation beside only low findings to fix starts a fix pass', async () => {
+  await withTempRepo(async (repo) => {
+    setUp(repo);
+    judgeSeed(repo, { V1: 'fix', D1: 'drop', R1: 'drop', R2: 'drop', R3: 'drop', R4: 'fix' });
+    const sail = join(repo.dir, '.sail');
+    const [answer] = JSON.parse(readFileSync(join(sail, 'fake', 'harness.json'), 'utf8'))['check-fix'];
+    answer.output.items = [
+      { finding: 'V1', resolved: true, detail: 'Holds.' },
+      { finding: 'R4', resolved: true, detail: 'Holds.' },
+    ];
+    seedHarness(sail, 'check-fix#1', [answer]);
+    const { code, stderr, dir } = await review(repo);
+    expect({ code, stderr }).toEqual({ code: 0, stderr: '' });
+    expect(fixIds(dir)).toEqual(['V1', 'R4']);
+    expect(callInput(dir, 'report', 'record').nits).toEqual([]);
   });
 }, 120_000);
 

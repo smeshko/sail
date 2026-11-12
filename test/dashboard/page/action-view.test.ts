@@ -41,6 +41,12 @@ test('a made-up entry is drawn enabled with what was typed, disabled and not at 
   expect(actionControl(made('off'), RUN, idle, NOTHING, { honourDisabled: true, wrap: true }).toString()).toBe(
     '<span class="act"><button class="btn" disabled>poke</button><span class="act-why">not now</span></span>',
   );
+  expect(actionControl(made('off'), RUN, idle, NOTHING, { honourDisabled: true, why: 'title' }).toString()).toBe(
+    '<button class="btn" disabled title="not now">poke</button>',
+  );
+  expect(
+    actionControl(made('off'), RUN, idle, NOTHING, { honourDisabled: true, wrap: true, why: 'title' }).toString(),
+  ).toBe('<span class="act"><button class="btn" disabled title="not now">poke</button></span>');
   expect(actionControl(made('off'), RUN, idle, NOTHING).toString()).toContain(
     '<button class="btn" data-action="poke">poke</button>',
   );

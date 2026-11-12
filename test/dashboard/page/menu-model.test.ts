@@ -13,6 +13,7 @@ import {
   type MenuRow,
   menuRows,
   rank,
+  sharedWhy,
   stepOf,
   subjectRows,
   wordFuzzy,
@@ -116,6 +117,7 @@ test("an item's rows say a move as its own up and down rows, and a disabled drop
   expect(rows.map((row) => [row.label, row.disabled])).toEqual([
     ['drop', true],
     ['move up', false],
+    ['move to the top', false],
   ]);
   const up = rows[1]?.run;
   expect(up).toEqual({
@@ -136,7 +138,7 @@ test('with no subject there is no head and no subject row, and the general rows 
     'add a ticket…',
     'poll every queue',
     'switch theme',
-    'toggle inspector',
+    'pin inspector',
   ]);
   expect(model.rows.map((row) => row.group)).toEqual([...Array(4).fill('goto'), ...Array(4).fill('general')]);
 });
@@ -151,7 +153,7 @@ test('the head names the subject as the list does, with no word for its kind', (
 });
 
 test('adding and polling are left out where no queue offers them, and disabled with the reason where none is enabled', () => {
-  expect(labels(generalRows({ index: [] }))).toEqual(['switch theme', 'toggle inspector']);
+  expect(labels(generalRows({ index: [] }))).toEqual(['switch theme', 'pin inspector']);
   const closed = JSON.parse(JSON.stringify(index)) as IndexRepo[];
   const queue = closed[1]?.queues[0] as unknown as { offers: { poll: unknown; add: unknown } };
   queue.offers.poll = off;
@@ -337,7 +339,7 @@ describe('audit 2: the menu ranks across groups, matches within words and says a
       'all clear',
       'dismiss',
       'switch theme',
-      'toggle inspector',
+      'pin inspector',
     ]);
   });
 
@@ -401,12 +403,86 @@ describe('audit 2: the menu ranks across groups, matches within words and says a
       expect(own.map((row) => [row.label, row.disabled, row.why])).toEqual([
         ['drop', true, undefined],
         ['move up', true, undefined],
+        ['move to the top', true, undefined],
       ]);
     }
     // Reasons that differ stay on their rows.
     const mixed = menuRows(state({ subject: { ...ITEM, item: 'ticket:FAKE-6' } }), source(), index, NOW);
     expect(mixed.why).toBeUndefined();
     expect(mixed.rows.find((row) => row.label === 'drop')?.why).toBe('no watcher is running');
+  });
+
+  describe('a reason that two or more disabled rows share, beside rows that are not', () => {
+    const reason = "no watcher is running for 'beta': sail watch ticket-to-pr first";
+    const six: Subject = { ...ITEM, item: 'ticket:FAKE-6' };
+    const withOffers = (items: Record<string, unknown>) => {
+      const copy = structuredClone(index) as unknown as { queues: { offers: { items: Record<string, unknown> } }[] }[];
+      const offers = copy[1]?.queues[0]?.offers;
+      if (offers === undefined) throw new Error('no offers');
+      offers.items['ticket:FAKE-6'] = items;
+      return copy as unknown as IndexRepo[];
+    };
+    const own = (repos: IndexRepo[]) => {
+      const model = menuRows(state({ subject: six }), { index: repos }, repos, NOW);
+      return { model, rows: model.rows.filter((row) => row.group === 'subject') };
+    };
+
+    test('an enabled row and two rows disabled for one reason: the reason is said once and leaves those rows', () => {
+      const { model, rows } = own(withOffers({ drop: { enabled: true }, move: { enabled: false, why: reason } }));
+      expect(model.why).toBe(reason);
+      expect(rows.map((row) => [row.label, row.disabled, row.why])).toEqual([
+        ['drop', false, undefined],
+        ['move up', true, undefined],
+        ['move to the top', true, undefined],
+      ]);
+    });
+
+    test('a row disabled for another reason keeps its own', () => {
+      const { model, rows } = own(
+        withOffers({ drop: { enabled: false, why: 'it is running' }, move: { enabled: false, why: reason } }),
+      );
+      expect(model.why).toBe(reason);
+      expect(rows.map((row) => [row.label, row.why])).toEqual([
+        ['drop', 'it is running'],
+        ['move up', undefined],
+        ['move to the top', undefined],
+      ]);
+    });
+
+    test('a query that hides the rows sharing a reason drops the note, and one that keeps one row gives it back its reason', () => {
+      const repos = withOffers({ drop: { enabled: true }, move: { enabled: false, why: reason } });
+      const typed = (query: string) => {
+        const model = menuRows(state({ subject: six, query }), { index: repos }, repos, NOW);
+        return { model, rows: model.rows.filter((row) => row.group === 'subject') };
+      };
+      const drop = typed('drop');
+      expect(drop.model.why).toBeUndefined();
+      expect(drop.rows.map((row) => [row.label, row.disabled])).toEqual([['drop', false]]);
+      const move = typed('move');
+      expect(move.model.why).toBe(reason);
+      expect(move.rows.every((row) => row.why === undefined)).toBe(true);
+      const top = typed('move to the top');
+      expect(top.model.why).toBeUndefined();
+      expect(top.rows.map((row) => [row.label, row.why])).toEqual([['move to the top', reason]]);
+    });
+
+    test('one disabled row alone keeps its reason and the model says none', () => {
+      const { model, rows } = own(withOffers({ drop: { enabled: false, why: reason }, move: { enabled: true } }));
+      expect(model.why).toBeUndefined();
+      expect(rows.map((row) => [row.label, row.why])).toEqual([
+        ['drop', reason],
+        ['move up', undefined],
+        ['move to the top', undefined],
+      ]);
+    });
+
+    test('two reasons with two rows each: the one with most rows, the first on a tie, is said', () => {
+      const row = (label: string, why: string) =>
+        ({ group: 'subject', label, why, disabled: true, run: { show: 'x' } }) as unknown as MenuRow;
+      expect(sharedWhy([row('a1', 'A'), row('b1', 'B'), row('b2', 'B'), row('b3', 'B')])).toBe('B');
+      expect(sharedWhy([row('a1', 'A'), row('b1', 'B'), row('a2', 'A'), row('b2', 'B')])).toBe('A');
+      expect(sharedWhy([row('a1', 'A'), row('b1', 'B')])).toBeUndefined();
+    });
   });
 });
 
@@ -578,6 +654,29 @@ test('while a step is open the menu is its rows under the subject head, and noth
   expect(model.head).toBe('FAKE-1-RUN');
   expect(labels(model.rows)).toEqual(['spec', 'tests']);
   expect(model.step?.label).toBe('from');
+});
+
+describe('the chip while a step is open', () => {
+  const alpha: Subject = { kind: 'repo', repo: 'alpha' };
+  const startStep = (at: number) => ({ action: 'start-run', subject: alpha, data: {}, values: {}, at }) as const;
+
+  test('a pick step has no subject yet, so the opening subject keeps the chip, and none when the menu has none', () => {
+    const pick = { pick: 'repo', action: 'start-run' } as const;
+    expect(menuRows(state({ subject: RUN, steps: [pick] }), source(), index, NOW).head).toBe('FAKE-1-RUN');
+    expect(menuRows(state({ steps: [pick] }), source(), index, NOW).head).toBeUndefined();
+  });
+
+  test('once the repository is chosen the chip names it on every later step, whatever the menu opened on', () => {
+    for (const at of [0, 1]) {
+      expect(menuRows(state({ subject: RUN, steps: [startStep(at)] }), source(), index, NOW).head).toBe('alpha');
+      expect(menuRows(state({ steps: [startStep(at)] }), source(), index, NOW).head).toBe('alpha');
+    }
+  });
+
+  test('a queue chosen for an action names that queue', () => {
+    const queue = { action: 'add-ticket', subject: QUEUE, data: {}, values: {}, at: 0 } as const;
+    expect(menuRows(state({ subject: RUN, steps: [queue] }), source(), index, NOW).head).toBe('beta › ticket-to-pr');
+  });
 });
 
 test('a workflow offers release only while its queue is held on a harness key, and the row carries that key', () => {

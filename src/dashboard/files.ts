@@ -4,7 +4,8 @@
 // edited `events.ndjson` can't lead out. Nothing here writes.
 import { existsSync, lstatSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, isAbsolute, join } from 'node:path';
-import { isPlainName } from '../engine/call-dir';
+import { callPaths, isPlainName } from '../engine/call-dir';
+import { INTAKE_INDEX, INTAKE_STAGE } from '../engine/intake';
 import { runsDir, type Source } from '../engine/run-dir';
 import { RUN_HEADER_FILE, readRunHeader } from '../engine/run-header';
 import { listRuns, type RunListing } from '../engine/runs';
@@ -21,8 +22,11 @@ export { containedFile, inside };
 /** A registered repository, with `problem` when its `.sail/` is gone. */
 export type Repo = RegistryEntry & { problem?: string };
 
-/** One run as the dashboard lists it: `sail runs`' listing, its source, and its summary or null. */
-export type RunItem = Omit<RunListing, 'dir'> & { source?: Source; summary: Summary | null };
+/**
+ * One run as the dashboard lists it: `sail runs`' listing, its source, and its summary or null. `title` is the title
+ * its intake wrote, read only when the summary names no ticket: a pull-request run's summary never does.
+ */
+export type RunItem = Omit<RunListing, 'dir'> & { source?: Source; summary: Summary | null; title?: string };
 
 /** A queue view with its workflow's watch state, from the live watcher, and the reason when it isn't watched. */
 export type IndexQueue = OfferedQueue & { watch: QueueWatch };
@@ -116,6 +120,30 @@ export function readSummary(dir: string): { summary?: Summary; problem?: string 
   }
 }
 
+/** The titles read so far, by file: an intake's output is written once, so a title read is never read again. */
+const intakeTitles = new Map<string, string>();
+
+/**
+ * The title the run's built-in intake wrote: the `title` of its `pr.json`, or of its `ticket.json`, which a seeded run
+ * holds as a copy. Undefined while the file isn't written, isn't a regular file of the run, or names no title.
+ */
+export function intakeTitle(dir: string, kind: Source['kind']): string | undefined {
+  const file = join(callPaths(dir, INTAKE_INDEX, INTAKE_STAGE, 1).out, kind === 'pr' ? 'pr.json' : 'ticket.json');
+  const known = intakeTitles.get(file);
+  if (known !== undefined) return known;
+  const real = containedFile(dir, file);
+  if (real === undefined) return undefined;
+  try {
+    const title = (JSON.parse(readFileSync(real, 'utf8')) as { title?: unknown } | null)?.title;
+    if (typeof title !== 'string' || title.trim() === '') return undefined;
+    intakeTitles.set(file, title);
+    return title;
+  } catch {
+    // A file still being written, or not JSON, names no title yet.
+    return undefined;
+  }
+}
+
 /**
  * The repository's runs in `listRuns()` order, each with its header's source and its parsed `summary.json`. A run whose
  * `run.json`, `STATUS` or `summary.json` links out of it, or isn't a regular file, is listed by id and problem alone.
@@ -141,6 +169,10 @@ export function runItems(entry: RegistryEntry): RunItem[] {
     if (read.summary !== undefined) item.summary = read.summary;
     if (read.problem !== undefined) problems.push(read.problem);
     if (problems.length > 0) item.problem = problems.join('; ');
+    if (item.source !== undefined && item.summary?.ticket === undefined) {
+      const title = intakeTitle(dir, item.source.kind);
+      if (title !== undefined) item.title = title;
+    }
     return item;
   });
 }

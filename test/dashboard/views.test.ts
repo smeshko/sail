@@ -87,7 +87,7 @@ test("the dense fixture's recorded menu shows a title query's runs by key and ti
   expect(runTitles.length).toBeGreaterThan(0);
   for (const [, label] of runTitles) expect(label?.toLowerCase()).toContain('retry');
   const key = readFileSync(join(COMMITTED, 'dense-menu-key.html'), 'utf8');
-  const goto = key.slice(key.indexOf('role="presentation">go to</div>'));
+  const goto = key.slice(key.indexOf('role="presentation">Go to</div>'));
   const next = goto.indexOf('<div class="cmdk-grp"', 10);
   const rows = (next < 0 ? goto : goto.slice(0, next)).match(/class="cmdk-row/g);
   expect(rows).toHaveLength(1);

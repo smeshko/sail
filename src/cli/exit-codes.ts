@@ -25,13 +25,20 @@ export const EXIT_INTERNAL = 4;
  */
 export const EXIT_WAITING = 5;
 
+/**
+ * 6: a login service stopped itself because sail's code changed, so launchd starts it again on the new code. Only
+ * `--service` returns it.
+ */
+export const EXIT_RESTART = 6;
+
 export type ExitCode =
   | typeof EXIT_OK
   | typeof EXIT_FAILED
   | typeof EXIT_SUSPENDED
   | typeof EXIT_REFUSED
   | typeof EXIT_INTERNAL
-  | typeof EXIT_WAITING;
+  | typeof EXIT_WAITING
+  | typeof EXIT_RESTART;
 
 /** The exit code of a run that ended with `status`. */
 export function exitCodeFor(status: Exclude<Status, 'running'>): ExitCode {

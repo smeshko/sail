@@ -97,9 +97,29 @@ test('the page starts with the inspector closed and unpinned (ADW-528)', () => {
 });
 
 test('the theme and inspector buttons carry an aria-label beside their title (ADW-508)', () => {
-  expect(html).toContain('data-action="toggle-theme" aria-label="switch theme" title="theme"');
+  expect(html).toContain('data-action="toggle-theme" aria-label="switch theme" title="switch theme"');
   expect(html).toContain(
-    'data-action="toggle-inspector" aria-label="pin inspector" aria-pressed="false" title="pin the inspector (i)"',
+    'data-action="toggle-inspector" aria-label="pin inspector" aria-pressed="false" title="pin inspector (I)"',
+  );
+});
+
+test('the pinned inspector toggle is drawn in the focus colour, not the error colour (ADW-548)', () => {
+  const rule = rules().find(([sel]) => sel === ':root[data-pinned="true"] [data-action="toggle-inspector"]');
+  expect(rule?.[1]).toContain('border-color: var(--focus)');
+  expect(rule?.[1]).not.toContain('--err');
+});
+
+test('the run view header is two rows that never wrap, and its actions never shrink (ADW-548)', () => {
+  const body = (selector: string) => rules().find(([sel]) => sel === selector)?.[1] ?? '';
+  expect(body('.run-h')).toContain('flex-wrap: nowrap');
+  expect(body('.run-h')).toContain('flex-direction: column');
+  expect(body('.h-row')).toContain('white-space: nowrap');
+  expect(body('.h-row')).not.toMatch(/flex-wrap:\s*wrap/);
+  expect(body('.h-row .h-acts')).toContain('flex: 0 0 auto');
+  expect(body('.h-row .d-agent')).toContain('text-overflow: ellipsis');
+  expect(body('.h-row .d-agent')).not.toContain('margin-left: auto');
+  expect(rules().filter(([sel, rule]) => /\.(run-h|h-row)\b/.test(sel) && /flex-wrap:\s*wrap\b/.test(rule))).toEqual(
+    [],
   );
 });
 
@@ -327,7 +347,8 @@ test('row, group and head heights are set once, in custom properties the fit tes
   expect(declarationsOf(':root')).toMatch(/--row-h:\s*28px/);
   expect(declarationsOf(':root')).toMatch(/--group-h:\s*28px/);
   expect(declarationsOf(':root')).toMatch(/--list-head-h:\s*40px/);
-  expect(declarationsOf('.run')).toContain('min-height: var(--row-h)');
+  expect(declarationsOf(':root')).toMatch(/--run-h:\s*44px/);
+  expect(declarationsOf('.run')).toContain('min-height: var(--run-h)');
   expect(declarationsOf('.lgh')).toContain('min-height: var(--group-h)');
   expect(declarationsOf('.list-h')).toContain('min-height: var(--list-head-h)');
 });
@@ -382,6 +403,54 @@ test('a field’s placeholder reads in the dimmest text token (ADW-506)', () => 
 
 test('a tickbox takes its accent from a theme variable (ADW-506)', () => {
   expect(declarationsOf('input[type="checkbox"]')).toContain('accent-color: var(--run);');
+});
+
+describe('the page reads at phone width (ADW-549)', () => {
+  const narrow = mediaBlock('max-width: 799px');
+
+  test('under 800px a queue row wraps and its title takes the row, under the key and the controls', () => {
+    expect(inBlock(narrow, '.qrow2')).toContain('flex-wrap: wrap;');
+    expect(inBlock(narrow, '.qrow2 .c-main')).toContain('flex: 1 0 100%;');
+    expect(inBlock(narrow, '.qrow2 .c-main')).toContain('order: 1;');
+    expect(inBlock(narrow, '.qrow2 .c-side')).toContain('margin-left: auto;');
+    expect(inBlock(style.replace(narrow, ''), '.qrow2')).not.toContain('flex-wrap');
+  });
+
+  test('under 800px the status bar wraps and clips nothing, and the shell gives it a track that grows', () => {
+    const status = inBlock(narrow, '.status');
+    expect(status).toContain('flex-wrap: wrap;');
+    expect(status).toContain('min-height: 26px;');
+    expect(status).not.toContain('nowrap');
+    expect(status).not.toContain('overflow: hidden');
+    expect(inBlock(narrow, '.shell')).toContain('grid-template-rows: 46px 1fr auto;');
+    const outside = style.replace(narrow, '');
+    expect(inBlock(outside, '.status')).not.toContain('flex-wrap');
+    expect(outside).toContain('grid-template-rows: 46px 1fr 26px;');
+  });
+
+  test('under 800px an open timeline hides the list back control, and the rule comes after the one that shows it', () => {
+    const shows = ':root[data-detail="open"] .back';
+    const hides = ':root[data-detail="open"] .main:has(.tl-top) > .back';
+    expect(inBlock(narrow, hides)).toContain('display: none;');
+    expect(narrow.indexOf(`${hides} {`)).toBeGreaterThan(narrow.indexOf(`${shows} {`));
+    expect(narrow.indexOf(`${shows} {`)).toBeGreaterThan(-1);
+  });
+});
+
+test('under 800px the inspector and the open sidebar end where the body row does, above a status bar of any height (ADW-549)', () => {
+  const narrow = mediaBlock('max-width: 799px');
+  expect(inBlock(narrow, '.body')).toContain('position: relative;');
+  for (const overlay of ['.inspector', ':root[data-sidebar="open"] .side']) {
+    const rule = inBlock(narrow, overlay);
+    expect(rule).toContain('position: absolute;');
+    expect(rule).toContain('top: 0;');
+    expect(rule).toContain('bottom: 0;');
+  }
+});
+
+test("the run header's ⋯ menu wraps a reason the nowrap row around it would keep on one line (ADW-548)", () => {
+  expect(declarationsOf('.h-menu')).toContain('white-space: normal');
+  expect(declarationsOf('.h-menu')).toContain('overflow-wrap: anywhere');
 });
 
 test("the resize handles are focusable separators that start at their column's width, minimum and maximum (ADW-547)", () => {

@@ -4,19 +4,22 @@
 import { afterAll, expect, test } from 'bun:test';
 import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { EXIT_OK } from '../../src/cli/exit-codes';
 import { readJournal } from '../../src/engine/journal';
 import { lostEvents } from '../../src/engine/restore-events';
 import { readRunHeader } from '../../src/engine/run-header';
 import { type RunEnd, resumeWorkflow, runSeededWorkflow, runWorkflow } from '../../src/engine/runtime';
 import { formatIssue, validateRunDir } from '../../src/engine/schemas';
+import { sourceTicket } from '../../src/engine/seed-run';
 import { readEvents } from '../../src/events/consumers/ndjson';
-import type { Summary } from '../../src/events/summary';
+import { type Summary, summarize } from '../../src/events/summary';
 import { fakeAdapters } from '../helpers/adapters';
 import { AGENT_WORKFLOW } from '../helpers/agent-fixture';
-import { edit } from '../helpers/fixture';
+import { copyFixture, edit } from '../helpers/fixture';
 import { writeLiveRun } from '../helpers/live-run';
 import { TRIO, TRIO_GROUP, TRIO_JOURNAL, trioRunInto } from '../helpers/review-fixture';
-import { pushedSource, SOURCE_BRANCH, SOURCE_JOURNAL, sharedSource } from '../helpers/seeded';
+import { runCaptured } from '../helpers/run-captured';
+import { pushedSource, runIds, SOURCE_BRANCH, SOURCE_JOURNAL, sharedSource } from '../helpers/seeded';
 import { copyRun } from '../helpers/stub-workflow';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
 import { writeTwoStep } from '../helpers/two-step';
@@ -286,6 +289,54 @@ test('a run seeded from a seeded run names the same ticket in its summary, thoug
     });
   });
 }, 90_000);
+
+test('a run whose roster holds step conventions is read back with its run:start, summarised with its ticket, and seeds a run that carries it', async () => {
+  await withTempRepo(async (first) => {
+    const sail = copyFixture(first.dir);
+    edit(sail, 'workflows/ticket-to-pr/stages/spec/stage.ts', "model: 'deep',", "model: 'deep',\n  conventions: [],");
+    edit(
+      sail,
+      'workflows/ticket-to-pr/stages/publish/stage.ts',
+      "model: 'default',",
+      "model: 'default',\n  conventions: [],",
+    );
+    const ran = await runCaptured(['FAKE-1'], first.dir, { env: first.env });
+    expect(ran.code).toBe(EXIT_OK);
+    const [runId = ''] = runIds(first.dir);
+    const dir = join(first.dir, '.sail-runs', runId);
+    const header = readRunHeader(dir);
+    const events = readEvents(dir);
+    expect({
+      specConventions: header.stages.spec?.conventions,
+      describeConventions: header.stages.publish?.steps?.[0]?.conventions,
+      first: events[0]?.type,
+      ticket: summarize(events)?.ticket,
+      sourceTicket: sourceTicket(dir),
+      issues: issuesOf(dir),
+      lost: lostEvents({ dir, header }).start,
+    }).toEqual({
+      specConventions: [],
+      describeConventions: [],
+      first: 'run:start',
+      ticket: FAKE_TICKET,
+      sourceTicket: FAKE_TICKET,
+      issues: [],
+      lost: undefined,
+    });
+    await withTempRepo(async (second) => {
+      copyRun(first.dir, second.dir);
+      const end = await seeded(second, runId, 'spec');
+      expect(endOf(end)).toEqual({ status: 'suspended', stopReason: 'until' });
+      const seededDir = dirOf(end);
+      const summary: Summary = JSON.parse(readFileSync(join(seededDir, 'summary.json'), 'utf8'));
+      const reused = readEvents(seededDir).find((e) => e.type === 'journal:append' && e.key === 'intake#1');
+      expect([summary.ticket, reused?.type === 'journal:append' ? reused.ticket : undefined]).toEqual([
+        FAKE_TICKET,
+        FAKE_TICKET,
+      ]);
+    });
+  });
+}, 60_000);
 
 test('a run seeded from a source whose events are gone names no ticket in its summary, and validates', async () => {
   await withTempRepo(async (repo) => {

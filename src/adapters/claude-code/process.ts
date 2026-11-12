@@ -14,7 +14,7 @@
 // POSIX process groups only. A descendant that calls `setsid` leaves the group, and survives unless a look saw it.
 import { type ChildProcess, spawn as spawnChild } from 'node:child_process';
 import type { SpawnedProcess, SpawnOptions } from '@anthropic-ai/claude-agent-sdk';
-import { DEFAULT_GRACE_MS, stopGroup, trackGroup, untrackGroup } from '../../engine/process';
+import { DEFAULT_GRACE_MS, descendantGroups, stopGroup, trackGroup, untrackGroup } from '../../engine/process';
 
 /** How long the leader has to exit by itself once its session ends: beyond the SDK's own ~2 s grace. */
 export const REAP_WAIT_MS = 3_000;
@@ -37,37 +37,6 @@ export interface Spawner {
   readonly spawn: (options: SpawnOptions) => SpawnedProcess;
   /** Waits up to `waitMs` for the leader to exit, then stops what is left of its groups. Nothing, when none spawned. */
   reap(waitMs?: number): Promise<void>;
-}
-
-/** Every process's pid, parent and group, from `ps`; none when it can't be run. */
-function processTable(): { pid: number; ppid: number; pgid: number }[] {
-  try {
-    const listed = Bun.spawnSync(['ps', '-A', '-o', 'pid=,ppid=,pgid='], { stdout: 'pipe', stderr: 'ignore' });
-    return listed.stdout
-      .toString()
-      .split('\n')
-      .map((line) => line.trim().split(/\s+/).map(Number))
-      .filter((row) => row.length === 3 && row.every((n) => Number.isInteger(n) && n > 0))
-      .map(([pid, ppid, pgid]) => ({ pid: pid as number, ppid: ppid as number, pgid: pgid as number }));
-  } catch {
-    return [];
-  }
-}
-
-/** The groups `leader`'s descendants are in, other than its own and sail's. */
-function descendantGroups(leader: number): number[] {
-  const table = processTable();
-  const own = table.find((row) => row.pid === process.pid)?.pgid;
-  const found = new Set<number>();
-  const below = [leader];
-  for (let at = below.shift(); at !== undefined; at = below.shift()) {
-    for (const row of table) {
-      if (row.ppid !== at || below.includes(row.pid)) continue;
-      below.push(row.pid);
-      if (row.pgid !== leader && row.pgid !== own && row.pgid > 1) found.add(row.pgid);
-    }
-  }
-  return [...found];
 }
 
 /** Resolves when `child` has exited, or after `ms`. */
