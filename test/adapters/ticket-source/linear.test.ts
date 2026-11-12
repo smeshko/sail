@@ -117,6 +117,7 @@ function linear(seed: LinearWorldSeed = SEED, options: { inReview?: string; emit
     endpoint: LINEAR_ENDPOINT,
     apiKey: KEY,
     fetch: world.fetch,
+    retryDelayMs: 1,
     uploadsOrigin: UPLOADS,
     emit: options.emit ?? capture.emit,
     ...(options.inReview === undefined ? {} : { inReview: options.inReview }),
@@ -1285,14 +1286,16 @@ test.each<[string, { status: number; body: unknown; headers?: Record<string, str
   'the definition with pickUp, with Linear answering the team read with %s, creates the adapter unchecked, and a later claim reads the states again',
   async (_, response) => {
     const world = createLinearWorld(PICK_UP_SEED);
-    world.failNext('SailTeam', response);
+    // A 503 is retried, so it fails all four tries; a rate limit is not, so one answer is all it takes.
+    for (let sent = 0; sent < (response.status >= 500 ? 4 : 1); sent += 1) world.failNext('SailTeam', response);
     const served = world.serve();
     try {
       const env = { LINEAR_API_KEY: KEY, SAIL_LINEAR_API_URL: served.url };
-      const adapter = await linearTicketSource.create({ team: 'ADW', pickUp: ['Todo'] }, context(env));
-      expect(world.operations()).toEqual(['SailTeam']);
+      const adapter = await linearTicketSource.create({ team: 'ADW', pickUp: ['Todo'], retryDelayMs: 1 }, context(env));
+      const teamReads = response.status >= 500 ? 4 : 1;
+      expect(world.operations()).toEqual(Array(teamReads).fill('SailTeam'));
       expect((await adapter.claim('ADW-1')).claimed).toBe(true);
-      expect(world.operations().filter((operation) => operation === 'SailTeam')).toEqual(['SailTeam', 'SailTeam']);
+      expect(world.operations().filter((operation) => operation === 'SailTeam')).toHaveLength(teamReads + 1);
     } finally {
       served.stop();
     }
@@ -1305,6 +1308,7 @@ test('opening the adapter with pickUp, with the transport to Linear failing, cre
     endpoint: LINEAR_ENDPOINT,
     apiKey: KEY,
     pickUp: ['Todo'],
+    retryDelayMs: 1,
     fetch: () => Promise.reject(new TypeError('fetch failed')),
   });
   expect(adapter.scope).toBe('ADW');
@@ -1333,11 +1337,11 @@ test('the definition with pickUp, with Linear answering the team read with a 401
 
 test('the definition with a wrong pickUp, created unchecked while Linear was unavailable, refuses the name once Linear answers', async () => {
   const world = createLinearWorld(PICK_UP_SEED);
-  world.failNext('SailTeam', { status: 503, body: 'Service Unavailable' });
+  for (let sent = 0; sent < 4; sent += 1) world.failNext('SailTeam', { status: 503, body: 'Service Unavailable' });
   const served = world.serve();
   try {
     const env = { LINEAR_API_KEY: KEY, SAIL_LINEAR_API_URL: served.url };
-    const adapter = await linearTicketSource.create({ team: 'ADW', pickUp: ['Tood'] }, context(env));
+    const adapter = await linearTicketSource.create({ team: 'ADW', pickUp: ['Tood'], retryDelayMs: 1 }, context(env));
     const listed = await rejection(adapter.listDesignated('sail'));
     const moved = await rejection(adapter.update('ADW-2', { state: 'unstarted' }));
     const problem = "option pickUp: 'Tood' is no state of team ADW";
@@ -1531,7 +1535,7 @@ test('download refuses a body whose Content-Length is over the cap without readi
   expect(pulled.chunks).toBeLessThan(3);
 });
 
-test('a source made with retryDelayMs: 1 reads past a dropped connection in under a second', async () => {
+test('a source made with retryDelayMs: 1 reads past three dropped connections in under a second', async () => {
   const world = createLinearWorld(SEED);
   let drops = 0;
   const source = createLinearTicketSource({
@@ -1541,12 +1545,12 @@ test('a source made with retryDelayMs: 1 reads past a dropped connection in unde
     retryDelayMs: 1,
     fetch: (input, init) => {
       drops += 1;
-      return drops <= 1 ? Promise.reject(new TypeError('fetch failed')) : world.fetch(input, init);
+      return drops <= 3 ? Promise.reject(new TypeError('fetch failed')) : world.fetch(input, init);
     },
   });
   const started = performance.now();
   expect((await source.get('ADW-1')).ticketKey).toBe('ADW-1');
-  expect(drops).toBeGreaterThanOrEqual(2);
+  expect(drops).toBeGreaterThanOrEqual(4);
   expect(performance.now() - started).toBeLessThan(1000);
 });
 
