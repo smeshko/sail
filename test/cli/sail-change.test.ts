@@ -138,6 +138,15 @@ test('sailCodeChanged is true across a commit that changes only bun.lock', async
   });
 });
 
+test('sailCodeChanged is true across a commit that changes only a schema under schemas/', async () => {
+  await withTempRepo(async (repo) => {
+    const g = commitIn(repo);
+    const before = g.commit({ 'schemas/sail.run.v1.json': '{"a":1}' });
+    const after = g.commit({ 'schemas/sail.run.v1.json': '{"a":2}' });
+    expect(await sailCodeChanged(before, after, repo.dir, repo.env)).toBe(true);
+  });
+});
+
 test('sailCodeChanged is false across a commit that changes only other files', async () => {
   await withTempRepo(async (repo) => {
     const g = commitIn(repo);

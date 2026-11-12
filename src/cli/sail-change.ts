@@ -1,5 +1,5 @@
 // The running sail's code version, and a timer that reports when its code changes. A login service reads it at start
-// and every minute, and stops itself, exiting 6, once it differs over `src/`, `package.json` or `bun.lock`, so launchd
+// and every minute, and stops itself, exiting 6, once it differs over `src/`, `schemas/`, `package.json` or `bun.lock`, so launchd
 // starts the new code. A version change the filter can't judge counts as a code change.
 //
 // The version is the checkout's `HEAD`: `git rev-parse HEAD` in the package root when it holds a `.git`. A packed
@@ -14,7 +14,7 @@ import type { Timers } from '../watch/poll';
 const LOCATION = ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR'];
 
 /** The paths whose change is a change of sail's code. */
-export const CODE_PATHS = ['src', 'package.json', 'bun.lock'] as const;
+export const CODE_PATHS = ['src', 'schemas', 'package.json', 'bun.lock'] as const;
 
 /** Whether two code versions differ in sail's code. */
 export type CodeChanged = (before: string, after: string) => Promise<boolean> | boolean;

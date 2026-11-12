@@ -21,7 +21,7 @@
 // at the default branch's tip (`committedWatches()`), and applies a change with no restart.
 //
 // `sail watch --service` is the watcher an installed login service runs (hidden, like `--dispatch`): the same
-// watcher, which also reads sail's code version at start and every minute, and once it changes in `src/`,
+// watcher, which also reads sail's code version at start and every minute, and once it changes in `src/`, `schemas/`,
 // `package.json` or `bun.lock` stops as on SIGTERM, prints a line starting `sail watch: sail changed (`, and exits 6,
 // so launchd starts the new code. Its runs carry on, and the next watcher adopts them. Without `--service` a watcher
 // keeps running through such a change and prints one line saying it needs a restart.

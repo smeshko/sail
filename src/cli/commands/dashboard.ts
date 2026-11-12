@@ -5,7 +5,7 @@
 // also refuses port 0 and, while no agent is installed, a port another process holds. A
 // restart prints `sail dashboard: restarted the login service`: the dashboard records no pid anywhere. `--service`,
 // which only the installed agent passes, also reads sail's code version at start and every minute and, once it
-// changes in `src/`, `package.json` or `bun.lock`, prints a line starting `sail dashboard: sail changed (`, stops the server and exits 6, so launchd starts the
+// changes in `src/`, `schemas/`, `package.json` or `bun.lock`, prints a line starting `sail dashboard: sail changed (`, stops the server and exits 6, so launchd starts the
 // new code. It writes nothing but a move command in a live watcher's inbox, when a person moves a queued item, a
 // release of a usage-limit hold in the machine directory, and the runs a person resumes or restarts, which it starts detached with this command's environment. The default port is
 // 3400, and 0 picks a free one. A port that isn't a whole number from 0 to 65535, or one in use, is refused with exit

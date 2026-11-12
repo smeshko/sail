@@ -213,7 +213,7 @@ const commands = new Map<string, CommandSpec>([
         install: { type: 'boolean' },
         uninstall: { type: 'boolean' },
         restart: { type: 'boolean' },
-        // The installed login service's: it also stops itself, exiting 6, once sail's code (`src/`, `package.json` or `bun.lock`) changes. Not in USAGE.
+        // The installed login service's: it also stops itself, exiting 6, once sail's code (`src/`, `schemas/`, `package.json` or `bun.lock`) changes. Not in USAGE.
         service: { type: 'boolean' },
       },
       positionals: 0,
@@ -300,7 +300,7 @@ const commands = new Map<string, CommandSpec>([
     {
       options: {
         'release-hold': { type: 'string' },
-        // The installed login service's: it also stops itself, exiting 6, once sail's code (`src/`, `package.json` or `bun.lock`) changes. Not in USAGE.
+        // The installed login service's: it also stops itself, exiting 6, once sail's code (`src/`, `schemas/`, `package.json` or `bun.lock`) changes. Not in USAGE.
         service: { type: 'boolean' },
         install: { type: 'boolean' },
         uninstall: { type: 'boolean' },
