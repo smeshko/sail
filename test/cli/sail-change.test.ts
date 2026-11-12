@@ -4,7 +4,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { sailVersion, watchSailChange } from '../../src/cli/sail-change';
+import { sailCodeChanged, sailVersion, watchSailChange } from '../../src/cli/sail-change';
 import { fakeTimers } from '../helpers/fake-timers';
 import { withTempRepo } from '../helpers/temp-repo';
 
@@ -91,4 +91,127 @@ test('a change watch that was cleared reads no more and calls back no more', asy
   expect(w.changes).toEqual([]);
   expect(w.reads()).toBe(1);
   expect(w.timers.pending()).toEqual([]);
+});
+
+function commitIn(repo: { dir: string; env: Record<string, string> }) {
+  const git = (...args: string[]) => Bun.spawnSync(['git', ...args], { cwd: repo.dir, env: repo.env });
+  const head = () => git('rev-parse', 'HEAD').stdout.toString().trim();
+  return {
+    head,
+    /** Writes the files, commits them, and returns the new HEAD. */
+    commit(files: Record<string, string>): string {
+      for (const [path, text] of Object.entries(files)) {
+        mkdirSync(join(repo.dir, path, '..'), { recursive: true });
+        writeFileSync(join(repo.dir, path), text);
+        git('add', path);
+      }
+      git('commit', '-m', 'change', '--allow-empty');
+      return head();
+    },
+  };
+}
+
+test('sailCodeChanged is true across a commit that adds a file under src/', async () => {
+  await withTempRepo(async (repo) => {
+    const g = commitIn(repo);
+    const before = g.commit({ 'README.md': 'a' });
+    const after = g.commit({ 'src/a.ts': 'export {}' });
+    expect(await sailCodeChanged(before, after, repo.dir, repo.env)).toBe(true);
+  });
+});
+
+test('sailCodeChanged is true across a commit that changes only package.json', async () => {
+  await withTempRepo(async (repo) => {
+    const g = commitIn(repo);
+    const before = g.commit({ 'package.json': '{"a":1}' });
+    const after = g.commit({ 'package.json': '{"a":2}' });
+    expect(await sailCodeChanged(before, after, repo.dir, repo.env)).toBe(true);
+  });
+});
+
+test('sailCodeChanged is true across a commit that changes only bun.lock', async () => {
+  await withTempRepo(async (repo) => {
+    const g = commitIn(repo);
+    const before = g.commit({ 'bun.lock': '1' });
+    const after = g.commit({ 'bun.lock': '2' });
+    expect(await sailCodeChanged(before, after, repo.dir, repo.env)).toBe(true);
+  });
+});
+
+test('sailCodeChanged is false across a commit that changes only other files', async () => {
+  await withTempRepo(async (repo) => {
+    const g = commitIn(repo);
+    const before = g.commit({ 'src/a.ts': 'export {}' });
+    const after = g.commit({ 'docs/a.md': 'x', 'README.md': 'y' });
+    expect(await sailCodeChanged(before, after, repo.dir, repo.env)).toBe(false);
+  });
+});
+
+test('sailCodeChanged is false when the second commit reverts the first change to src/', async () => {
+  await withTempRepo(async (repo) => {
+    const g = commitIn(repo);
+    const before = g.commit({ 'src/a.ts': 'one' });
+    g.commit({ 'src/a.ts': 'two' });
+    const after = g.commit({ 'src/a.ts': 'one' });
+    expect(await sailCodeChanged(before, after, repo.dir, repo.env)).toBe(false);
+  });
+});
+
+test('sailCodeChanged is true for versions that are no commit id, an unknown commit and a root with no .git', async () => {
+  await withTempRepo(async (repo) => {
+    const g = commitIn(repo);
+    const head = g.commit({ 'README.md': 'a' });
+    expect(await sailCodeChanged('v1', 'v2', repo.dir, repo.env)).toBe(true);
+    expect(await sailCodeChanged(head, 'f'.repeat(40), repo.dir, repo.env)).toBe(true);
+    const bare = realpathSync(mkdtempSync(join(tmpdir(), 'sail-change-')));
+    dirs.push(bare);
+    expect(await sailCodeChanged(head, head, bare, repo.env)).toBe(true);
+  });
+});
+
+test('the change watch with a changed filter skips a version judged unchanged, asks once about it, and reports a later change against the first', async () => {
+  const timers = fakeTimers('2026-10-15T09:00:00.000Z');
+  const answers = ['v1', 'v2', 'v2', 'v3'];
+  let index = 0;
+  const asked: string[] = [];
+  const changes: [string, string][] = [];
+  watchSailChange({
+    read: () => answers[Math.min(index++, answers.length - 1)],
+    everyMs: 60_000,
+    timers,
+    changed: (_before, after) => {
+      asked.push(after);
+      return after === 'v3';
+    },
+    onChange: (before, after) => changes.push([before, after]),
+  });
+  await Bun.sleep(0);
+  await timers.advance(60_000);
+  expect(changes).toEqual([]);
+  expect(asked).toEqual(['v2']);
+  await timers.advance(60_000);
+  expect(changes).toEqual([]);
+  expect(asked).toEqual(['v2']);
+  await timers.advance(60_000);
+  expect(changes).toEqual([['v1', 'v3']]);
+  expect(asked).toEqual(['v2', 'v3']);
+});
+
+test('the change watch counts a changed filter that throws as a change', async () => {
+  const timers = fakeTimers('2026-10-15T09:00:00.000Z');
+  const answers = ['v1', 'v2'];
+  let index = 0;
+  const changes: [string, string][] = [];
+  watchSailChange({
+    read: () => answers[Math.min(index++, answers.length - 1)],
+    everyMs: 60_000,
+    timers,
+    changed: () => {
+      throw new Error('no git');
+    },
+    onChange: (before, after) => changes.push([before, after]),
+  });
+  await Bun.sleep(0);
+  await timers.advance(60_000);
+  expect(changes).toEqual([['v1', 'v2']]);
 });
