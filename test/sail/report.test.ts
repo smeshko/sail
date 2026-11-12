@@ -241,6 +241,12 @@ test('a record with no findings and one nit says no reviewer found anything at m
   expect(result.full).toContain('- tests: a gap (notes.txt): y');
 });
 
+test('a record with no findings claims nothing about the demonstration, whose unshown criteria are no findings', async () => {
+  const result = await report(record([], () => 'drop'));
+  expect(result.full).toContain('No findings: validation passed');
+  expect(result.full).not.toContain('demonstration');
+});
+
 test('a report shortened to level 4 fits the comment limit and counts its nits, the full one listing them all', async () => {
   const long = 'x'.repeat(200_000);
   const findings = Array.from({ length: 4000 }, (_, i) => bug(i + 1, long));
