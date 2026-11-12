@@ -1,7 +1,10 @@
 // sail's own groom rulings stage: a ticket's rulings and its earlier open questions read, the guard request built, and
 // the stage run as a script on the fake Jev. The helpers are `.sail/lib/rulings.mjs`.
 import { expect, test } from 'bun:test';
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { nouls, writeOwnSail } from '../helpers/own-sail';
+import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
 
 interface Lib {
   RULED_YES: number;
@@ -100,3 +103,116 @@ test('guardRequest gives the id Q2, the state and the measured instructions', ()
   expect(request.questions.Q2?.instructions).toBe('Does `rulings` give an answer to the question in `question`?');
   expect(lib.RULED_YES).toBe(0.6);
 });
+
+interface Ruled {
+  skip: boolean;
+  asked: boolean;
+  note: string;
+  threshold: number;
+  questions: number;
+  answers: { id: string; yes: number }[];
+}
+
+const RULED_DESCRIPTION = 'Do the thing.\n\n## Rulings\n\n1. Exclude reused calls.\n2. Use the flag.\n';
+const ruledTicket = { description: RULED_DESCRIPTION, comments: [{ author: 'sail', body: COMMENT }] };
+
+/** Runs the stage's run.sh in `repo`'s copy of `.sail/` on `ticket`: its exit code, its last stdout line parsed, and its out. */
+function runStage(repo: TempRepo, ticket: object): { code: number; output: Ruled; out: string } {
+  const stageDir = join(repo.dir, '.sail', 'workflows', 'groom', 'stages', '00-rulings');
+  const out = join(repo.home, 'stage-out');
+  mkdirSync(out);
+  const ticketFile = join(repo.home, 'ticket.json');
+  writeFileSync(ticketFile, JSON.stringify(ticket));
+  const child = Bun.spawnSync([join(stageDir, 'run.sh')], {
+    cwd: repo.dir,
+    env: {
+      ...repo.env,
+      PATH: `${join(ROOT, 'bin')}:${repo.env.PATH ?? ''}`,
+      SAIL_BUN: process.execPath,
+      SAIL_CONFIG: join(repo.dir, '.sail', 'project.yaml'),
+      INPUT_TICKET: ticketFile,
+      STAGE_OUT: out,
+    },
+  });
+  const lines = child.stdout.toString().trim().split('\n');
+  return { code: child.exitCode ?? -1, output: JSON.parse(lines.at(-1) ?? 'null'), out };
+}
+
+test('the stage skips when Jev answers every earlier question at or over the threshold', async () => {
+  await withTempRepo(async (repo) => {
+    writeOwnSail(repo, { jev: nouls({ Q1: 0.9, Q2: 0.6 }) });
+    const { code, output, out } = runStage(repo, ruledTicket);
+    expect(code).toBe(0);
+    expect(output).toEqual({
+      skip: true,
+      asked: true,
+      note: '',
+      threshold: 0.6,
+      questions: 2,
+      answers: [
+        { id: 'Q1', yes: 0.9 },
+        { id: 'Q2', yes: 0.6 },
+      ],
+    });
+    expect(readdirSync(out).sort()).toEqual(['jev-request-1.json', 'jev-request-2.json']);
+    const first = JSON.parse(readFileSync(join(out, 'jev-request-1.json'), 'utf8'));
+    expect(first.state.rulings).toBe('1. Exclude reused calls.\n2. Use the flag.');
+    expect(first.state.question).toStartWith('1. Should the total include reused calls?');
+  });
+}, 60_000);
+
+test('the stage does not skip when one answer is under the threshold, and names it', async () => {
+  await withTempRepo(async (repo) => {
+    writeOwnSail(repo, { jev: nouls({ Q1: 0.9, Q2: 0.59 }) });
+    const { code, output } = runStage(repo, ruledTicket);
+    expect(code).toBe(0);
+    expect(output.skip).toBe(false);
+    expect(output.asked).toBe(true);
+    expect(output.note).toContain('Q2');
+    expect(output.note).not.toContain('Q1');
+  });
+}, 60_000);
+
+test('the stage asks nothing of a ruled ticket with no earlier questions on record', async () => {
+  await withTempRepo(async (repo) => {
+    writeOwnSail(repo, { jev: nouls({ Q1: 1 }) });
+    const { code, output, out } = runStage(repo, { description: RULED_DESCRIPTION, comments: [] });
+    expect(code).toBe(0);
+    expect(output).toMatchObject({ skip: false, asked: false, questions: 0 });
+    expect(output.note).toContain('no earlier open questions');
+    expect(readdirSync(out)).toEqual([]);
+  });
+}, 60_000);
+
+test('the stage asks nothing of a ticket with no Rulings section', async () => {
+  await withTempRepo(async (repo) => {
+    writeOwnSail(repo, { jev: nouls({ Q1: 1 }) });
+    const { code, output, out } = runStage(repo, {
+      description: 'Plain.',
+      comments: [{ author: 'sail', body: COMMENT }],
+    });
+    expect(code).toBe(0);
+    expect(output).toMatchObject({ skip: false, asked: false, note: 'the description has no ## Rulings section' });
+    expect(readdirSync(out)).toEqual([]);
+  });
+}, 60_000);
+
+test('the stage takes the full path, exiting 0, with no Jev configured', async () => {
+  await withTempRepo(async (repo) => {
+    writeOwnSail(repo);
+    const { code, output } = runStage(repo, ruledTicket);
+    expect(code).toBe(0);
+    expect(output).toMatchObject({ skip: false, asked: false });
+    expect(output.note).not.toBe('');
+  });
+}, 60_000);
+
+test('the stage takes the full path, exiting 0, when Jev answers an error', async () => {
+  await withTempRepo(async (repo) => {
+    writeOwnSail(repo, { jev: { error: { status: 503, detail: 'down' } } });
+    const { code, output } = runStage(repo, ruledTicket);
+    expect(code).toBe(0);
+    expect(output).toMatchObject({ skip: false, asked: false });
+    expect(output.note).toContain('503');
+  });
+}, 60_000);
