@@ -54,8 +54,9 @@ steps below say, in a commit of its own.
 Read files with the Read tool, or `sed -n` for a range, and change them with Edit and Write.
 
 Write a scratch file, if you need one, under `$STAGE_OUT`, never in the repository: `rm` and `git clean` are
-denied, so a file left there can't be removed, and validation fails while any path is uncommitted. Pushing, `gh` and
-network clients are denied too: the workflow's own stages push and open the pull request.
+denied, so a file left there can't be removed, and validation fails while any path is uncommitted. `pr-body.md` is the
+one file the step must leave in `$STAGE_OUT`. Pushing, `gh` and network clients are denied too: the workflow's own
+stages push and open the pull request.
 
 ## When something is wrong
 
@@ -64,9 +65,49 @@ network clients are denied too: the workflow's own stages push and open the pull
 - Files that drifted from the plan: follow the code as it is, and say so in your notes.
 - Work the plan doesn't list: leave it, and say so in your notes. Don't invent tasks.
 
+## Describe the pull request
+
+After the last task of this pass, describe the change on this branch for its pull request into `staging`. Describe the
+whole branch, from the plan and every commit in `git log origin/staging..HEAD`: an earlier pass's commits and an
+earlier run's are part of it, so a pass that only fixed what validation or the task check reported still writes the
+body again for all of them, never for its own commits alone.
+
+Write `$STAGE_OUT/pr-body.md`, never a path in the repository, with these sections:
+
+- **Summary**: what changes and why, in two or three sentences, in `CONTEXT.md`'s terms.
+- **Changes**: one bullet per commit or group of related commits.
+- **Testing**: the tests the plan added and what they prove, and `bun run gate` passing on this head: the workflow
+  opens the pull request only after its validate stage ran the gate green. CI runs the full `bun run verify`. Run no
+  gate yourself.
+- **Demonstration**: the plan's Demonstration section as it is: its surface, then each acceptance criterion's
+  scenario and what to observe. The review workflow runs these scenarios against the pull request, so keep them
+  exact. For a surface of `none`, its one line saying why nothing can be shown.
+- **Follow-ups**: each follow-up you submit, one bullet each, or leave the section out when there is none. Each is
+  filed as a ticket once the pull request is open.
+
+Write no Verification section: the workflow adds it itself, before the `Closes` line, when a task changed no file.
+
+End the body with `Closes {{commit.ticketKey}}` on its own line. The repository is public: name only sail and its
+`ADW-<n>` issues, never another project or tracker.
+
+Submit as `followUps` the work outside this branch that the plan's Out of Scope or your own notes surfaced, and that
+is worth a ticket of its own: usually a bug the change exposed. A ticket costs a reader's attention every time they
+pass it, and sail has one maintainer, who writes every adapter and workflow. File one only when doing it changes
+something a person would notice: a failure someone hit or can reach through a real path, a behaviour someone asked for,
+or a measured cost. Never file hardening against a misuse no caller makes or an input no path produces, a tidy-up with
+no behaviour behind it (a rename, a move, a shared helper, a comment, an unused field), a test for code with no
+reported failure, or anything smaller than writing it up. A run files at most two tickets, bugs first.
+
+Give each a title, a description a reader can act on without this run (the files, what is wrong, why it was left), the
+`trigger` (the command, input or code path that reaches the problem), and its type: `bug`, `feature` or `refactoring`.
+Leave out anything the plan rules out as unwanted. Submit none when there is none: an empty list is the usual answer.
+
 ## Submit
 
 Submit each task with its commit's sha and the evidence that proves its acceptance: the tests that went red, then
 green. A task that changed no file is submitted with `commit: null` and non-blank evidence: that evidence is published
 as it is in the pull request's body, so keep it to the command and the lines that matter, with no credential and no
 name outside sail. Add a short note on anything you did differently from the plan.
+
+Submit the pull request's `title`, a Conventional Commits subject ending with `({{commit.ticketKey}})`, at most 120
+characters, and `followUps`, an empty list when there is none.

@@ -10,7 +10,7 @@ import { readJournal } from '../src/engine/journal';
 import { readStatus } from '../src/engine/run-dir';
 import { readEvents } from '../src/events/consumers/ndjson';
 import { fakeTicket, onlyRun } from './helpers/groom-fixture';
-import { nouls, writeOwnSail } from './helpers/own-sail';
+import { nouls, OWN_SAIL, writeOwnSail } from './helpers/own-sail';
 import { runCaptured } from './helpers/run-captured';
 import { sail } from './helpers/sail-process';
 import { type TempRepo, withTempRepo } from './helpers/temp-repo';
@@ -454,5 +454,77 @@ test('implement gets AGENTS.md and CONTEXT.md, describe CONTEXT.md alone and che
     expect(conventionsOf('implement#1')).toEqual(['AGENTS.md', 'CONTEXT.md']);
     expect(conventionsOf('describe#1')).toEqual(['CONTEXT.md']);
     expect(conventionsOf('check-tasks#1')).toEqual([]);
+  });
+}, 120_000);
+
+/** The committed `implement` answer: its title, its follow-ups and its `pr-body.md`. */
+const implementSeed = (): { output: { title: string; followUps: unknown[] }; files: { 'pr-body.md': string } } =>
+  JSON.parse(readFileSync(join(OWN_SAIL, 'fake', 'harness.json'), 'utf8')).implement[0];
+
+test("implement's prompt asks for the pull request's body and its sections", async () => {
+  await withTempRepo(async (repo) => {
+    writeOwnSail(repo, { jev: nouls({ 'TASK-001': 0.99 }) });
+    const { code, stderr, dir } = await factory(repo);
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    const prompt = readFileSync(join(dir, '02-implement', 'call-1', 'prompt.md'), 'utf8');
+    for (const part of [
+      '$STAGE_OUT/pr-body.md',
+      '**Summary**',
+      '**Changes**',
+      '**Testing**',
+      '**Demonstration**',
+      '**Follow-ups**',
+      'Closes FAKE-1',
+      'git log origin/staging..HEAD',
+      'ending with `(FAKE-1)`',
+    ]) {
+      expect(prompt).toContain(part);
+    }
+  });
+}, 120_000);
+
+test('implement#1 is journaled with its title, its follow-ups and pr-body.md', async () => {
+  await withTempRepo(async (repo) => {
+    writeOwnSail(repo, { jev: nouls({ 'TASK-001': 0.99 }) });
+    const { code, stderr, dir } = await factory(repo);
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    const seed = implementSeed();
+    const entry = readJournal(dir).entries.find((each) => each.key === 'implement#1');
+    const output = (entry?.output ?? {}) as { title?: string; followUps?: unknown[] };
+    expect(output.title).toBe("feat(cli): print the run's total cost in sail show's footer (FAKE-1)");
+    expect(output.title).toBe(seed.output.title);
+    expect(output.followUps).toHaveLength(1);
+    expect(Object.keys(entry?.files ?? {})).toEqual(['pr-body.md']);
+    const written = readFileSync(join(dir, '02-implement', 'call-1', 'out', 'pr-body.md'), 'utf8');
+    expect(written).toBe(seed.files['pr-body.md']);
+    expect(written).toContain('## Demonstration');
+  });
+}, 120_000);
+
+test('an implement pass that submits without pr-body.md gets a corrective try, and the run goes on once the file is there', async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeOwnSail(repo, { jev: nouls({ 'TASK-001': 0.99 }) });
+    const harness = join(sailDir, 'fake', 'harness.json');
+    const seeds = JSON.parse(readFileSync(harness, 'utf8'));
+    const { files: _files, ...withoutBody } = seeds.implement[0];
+    seeds['implement#1'] = [withoutBody, seeds.implement[0]];
+    writeFileSync(harness, JSON.stringify(seeds));
+    repo.git('add', '.sail/fake/harness.json');
+    repo.git('commit', '-q', '-m', 'seed a pass with no body');
+
+    const { code, stderr, keys, dir } = await factory(repo);
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    const events = readEvents(dir).filter((event) => (event as { key?: string }).key === 'implement#1');
+    const starts = events.filter((event) => event.type === 'stage:start') as { try?: number }[];
+    expect(starts.map((event) => event.try)).toEqual([1, 2]);
+    const refused = events.filter((event) =>
+      JSON.stringify(event).includes("'pr-body.md' was not produced in $STAGE_OUT"),
+    );
+    expect(refused).toHaveLength(1);
+
+    const entry = readJournal(dir).entries.find((each) => each.key === 'implement#1');
+    expect(entry?.outcome).toBe('done');
+    expect(Object.keys(entry?.files ?? {})).toEqual(['pr-body.md']);
+    expect(keys[keys.indexOf('implement#1') + 1]).toBe('validate#1');
   });
 }, 120_000);
