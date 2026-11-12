@@ -42,7 +42,7 @@ const lib = (await import(join(import.meta.dir, '../../.sail/lib/jev-check.mjs')
 const entry = { term: 'Call', definition: 'One invocation.', avoid: ['invocation'] };
 const glossary = '**Call**:\nOne invocation.\n_Avoid_: invocation\n';
 const doc = '+++ b/note.md\n@@ -0,0 +1 @@\n+Each invocation of a stage\n';
-function stage(repo: TempRepo, diff: string, base = repo.git('rev-parse', 'HEAD').trim()) {
+function stage(repo: TempRepo, diff: string, base = repo.git('rev-parse', 'HEAD').trim(), first = '') {
   const out = join(repo.home, 'out');
   mkdirSync(out);
   const patch = join(repo.home, 'diff');
@@ -53,7 +53,7 @@ function stage(repo: TempRepo, diff: string, base = repo.git('rev-parse', 'HEAD'
     cwd: repo.dir,
     env: {
       ...repo.env,
-      PATH: `${join(import.meta.dir, '../../bin')}:${repo.env.PATH}`,
+      PATH: `${first ? `${first}:` : ''}${join(import.meta.dir, '../../bin')}:${repo.env.PATH}`,
       SAIL_BUN: process.execPath,
       SAIL_CONFIG: join(repo.dir, '.sail/project.yaml'),
       SAIL_HOME: repo.home,
@@ -541,3 +541,57 @@ test('the stage asks one question for three lines of a TypeScript file and repor
     expect(result.stderr).toContain('not asked: 1 keyword, 1 repeat');
   });
 });
+/**
+ * A `sail` ahead of the checkout's on the PATH that fails its `failing`-th `port jev ask`, as an unreachable Jev does,
+ * and passes every other call through; `asks()` counts the asks it saw.
+ */
+function failingJev(repo: TempRepo, failing: number[]) {
+  const dir = join(repo.home, 'failing-jev');
+  mkdirSync(dir);
+  const count = join(dir, 'count');
+  writeFileSync(
+    join(dir, 'sail'),
+    [
+      '#!/bin/sh',
+      `n=$(($(cat '${count}' 2>/dev/null || echo 0) + 1))`,
+      `echo "$n" > '${count}'`,
+      `case " ${failing.join(' ')} " in *" $n "*) echo "jev ask: Jev could not be reached" >&2; exit 1;; esac`,
+      `exec '${join(import.meta.dir, '../../bin/sail')}' "$@"`,
+      '',
+    ].join('\n'),
+    { mode: 0o755 },
+  );
+  return { dir, asks: () => Number(readFileSync(count, 'utf8').trim()) };
+}
+const low = (n: number, high: Record<string, number>) => ({
+  ...Object.fromEntries(Array.from({ length: n }, (_, i) => [`word-${i + 1}`, 0.05])),
+  ...high,
+});
+const candidateFiles = (n: number) =>
+  Array.from({ length: n }, (_, i) => `+++ b/f${i + 1}.md\n@@ -0,0 +1 @@\n+invocation\n`).join('');
+test('the stage keeps the first request’s hits and notes the second, refused, as not asked', async () => {
+  await withTempRepo((repo) => {
+    setup(repo, low(17, { 'word-2': 0.97, 'word-17': 0.97 }));
+    const jev = failingJev(repo, [2]);
+    const result = stage(repo, candidateFiles(17), undefined, jev.dir);
+    expect(result.code).toBe(0);
+    expect(jev.asks()).toBe(2);
+    expect(result.output.hits).toEqual([{ file: 'f2.md', line: 1, word: 'invocation', term: 'Call', yes: 0.97 }]);
+    expect(result.output.jev).toMatchObject({ asked: true, failed: false, requests: 2 });
+    expect(result.output.jev.note).toBe('1 of 2 requests not asked: jev ask: Jev could not be reached');
+  });
+}, 120_000);
+test('the stage reports a failed check when every request it asked was refused', async () => {
+  await withTempRepo((repo) => {
+    setup(repo, low(17, { 'word-1': 0.97 }));
+    const jev = failingJev(repo, [1, 2]);
+    const result = stage(repo, candidateFiles(17), undefined, jev.dir);
+    expect(result.code).toBe(0);
+    expect(result.output.hits).toEqual([]);
+    expect(result.output.jev).toMatchObject({
+      asked: false,
+      failed: true,
+      note: 'jev ask: Jev could not be reached',
+    });
+  });
+}, 120_000);
