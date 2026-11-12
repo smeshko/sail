@@ -48,6 +48,10 @@ has_prefix=
 want_prefix=
 for arg in "$@"; do
   if [ -n "$want_prefix" ]; then
+    # GNU's -t takes no argument, so an option after it is an option: the real mktemp reads it as its own does.
+    case "$arg" in
+      -*) exec "$real" "$@" ;;
+    esac
     prefix=$arg
     has_prefix=1
     want_prefix=

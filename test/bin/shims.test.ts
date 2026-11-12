@@ -108,6 +108,28 @@ test("a -t prefix with X's not at its end gets a random suffix, so it can be mad
   });
 });
 
+test('an option after -t goes to the real mktemp unchanged, never taken as the prefix', () => {
+  withDirs((tmp) => {
+    const env = { PATH: `${SHIMS_DIR}:${SYSTEM_PATH}`, TMPDIR: tmp };
+    for (const args of [
+      ['-t', '-d'],
+      ['-qt', '-d'],
+    ]) {
+      const shim = mktemp(args, env);
+      const real = Bun.spawnSync(['/usr/bin/mktemp', ...args], { env, stdout: 'pipe', stderr: 'pipe', cwd: '/' });
+      const realOut = real.stdout.toString().trim();
+      expect([args, shim.code]).toEqual([args, real.exitCode]);
+      expect([args, dirname(shim.out), basename(shim.out).slice(0, 3)]).toEqual([
+        args,
+        dirname(realOut),
+        basename(realOut).slice(0, 3),
+      ]);
+      rmSync(shim.out, { recursive: true, force: true });
+      rmSync(realOut, { recursive: true, force: true });
+    }
+  });
+});
+
 /** Runs `script` in a login bash with `env`, as Claude Code runs a Bash command, and gives its lines. */
 function loginBash(script: string, env: Record<string, string>): string[] {
   const child = Bun.spawnSync(['/bin/bash', '-l', '-c', script], { env, cwd: '/', stdout: 'pipe', stderr: 'pipe' });
