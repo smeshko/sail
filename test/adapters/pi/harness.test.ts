@@ -151,6 +151,18 @@ test('the session is given pi’s model, the workspace, the tools its step can u
   });
 });
 
+test('a pi session with bash and a scratch folder gets the temp-file paragraph in its system prompt, and one without a scratch folder does not', async () => {
+  const tmp = '/work/tmp';
+  const env = { STAGE_OUT: '/work/out', TMPDIR: tmp, TMP: tmp, TEMP: tmp };
+  const permissions = { read: ['**'], write: ['$STAGE_OUT/**'], commands: ['git status'] };
+  const withTmp = await play('done', { permissions, env: { ...request('done').env, ...env } });
+  const without = await play('done', { permissions });
+  expect([
+    withTmp.scripted.calls[0]?.params.systemPrompt.includes('A temporary file goes in `$TMPDIR`'),
+    without.scripted.calls[0]?.params.systemPrompt.includes('mktemp'),
+  ]).toEqual([true, false]);
+});
+
 test('the session is told to submit through the submit tool, not through structured output', async () => {
   const { scripted } = await play('done');
   const prompt = scripted.calls[0]?.params.systemPrompt ?? '';

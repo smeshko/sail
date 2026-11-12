@@ -12,12 +12,13 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import pkg from '../../package.json' with { type: 'json' };
 import { callPaths, createCallDir, stepPaths } from '../../src/engine/call-dir';
 import type { ContractError } from '../../src/engine/contract';
 import { redactor } from '../../src/engine/redact';
 import { validateDocument } from '../../src/engine/schemas';
+import { SHIMS_DIR } from '../../src/engine/shims';
 import { readSlot, releaseSlot, takeSlot } from '../../src/engine/slots';
 import type { CallEvent } from '../../src/events/types';
 import { KINDS, type StepContext, type StepRun } from '../../src/kinds/index';
@@ -144,7 +145,7 @@ test('a script step that declares nothing gets none of the run credentials', asy
     const { environment } = await environmentRun();
     for (const name of [...Object.keys(secrets), 'FOO', 'GIT_INDEX_FILE']) expect(environment[name]).toBeUndefined();
     expect(environment.HOME).toBe('/test/home');
-    expect(environment.PATH).toBe(`${BIN_DIR}:/usr/bin:/bin`);
+    expect(environment.PATH).toBe(`${SHIMS_DIR}:${BIN_DIR}:/usr/bin:/bin`);
     expect(environment.SSH_AUTH_SOCK).toBe('/test/ssh');
     expect(environment.SAIL_HOME).toBe('/test/sail');
     expect(environment.GIT_AUTHOR_NAME).toBe('Test Author');
@@ -776,7 +777,7 @@ const WHICH_SAIL =
   '"$(command -v sail)" "$(printf %s "$PATH" | cut -d: -f1)" "$(printf %s "$PATH" | cut -d: -f2-)" "$SAIL_BUN"';
 const Which = z.object({ version: z.string(), path: z.string(), first: z.string(), rest: z.string(), bun: z.string() });
 
-test("sail inside a script step is this checkout's, on the running Bun: PATH starts with its bin/, ahead of the PATH the engine has, and neither PATH nor SAIL_BUN is recorded", async () => {
+test("sail inside a script step is this checkout's, on the running Bun: PATH starts with the shims folder, then its bin/, ahead of the PATH the engine has, and neither PATH nor SAIL_BUN is recorded", async () => {
   const s = setup();
   s.run(WHICH_SAIL);
   const { context, events } = collecting(s);
@@ -785,8 +786,8 @@ test("sail inside a script step is this checkout's, on the running Bun: PATH sta
   expect(run.output).toEqual({
     version: pkg.version,
     path: join(ROOT, 'bin', 'sail'),
-    first: join(ROOT, 'bin'),
-    rest: process.env.PATH ?? '',
+    first: SHIMS_DIR,
+    rest: `${BIN_DIR}:${process.env.PATH ?? ''}`,
     bun: process.execPath,
   });
   expect(BIN_DIR).toBe(join(ROOT, 'bin'));
@@ -796,7 +797,7 @@ test("sail inside a script step is this checkout's, on the running Bun: PATH sta
   expect([exec?.includes('PATH'), exec?.includes('SAIL_BUN')]).toEqual([false, false]);
 });
 
-test("with no PATH in the engine's environment a script step still runs, and finds sail: PATH is bin/, then the system's default", async () => {
+test("with no PATH in the engine's environment a script step still runs, and finds sail: PATH is the shims folder, bin/, then the system's default", async () => {
   const s = setup();
   s.run(WHICH_SAIL);
   const had = process.env.PATH;
@@ -807,13 +808,29 @@ test("with no PATH in the engine's environment a script step still runs, and fin
     expect(run.output).toEqual({
       version: pkg.version,
       path: join(ROOT, 'bin', 'sail'),
-      first: join(ROOT, 'bin'),
-      rest: '/usr/bin:/bin',
+      first: SHIMS_DIR,
+      rest: `${BIN_DIR}:/usr/bin:/bin`,
       bun: process.execPath,
     });
   } finally {
     if (had !== undefined) process.env.PATH = had;
   }
+});
+
+test("a bare mktemp in a script step makes its file in the try's scratch folder", async () => {
+  const s = setup();
+  mkdirSync(s.context.paths.tmp, { recursive: true });
+  s.run('f=$(mktemp) && d=$(mktemp -d) && printf \'{"file":"%s","dir":"%s"}\\n\' "$f" "$d"');
+  const run = await scriptKind.run(
+    script('tests', { run: './run.sh', output: z.object({ file: z.string(), dir: z.string() }) }),
+    s.context,
+  );
+  expect(run.errors).toEqual([]);
+  const out = run.output as { file: string; dir: string };
+  expect([dirname(realpathSync(out.file)), dirname(realpathSync(out.dir))]).toEqual([
+    realpathSync(s.context.paths.tmp),
+    realpathSync(s.context.paths.tmp),
+  ]);
 });
 
 // A script's port events (D12): what a `sail port` under the step leaves in `$SAIL_EVENTS` joins the step's events once

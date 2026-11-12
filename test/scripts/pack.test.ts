@@ -69,8 +69,8 @@ test('holds package.json, LICENSE and every file git lists under bin, src, schem
   expect(listing.filter((path) => /^(test|scripts|docs)\//.test(path) || /README/i.test(path))).toEqual([]);
 }, 30_000);
 
-test('keeps bin/sail and src/cli/main.ts executable', () => {
-  for (const path of ['bin/sail', 'src/cli/main.ts']) {
+test('keeps bin/sail, bin/shims/mktemp and src/cli/main.ts executable', () => {
+  for (const path of ['bin/sail', 'bin/shims/mktemp', 'src/cli/main.ts']) {
     const line = verbose.find((entry) => entry.endsWith(`package/${path}`));
     expect(line?.startsWith('-rwxr-xr-x')).toBe(true);
   }

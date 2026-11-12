@@ -17,6 +17,7 @@ import { SUBMIT_CONTRACT, submissionEnvelope } from '../../../src/adapters/claud
 import { BUILTIN_TOOLS } from '../../../src/adapters/claude-code/tool-call';
 import { decide } from '../../../src/engine/permissions';
 import { deniedCommands } from '../../../src/engine/permissions/guide';
+import { SESSION_ENV_FILE, SHIMS_DIR } from '../../../src/engine/shims';
 import type { HarnessEvent, HarnessRequest } from '../../../src/ports/harness';
 import { HarnessCapabilities, type HarnessResult } from '../../../src/ports/types';
 import {
@@ -284,7 +285,9 @@ test("the session's environment is the allowlisted names of sail's, the client a
     ...picked
   } = sessionOptions(req, env).env ?? {};
   expect(picked).toEqual({
-    PATH: '/usr/bin',
+    PATH: `${SHIMS_DIR}:/usr/bin`,
+    SAIL_SHIMS: SHIMS_DIR,
+    CLAUDE_ENV_FILE: SESSION_ENV_FILE,
     HOME: '/home/sail',
     LANG: 'C.UTF-8',
     LC_ALL: 'C',
@@ -303,6 +306,21 @@ test("the session's environment is the allowlisted names of sail's, the client a
     STAGE_OUT: req.env.STAGE_OUT,
     TRY: '1',
   });
+});
+
+test("the session's environment names sail's env file and shims folder, which a preamble can't replace", () => {
+  const plain = request();
+  const req: HarnessRequest = {
+    ...plain,
+    env: { ...plain.env, CLAUDE_ENV_FILE: '/evil', SAIL_SHIMS: '/evil', PATH: '/evil' },
+  };
+  const env = sessionOptions(req, { PATH: '/usr/bin', CLAUDE_ENV_FILE: '/also-evil' }).env ?? {};
+  expect([env.PATH?.startsWith(`${SHIMS_DIR}:`), env.SAIL_SHIMS, env.CLAUDE_ENV_FILE]).toEqual([
+    true,
+    SHIMS_DIR,
+    SESSION_ENV_FILE,
+  ]);
+  expect(env).not.toHaveProperty('BASH_ENV');
 });
 
 test.each(['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'])(
@@ -1154,4 +1172,17 @@ test('whereYouWork lists a line for each of $TMPDIR, $TMP and $TEMP of the reque
   );
   expect(lines.map((found) => found.length)).toEqual([1, 1, 1]);
   expect(lines[0]?.[0]).toContain(req.env.TMPDIR ?? '<none>');
+});
+
+test('whereYouWork names the working temp-file forms for a session with a shell and a scratch folder, and none otherwise', () => {
+  const scratched = whereYouWork(withScratch(request()), true);
+  expect(scratched).toContain('A temporary file goes in `$TMPDIR`, which is removed when the step ends.');
+  expect(scratched).toContain('mktemp "$TMPDIR/name.XXXXXX"');
+  expect(scratched).toContain('"$TMPDIR/name"');
+  expect(scratched).toContain('in one command and use the path it prints in the next');
+  expect(scratched).toContain('`f=$(mktemp); echo ok > "$f"`');
+  expect(scratched).toContain('is denied');
+  expect(whereYouWork(withScratch(request()), false)).not.toContain('mktemp');
+  expect(whereYouWork(request(), true)).not.toContain('mktemp');
+  expect(whereYouWork({ ...request(), env: { ...request().env, TMPDIR: '' } }, true)).not.toContain('mktemp');
 });

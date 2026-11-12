@@ -1,0 +1,91 @@
+#!/bin/sh
+# sail-mktemp-shim
+# A mktemp that puts every file whose directory it picks itself in $TMPDIR, the step's scratch folder. macOS's mktemp
+# ignores TMPDIR for a bare call and for -t. Any other form goes to the real mktemp unchanged. The marker on line 2
+# lets one copy of this shim pass over another copy (another sail checkout's), so two never exec each other.
+
+self=$0
+real=
+
+# True when $1 is a copy of this shim: its second line is the marker.
+is_shim() {
+  [ "$1" -ef "$self" ] && return 0
+  marker=
+  { read -r _first && read -r marker; } < "$1" 2>/dev/null
+  [ "$marker" = "# sail-mktemp-shim" ]
+}
+
+oldifs=$IFS
+IFS=:
+for dir in $PATH; do
+  candidate="${dir:-.}/mktemp"
+  if [ -x "$candidate" ] && ! is_shim "$candidate"; then
+    real=$candidate
+    break
+  fi
+done
+IFS=$oldifs
+if [ -z "$real" ]; then
+  for candidate in /usr/bin/mktemp /bin/mktemp; do
+    if [ -x "$candidate" ] && ! is_shim "$candidate"; then
+      real=$candidate
+      break
+    fi
+  done
+fi
+if [ -z "$real" ]; then
+  echo "mktemp: no mktemp found beside sail's" >&2
+  exit 127
+fi
+
+if [ -z "${TMPDIR:-}" ]; then
+  exec "$real" "$@"
+fi
+
+flags=
+prefix=
+has_prefix=
+want_prefix=
+for arg in "$@"; do
+  if [ -n "$want_prefix" ]; then
+    # GNU's -t takes no argument, so an option after it is an option: the real mktemp reads it as its own does.
+    case "$arg" in
+      -*) exec "$real" "$@" ;;
+    esac
+    prefix=$arg
+    has_prefix=1
+    want_prefix=
+    continue
+  fi
+  case "$arg" in
+    -[dqu]*t)
+      flags="$flags ${arg%t}"
+      want_prefix=1
+      ;;
+    -t)
+      want_prefix=1
+      ;;
+    -[dqu]*)
+      case "$arg" in
+        -*[!dqu]*) exec "$real" "$@" ;;
+      esac
+      flags="$flags $arg"
+      ;;
+    *) exec "$real" "$@" ;;
+  esac
+done
+if [ -n "$want_prefix" ]; then
+  exec "$real" "$@"
+fi
+
+dir=${TMPDIR%/}
+if [ -z "$has_prefix" ]; then
+  template="$dir/tmp.XXXXXXXXXX"
+else
+  case "$prefix" in
+    *XXX) template="$dir/$prefix" ;;
+    *) template="$dir/$prefix.XXXXXXXX" ;;
+  esac
+fi
+# shellcheck disable=SC2086
+exec "$real" $flags "$template"

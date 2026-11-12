@@ -4,8 +4,9 @@
 // reports the facts only it knows as events: how the process ran and ended, whether the output was read and held its
 // schema, and which files it recorded.
 //
-// `sail` inside a script is the sail that runs it: `PATH` starts with this package's `bin/`, and `SAIL_BUN` names the
-// running Bun, which `bin/sail` executes. Both name this machine, so neither is recorded.
+// `sail` inside a script is the sail that runs it: `PATH` starts with the shims folder (a `mktemp` that
+// uses `$TMPDIR`), then this package's `bin/`, and `SAIL_BUN` names the running Bun, which `bin/sail` executes. Both name
+// this machine, so neither is recorded.
 //
 // `SAIL_EVENTS` names the step's port events file, `port-events.ndjson` in its call directory, where a `sail port` the
 // script runs leaves its provider events. Once the process has ended, however it ended, the file is read and each event
@@ -30,6 +31,7 @@ import { preamble } from '../engine/preamble';
 import { runProcess } from '../engine/process';
 import { redactFile } from '../engine/redact';
 import { checkoutPath } from '../engine/run-dir';
+import { shimsFirst } from '../engine/shims';
 import {
   defaultSlotsDir,
   releaseSlot,
@@ -313,7 +315,7 @@ async function runScript(step: ScriptStep, context: StepContext): Promise<StepRu
     cwd: context.workspace,
     env: {
       ...inherited,
-      PATH: `${BIN_DIR}${delimiter}${inherited.PATH ?? SYSTEM_PATH}`,
+      PATH: shimsFirst(`${BIN_DIR}${delimiter}${inherited.PATH ?? SYSTEM_PATH}`),
       SAIL_BUN: process.execPath,
       SAIL_PORTS: (step.ports ?? []).join(','),
       ...Object.fromEntries(variables.map(({ name, value }) => [name, value])),

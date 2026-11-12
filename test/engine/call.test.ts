@@ -232,6 +232,19 @@ test("a script step sees TMPDIR, TMP and TEMP as the try's empty tmp/ beside out
   });
 });
 
+test("a script try's bare mktemp lands in tmp/, which is removed when the try ends", async () => {
+  await withTempRepo(async (repo) => {
+    const s = tests(repo);
+    s.run(`f=$(mktemp)\nd=$(mktemp -d)\nprintf '%s\\n%s\\n' "$f" "$d" > "$STAGE_OUT/seen.txt"\n${PASSES}`);
+    const { paths } = await runCall(s.request(plainStep()));
+    expect(readBack(paths.result).outcome).toBe('passed');
+    const real = realpathSync(dirname(paths.out));
+    const seen = readFileSync(join(paths.out, 'seen.txt'), 'utf8').trim().split('\n');
+    expect(seen.map((path) => dirname(path))).toEqual([`${real}/tmp`, `${real}/tmp`]);
+    expect(existsSync(paths.tmp)).toBe(false);
+  });
+});
+
 test('after a script step ends passed, failed or timed out, its tmp/ is gone and its out/ stays', async () => {
   await withTempRepo(async (repo) => {
     const s = tests(repo);

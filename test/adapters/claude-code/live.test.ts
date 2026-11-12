@@ -13,7 +13,7 @@
 // (SIGKILL, a crash) has no result to give, so its cost stays the estimate of its last usage update: a known gap.
 import { describe, expect, setDefaultTimeout, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { createClaudeCodeHarness } from '../../../src/adapters/claude-code/harness';
@@ -228,6 +228,27 @@ describe.skipIf(!LIVE)('claude-code live', () => {
     expect(
       ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_AUTH_TOKEN'].filter((name) => said.includes(name)),
     ).toEqual([]);
+  }, 600_000);
+
+  // Needs a Claude Code that honours CLAUDE_ENV_FILE: on macOS the login shell's profile moves /usr/bin ahead of the
+  // shims folder, and only sail's env file puts it back.
+  test("a bare mktemp in one Bash command and a write to its path in the next are both allowed, and the path is in the request's TMPDIR", async () => {
+    const plain = request('placeholder');
+    const tmp = join(dirname(plain.env.STAGE_OUT ?? ''), 'tmp');
+    mkdirSync(tmp, { recursive: true });
+    const { result, events } = await guarded(
+      request(
+        'Run `mktemp` alone with Bash, then in a second Bash command run `echo ok >` followed by the path it printed, then submit done with that path as the summary.',
+        {
+          env: { ...plain.env, TMPDIR: tmp, TMP: tmp, TEMP: tmp },
+          cwd: plain.cwd,
+          permissions: { read: ['**'], write: ['$STAGE_OUT/**'], commands: ['*'] },
+        },
+      ),
+    );
+    expect(denialsIn(events)).toEqual([]);
+    const said = result.outcome === 'done' ? JSON.stringify(result.output) : '';
+    expect(said).toContain(realpathSync(tmp));
   }, 600_000);
 
   test('maxUsd 0.05 on a long task ends in error naming maxUsd 0.05, with its overrun', async () => {
