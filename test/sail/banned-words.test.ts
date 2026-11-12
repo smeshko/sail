@@ -25,6 +25,8 @@ interface Lib {
   bannedLines(diff: string): Line[];
   messageContext(lines: Omit<Line, 'context'>[]): Line[];
   bannedCandidates(lines: Line[], glossary: Entry[]): Candidate[];
+  bannedPattern(word: string): RegExp;
+  bannedMatches(pattern: RegExp, text: string): boolean;
   bannedState(candidates: Candidate[]): unknown;
   bannedQuestions(candidates: Candidate[]): Record<string, { type: string; instructions: string }>;
 }
@@ -313,15 +315,19 @@ test('Jev receives the full Avoid wording, including sense qualifiers', () => {
   expect(JSON.stringify(lib.bannedState(candidates))).toContain('invocation (as a noun), execution');
 });
 
-test('bannedCandidates matches whole words ignoring case but not plurals or hyphen joins', () => {
-  const glossary = [entry, { term: 'sail', definition: 'Tool.', avoid: ['ADW', 'loop', 'retry loop', 'a.b'] }];
-  expect(lib.bannedCandidates([line], glossary)).toEqual([{ ...line, ...entry, word: 'invocation' }]);
-  expect(lib.bannedCandidates([{ ...line, text: 'invocations ADW-387 run-loop axb' }], glossary)).toEqual([]);
-  expect(lib.bannedCandidates([{ ...line, text: 'retry  loop a.b' }], glossary).map((c) => c.word)).toEqual([
-    'loop',
-    'retry loop',
-    'a.b',
-  ]);
+test('bannedCandidates matches an avoided word as a camelCase part, a kebab part and a plural', () => {
+  const glossary = [
+    { term: 'T', definition: 'D.', avoid: ['nav', 'notice', 'ADW', 'loop', 'retry loop', 'a.b', 'stage run'] },
+  ];
+  const words = (text: string) => lib.bannedCandidates([{ ...line, text }], glossary).map((c) => c.word);
+  for (const text of ['navCounts', 'sideNav', 'side-nav', 'NAV', 'navs']) expect(words(text)).toContain('nav');
+  expect(words('notices')).toEqual(['notice']);
+  expect(words('run-loop')).toEqual(['loop']);
+  for (const text of ['retry  loop', 'retry-loop', 'retryLoop']) expect(words(text)).toContain('retry loop');
+  expect(words('stageRun')).toEqual(['stage run']);
+  expect(words('a.b')).toEqual(['a.b']);
+  expect(words('axb')).toEqual([]);
+  for (const text of ['ADW-387', 'navigate', 'canvas', 'nav_counts', 'noticed']) expect(words(text)).toEqual([]);
 });
 test('bannedCandidates keeps one candidate per word and entry, even for repeated words', () => {
   expect(

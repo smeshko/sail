@@ -441,19 +441,25 @@ export function messageContext(lines) {
   }));
 }
 
+/** An avoided word, with an optional plural s, that touches no letter, digit or `_`, and is no ticket key (`ADW-387`). */
+export function bannedPattern(word) {
+  const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '[\\s-]+');
+  return new RegExp(`(?<![A-Za-z0-9_])${escaped}s?(?![A-Za-z0-9_]|-\\d)`, 'i');
+}
+/** Whether the pattern matches the text as written, or with a space put at each camelCase boundary. */
+export function bannedMatches(pattern, text) {
+  if (pattern.test(text)) return true;
+  const spaced = text.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/([A-Z])([A-Z][a-z])/g, '$1 $2');
+  return spaced !== text && pattern.test(spaced);
+}
 export function bannedCandidates(lines, glossary) {
   const patterns = glossary.flatMap((entry) =>
-    entry.avoid.map((word) => ({
-      entry,
-      word,
-      pattern: new RegExp(
-        `(?<![\\w-])${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+')}(?![\\w-])`,
-        'i',
-      ),
-    })),
+    entry.avoid.map((word) => ({ entry, word, pattern: bannedPattern(word) })),
   );
   return lines.flatMap((line) =>
-    patterns.filter(({ pattern }) => pattern.test(line.text)).map(({ entry, word }) => ({ ...line, ...entry, word })),
+    patterns
+      .filter(({ pattern }) => bannedMatches(pattern, line.text))
+      .map(({ entry, word }) => ({ ...line, ...entry, word })),
   );
 }
 export function bannedState(candidates) {
