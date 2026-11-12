@@ -203,7 +203,7 @@ A check the engine runs on a document after the step ends, such as required sect
 _Avoid_: linter, assertion, gate, check
 
 **Prompt**:
-An agent step's instructions, rendered with the step's bindings. The engine puts the repository's conventions before them and appends both shared fragments, about untrusted input and submitting, so steps with the same conventions start with the same text.
+An agent step's instructions, rendered with the step's bindings. The engine puts the repository's conventions before them and appends both shared fragments, about untrusted input and submitting, so steps with the same conventions start with the same text. A harness ends the prompt it sends a session with the call's own values, under "Where you work".
 _Avoid_: system prompt, instructions file
 
 **Fragment**:

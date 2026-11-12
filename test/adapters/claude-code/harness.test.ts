@@ -11,6 +11,8 @@ import {
   INTERRUPT_GRACE_MS,
   type QueryFunction,
   sessionOptions,
+  sessionPrompt,
+  stepGuide,
   whereYouWork,
 } from '../../../src/adapters/claude-code/harness';
 import { SUBMIT_CONTRACT, submissionEnvelope } from '../../../src/adapters/claude-code/submission';
@@ -89,8 +91,11 @@ const SUITE: Record<string, Stream> = {
   ],
 };
 
+/** The engine's text of the prompt a session was sent: what precedes its `## Where you work` section. */
+const engineText = (sent: string) => sent.slice(0, sent.lastIndexOf('\n\n## Where you work\n'));
+
 /** A query that plays the suite's stream named by the session's prompt. */
-const suiteQuery: QueryFunction = (params) => scriptedQuery([SUITE[params.prompt] ?? []])(params);
+const suiteQuery: QueryFunction = (params) => scriptedQuery([SUITE[engineText(params.prompt)] ?? []])(params);
 
 describe('the port suite', () =>
   harnessSuite('claude-code (scripted query)', async () => ({
@@ -119,32 +124,80 @@ async function play(stream: Stream, extra: Partial<HarnessRequest> = {}, env: Re
   return { query, result, capture, types: capture.events.map((event) => event.type) };
 }
 
-/** What the session's system prompt gets appended for `req`: where it works, then the submit contract. */
-const appended = (req: HarnessRequest) =>
-  [
-    '## Where you work',
-    '',
-    `Your working directory is the workspace, ${req.cwd}. You have no shell, so you can't read environment`,
-    'variables: where a prompt names one of these, it means the value given.',
-    '',
-    ...Object.entries(req.env).map(([name, value]) => `- \`$${name}\`: ${value}`),
-    '',
-    'A file the step produces goes straight into `$STAGE_OUT` under its own name, as `$STAGE_OUT/<name>`, not into a',
-    'directory below it.',
-    '',
-    SUBMIT_CONTRACT,
-  ].join('\n');
+/** The system prompt's section on files and commands, for a session with no shell. */
+const NO_SHELL_GUIDE = [
+  '## Files and commands',
+  '',
+  'Your working directory is the workspace, `$WORKSPACE`. Your prompt ends with a "Where you work" section, which',
+  "gives the value of each environment variable a prompt names. You have no shell, so you can't read them from",
+  'your environment.',
+  '',
+  'A file the step produces goes straight into `$STAGE_OUT` under its own name, as `$STAGE_OUT/<name>`, not into a',
+  'directory below it.',
+].join('\n');
+
+/** What the session's system prompt gets appended for a step with no commands: the guide, then the submit contract. */
+const appended = () => [NO_SHELL_GUIDE, '', SUBMIT_CONTRACT].join('\n');
+
+/** `req` as another run's later call of another stage would make it: every per-call value differs. */
+function elsewhere(req: HarnessRequest): HarnessRequest {
+  const other = request(req.prompt, { permissions: req.permissions });
+  const env = Object.fromEntries(Object.keys(req.env).map((name) => [name, `${other.cwd}/${name.toLowerCase()}-2`]));
+  return { ...other, key: 'review:bugs#3', try: 2, env };
+}
 
 // Live run 1: the session has file tools only, so it can't read $STAGE_OUT from its environment. It wrote spec.md
-// into a directory it guessed, and the stage ended missing_file. The system prompt now gives it the paths.
-test("the system prompt gives the session its working directory and every preamble variable's value, then the submit contract", () => {
+// into a directory it guessed, and the stage ended missing_file. Its prompt now ends with the paths (ADW-569: they were
+// in the system prompt, where they kept another session from reading what followed them from the prompt cache).
+test('the system prompt of a session with no shell names no value: the guide to files and commands, then the submit contract', () => {
   const req = request('Write `$STAGE_OUT/spec.md` from `$INPUT_BRIEF`.');
   const env = { ...req.env, INPUT_BRIEF: join(req.env.STAGE_IN ?? '', 'brief.md') };
   const { systemPrompt } = sessionOptions({ ...req, env }, {});
-  expect(systemPrompt).toEqual({
-    type: 'preset',
-    preset: 'claude_code',
-    append: [
+  expect(systemPrompt).toEqual({ type: 'preset', preset: 'claude_code', append: appended() });
+  const { append } = systemPrompt as { append: string };
+  expect([req.cwd, ...Object.values(env)].filter((value) => value.length > 1 && append.includes(value))).toEqual([]);
+});
+
+const WITH_COMMANDS = { read: ['**'], write: ['$STAGE_OUT/**'], commands: ['git status'] };
+
+test('the text appended to the system prompt is identical for two calls that differ in run, stage, call, try, workspace and stage paths, with a shell and without', () => {
+  for (const permissions of [request().permissions, WITH_COMMANDS]) {
+    for (const scratch of [false, true]) {
+      const made = request('Write the spec.', { permissions });
+      const one = scratch ? withScratch(made) : made;
+      const two = elsewhere(one);
+      // The two share no per-call value, and the second's differ from the first's in every variable.
+      expect([two.key, two.try, two.cwd]).not.toEqual([one.key, one.try, one.cwd]);
+      expect(Object.keys(two.env)).toEqual(Object.keys(one.env));
+      expect(Object.keys(one.env).filter((name) => one.env[name] === two.env[name])).toEqual([]);
+      const [first, second] = [sessionOptions(one, {}), sessionOptions(two, {})].map((options) => options.systemPrompt);
+      expect(second).toEqual(first as NonNullable<typeof first>);
+      const { append } = first as { append: string };
+      expect(
+        [one.cwd, ...Object.values(one.env)].filter((value) => value.length > 1 && append.includes(value)),
+      ).toEqual([]);
+    }
+  }
+});
+
+test('the prompt a session with no shell is sent ends with Where you work: the workspace path and a line for every preamble variable', async () => {
+  const made = request('Write `$STAGE_OUT/spec.md` from `$INPUT_BRIEF`.');
+  const req: HarnessRequest = {
+    ...made,
+    env: {
+      ...made.env,
+      RUN_ID: 'run-7',
+      STAGE: 'spec',
+      CALL: '1',
+      INPUT_BRIEF: join(made.env.STAGE_IN ?? '', 'brief.md'),
+    },
+  };
+  const { query } = await play(SUITE.done ?? [], req);
+  const sent = query.calls[0]?.prompt ?? '';
+  expect(sent).toBe(
+    [
+      'Write `$STAGE_OUT/spec.md` from `$INPUT_BRIEF`.',
+      '',
       '## Where you work',
       '',
       `Your working directory is the workspace, ${req.cwd}. You have no shell, so you can't read environment`,
@@ -153,14 +206,46 @@ test("the system prompt gives the session its working directory and every preamb
       `- \`$STAGE_IN\`: ${req.env.STAGE_IN}`,
       `- \`$STAGE_OUT\`: ${req.env.STAGE_OUT}`,
       '- `$TRY`: 1',
+      '- `$RUN_ID`: run-7',
+      '- `$STAGE`: spec',
+      '- `$CALL`: 1',
       `- \`$INPUT_BRIEF\`: ${req.env.STAGE_IN}/brief.md`,
       '',
-      'A file the step produces goes straight into `$STAGE_OUT` under its own name, as `$STAGE_OUT/<name>`, not into a',
-      'directory below it.',
-      '',
-      SUBMIT_CONTRACT,
     ].join('\n'),
-  });
+  );
+  const section = sent.slice(sent.indexOf('## Where you work'));
+  expect(Object.entries(req.env).filter(([name, value]) => !section.includes(`- \`$${name}\`: ${value}\n`))).toEqual(
+    [],
+  );
+});
+
+test('Where you work is the last thing in the prompt a session is sent, after the conventions, the stage prompt and Fix your last output', async () => {
+  const engine = [
+    '## Repository conventions: AGENTS.md\n\nIndent with tabs.',
+    '## Your task\n\nWrite the spec.',
+    '## Fix your last output\n\nYour last output was rejected.\n',
+  ].join('\n\n');
+  const req = request(engine, { permissions: WITH_COMMANDS });
+  const { query } = await play(SUITE.done ?? [], req);
+  const sent = query.calls[0]?.prompt ?? '';
+  const at = [
+    '## Repository conventions: AGENTS.md',
+    '## Your task',
+    '## Fix your last output',
+    '## Where you work',
+  ].map((heading) => sent.indexOf(heading));
+  expect(at).not.toContain(-1);
+  expect(at).toEqual([...at].sort((a, b) => a - b));
+  expect(sent).toBe(`${engine.trimEnd()}\n\n${whereYouWork(req, true)}\n`);
+  expect(sent).toBe(sessionPrompt(req, true));
+  expect(sent.endsWith(`- \`$TRY\`: 1\n`)).toBe(true);
+  // Two stages with the same conventions are sent prompts with the same start.
+  const other = sessionPrompt(
+    elsewhere({ ...req, prompt: engine.replace('Write the spec.', 'Review the diff.') }),
+    true,
+  );
+  const shared = '## Repository conventions: AGENTS.md\n\nIndent with tabs.\n\n## Your task\n\n';
+  expect([sent.startsWith(shared), other.startsWith(shared)]).toEqual([true, true]);
 });
 
 test('the session options hold the request effort as the SDK effort, and no effort key when it has none, with thinking unchanged', () => {
@@ -199,7 +284,7 @@ test("the session's options are the step's model, workspace, envelope and budget
     thinking: { type: 'adaptive', display: 'summarized' },
     permissionMode: 'default',
     outputFormat: { type: 'json_schema', schema: submissionEnvelope(req.outputSchema) },
-    systemPrompt: { type: 'preset', preset: 'claude_code', append: appended(req) },
+    systemPrompt: { type: 'preset', preset: 'claude_code', append: appended() },
     maxTurns: 40,
     maxBudgetUsd: 2,
   });
@@ -349,8 +434,9 @@ test('the session sees the OAuth token, and nothing the harness reports carries 
 });
 
 test('a done session runs its prompt with those options, reports its usage at the total cost, and ends last with its counts', async () => {
-  const { query, result, capture, types } = await play(SUITE.done ?? []);
-  expect(query.calls.map((call) => call.prompt)).toEqual(['Write the spec.']);
+  const sent = request();
+  const { query, result, capture, types } = await play(SUITE.done ?? [], sent);
+  expect(query.calls.map((call) => call.prompt)).toEqual([`Write the spec.\n\n${whereYouWork(sent, false)}\n`]);
   expect(types).toEqual([
     'harness:session_start',
     'tool:start',
@@ -659,23 +745,17 @@ test("the session's Bash is bash, it has no background tasks, and neither sail's
   }).toEqual({ scrub: '1', cwd: '1', shell: '/bin/bash', SHELL: '/bin/bash', background: '1' });
 });
 
-test('a step with commands is told its variables are in its environment too, and the commands its permissions deny', () => {
-  const req = request('Write the spec.', {
-    permissions: { read: ['**'], write: ['$STAGE_OUT/**'], commands: ['git status'] },
-  });
+test('a step with commands is told its variables are in its environment too, and the commands its permissions deny', async () => {
+  const req = request('Write the spec.', { permissions: WITH_COMMANDS });
   const { systemPrompt } = sessionOptions(req, {});
   expect(systemPrompt).toEqual({
     type: 'preset',
     preset: 'claude_code',
     append: [
-      '## Where you work',
+      '## Files and commands',
       '',
-      `Your working directory is the workspace, ${req.cwd}. Where a prompt names one of these environment`,
-      'variables, it means the value given: the same values are in your environment.',
-      '',
-      `- \`$STAGE_IN\`: ${req.env.STAGE_IN}`,
-      `- \`$STAGE_OUT\`: ${req.env.STAGE_OUT}`,
-      '- `$TRY`: 1',
+      'Your working directory is the workspace, `$WORKSPACE`. Your prompt ends with a "Where you work" section, which',
+      'gives the value of each environment variable a prompt names: the same values are in your environment.',
       '',
       'A file the step produces goes straight into `$STAGE_OUT` under its own name, as `$STAGE_OUT/<name>`, not into a',
       'directory below it.',
@@ -685,6 +765,22 @@ test('a step with commands is told its variables are in its environment too, and
       SUBMIT_CONTRACT,
     ].join('\n'),
   });
+  const { query } = await play(SUITE.done ?? [], req);
+  expect(query.calls[0]?.prompt).toBe(
+    [
+      'Write the spec.',
+      '',
+      '## Where you work',
+      '',
+      `Your working directory is the workspace, ${req.cwd}. Where a prompt names one of these environment`,
+      'variables, it means the value given: the same values are in your environment.',
+      '',
+      `- \`$STAGE_IN\`: ${req.env.STAGE_IN}`,
+      `- \`$STAGE_OUT\`: ${req.env.STAGE_OUT}`,
+      '- `$TRY`: 1',
+      '',
+    ].join('\n'),
+  );
 });
 
 /** The events of `types` among `events`, each as its type and the fields a test names. */
@@ -1174,15 +1270,23 @@ test('whereYouWork lists a line for each of $TMPDIR, $TMP and $TEMP of the reque
   expect(lines[0]?.[0]).toContain(req.env.TMPDIR ?? '<none>');
 });
 
-test('whereYouWork names the working temp-file forms for a session with a shell and a scratch folder, and none otherwise', () => {
-  const scratched = whereYouWork(withScratch(request()), true);
+test('stepGuide names the working temp-file forms for a session with a shell and a scratch folder, and none otherwise', () => {
+  const scratched = stepGuide(true, true);
   expect(scratched).toContain('A temporary file goes in `$TMPDIR`, which is removed when the step ends.');
   expect(scratched).toContain('mktemp "$TMPDIR/name.XXXXXX"');
   expect(scratched).toContain('"$TMPDIR/name"');
   expect(scratched).toContain('in one command and use the path it prints in the next');
   expect(scratched).toContain('`f=$(mktemp); echo ok > "$f"`');
   expect(scratched).toContain('is denied');
-  expect(whereYouWork(withScratch(request()), false)).not.toContain('mktemp');
-  expect(whereYouWork(request(), true)).not.toContain('mktemp');
-  expect(whereYouWork({ ...request(), env: { ...request().env, TMPDIR: '' } }, true)).not.toContain('mktemp');
+  expect(stepGuide(false, true)).not.toContain('mktemp');
+  expect(stepGuide(true, false)).not.toContain('mktemp');
+  const append = (req: HarnessRequest) => (sessionOptions(req, {}).systemPrompt as { append: string }).append;
+  const shell = request('Write the spec.', { permissions: WITH_COMMANDS });
+  expect(append(withScratch(shell))).toContain('mktemp "$TMPDIR/name.XXXXXX"');
+  expect(append(withScratch(request()))).not.toContain('mktemp');
+  expect(append(shell)).not.toContain('mktemp');
+  expect(append({ ...shell, env: { ...shell.env, TMPDIR: '' } })).not.toContain('mktemp');
+  // The deny guide names the section the values are in, which no longer holds the advice.
+  expect(append(shell)).toContain('A variable listed under "Where you work"');
+  expect(whereYouWork(withScratch(shell), true)).not.toContain('mktemp');
 });
