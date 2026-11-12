@@ -13,6 +13,8 @@ export const Banned = z.object({
     note: z.string(),
     threshold: z.number(),
     candidates: z.number(),
+    requests: z.number().int(),
+    skipped: z.object({ oversized: z.number().int() }),
   }),
 });
 

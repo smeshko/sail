@@ -180,14 +180,24 @@ test('a banned-words Jev hit reaches the judge as B1', async () => {
   });
 }, 120_000);
 
-test.each([
-  [
-    'question cap',
-    Array.from({ length: 65 }, (_, i) => `**Edit ${i}**:\nAn alteration.\n_Avoid_: change\n`).join(''),
-    '1 candidates omitted',
-  ],
-  ['oversized candidate', `**Edit**:\n${'x'.repeat(70_000)}\n_Avoid_: change\n`, '1 candidates omitted'],
-])(
+test('the review asks all 65 banned-words candidates in five requests and posts no incomplete line', async () => {
+  await withTempRepo(async (repo) => {
+    const answers = seed() as { answers: Record<string, unknown> };
+    for (let i = 1; i <= 65; i++) answers.answers[`word-${i}`] = { type: 'noul', noul: 0.05 };
+    setUp(
+      repo,
+      answers,
+      Array.from({ length: 65 }, (_, i) => `**Edit ${i}**:\nAn alteration.\n_Avoid_: change\n`).join(''),
+    );
+    const { code, dir } = await review(repo);
+    expect(code).toBe(0);
+    const pr = await pullRequest(repo);
+    expect(pr.comments.find((body) => body.includes('## sail review'))).not.toContain('Banned-words check incomplete');
+    expect(asked(dir, 'banned-words#1')).toHaveLength(5);
+  });
+}, 120_000);
+
+test.each([['oversized candidate', `**Edit**:\n${'x'.repeat(70_000)}\n_Avoid_: change\n`, '1 candidates omitted']])(
   'the review comment discloses banned-words omissions from %s',
   async (_name, glossary, note) => {
     await withTempRepo(async (repo) => {

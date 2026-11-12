@@ -335,11 +335,14 @@ export function leakRequests(lines) {
 
 // --- banned-words: is each avoided word used in the sense the glossary forbids?
 
-/** Provisional until ADW-416 calibrates it. */
+/** Measured on real requests: it stays 0.8, in requests of BANNED_BATCH candidates. */
 export const BANNED_YES = 0.8;
 export const BANNED_CONTEXT = 3;
-/** Bound both question count and serialized request bytes; omitted candidates are reported, not judged. */
-export const BANNED_MAX_QUESTIONS = 64;
+/**
+ * Candidates to a request. The same real lines score 0.55-0.60 in a request of 64 and 0.85-0.86 in one of 16, and
+ * requests of 4 or 1 flag more wrong lines at 1.5 to 2.5 times the tokens.
+ */
+export const BANNED_BATCH = 16;
 export const BANNED_MAX_REQUEST_BYTES = MAX_REQUEST_BYTES;
 
 export function parseGlossary(text) {
@@ -462,7 +465,7 @@ export function bannedCandidates(lines, glossary) {
       .map(({ entry, word }) => ({ ...line, ...entry, word })),
   );
 }
-export function bannedState(candidates) {
+export function bannedState(candidates, start = 0) {
   const entries = new Map();
   const lines = new Map();
   const locations = new Map();
@@ -474,7 +477,7 @@ export function bannedState(candidates) {
       locations.set(location, id);
       lines.set(id, { file, line, text, context });
     }
-    return [`word-${i + 1}`, { word, entry: term, location: locations.get(location) }];
+    return [`word-${start + i + 1}`, { word, entry: term, location: locations.get(location) }];
   });
   return {
     entries: Object.fromEntries(entries),
@@ -483,35 +486,49 @@ export function bannedState(candidates) {
   };
 }
 
-/** Select a bounded prefix without cutting any line, context or glossary sense mid-text. */
-export function bannedRequest(candidates) {
-  let selected = [];
-  let state = bannedState(selected);
-  let questions = bannedQuestions(selected);
-  for (const candidate of candidates.slice(0, BANNED_MAX_QUESTIONS)) {
-    const next = [...selected, candidate];
-    const nextState = bannedState(next);
-    const nextQuestions = bannedQuestions(next);
-    if (Buffer.byteLength(JSON.stringify({ state: nextState, questions: nextQuestions })) > BANNED_MAX_REQUEST_BYTES)
-      break;
-    selected = next;
-    state = nextState;
-    questions = nextQuestions;
-  }
-  const omitted = candidates.length - selected.length;
-  return {
-    candidates: selected,
-    state,
-    questions,
-    note: omitted ? `${omitted} candidates omitted (request limits)` : '',
+const bannedBytes = (candidates, start) =>
+  Buffer.byteLength(
+    JSON.stringify({ state: bannedState(candidates, start), questions: bannedQuestions(candidates, start) }),
+  );
+
+/**
+ * Every candidate in requests of at most BANNED_BATCH that each fit BANNED_MAX_REQUEST_BYTES, numbered `word-<n>`
+ * across them: `{ requests: [{ candidates, state, questions }], asked, oversized }`. A candidate too large to fit a
+ * request alone is in none and counted in `oversized`; `asked[n - 1]` is `word-<n>`.
+ */
+export function bannedRequests(candidates) {
+  const requests = [];
+  const asked = [];
+  let oversized = 0;
+  let open = [];
+  const close = () => {
+    if (!open.length) return;
+    const start = asked.length;
+    requests.push({ candidates: open, state: bannedState(open, start), questions: bannedQuestions(open, start) });
+    asked.push(...open);
+    open = [];
   };
+  for (const candidate of candidates) {
+    if (bannedBytes([candidate], asked.length) > BANNED_MAX_REQUEST_BYTES) {
+      oversized++;
+      continue;
+    }
+    if (
+      open.length >= BANNED_BATCH ||
+      (open.length && bannedBytes([...open, candidate], asked.length) > BANNED_MAX_REQUEST_BYTES)
+    )
+      close();
+    open.push(candidate);
+  }
+  close();
+  return { requests, asked, oversized };
 }
-export function bannedQuestions(candidates) {
+export function bannedQuestions(candidates, start = 0) {
   return Object.fromEntries(
     candidates.map((candidate, i) => [
-      `word-${i + 1}`,
+      `word-${start + i + 1}`,
       noul(
-        `In candidates.word-${i + 1}, read its location in lines and its glossary entry in entries (including avoidText). Is "${candidate.word}" used in the sense that entry forbids, where "${candidate.term}" should be used instead?`,
+        `In candidates.word-${start + i + 1}, read its location in lines and its glossary entry in entries (including avoidText). Is "${candidate.word}" used in the sense that entry forbids, where "${candidate.term}" should be used instead?`,
         'The word names what the glossary entry defines, so the entry’s term belongs there.',
         'The word means something else, is mentioned as a word, or is a name the line cannot change, such as a language keyword or another system’s API.',
       ),
