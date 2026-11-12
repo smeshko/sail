@@ -34,5 +34,6 @@ models:
 # No dollar cap on the run: each agent stage carries its own, with its turns. Minutes are wall time, which a machine
 # busy with two runs and a gate stretches: each stage's maxMinutes, and the run's, only stop a session that hung.
 budgets: { run: { maxMinutes: 360 } }
-# AGENTS.md carries the conventions, and CONTEXT.md the vocabulary every identifier and commit message uses.
-conventions: [AGENTS.md, CONTEXT.md]
+# AGENTS.md goes to every agent stage. A stage that writes identifiers, docs or commit text names CONTEXT.md, the
+# vocabulary, beside it in its own conventions.
+conventions: [AGENTS.md]

@@ -186,7 +186,7 @@ function create(dir, from, own, runs, clones) {
   cpSync(from, join(dir, 'repo', '.sail'), { recursive: true, filter: own ? generated : undefined });
   if (own) {
     fakeAll(join(dir, 'repo', '.sail'));
-    // The conventions the config lists are appended to every agent prompt, so they must exist.
+    // The config's default and the stages' own lists name these two files, so both must exist.
     for (const name of ['AGENTS.md', 'CONTEXT.md']) cpSync(join(root, name), join(dir, 'repo', name));
   }
   for (const { folder, to } of seeds) {

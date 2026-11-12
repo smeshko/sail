@@ -439,11 +439,20 @@ test('a task with no commit stays accepted on its first evidence when a later pa
   });
 }, 120_000);
 
-test("implement names CONTEXT.md as its own conventions in the run's roster", async () => {
+test('implement gets AGENTS.md and CONTEXT.md, describe CONTEXT.md alone and check-tasks none', async () => {
   await withTempRepo(async (repo) => {
     writeOwnSail(repo);
-    const { dir } = await factory(repo);
-    const { stages } = JSON.parse(readFileSync(join(dir, 'run.json'), 'utf8'));
-    expect(stages.implement.conventions).toEqual(['AGENTS.md', 'CONTEXT.md']);
+    const { code, stderr, keys, dir } = await factory(repo);
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    expect(keys).toContain('check-tasks#1');
+    const conventionsOf = (key: string) =>
+      (
+        readEvents(dir).find((event) => event.type === 'prompt:rendered' && event.key === key) as
+          | { conventions?: string[] }
+          | undefined
+      )?.conventions;
+    expect(conventionsOf('implement#1')).toEqual(['AGENTS.md', 'CONTEXT.md']);
+    expect(conventionsOf('describe#1')).toEqual(['CONTEXT.md']);
+    expect(conventionsOf('check-tasks#1')).toEqual([]);
   });
 }, 120_000);

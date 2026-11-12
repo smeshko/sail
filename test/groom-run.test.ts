@@ -556,6 +556,8 @@ test('groom plans a ticket with no open question: attaches plan.md with its trai
         .entries.map((entry) => entry.key)
         .slice(4),
     ).toEqual(['decide#1', 'plan#1', 'act#1']);
+    const planned = readEvents(dir).find((event) => event.type === 'prompt:rendered' && event.key === 'plan#1');
+    expect((planned as { conventions?: string[] } | undefined)?.conventions).toEqual(['AGENTS.md', 'CONTEXT.md']);
     expect(JSON.parse(readFileSync(join(dir, 'run.json'), 'utf8')).stages.plan.conventions).toEqual([
       'AGENTS.md',
       'CONTEXT.md',
@@ -686,7 +688,7 @@ test('groom cancels a stale ticket whatever the worth check gave', async () => {
   });
 }, 120_000);
 
-test("groom's checkers get AGENTS.md alone as conventions, and decide gets both", async () => {
+test("groom's checkers and decide get AGENTS.md alone as conventions", async () => {
   await withTempRepo(async (repo) => {
     writeGroomRepo(repo);
     const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
@@ -706,8 +708,8 @@ test("groom's checkers get AGENTS.md alone as conventions, and decide gets both"
       });
     }
     const decided = promptOf('decide');
-    expect(decided).toContain('# AGENTS.md');
-    expect(decided).toContain('# CONTEXT.md');
+    expect(decided).toContain('## Repository conventions: AGENTS.md');
+    expect(decided).not.toContain('## Repository conventions: CONTEXT.md');
   });
 }, 120_000);
 

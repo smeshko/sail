@@ -25,9 +25,13 @@ export function nouls(answers: Readonly<Record<string, number>>): object {
 
 /**
  * Copies the repository's own `.sail/` into `repo`, points its ports at the fakes, commits, and returns the copy. With a
- * `jev` seed the copy has a fake Jev answering from it; without, it has none.
+ * `jev` seed the copy has a fake Jev answering from it; without, it has none. `conventions` gives the text of `AGENTS.md`
+ * or `CONTEXT.md` in place of its one-line stub.
  */
-export function writeOwnSail(repo: TempRepo, options: { jev?: object } = {}): string {
+export function writeOwnSail(
+  repo: TempRepo,
+  options: { jev?: object; conventions?: Readonly<Record<string, string>> } = {},
+): string {
   const sail = join(repo.dir, '.sail');
   cpSync(OWN_SAIL, sail, {
     recursive: true,
@@ -40,8 +44,9 @@ export function writeOwnSail(repo: TempRepo, options: { jev?: object } = {}): st
   const jev = options.jev === undefined ? '' : '  jev: { use: fake, seed: ./fake/jev.json }\n';
   writeFileSync(config, `${text.slice(0, start)}${FAKE_ADAPTERS}${jev}${text.slice(end)}`);
   if (options.jev !== undefined) writeFileSync(join(sail, 'fake', 'jev.json'), JSON.stringify(options.jev));
-  // The conventions the config lists are appended to every agent prompt, so they must exist.
-  for (const name of ['AGENTS.md', 'CONTEXT.md']) writeFileSync(join(repo.dir, name), `# ${name}\n`);
+  // The config's default and the stages' own lists name these two files, so both must exist.
+  for (const name of ['AGENTS.md', 'CONTEXT.md'])
+    writeFileSync(join(repo.dir, name), options.conventions?.[name] ?? `# ${name}\n`);
   repo.git('add', '.sail', 'AGENTS.md', 'CONTEXT.md');
   repo.git('commit', '-m', 'add sail');
   return sail;

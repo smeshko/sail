@@ -15,7 +15,7 @@ import { readEvents } from '../src/events/consumers/ndjson';
 import type { Summary } from '../src/events/summary';
 import { seedHarness } from './helpers/fixture';
 import { onlyRun } from './helpers/groom-fixture';
-import { nouls, writeOwnSail } from './helpers/own-sail';
+import { nouls, OWN_SAIL, writeOwnSail } from './helpers/own-sail';
 import { runCaptured } from './helpers/run-captured';
 import { type TempRepo, withTempRepo } from './helpers/temp-repo';
 
@@ -37,8 +37,9 @@ function setUp(
   glossary?: string,
   gateFile?: string,
   extra: Record<string, string> = {},
+  conventions?: Record<string, string>,
 ): void {
-  writeOwnSail(repo, jev === undefined ? {} : { jev });
+  writeOwnSail(repo, { ...(jev === undefined ? {} : { jev }), ...(conventions === undefined ? {} : { conventions }) });
   if (glossary !== undefined) {
     writeFileSync(join(repo.dir, 'CONTEXT.md'), glossary);
     repo.git('add', 'CONTEXT.md');
@@ -791,6 +792,7 @@ test('a base that conflicts is caught before any check is read and goes to resol
       'merge#3',
     ]);
     expect(readEvents(dir).filter((event) => event.type === 'codehost:checks')).toEqual([]);
+    expect(conventionsOf(dir, 'resolve-conflicts#1')).toEqual(['AGENTS.md', 'CONTEXT.md']);
     expect((await pullRequest(repo)).comments.at(-1)).toBe(
       '## sail review\n\nNot merged: it conflicts with its base in notes.txt\n\nBefore that, the review:\n\n- merged the base in, resolving conflicts in notes.txt\n- merged the base in, resolving conflicts in notes.txt\n\nThe `factory` label is off and `needs-human` is on: this pull request needs a human.\n',
     );
@@ -1216,5 +1218,38 @@ test("the stages that write name CONTEXT.md as their own conventions, and a read
     expect(stages['review-bugs'].budget.maxUsd).toBe(6);
     expect(stages['review-architecture'].budget.maxUsd).toBe(6);
     expect(stages['review-tests'].budget.maxUsd).toBe(3);
+  });
+}, 120_000);
+
+/** The conventions the `prompt:rendered` event of `key` lists. */
+function conventionsOf(dir: string, key: string): unknown {
+  const event = readEvents(dir).find((candidate) => candidate.type === 'prompt:rendered' && candidate.key === key);
+  return (event as { conventions?: string[] } | undefined)?.conventions;
+}
+
+test("only the stages that write get CONTEXT.md, and a read-only reviewer's prompt with the real AGENTS.md is under 20 KB", async () => {
+  await withTempRepo(async (repo) => {
+    const agents = readFileSync(join(OWN_SAIL, '..', 'AGENTS.md'), 'utf8');
+    setUp(repo, seed(), undefined, undefined, {}, { 'AGENTS.md': agents });
+    const { keys, dir } = await review(repo);
+    const readOnly = [
+      'review-requirements#1',
+      'review-architecture#1',
+      'review-bugs#1',
+      'review-tests#1',
+      'review-security#1',
+      'judge#1',
+      'demonstrate#1',
+      'check-fix#1',
+    ];
+    expect(readOnly.filter((key) => !keys.includes(key))).toEqual([]);
+    expect(readOnly.map((key) => [key, conventionsOf(dir, key)])).toEqual(readOnly.map((key) => [key, ['AGENTS.md']]));
+    expect(conventionsOf(dir, 'review-conventions#1')).toEqual(['AGENTS.md', 'CONTEXT.md']);
+    expect(keys).toContain('fix#1');
+    expect(conventionsOf(dir, 'fix#1')).toEqual(['AGENTS.md', 'CONTEXT.md']);
+    const folder = readdirSync(dir).find((name) => name.endsWith('-review-security')) ?? 'missing';
+    const prompt = readFileSync(join(dir, folder, 'call-1', 'prompt.md'), 'utf8');
+    expect(prompt).toContain('# AGENTS.md');
+    expect(Buffer.byteLength(prompt)).toBeLessThan(20_000);
   });
 }, 120_000);
