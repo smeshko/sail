@@ -2,11 +2,12 @@
 // whatever still reaches it, and each denial is reported with its rule, the step's permissions under it and the reason
 // (D1, D9, D11). A real workspace, with the call directories, a symlink out of it and one that climbs back in.
 import { afterAll, describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { HookInput, PreToolUseHookInput } from '@anthropic-ai/claude-agent-sdk';
 import { createGate } from '../../../src/adapters/claude-code/gate';
+import { sessionEnv } from '../../../src/adapters/claude-code/harness';
 import type { Denial } from '../../../src/adapters/claude-code/tool-call';
 import { type DecideContext, decide } from '../../../src/engine/permissions';
 import type { Permissions } from '../../../src/engine/permissions/types';
@@ -510,4 +511,32 @@ test('on Claude Code a Write to /tmp/notes.log is denied by write, and with no T
     await verdictOf(without, 'Write', { file_path: join(scratch, 'notes.log'), content: 'x' }),
   ]).toEqual(['deny', 'deny']);
   expect([withScratch.denials[0]?.[1].rule, without.denials[0]?.[1].rule]).toEqual(['write', 'write']);
+});
+
+test('on Claude Code, mktemp in one command and a write to the path it printed in the next are both allowed, and the file is in the scratch folder; the one-command form stays denied', async () => {
+  const g = gate(SCRATCH_STEP, SCRATCH_CTX);
+  const home = join(base, 'home');
+  mkdirSync(home, { recursive: true });
+  const env = sessionEnv(SCRATCH_CTX.env, { PATH: process.env.PATH, HOME: home });
+  const shell = (command: string) => {
+    const child = Bun.spawnSync(['/bin/bash', '-l', '-c', `. "$CLAUDE_ENV_FILE"; ${command}`], {
+      cwd: work,
+      env,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    return { code: child.exitCode, out: child.stdout.toString().trim() };
+  };
+  expect(await verdictOf(g, 'Bash', { command: 'mktemp' })).toBe('allow');
+  const made = shell('mktemp');
+  expect(made.code).toBe(0);
+  expect(realpathSync(dirname(made.out))).toBe(realpathSync(scratch));
+  expect(await verdictOf(g, 'Bash', { command: `echo ok > ${made.out}` })).toBe('allow');
+  shell(`echo ok > ${made.out}`);
+  expect(readFileSync(made.out, 'utf8')).toBe('ok\n');
+  expect(await verdictOf(g, 'Write', { file_path: made.out, content: 'x' })).toBe('allow');
+  expect(await verdictOf(g, 'Bash', { command: 'f=$(mktemp); echo ok > "$f"' })).toBe('deny');
+  expect(
+    g.denials.map(([, denial]) => [denial.rule, denial.reason.includes("can't be resolved before it runs")]),
+  ).toEqual([['write', true]]);
 });

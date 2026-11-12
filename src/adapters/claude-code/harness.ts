@@ -10,6 +10,7 @@
 // runs it under bash, the shell decide() reads. Each SDK message also goes to the request's onRaw as it comes, for a recording (11.3 D3). The Claude Code process leads a process group of its own, and run() returns only once that group is gone (D7). A session sail cuts short, by its minutes or an aborted request, is interrupted first so the SDK's result records its cost, and aborted after INTERRUPT_GRACE_MS without one.
 import type { Options, SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import { allowlisted } from '../../engine/env-allowlist';
+import { SESSION_ENV_FILE, SHIMS_DIR, shimsFirst } from '../../engine/shims';
 import type { Env } from '../../ports/adapter';
 import type { Harness, HarnessEvent, HarnessRequest } from '../../ports/harness';
 import type { HarnessCapabilities, HarnessResult } from '../../ports/types';
@@ -72,8 +73,11 @@ const SWITCHES: Readonly<Record<string, string>> = {
 const OUTRANKS_OAUTH: ReadonlySet<string> = new Set(['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN']);
 
 /**
- * The session's environment: the allowlisted names of `env`, the preamble, which wins a clash, then the switches. With
- * an OAuth token, the session stays on the subscription: it doesn't see what would outrank the token.
+ * The session's environment: the allowlisted names of `env`, with the shims folder (a `mktemp` that uses `$TMPDIR`)
+ * first on `PATH`, the preamble, which wins a clash, then the switches and sail's env file. The Bash tool's shell is a
+ * login shell whose profile reorders `PATH` (macOS's path_helper puts `/usr/bin` first), so `CLAUDE_ENV_FILE` names the
+ * file that puts the shims folder, `SAIL_SHIMS`, first again before each command. With an OAuth token, the session
+ * stays on the subscription: it doesn't see what would outrank the token.
  */
 export function sessionEnv(preamble: Readonly<Record<string, string>>, env: Env): Record<string, string> {
   const subscribed = (env.CLAUDE_CODE_OAUTH_TOKEN ?? '') !== '';
@@ -81,11 +85,15 @@ export function sessionEnv(preamble: Readonly<Record<string, string>>, env: Env)
     (entry): entry is [string, string] =>
       entry[1] !== undefined && allowlisted(entry[0]) && !(subscribed && OUTRANKS_OAUTH.has(entry[0])),
   );
+  const inherited = Object.fromEntries(picked);
   return {
-    ...Object.fromEntries(picked),
+    ...inherited,
     CLAUDE_AGENT_SDK_CLIENT_APP: 'sail',
     ...preamble,
+    PATH: shimsFirst(inherited.PATH),
     ...SWITCHES,
+    SAIL_SHIMS: SHIMS_DIR,
+    CLAUDE_ENV_FILE: SESSION_ENV_FILE,
   };
 }
 

@@ -3,7 +3,8 @@ import { expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
-import { SHIMS_DIR } from '../../src/engine/shims';
+import { SESSION_ENV_FILE, SHIMS_DIR } from '../../src/engine/shims';
+import { withTempRepo } from '../helpers/temp-repo';
 
 const SYSTEM_PATH = '/usr/bin:/bin';
 
@@ -72,5 +73,43 @@ test('the shim never runs itself', () => {
     expect([twice.code, dirname(twice.out)]).toEqual([0, tmp]);
     const alone = mktemp([], { PATH: SHIMS_DIR, TMPDIR: tmp });
     expect([alone.code, dirname(alone.out)]).toEqual([0, tmp]);
+  });
+});
+
+/** Runs `script` in a login bash with `env`, as Claude Code runs a Bash command, and gives its lines. */
+function loginBash(script: string, env: Record<string, string>): string[] {
+  const child = Bun.spawnSync(['/bin/bash', '-l', '-c', script], { env, cwd: '/', stdout: 'pipe', stderr: 'pipe' });
+  expect(child.stderr.toString()).toBe('');
+  return child.stdout.toString().trim().split('\n');
+}
+
+test('a login bash that sources session-env.sh finds the shim first, whatever its profile did to PATH', async () => {
+  await withTempRepo((repo) => {
+    const tmp = realpathSync(repo.dir);
+    const base = { ...repo.env, SAIL_SHIMS: SHIMS_DIR, TMPDIR: tmp, CLAUDE_ENV_FILE: SESSION_ENV_FILE };
+    const script = '. "$CLAUDE_ENV_FILE"; command -v mktemp; mktemp';
+    for (const path of [`${SHIMS_DIR}:${SYSTEM_PATH}`, SYSTEM_PATH]) {
+      const [found, made] = loginBash(script, { ...base, PATH: path });
+      expect([found, dirname(realpathSync(made ?? ''))]).toEqual([`${SHIMS_DIR}/mktemp`, tmp]);
+      rmSync(made ?? '', { force: true });
+    }
+  });
+});
+
+test('sourcing session-env.sh twice leaves the shims folder once at the head of PATH, and with SAIL_SHIMS unset PATH is as it was', async () => {
+  await withTempRepo((repo) => {
+    const base = { ...repo.env, CLAUDE_ENV_FILE: SESSION_ENV_FILE };
+    const twice = loginBash('. "$CLAUDE_ENV_FILE"; . "$CLAUDE_ENV_FILE"; echo "$PATH"', {
+      ...base,
+      SAIL_SHIMS: SHIMS_DIR,
+      PATH: SYSTEM_PATH,
+    });
+    const entries = (twice[0] ?? '').split(':');
+    expect([entries[0], entries.filter((entry) => entry === SHIMS_DIR).length]).toEqual([SHIMS_DIR, 1]);
+    const unset = loginBash('before="$PATH"; . "$CLAUDE_ENV_FILE"; [ "$before" = "$PATH" ] && echo same', {
+      ...base,
+      PATH: SYSTEM_PATH,
+    });
+    expect(unset).toEqual(['same']);
   });
 });
