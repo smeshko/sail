@@ -1183,7 +1183,36 @@ test('review-tests is asked for medium and high findings only', async () => {
   });
 }, 120_000);
 
-test('each reviewer runs on its model: architecture and bugs on the frontier model, requirements, tests and security on Sonnet, conventions on Haiku', async () => {
+test('review-bugs is asked the security checks, and its coverage of them reaches the judge', async () => {
+  await withTempRepo(async (repo) => {
+    setUp(repo);
+    const { code, stderr, dir } = await review(repo);
+    expect({ code, stderr: code === 0 ? '' : stderr }).toEqual({ code: 0, stderr: '' });
+    const folder = readdirSync(dir).find((name) => name.replace(/^\d+-/, '') === 'review-bugs');
+    const prompt = readFileSync(join(dir, folder ?? '', 'call-1', 'prompt.md'), 'utf8');
+    for (const item of [
+      '- Untrusted input stays marked and is never built into a command, path, regex, URL or prompt unwrapped.',
+      '- No argument injection, path escape or shell.',
+      '- Every permission the least its step needs.',
+      '- No secret leaves its own host and header.',
+      '- New hosts and dependencies vetted.',
+    ]) {
+      expect(prompt).toContain(item);
+    }
+    expect(prompt).toContain('6. Find where untrusted input enters the change');
+    expect(prompt).toContain('per spawn, path, request or permission it adds or changes');
+    expect(prompt).toContain('checklist item above, the security ones included');
+    const evidence: { reviews: { lens: string; coverage: { what: string }[] }[] } = callInput(dir, 'judge', 'evidence');
+    const bugs = evidence.reviews.find((each) => each.lens === 'bugs');
+    expect(bugs?.coverage.map((each) => each.what)).toEqual([
+      'footer(calls)',
+      'Untrusted input',
+      'Permissions and secrets',
+    ]);
+  });
+}, 120_000);
+
+test('each reviewer runs on its model:architecture and bugs on the frontier model, requirements, tests and security on Sonnet, conventions on Haiku', async () => {
   await withTempRepo(async (repo) => {
     setUp(repo);
     const { code, stderr, dir } = await review(repo);
