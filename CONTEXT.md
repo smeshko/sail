@@ -99,7 +99,7 @@ One body inside a stage, run in order with its siblings. Every stage has at leas
 _Avoid_: sub-stage, action, unit
 
 **Scratch folder**:
-A try's `tmp/`, beside its `out/`, which the step's `TMPDIR`, `TMP` and `TEMP` name. It is open to the step's reads and writes whatever its permissions, though never under `.git`, and the engine removes it when the try ends.
+A try's `tmp/`, beside its `out/`, which the step's `TMPDIR`, `TMP` and `TEMP` name. It is open to the step's reads and writes whatever its permissions, though a write under `.git` there is denied, and the engine removes it when the try ends.
 _Avoid_: temp dir, tmp folder, sandbox
 
 **Kind**:

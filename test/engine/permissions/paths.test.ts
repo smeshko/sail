@@ -268,7 +268,7 @@ test('insideRoots resolves a directory for cd and git, and says why one outside 
   ]);
 });
 
-// The scratch folder: a try's tmp/, open to reads and writes whatever the globs, never under .git.
+// The scratch folder: a try's tmp/, open to reads and writes whatever the globs, though never to a write under .git.
 const { scratch } = layout;
 const none = perms();
 
