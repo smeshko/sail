@@ -3,10 +3,11 @@
 // recording `launchctl`, the platform is injected, and HOME and SAIL_HOME are under the test's temp directory.
 import { expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { type WatchDeps, watchCommand } from '../../src/cli/commands/watch';
 import { EXIT_OK, EXIT_REFUSED, EXIT_RESTART } from '../../src/cli/exit-codes';
 import type { Io } from '../../src/cli/index';
+import { sailCodeChanged, sailVersion } from '../../src/cli/sail-change';
 import type { Launchctl } from '../../src/cli/service';
 import { queueDir } from '../../src/watch/queue-store';
 import { readEntry, recordEntry } from '../../src/watch/registry';
@@ -44,13 +45,18 @@ function io(cwd: string, env: NonNullable<Io['env']>, onInterrupt?: Io['onInterr
   return { io: handle, printed };
 }
 
-/** A watcher running in process whose sail version answers `version.current`, started with or without `--service`. */
-async function serviceWatcher(repo: TempRepo, service: boolean) {
+/**
+ * A watcher running in process whose sail version answers `version.current`, started with or without `--service`. With
+ * `checkout`, the temp repository stands for sail's checkout: the version is its `HEAD`, judged by `sailCodeChanged`,
+ * and `commit()` moves it.
+ */
+async function serviceWatcher(repo: TempRepo, service: boolean, checkout = false) {
   const world = repository(repo);
   const timers = fakeTimers(START);
   const spawner = fakeSpawner(join(repo.dir, '.sail-runs'));
   const isAlive = (pid: number) => pid === WATCHER_PID || spawner.isAlive(pid);
   const version = { current: 'aaaaaaa1111' };
+  const reads = { count: 0 };
   const deps: WatchDeps = {
     timers,
     now: timers.now,
@@ -58,9 +64,27 @@ async function serviceWatcher(repo: TempRepo, service: boolean) {
     resume: spawner.resume,
     isAlive,
     pid: WATCHER_PID,
-    sailVersion: () => version.current,
+    sailVersion: checkout
+      ? async () => {
+          const read = await sailVersion(repo.dir, repo.env);
+          reads.count += 1;
+          return read;
+        }
+      : () => version.current,
     sailVersionEveryMs: 60_000,
+    ...(checkout
+      ? { sailChanged: (before: string, after: string) => sailCodeChanged(before, after, repo.dir, repo.env) }
+      : {}),
   };
+  const commit = (path: string, text: string): string => {
+    const git = (...args: string[]) => Bun.spawnSync(['git', ...args], { cwd: repo.dir, env: repo.env });
+    mkdirSync(dirname(join(repo.dir, path)), { recursive: true });
+    writeFileSync(join(repo.dir, path), text);
+    git('add', path);
+    git('commit', '-m', `change ${path}`);
+    return git('rev-parse', 'HEAD').stdout.toString().trim();
+  };
+  if (checkout) commit('docs/baseline.md', 'baseline');
   const interrupts = fakeInterrupts();
   const watcher = io(repo.dir, world.env, interrupts.onInterrupt);
   let ended = false;
@@ -73,7 +97,9 @@ async function serviceWatcher(repo: TempRepo, service: boolean) {
   while (readEntry(world.registry, 'stub')?.watcher === undefined && !ended && performance.now() < deadline) {
     await Bun.sleep(5);
   }
-  return { ...world, timers, spawner, interrupts, watcher, exited, version, isAlive };
+  // The baseline is the version the first read finds: a commit made before it would be the baseline itself.
+  while (checkout && reads.count === 0 && performance.now() < deadline) await Bun.sleep(5);
+  return { ...world, timers, spawner, interrupts, watcher, exited, version, isAlive, commit };
 }
 
 const outcome = (exited: Promise<number>) => Promise.race([exited, Bun.sleep(3000).then(() => 'running' as const)]);
@@ -132,14 +158,76 @@ test('the run a --service watcher dispatched is still alive after it exits 6, an
   });
 }, 30_000);
 
-test('a terminal watcher started without --service keeps running through a sail change and exits 0 only on its interrupt', async () => {
+test('a --service watcher whose sail checkout moves over a change to src/ exits 6, and the next watcher adopts its live run', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await serviceWatcher(repo, true, true);
+    await w.timers.advance(1000);
+    const [run] = w.spawner.runs;
+    expect(run?.pid).toBe(FAKE_PID);
+    const before = (await sailVersion(repo.dir, repo.env)) ?? '';
+    const after = w.commit('src/new.ts', 'export {}');
+    await w.timers.advance(60_000);
+    expect(await outcome(w.exited)).toBe(EXIT_RESTART);
+    expect(w.watcher.printed.stdout).toContain(
+      `sail watch: sail changed (${before.slice(0, 7)} → ${after.slice(0, 7)})`,
+    );
+    expect(w.spawner.isAlive(FAKE_PID)).toBe(true);
+
+    mkdirSync(join(repo.dir, '.sail-runs', run?.runId ?? ''), { recursive: true });
+    const timers = fakeTimers(START);
+    const interrupts = fakeInterrupts();
+    const second = io(repo.dir, w.env, interrupts.onInterrupt);
+    const exited = Promise.resolve(
+      watchCommand({
+        timers,
+        now: timers.now,
+        spawn: w.spawner.spawn,
+        resume: w.spawner.resume,
+        isAlive: (pid) => pid === SECOND_PID || w.spawner.isAlive(pid),
+        pid: SECOND_PID,
+      })({ values: {}, positionals: ['a'] }, second.io),
+    );
+    const deadline = performance.now() + 10_000;
+    while (readEntry(w.registry, 'stub')?.watcher?.pid !== SECOND_PID && performance.now() < deadline)
+      await Bun.sleep(5);
+    await timers.advance(1000);
+    const events = readFileSync(join(queueDir(join(repo.dir, '.sail-runs'), 'a'), 'events.ndjson'), 'utf8')
+      .split('\n')
+      .filter((line) => line !== '')
+      .map((line) => JSON.parse(line) as { type: string; run?: string; pid?: number });
+    expect(events.filter((event) => event.type === 'run:adopted')).toMatchObject([{ run: run?.runId, pid: FAKE_PID }]);
+    expect(w.spawner.runs).toHaveLength(1);
+    interrupts.interrupt();
+    expect(await outcome(exited)).toBe(EXIT_OK);
+  });
+}, 30_000);
+
+test('a --service watcher whose sail checkout moves over a change to other files alone keeps running, and exits 6 on a later change to src/', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await serviceWatcher(repo, true, true);
+    await w.timers.advance(1000);
+    w.commit('docs/notes.md', 'notes');
+    await w.timers.advance(180_000);
+    expect(await outcome(w.exited)).toBe('running');
+    expect(w.watcher.printed.stdout).not.toContain('sail changed');
+    w.commit('src/new.ts', 'export {}');
+    await w.timers.advance(60_000);
+    expect(await outcome(w.exited)).toBe(EXIT_RESTART);
+    expect(w.watcher.printed.stdout).toContain('sail watch: sail changed (');
+  });
+}, 30_000);
+
+test('a terminal watcher started without --service keeps running through a sail change, says once that it needs a restart, and exits 0 only on its interrupt', async () => {
   await withTempRepo(async (repo) => {
     const w = await serviceWatcher(repo, false);
     await w.timers.advance(1000);
     w.version.current = 'bbbbbbb2222';
     await w.timers.advance(180_000);
     expect(await outcome(w.exited)).toBe('running');
-    expect(w.watcher.printed.stdout).not.toContain('sail changed');
+    expect(w.watcher.printed.stdout).not.toContain('sail changed (');
+    const line =
+      "sail watch: sail's code changed (aaaaaaa → bbbbbbb): this watcher still runs the old code, restart it to run the new";
+    expect(w.watcher.printed.stdout.split(line).length - 1).toBe(1);
     w.interrupts.interrupt();
     expect(await outcome(w.exited)).toBe(EXIT_OK);
     expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(true);

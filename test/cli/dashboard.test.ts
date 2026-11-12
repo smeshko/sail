@@ -302,3 +302,39 @@ test('a dashboard serving under --service returns 6 once its version changes and
     }
   }
 }, 20_000);
+
+test('a dashboard under --service keeps serving through a version change that is no code change, and returns 6 on one that is', async () => {
+  const home = sailHome();
+  let stdout = '';
+  const timers = fakeTimers('2026-10-15T09:00:00.000Z');
+  const version = { current: 'aaaaaaa1' };
+  const running = dashboardCommand({
+    timers,
+    sailVersion: () => version.current,
+    sailVersionEveryMs: 60_000,
+    sailChanged: (_before, after) => after === 'ccccccc3',
+  })(
+    { values: { port: '0', service: true }, positionals: [] },
+    {
+      cwd: home,
+      env: { SAIL_HOME: home },
+      stdout: (t) => (stdout += t),
+      stderr: () => {},
+      onInterrupt: fakeInterrupts().onInterrupt as NonNullable<Io['onInterrupt']>,
+    },
+  );
+  const deadline = Date.now() + 5000;
+  while (!stdout.includes('Ctrl-C stops it\n') && Date.now() < deadline) await Bun.sleep(10);
+  const port = Number(/127\.0\.0\.1:(\d+)/.exec(stdout)?.[1]);
+  await Bun.sleep(0);
+  version.current = 'bbbbbbb2';
+  await timers.advance(60_000);
+  expect(await Promise.race([running, after(300, 'still running')])).toBe('still running');
+  expect(await listening(port)).toBe(true);
+  expect(stdout).not.toContain('sail changed');
+  version.current = 'ccccccc3';
+  await timers.advance(60_000);
+  expect(await Promise.race([running, after(5000, 'still running')])).toBe(EXIT_RESTART);
+  expect(stdout).toContain('sail dashboard: sail changed (aaaaaaa → ccccccc)');
+  expect(await listening(port)).toBe(false);
+}, 20_000);
