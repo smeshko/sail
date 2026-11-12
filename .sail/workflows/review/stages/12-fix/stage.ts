@@ -17,6 +17,8 @@ export const fix = agent('fix', {
     description: value(untrusted()),
   },
   output: Fixed,
+  // It writes code and commit messages, which carry the vocabulary.
+  conventions: ['AGENTS.md', 'CONTEXT.md'],
   model: 'deep',
   permissions: builder,
   budget: { maxTurns: 150, maxUsd: 6, maxMinutes: 90 },

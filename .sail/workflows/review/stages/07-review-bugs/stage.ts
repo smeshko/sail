@@ -3,4 +3,4 @@
 // finding becomes.
 import { reviewer } from '../../reviewer';
 
-export const reviewBugs = reviewer('review-bugs', 'frontier', 6);
+export const reviewBugs = reviewer('review-bugs', 'frontier', { maxUsd: 6 });

@@ -39,6 +39,8 @@ export const implement = agent('implement', {
     feedback: value(PassFeedback).optional(),
   },
   output: Implemented,
+  // It writes code, docs and commits, which carry the vocabulary.
+  conventions: ['AGENTS.md', 'CONTEXT.md'],
   model: 'default',
   permissions: withTools(builder, ['WebFetch']),
   budget: { maxTurns: 250, maxUsd: 10, maxMinutes: 90 },

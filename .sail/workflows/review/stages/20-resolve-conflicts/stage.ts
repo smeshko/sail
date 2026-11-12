@@ -15,6 +15,8 @@ export const resolveConflicts = agent('resolve-conflicts', {
   prompt: './prompt.md',
   consumes: { requirements: file('requirements.md'), synced: value(Synced) },
   output: Resolved,
+  // It writes code and a merge commit, which carry the vocabulary.
+  conventions: ['AGENTS.md', 'CONTEXT.md'],
   model: 'deep',
   permissions: builder,
   budget: { maxTurns: 80, maxUsd: 4, maxMinutes: 90 },

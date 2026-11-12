@@ -3,4 +3,5 @@
 // what each finding becomes.
 import { reviewer } from '../../reviewer';
 
-export const reviewConventions = reviewer('review-conventions', 'fast');
+// The reviewer that checks the vocabulary, so it alone reads the glossary beside AGENTS.md.
+export const reviewConventions = reviewer('review-conventions', 'fast', { conventions: ['AGENTS.md', 'CONTEXT.md'] });
