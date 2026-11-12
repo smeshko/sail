@@ -22,13 +22,13 @@ function jevSeed(overrides: Record<string, number> = {}): object {
   return seed;
 }
 
-/** sail's own `.sail/` on the fakes, describe answering with `followUps` when given, committed. */
+/** sail's own `.sail/` on the fakes, implement answering with `followUps` when given, committed. */
 function setUp(repo: TempRepo, options: { jev?: object; followUps?: FollowUp[] }): void {
   const sail = writeOwnSail(repo, options.jev === undefined ? {} : { jev: options.jev });
   if (options.followUps !== undefined) {
-    const [answer] = harness().describe;
+    const [answer] = harness().implement;
     answer.output.followUps = options.followUps;
-    seedHarness(sail, 'describe', [answer]);
+    seedHarness(sail, 'implement', [answer]);
     repo.git('commit', '-am', 'seed the follow-ups');
   }
 }

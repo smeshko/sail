@@ -1,23 +1,23 @@
 // factory: a planned ticket in, a pull request out, along the plan lifecycle: load the plan groom attached to the ticket,
-// implement it task by task, test first, validate it, check every task is implemented, then open the pull request, its
-// body carrying the evidence of any task that changed no file (the verification stage). A ticket with no plan attached
+// implement it task by task, test first, validate it, check every task is implemented, then open the pull request
+// with the title and the body implement's last pass wrote, the body carrying the evidence of any task that changed no
+// file (the verification stage). A ticket with no plan attached
 // fails the run before any work: groom plans it. A run that ends because an agent
 // blocked, or because no plan is attached, hands its ticket to a person (the hand-over-ticket stage): another run
 // would end the same way, so the watcher must not retry it. The follow-ups the run found are
 // filed as tickets of their own once the pull request is open. The pull request carries the `factory` label, so the
 // review workflow picks it up: the deep review, the demonstration and the merge are its.
 // Composition only: every contract lives on its stage, and every check that needs no judgment is a script.
-import { workflow } from 'sail';
+import { type ProducedFile, workflow, type z } from 'sail';
 import { ticket } from 'sail/intakes';
 import { fileFollowUps } from '../../stages/file-follow-ups/stage';
 import { handOverTicket } from '../../stages/hand-over-ticket/stage';
 import { redTests, validate } from '../../stages/validate/stage';
 import { PassFeedback } from './schemas';
 import { loadPlan } from './stages/01-load-plan/stage';
-import { implement } from './stages/02-implement/stage';
+import { type Implemented, implement } from './stages/02-implement/stage';
 import { jevTasks } from './stages/03-jev-tasks/stage';
 import { checkTasks } from './stages/04-check-tasks/stage';
-import { describe } from './stages/05-describe/stage';
 import { verification } from './stages/06-verification/stage';
 import { open } from './stages/07-open/stage';
 
@@ -28,7 +28,7 @@ export default workflow(
   'factory',
   {
     intake: ticket,
-    version: 10,
+    version: 11,
     watch: { every: '5m' },
     // One at a time: two factory runs beside the reviews load the machine until every gate turns flaky (ADW-444).
     maxConcurrentRuns: 1,
@@ -58,11 +58,18 @@ export default workflow(
     // in code, whatever the task check answered for it.
     let implemented = false;
     let verified: { id: string; evidence: string }[] = [];
+    // The pull request's title, body and follow-ups, as the last pass wrote them for the whole branch.
+    let described: {
+      title: string;
+      body: ProducedFile;
+      followUps: z.infer<typeof Implemented>['followUps'];
+    } | null = null;
     let passes = 0;
     for (const iteration of run.loop('implement', { max: IMPLEMENT_PASSES, feedback: PassFeedback })) {
       passes++;
       const impl = await run.stage(implement, { plan: planFile, commit, feedback: iteration.previous });
       if (impl.outcome === 'blocked') return handOff(`implement blocked: ${impl.reason}`);
+      described = { title: impl.output.title, body: impl.files['pr-body.md'], followUps: impl.output.followUps };
       // Kept across passes by id: a later pass that leaves such a task out keeps its earlier evidence, a later report of
       // it replaces that evidence, and a later commit for it takes it off the list.
       const reported = new Map(impl.output.tasks.map((task) => [task.id, task]));
@@ -106,22 +113,22 @@ export default workflow(
       implemented = true;
       break;
     }
-    if (!implemented) return run.fail(`implement: validation or a task still fails after ${IMPLEMENT_PASSES} passes`);
+    if (!implemented || described === null) {
+      return run.fail(`implement: validation or a task still fails after ${IMPLEMENT_PASSES} passes`);
+    }
 
-    // create-pr
-    const d = await run.stage(describe, { ticket: run.input, plan: planFile });
-    if (d.outcome === 'blocked') return handOff(`describe blocked: ${d.reason}`);
+    // create-pr, from what the pass that ended the loop wrote.
     // A task implement reported with no commit has its evidence copied into the body, by a script, before it is sent.
-    let body = d.files['pr-body.md'];
+    let body = described.body;
     if (verified.length > 0) body = (await run.stage(verification, { body, tasks: verified })).files['pr-body.md'];
     const pr = await run.stage(open, {
-      title: d.output.title,
+      title: described.title,
       body,
       ticketKey: run.input.ticketKey,
     });
 
-    // What describe found beside the change: each a ticket, listed on the pull request.
-    const followUps = d.output.followUps.map((each) => ({ ...each, fromReview: false }));
+    // What implement's last pass found beside the change: each a ticket, listed on the pull request.
+    const followUps = described.followUps.map((each) => ({ ...each, fromReview: false }));
     if (followUps.length > 0) {
       await run.stage(fileFollowUps, {
         followUps: { followUps },

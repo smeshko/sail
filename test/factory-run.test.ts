@@ -10,7 +10,7 @@ import { readJournal } from '../src/engine/journal';
 import { readStatus } from '../src/engine/run-dir';
 import { readEvents } from '../src/events/consumers/ndjson';
 import { fakeTicket, onlyRun } from './helpers/groom-fixture';
-import { nouls, writeOwnSail } from './helpers/own-sail';
+import { nouls, OWN_SAIL, writeOwnSail } from './helpers/own-sail';
 import { runCaptured } from './helpers/run-captured';
 import { sail } from './helpers/sail-process';
 import { type TempRepo, withTempRepo } from './helpers/temp-repo';
@@ -141,7 +141,7 @@ test('the plan a groom run attaches is the plan a factory run on the same ticket
 const asked = (dir: string, key: string) =>
   readEvents(dir).filter((event) => event.type === 'jev:asked' && (event as { key?: string }).key === key);
 
-test('with Jev answering every task a clear yes, jev-tasks#1 runs, check-tasks never does, and the run goes on to describe', async () => {
+test('with Jev answering every task a clear yes, jev-tasks#1 runs, check-tasks never does, and the run goes on to open', async () => {
   await withTempRepo(async (repo) => {
     writeOwnSail(repo, { jev: nouls({ 'TASK-001': 0.99 }) });
     const { code, stderr, keys, dir } = await factory(repo);
@@ -149,12 +149,7 @@ test('with Jev answering every task a clear yes, jev-tasks#1 runs, check-tasks n
     expect(readStatus(dir)).toEqual({ status: 'completed' });
 
     expect(keys.filter((key) => key.startsWith('check-tasks#'))).toEqual([]);
-    expect(keys.slice(keys.indexOf('jev-tasks#1'))).toEqual([
-      'jev-tasks#1',
-      'describe#1',
-      'open#1',
-      'file-follow-ups#1',
-    ]);
+    expect(keys.slice(keys.indexOf('jev-tasks#1'))).toEqual(['jev-tasks#1', 'open#1', 'file-follow-ups#1']);
     expect(asked(dir, 'jev-tasks#1')).toHaveLength(1);
   });
 }, 120_000);
@@ -195,7 +190,6 @@ test('with no adapters.jev, check-tasks runs after jev-tasks on every pass as th
       'validate#3',
       'jev-tasks#2',
       'check-tasks#2',
-      'describe#1',
       'open#1',
       'file-follow-ups#1',
     ]);
@@ -374,12 +368,8 @@ test('a plan with a task that changes no file reaches open: check-tasks answerin
     expect(keys).not.toContain('implement#3');
     expect(keys).not.toContain('check-tasks#2');
     expect(stageIn(dir, 'check-tasks', 1, 'verified.json')).toEqual(['TASK-002']);
-    expect(keys.slice(keys.indexOf('describe#1'))).toEqual([
-      'describe#1',
-      'verification#1',
-      'open#1',
-      'file-follow-ups#1',
-    ]);
+    expect(keys.slice(keys.indexOf('verification#1'))).toEqual(['verification#1', 'open#1', 'file-follow-ups#1']);
+    expect(keys[keys.indexOf('verification#1') - 1]).toBe('check-tasks#1');
     const written = readFileSync(join(callDir(dir, 'verification'), 'call-1', 'out', 'pr-body.md'), 'utf8');
     expect(written).toContain('## Verification');
     expect(written).toContain('**TASK-002**');
@@ -440,7 +430,7 @@ test('a task with no commit stays accepted on its first evidence when a later pa
   });
 }, 120_000);
 
-test('implement gets AGENTS.md and CONTEXT.md, describe CONTEXT.md alone and check-tasks none', async () => {
+test('implement gets AGENTS.md and CONTEXT.md and check-tasks none', async () => {
   await withTempRepo(async (repo) => {
     writeOwnSail(repo);
     const { code, stderr, keys, dir } = await factory(repo);
@@ -453,7 +443,141 @@ test('implement gets AGENTS.md and CONTEXT.md, describe CONTEXT.md alone and che
           | undefined
       )?.conventions;
     expect(conventionsOf('implement#1')).toEqual(['AGENTS.md', 'CONTEXT.md']);
-    expect(conventionsOf('describe#1')).toEqual(['CONTEXT.md']);
     expect(conventionsOf('check-tasks#1')).toEqual([]);
+  });
+}, 120_000);
+
+/** The committed `implement` answer: its title, its follow-ups and its `pr-body.md`. */
+const implementSeed = (): { output: { title: string; followUps: unknown[] }; files: { 'pr-body.md': string } } =>
+  JSON.parse(readFileSync(join(OWN_SAIL, 'fake', 'harness.json'), 'utf8')).implement[0];
+
+test("implement's prompt asks for the pull request's body and its sections", async () => {
+  await withTempRepo(async (repo) => {
+    writeOwnSail(repo, { jev: nouls({ 'TASK-001': 0.99 }) });
+    const { code, stderr, dir } = await factory(repo);
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    const prompt = readFileSync(join(dir, '02-implement', 'call-1', 'prompt.md'), 'utf8');
+    for (const part of [
+      '$STAGE_OUT/pr-body.md',
+      '**Summary**',
+      '**Changes**',
+      '**Testing**',
+      '**Demonstration**',
+      '**Follow-ups**',
+      'Closes FAKE-1',
+      'git log origin/staging..HEAD',
+      'ending with `(FAKE-1)`',
+    ]) {
+      expect(prompt).toContain(part);
+    }
+  });
+}, 120_000);
+
+test('implement#1 is journaled with its title, its follow-ups and pr-body.md', async () => {
+  await withTempRepo(async (repo) => {
+    writeOwnSail(repo, { jev: nouls({ 'TASK-001': 0.99 }) });
+    const { code, stderr, dir } = await factory(repo);
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    const seed = implementSeed();
+    const entry = readJournal(dir).entries.find((each) => each.key === 'implement#1');
+    const output = (entry?.output ?? {}) as { title?: string; followUps?: unknown[] };
+    expect(output.title).toBe("feat(cli): print the run's total cost in sail show's footer (FAKE-1)");
+    expect(output.title).toBe(seed.output.title);
+    expect(output.followUps).toHaveLength(1);
+    expect(Object.keys(entry?.files ?? {})).toEqual(['pr-body.md']);
+    const written = readFileSync(join(dir, '02-implement', 'call-1', 'out', 'pr-body.md'), 'utf8');
+    expect(written).toBe(seed.files['pr-body.md']);
+    expect(written).toContain('## Demonstration');
+  });
+}, 120_000);
+
+test('an implement pass that submits without pr-body.md gets a corrective try, and the run goes on once the file is there', async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeOwnSail(repo, { jev: nouls({ 'TASK-001': 0.99 }) });
+    const harness = join(sailDir, 'fake', 'harness.json');
+    const seeds = JSON.parse(readFileSync(harness, 'utf8'));
+    const { files: _files, ...withoutBody } = seeds.implement[0];
+    seeds['implement#1'] = [withoutBody, seeds.implement[0]];
+    writeFileSync(harness, JSON.stringify(seeds));
+    repo.git('add', '.sail/fake/harness.json');
+    repo.git('commit', '-q', '-m', 'seed a pass with no body');
+
+    const { code, stderr, keys, dir } = await factory(repo);
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    const events = readEvents(dir).filter((event) => (event as { key?: string }).key === 'implement#1');
+    const starts = events.filter((event) => event.type === 'stage:start') as { try?: number }[];
+    expect(starts.map((event) => event.try)).toEqual([1, 2]);
+    const refused = events.filter((event) =>
+      JSON.stringify(event).includes("'pr-body.md' was not produced in $STAGE_OUT"),
+    );
+    expect(refused).toHaveLength(1);
+
+    const entry = readJournal(dir).entries.find((each) => each.key === 'implement#1');
+    expect(entry?.outcome).toBe('done');
+    expect(Object.keys(entry?.files ?? {})).toEqual(['pr-body.md']);
+    expect(keys[keys.indexOf('implement#1') + 1]).toBe('validate#1');
+  });
+}, 120_000);
+
+type OpenedPr = { number: number; title: string; body: string };
+const prsIn = (path: string): OpenedPr[] => JSON.parse(readFileSync(path, 'utf8')).pullRequests;
+
+/** The pull requests the run opened: the committed seed holds one of its own, with the seeded title. */
+function openedBy(repo: TempRepo): OpenedPr[] {
+  const seeded = new Set(prsIn(join(OWN_SAIL, 'fake', 'prs.json')).map((pr) => pr.number));
+  return prsIn(join(repo.dir, '.sail-runs', 'fake', 'prs.json')).filter((pr) => !seeded.has(pr.number));
+}
+
+test("a factory run makes no describe call and opens the pull request with implement's title and body", async () => {
+  await withTempRepo(async (repo) => {
+    writeOwnSail(repo, { jev: nouls({ 'TASK-001': 0.99 }) });
+    const { code, stderr, keys, dir } = await factory(repo);
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    expect(keys.filter((key) => key.startsWith('describe#'))).toEqual([]);
+
+    const seed = implementSeed();
+    const opened = openedBy(repo);
+    expect(opened.map((pr) => pr.title)).toEqual([seed.output.title]);
+    expect(opened[0]?.body).toBe(seed.files['pr-body.md']);
+    for (const heading of ['## Summary', '## Changes', '## Testing', '## Demonstration']) {
+      expect(opened[0]?.body).toContain(`${heading}\n`);
+    }
+    expect(opened[0]?.body).toEndWith('Closes FAKE-1\n');
+
+    // The follow-up implement submitted reaches file-follow-ups once the pull request is open.
+    expect(keys.slice(keys.indexOf('open#1'))).toEqual(['open#1', 'file-follow-ups#1']);
+    const filed = readJournal(dir).entries.find((entry) => entry.key === 'file-follow-ups#1');
+    expect(filed?.outcome).toBe('passed');
+    // Filed, or skipped as a duplicate by the fake Jev: either way the stage was handed implement's follow-up.
+    expect(JSON.stringify(filed?.output)).toContain("sail show's footer ignores calls replayed from a seeded run");
+  });
+}, 120_000);
+
+test("a run of several implement passes opens the pull request with the last pass's body and title", async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeOwnSail(repo);
+    const harness = join(sailDir, 'fake', 'harness.json');
+    const seeds = JSON.parse(readFileSync(harness, 'utf8'));
+    const first = structuredClone(seeds.implement[0]);
+    first.output.title = 'feat(cli): first pass (FAKE-1)';
+    first.files['pr-body.md'] = 'FIRST PASS ONLY\n\nCloses FAKE-1\n';
+    seeds['implement#1'] = [first];
+    writeFileSync(harness, JSON.stringify(seeds));
+    repo.git('add', '.sail/fake/harness.json');
+    repo.git('commit', '-q', '-m', 'seed a first pass with a body of its own');
+
+    const { code, stderr, keys, dir } = await factory(repo);
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    expect(keys).toContain('implement#3');
+    expect(readFileSync(join(dir, '02-implement', 'call-1', 'out', 'pr-body.md'), 'utf8')).toStartWith(
+      'FIRST PASS ONLY',
+    );
+
+    const seed = implementSeed();
+    const opened = openedBy(repo);
+    expect(opened.filter((pr) => pr.body.includes('FIRST PASS ONLY'))).toEqual([]);
+    expect(opened.filter((pr) => pr.title === 'feat(cli): first pass (FAKE-1)')).toEqual([]);
+    expect(opened.map((pr) => pr.title)).toEqual([seed.output.title]);
+    expect(opened[0]?.body).toBe(seed.files['pr-body.md']);
   });
 }, 120_000);
