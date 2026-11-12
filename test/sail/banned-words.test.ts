@@ -29,6 +29,8 @@ interface Lib {
   bannedMatches(pattern: RegExp, text: string): boolean;
   bannedState(candidates: Candidate[], start?: number): unknown;
   BANNED_BATCH: number;
+  JS_KEYWORDS: Set<string>;
+  bannedSelect(candidates: Candidate[]): { selected: Candidate[]; keyword: number; repeat: number };
   bannedRequests(candidates: Candidate[]): {
     requests: { candidates: Candidate[]; state: unknown; questions: Record<string, unknown> }[];
     asked: Candidate[];
@@ -60,7 +62,12 @@ function stage(repo: TempRepo, diff: string, base = repo.git('rev-parse', 'HEAD'
       INPUT_BASE: baseFile,
     },
   });
-  return { code: child.exitCode, output: JSON.parse(child.stdout.toString()), request: join(out, 'jev-request.json') };
+  return {
+    code: child.exitCode,
+    stderr: child.stderr.toString(),
+    output: JSON.parse(child.stdout.toString()),
+    request: join(out, 'jev-request.json'),
+  };
 }
 function setup(repo: TempRepo, answers?: Record<string, number>) {
   writeOwnSail(repo, answers === undefined ? {} : { jev: nouls(answers) });
@@ -81,7 +88,7 @@ test('the stage, with Jev answering word-1 0.97, reports the hit with its word a
         threshold: 0.8,
         candidates: 1,
         requests: 1,
-        skipped: { oversized: 0 },
+        skipped: { keyword: 0, repeat: 0, oversized: 0 },
       },
     });
   });
@@ -119,7 +126,7 @@ test('the stage asks 40 candidates in requests of 16, 16 and 8 numbered across t
       threshold: 0.8,
       candidates: 40,
       requests: 3,
-      skipped: { oversized: 0 },
+      skipped: { keyword: 0, repeat: 0, oversized: 0 },
     });
     expect(result.output.hits).toEqual([{ file: 'f33.md', line: 1, word: 'invocation', term: 'Call', yes: 0.97 }]);
   });
@@ -177,7 +184,7 @@ test('the stage asks Jev nothing when no added line holds an avoided word', asyn
       threshold: 0.8,
       candidates: 0,
       requests: 0,
-      skipped: { oversized: 0 },
+      skipped: { keyword: 0, repeat: 0, oversized: 0 },
     });
     expect(existsSync(result.request)).toBe(false);
   });
@@ -236,7 +243,7 @@ test('the Jev request holds the glossary entry, added line and its context', asy
 test('the stage includes answers exactly at the threshold but excludes answers just below it', async () => {
   await withTempRepo((repo) => {
     setup(repo, { 'word-1': 0.8, 'word-2': 0.799 });
-    const result = stage(repo, `${doc}+invocation\n`);
+    const result = stage(repo, `${doc}+++ b/other.md\n@@ -0,0 +1 @@\n+invocation\n`);
     expect(result.output.hits).toEqual([{ file: 'note.md', line: 1, word: 'invocation', term: 'Call', yes: 0.8 }]);
     expect(result.output.jev.candidates).toBe(2);
   });
@@ -253,7 +260,7 @@ test('the stage with no CONTEXT.md makes no Jev request', async () => {
       threshold: 0.8,
       candidates: 0,
       requests: 0,
-      skipped: { oversized: 0 },
+      skipped: { keyword: 0, repeat: 0, oversized: 0 },
     });
     expect(result.output.glossary).toEqual({ entries: 0, words: 0 });
     expect(existsSync(result.request)).toBe(false);
@@ -272,7 +279,7 @@ test('the stage with no glossary entries makes no Jev request', async () => {
       threshold: 0.8,
       candidates: 0,
       requests: 0,
-      skipped: { oversized: 0 },
+      skipped: { keyword: 0, repeat: 0, oversized: 0 },
     });
     expect(existsSync(result.request)).toBe(false);
   });
@@ -472,4 +479,65 @@ test('bannedState and bannedQuestions name each candidate word-n with a noul and
     'In candidates.word-2, read its location in lines and its glossary entry in entries (including avoidText). Is "invocation" used in the sense that entry forbids, where "Call" should be used instead?',
   );
   expect(lib.BANNED_YES).toBe(0.8);
+});
+
+const kinds: Entry[] = [
+  { term: 'Kind', definition: 'D.', avoid: ['type'] },
+  { term: 'Shadowing', definition: 'D.', avoid: ['extend'] },
+  { term: 'Call', definition: 'D.', avoid: ['invocation'] },
+];
+function select(...rows: [string, string][]) {
+  const candidates = rows.flatMap(([file, text]) =>
+    lib.bannedCandidates([{ file, line: 1, text, context: [] }], kinds),
+  );
+  return lib.bannedSelect(candidates);
+}
+test('bannedSelect leaves out a JS keyword on a code line of a TypeScript file', () => {
+  expect(select(['a.ts', 'type Foo = string;'])).toMatchObject({ selected: [], keyword: 1, repeat: 0 });
+  expect(select(['a.ts', 'class A extends B {}'])).toMatchObject({ selected: [], keyword: 1 });
+});
+test('bannedSelect keeps an identifier, a comment, a doc line and a commit message that hold the word', () => {
+  expect(select(['a.ts', 'const stepType = 1;']).selected).toHaveLength(1);
+  expect(select(['a.ts', '// which type of step']).selected).toHaveLength(1);
+  expect(select(['note.md', 'type Foo = string;']).selected).toHaveLength(1);
+  expect(select(['commit abc1234', 'return type;']).selected).toHaveLength(1);
+});
+test('bannedSelect asks one candidate per word, entry and file, the first', () => {
+  const result = select(
+    ['a.ts', 'invocation one'],
+    ['a.ts', 'invocation two'],
+    ['a.ts', 'invocation three'],
+    ['b.ts', 'invocation one'],
+  );
+  expect(result.selected.map((c) => [c.file, c.text])).toEqual([
+    ['a.ts', 'invocation one'],
+    ['b.ts', 'invocation one'],
+  ]);
+  expect(result.repeat).toBe(2);
+});
+test('bannedSelect lets a keyword line not take the place of a later comment line', () => {
+  const result = select(['a.ts', 'type Foo = string;'], ['a.ts', '// the type of it']);
+  expect(result.selected.map((c) => c.text)).toEqual(['// the type of it']);
+  expect(result.keyword).toBe(1);
+});
+test('the stage asks one question for three lines of a TypeScript file and reports the two skipped', async () => {
+  await withTempRepo((repo) => {
+    setup(repo, { 'word-1': 0.97 });
+    writeFileSync(join(repo.dir, 'CONTEXT.md'), '**Kind**:\nWhat a step is.\n_Avoid_: type\n');
+    const diff = '+++ b/a.ts\n@@ -0,0 +1,3 @@\n+type Foo = string;\n+// which type of step\n+const stepType = 1;\n';
+    const out = join(repo.home, 'out');
+    const result = stage(repo, diff);
+    expect(Object.keys(JSON.parse(readFileSync(join(out, 'jev-request.json'), 'utf8')).questions)).toEqual(['word-1']);
+    expect(result.output.hits).toEqual([{ file: 'a.ts', line: 2, word: 'type', term: 'Kind', yes: 0.97 }]);
+    expect(result.output.jev).toEqual({
+      asked: true,
+      failed: false,
+      note: '',
+      threshold: 0.8,
+      candidates: 3,
+      requests: 1,
+      skipped: { keyword: 1, repeat: 1, oversized: 0 },
+    });
+    expect(result.stderr).toContain('not asked: 1 keyword, 1 repeat');
+  });
 });

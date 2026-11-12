@@ -486,6 +486,49 @@ export function bannedState(candidates, start = 0) {
   };
 }
 
+/** ECMAScript reserved words and TypeScript's keywords: a line of code holds them as syntax, not as prose. */
+export const JS_KEYWORDS = new Set(
+  (
+    'break case catch class const continue debugger default delete do else enum export extends false finally for function if ' +
+    'import in instanceof new null return super switch this throw true try typeof var void while with yield let static async ' +
+    'await of as from get set type interface implements package private protected public readonly declare namespace module ' +
+    'abstract override satisfies keyof infer is'
+  ).split(' '),
+);
+const JS_FILE = /\.(js|jsx|ts|tsx|mjs|cjs|mts|cts)$/;
+
+function isKeyword({ word, file, text }) {
+  if (!JS_FILE.test(file) || /^(\/\/|\/\*|\*)/.test(text.trim())) return false;
+  const forms = [word, `${word}s`].filter((form) => JS_KEYWORDS.has(form));
+  if (!forms.length) return false;
+  const standalone = new RegExp(`(?<![\\w$-])(?:${forms.join('|')})(?![\\w$-])`, 'g');
+  return !bannedMatches(bannedPattern(word), text.replace(standalone, ' '));
+}
+
+/**
+ * Leaves out a candidate that is only a JS keyword on a non-comment line of a JS or TypeScript file (`keyword`), then
+ * every one after the first of the same word, entry and file (`repeat`): `{ selected, keyword, repeat }`.
+ */
+export function bannedSelect(candidates) {
+  const seen = new Set();
+  const selected = [];
+  let keyword = 0;
+  let repeat = 0;
+  for (const candidate of candidates) {
+    if (isKeyword(candidate)) {
+      keyword++;
+      continue;
+    }
+    const key = JSON.stringify([candidate.word, candidate.term, candidate.file]);
+    if (seen.has(key)) repeat++;
+    else {
+      seen.add(key);
+      selected.push(candidate);
+    }
+  }
+  return { selected, keyword, repeat };
+}
+
 const bannedBytes = (candidates, start) =>
   Buffer.byteLength(
     JSON.stringify({ state: bannedState(candidates, start), questions: bannedQuestions(candidates, start) }),

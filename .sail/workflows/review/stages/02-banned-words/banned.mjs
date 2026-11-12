@@ -1,4 +1,4 @@
-// Find added uses of CONTEXT.md's avoided words; Jev judges every candidate in requests of 16, reporting what it didn't ask.
+// Find added uses of CONTEXT.md's avoided words; Jev judges every candidate in requests of 16, leaving out a JS keyword on a code line and repeats of a word in one file, and counting what it didn't ask.
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
@@ -9,6 +9,7 @@ const {
   messageContext,
   commitLines,
   bannedCandidates,
+  bannedSelect,
   bannedRequests,
   askNouls,
   yesses,
@@ -23,7 +24,8 @@ const lines = [
   ...messageContext(commitLines(git(['log', '--format=%h%x00%B%x1e', `${base}..HEAD`]))),
 ];
 const allCandidates = bannedCandidates(lines, entries);
-const { requests, asked, oversized } = bannedRequests(allCandidates);
+const { selected, keyword, repeat } = bannedSelect(allCandidates);
+const { requests, asked, oversized } = bannedRequests(selected);
 const results = requests.map(({ state, questions }, i) =>
   askNouls(questions, state, process.env.STAGE_OUT, i === 0 ? 'jev-request.json' : `jev-request-${i + 1}.json`),
 );
@@ -57,9 +59,16 @@ const jev = {
   threshold: BANNED_YES,
   candidates: allCandidates.length,
   requests: requests.length,
-  skipped: { oversized },
+  skipped: { keyword, repeat, oversized },
 };
+const notAsked = [
+  keyword && `${keyword} keyword`,
+  repeat && `${repeat} repeat`,
+  oversized && `${oversized} over the request limit`,
+]
+  .filter(Boolean)
+  .join(', ');
 process.stderr.write(
-  `${hits.length} hits; glossary: ${glossary.entries} entries, ${glossary.words} words; jev: ${answer.asked ? `${asked.length} asked in ${requests.length} request(s), ${hits.length} over ${BANNED_YES}${oversized ? `; not asked: ${oversized} over the request limit` : ''}${answer.note ? `; ${answer.note}` : ''}` : `not asked (${jev.note})`}\n`,
+  `${hits.length} hits; glossary: ${glossary.entries} entries, ${glossary.words} words; jev: ${answer.asked ? `${asked.length} asked in ${requests.length} request(s), ${hits.length} over ${BANNED_YES}${notAsked ? `; not asked: ${notAsked}` : ''}${answer.note ? `; ${answer.note}` : ''}` : `not asked (${jev.note})`}\n`,
 );
 console.log(JSON.stringify({ hits, glossary, jev }));
