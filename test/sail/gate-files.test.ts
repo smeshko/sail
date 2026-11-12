@@ -133,6 +133,15 @@ test('the silence watchdog the test launcher runs is a gate file', async () => {
   });
 });
 
+test('the preload the test launcher loads into every worker is a gate file', async () => {
+  await withTempRepo((repo) => {
+    const base = setup(repo);
+    put(repo, 'scripts/test-running.ts');
+    commit(repo, 'scripts/test-running.ts');
+    expect(stage(repo, base)).toEqual({ code: 0, output: { base, touched: ['scripts/test-running.ts'] } });
+  });
+});
+
 test('a deleted tsconfig is named', async () => {
   await withTempRepo((repo) => {
     const base = setup(repo);
