@@ -312,3 +312,16 @@ test('a scratch folder inside the worktree is the scratch region, so a write the
   expect(checkWrite([join(inside, 'x')], none, c).allow).toBe(true);
   expect(checkWrite([join(worktree, 'src', 'a.ts')], none, c).allow).toBe(false);
 });
+
+test('a scratch folder swapped for a link is no region: its target stays outside, for a read and a write', () => {
+  const swapped = join(dirname(scratch), 'tmp-swapped');
+  symlinkSync(elsewhere, swapped);
+  const c = { ...ctx, scratch: swapped, env: { ...ctx.env, TMPDIR: swapped } };
+  expect(roots(c).scratch).toBeUndefined();
+  const paths = [join(swapped, 'x'), '$TMPDIR/x', join(elsewhere, 'x')];
+  expect(paths.map((path) => [checkWrite([path], none, c).allow, checkRead([path], none, c).allow])).toEqual([
+    [false, false],
+    [false, false],
+    [false, false],
+  ]);
+});

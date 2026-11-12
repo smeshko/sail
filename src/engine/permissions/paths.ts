@@ -7,7 +7,7 @@ import { allow, type DecideContext, type Decision, deny, type Permissions } from
 
 export type Region = 'worktree' | 'stage-in' | 'scratch' | 'stage-out' | 'outside';
 
-/** The roots, each `realpath`'d; the scratch folder only when the context names one that exists. */
+/** The roots, each `realpath`'d; the scratch folder only when the context names a directory, not a link to one. */
 export interface Roots {
   readonly worktree: string;
   readonly stageIn: string;
@@ -32,6 +32,8 @@ export function roots(ctx: DecideContext): Roots {
   };
   if (ctx.scratch === undefined || ctx.scratch.trim() === '') return base;
   try {
+    // A folder swapped for a link, or for anything but a directory, is no region: the link's target stays outside.
+    if (!lstatSync(ctx.scratch).isDirectory()) return base;
     return { ...base, scratch: realpathSync(ctx.scratch) };
   } catch {
     return base; // a folder that is gone is no region: its paths are outside
