@@ -16,6 +16,7 @@ import {
 import { SUBMIT_CONTRACT, submissionEnvelope } from '../../../src/adapters/claude-code/submission';
 import { BUILTIN_TOOLS } from '../../../src/adapters/claude-code/tool-call';
 import { decide } from '../../../src/engine/permissions';
+import { deniedCommands } from '../../../src/engine/permissions/guide';
 import { SESSION_ENV_FILE, SHIMS_DIR } from '../../../src/engine/shims';
 import type { HarnessEvent, HarnessRequest } from '../../../src/ports/harness';
 import { HarnessCapabilities, type HarnessResult } from '../../../src/ports/types';
@@ -658,7 +659,7 @@ test("the session's Bash is bash, it has no background tasks, and neither sail's
   }).toEqual({ scrub: '1', cwd: '1', shell: '/bin/bash', SHELL: '/bin/bash', background: '1' });
 });
 
-test('a step with commands is told its variables are in its environment too, where one without is told it has no shell', () => {
+test('a step with commands is told its variables are in its environment too, and the commands its permissions deny', () => {
   const req = request('Write the spec.', {
     permissions: { read: ['**'], write: ['$STAGE_OUT/**'], commands: ['git status'] },
   });
@@ -678,6 +679,8 @@ test('a step with commands is told its variables are in its environment too, whe
       '',
       'A file the step produces goes straight into `$STAGE_OUT` under its own name, as `$STAGE_OUT/<name>`, not into a',
       'directory below it.',
+      '',
+      deniedCommands(),
       '',
       SUBMIT_CONTRACT,
     ].join('\n'),

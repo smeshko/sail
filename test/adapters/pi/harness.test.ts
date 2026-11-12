@@ -134,6 +134,10 @@ test('the session is given pi’s model, the workspace, the tools its step can u
     submit: call?.params.submit.name,
     prompt: call?.params.systemPrompt.includes('## Where you work'),
     shell: call?.params.systemPrompt.includes('same values are in your environment'),
+    denied: call?.params.systemPrompt.includes('## Commands the permissions deny'),
+    beforeSubmit:
+      (call?.params.systemPrompt.indexOf('## Commands the permissions deny') ?? -1) <
+      (call?.params.systemPrompt.indexOf('by calling the `submit` tool') ?? -1),
     disposed: call?.disposed,
   }).toEqual({
     model: PI_MODEL,
@@ -141,6 +145,8 @@ test('the session is given pi’s model, the workspace, the tools its step can u
     submit: 'submit',
     prompt: true,
     shell: true,
+    denied: true,
+    beforeSubmit: true,
     disposed: true,
   });
 });
@@ -168,7 +174,9 @@ test('the session is told to submit through the submit tool, not through structu
 
 test('a step with no shell is told it has none', async () => {
   const { scripted } = await play('done');
-  expect(scripted.calls[0]?.params.systemPrompt).toContain("You have no shell, so you can't read environment");
+  const prompt = scripted.calls[0]?.params.systemPrompt ?? '';
+  expect(prompt).toContain("You have no shell, so you can't read environment");
+  expect(prompt).not.toContain('## Commands the permissions deny');
 });
 
 test('a submission that breaks the schema goes back to the model, and a valid one after it is kept', async () => {

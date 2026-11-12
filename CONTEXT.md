@@ -472,7 +472,7 @@ One action an agent asks its harness for (read, write, edit, execute a command, 
 _Avoid_: tool use, action, request, invocation
 
 **Denial**:
-A tool call refused for falling outside the step's permissions, recorded with the permissions that refused it. The agent carries on.
+A tool call refused for falling outside the step's permissions, recorded with the permissions that refused it. The agent carries on. A session with a shell is told, in its system prompt, the command rules every step shares and the deny set's names.
 _Avoid_: block, violation, rejection
 
 **Pid-held file**:

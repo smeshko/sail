@@ -10,6 +10,7 @@
 // runs it under bash, the shell decide() reads. Each SDK message also goes to the request's onRaw as it comes, for a recording (11.3 D3). The Claude Code process leads a process group of its own, and run() returns only once that group is gone (D7). A session sail cuts short, by its minutes or an aborted request, is interrupted first so the SDK's result records its cost, and aborted after INTERRUPT_GRACE_MS without one.
 import type { Options, SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import { allowlisted } from '../../engine/env-allowlist';
+import { deniedCommands } from '../../engine/permissions/guide';
 import { SESSION_ENV_FILE, SHIMS_DIR, shimsFirst } from '../../engine/shims';
 import type { Env } from '../../ports/adapter';
 import type { Harness, HarnessEvent, HarnessRequest } from '../../ports/harness';
@@ -100,7 +101,7 @@ export function sessionEnv(preamble: Readonly<Record<string, string>>, env: Env)
 /**
  * The text appended to the preset system prompt: where the session works, then how it submits. A session without a
  * shell can't read its environment: a prompt that names `$STAGE_OUT` resolves only through the values given here (D23).
- * A session with one has them in its environment too (D16).
+ * A session with one has them in its environment too (D16), and is told the commands its permissions deny.
  */
 export function appendedSystemPrompt(request: HarnessRequest): string {
   return [whereYouWork(request, sessionTools(request.permissions).tools.includes('Bash')), '', SUBMIT_CONTRACT].join(
@@ -108,7 +109,10 @@ export function appendedSystemPrompt(request: HarnessRequest): string {
   );
 }
 
-/** Where the session works, the same text for any harness: `hasShell` is whether the session is offered a shell. */
+/**
+ * Where the session works, the same text for any harness: `hasShell` is whether the session is offered a shell. A
+ * session with one is also told the commands its permissions deny.
+ */
 export function whereYouWork(request: HarnessRequest, hasShell: boolean): string {
   const variables = Object.entries(request.env).map(([name, value]) => `- \`$${name}\`: ${value}`);
   const shell = hasShell
@@ -142,6 +146,7 @@ export function whereYouWork(request: HarnessRequest, hasShell: boolean): string
     'A file the step produces goes straight into `$STAGE_OUT` under its own name, as `$STAGE_OUT/<name>`, not into a',
     'directory below it.',
     ...temporary,
+    ...(hasShell ? ['', deniedCommands()] : []),
   ].join('\n');
 }
 
