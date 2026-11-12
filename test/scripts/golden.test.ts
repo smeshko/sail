@@ -149,14 +149,44 @@ test('a view rendered from a changed stream differs from the committed one: a st
   expect(committedView.replace('fix                 ↻ break after 2/3\n', '')).toBe(rendered);
 });
 
+/**
+ * Whether `text` holds `path` as a path of its own, absolute as the machine spells it, not as the tail of a longer one.
+ * A run records its paths relative to the root, and a try's scratch folder ends in `/tmp`: where the system's temp
+ * directory is `/tmp` itself, `03-tests/call-1/tmp` holds its letters and is no path of the machine.
+ */
+function holdsPath(text: string, path: string): boolean {
+  for (let at = text.indexOf(path); at !== -1; at = text.indexOf(path, at + 1)) {
+    if (at === 0 || !/[\w.-]/.test(text.charAt(at - 1))) return true;
+  }
+  return false;
+}
+
 test('no file of a fresh run holds the path of the temporary repository it ran in, or of this checkout', () => {
   const files = filesIn(fresh);
   expect(files).toHaveLength(82);
-  const machine = [tmpdir(), 'sail-golden-', join(import.meta.dir, '..', '..')];
-  const holding = files.filter((file) =>
-    machine.some((path) => readFileSync(join(fresh, file), 'utf8').includes(path)),
-  );
+  const machine = [tmpdir(), join(import.meta.dir, '..', '..')];
+  const holding = files.filter((file) => {
+    const text = readFileSync(join(fresh, file), 'utf8');
+    return text.includes('sail-golden-') || machine.some((path) => holdsPath(text, path));
+  });
   expect(holding).toEqual([]);
+});
+
+test.each([
+  ['at the start of a value', '"TMPDIR": "/tmp/sail-x/03-tests/call-1/tmp"', true],
+  ['alone', '/tmp', true],
+  ['after a space', 'wrote /tmp/out.log', true],
+  ['after an equals sign', 'TMPDIR=/tmp', true],
+  [
+    'after a relative path that also ends in it',
+    '"TMP": ".sail-runs/R/03-tests/call-1/tmp", "HOME": "/tmp/home"',
+    true,
+  ],
+  ["only as the end of a try's relative scratch folder", '"TMPDIR": ".sail-runs/R/03-tests/call-1/tmp"', false],
+  ['only inside a longer relative path', '.sail-runs/R/03-tests/call-1/tmp/notes.txt', false],
+  ['nowhere', '"STAGE_OUT": ".sail-runs/R/03-tests/call-1/out"', false],
+])('a text holds the machine path /tmp %s: %p is %p', (_where, text, held) => {
+  expect(holdsPath(text, '/tmp')).toBe(held);
 });
 
 test('every file of a fresh run is an ordinary, writable file: run.json too, which the run itself leaves read-only', () => {
