@@ -20,13 +20,32 @@ export interface TempRepo {
   readonly home: string;
   /** Environment for every subprocess the test spawns. Bun spawns ignore a mutated `process.env`. */
   readonly env: Readonly<Record<string, string>>;
-  /** Runs git in `dir` with `env`. Returns trimmed stdout; throws with stderr on a non-zero exit. */
+  /** Runs git in `dir` with `env`. Returns trimmed stdout; throws with stderr on a non-zero exit, and naming the command when it does not return within 30 s. */
   git(...args: string[]): string;
 }
 
-/** Runs git in `cwd` with `env`. Returns trimmed stdout; throws with stderr on a non-zero exit. */
-function runGit(cwd: string, env: Readonly<Record<string, string>>, args: readonly string[]): string {
-  const result = Bun.spawnSync(['git', ...args], { cwd, env });
+/**
+ * The most a temp-repo git call may take. A `bun test` worker blocked in a synchronous spawn never reaches its test's
+ * timeout, so a child that is never heard from would stall the run until the silence watchdog stops it (ADW-584).
+ */
+export const GIT_TIMEOUT_MS = 30_000;
+
+/**
+ * Runs git in `cwd` with `env`. Returns trimmed stdout; throws with stderr on a non-zero exit, and, naming the command,
+ * when it does not return within `timeoutMs` (30 s by default), after killing it.
+ */
+export function runGit(
+  cwd: string,
+  env: Readonly<Record<string, string>>,
+  args: readonly string[],
+  timeoutMs = GIT_TIMEOUT_MS,
+): string {
+  const result = Bun.spawnSync(['git', ...args], { cwd, env, timeout: timeoutMs, killSignal: 'SIGKILL' });
+  if (result.exitedDueToTimeout === true) {
+    throw new Error(
+      `git ${args.join(' ')} did not return within ${timeoutMs} ms (pid ${result.pid}), so it was killed`,
+    );
+  }
   if (result.exitCode !== 0) {
     throw new Error(`git ${args.join(' ')} exited ${result.exitCode}: ${result.stderr.toString().trim()}`);
   }

@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test';
-import { existsSync, mkdirSync, readdirSync, realpathSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative } from 'node:path';
-import { type TempRepo, withTempRepo } from './temp-repo';
+import { runGit, type TempRepo, withTempRepo } from './temp-repo';
 
 const checkoutRoot = realpathSync(join(import.meta.dir, '..', '..'));
 const tempRoot = realpathSync(tmpdir());
@@ -11,6 +11,20 @@ function isInside(parent: string, child: string): boolean {
   const rel = relative(parent, child);
   return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
 }
+
+test('a git that never returns fails within its limit, naming the command', async () => {
+  await withTempRepo((repo) => {
+    const bin = join(repo.home, 'bin');
+    mkdirSync(bin);
+    writeFileSync(join(bin, 'git'), '#!/bin/sh\nexec sleep 30\n', { mode: 0o755 });
+    const env = { ...repo.env, PATH: `${bin}:${repo.env.PATH}` };
+    const start = performance.now();
+    expect(() => runGit(repo.dir, env, ['status'], 500)).toThrow(/git status did not return within 500 ms/);
+    const elapsed = performance.now() - start;
+    expect(elapsed).toBeGreaterThanOrEqual(400);
+    expect(elapsed).toBeLessThan(10_000);
+  });
+}, 20_000);
 
 test('each call gets its own repository and HOME under the temp dir, outside the checkout', async () => {
   const [a, b] = await Promise.all([withTempRepo((repo) => repo), withTempRepo((repo) => repo)]);
