@@ -37,6 +37,11 @@ interface Lib {
     oversized: number;
   };
   bannedQuestions(candidates: Candidate[], start?: number): Record<string, { type: string; instructions: string }>;
+  bannedAsk<R, A extends { asked?: boolean; failed?: boolean; note?: string }>(
+    requests: R[],
+    ask: (request: R, i: number) => A,
+    options?: { deadlineMs?: number; now?: () => number },
+  ): { results: A[]; unasked: number; reason: string };
 }
 const lib = (await import(join(import.meta.dir, '../../.sail/lib/jev-check.mjs'))) as Lib;
 const entry = { term: 'Call', definition: 'One invocation.', avoid: ['invocation'] };
@@ -595,3 +600,38 @@ test('the stage reports a failed check when every request it asked was refused',
     });
   });
 }, 120_000);
+test('the stage stops asking at the first request Jev fails, leaving the rest not asked', async () => {
+  await withTempRepo((repo) => {
+    setup(repo, low(40, { 'word-1': 0.97, 'word-40': 0.97 }));
+    const jev = failingJev(repo, [2]);
+    const result = stage(repo, candidateFiles(40), undefined, jev.dir);
+    expect(jev.asks()).toBe(2);
+    expect(result.output.hits).toEqual([{ file: 'f1.md', line: 1, word: 'invocation', term: 'Call', yes: 0.97 }]);
+    expect(result.output.jev.note).toBe('2 of 3 requests not asked: jev ask: Jev could not be reached');
+  });
+}, 120_000);
+test('bannedAsk asks no request once its deadline has passed, and counts the rest not asked', () => {
+  let clock = 0;
+  const asked: number[] = [];
+  const { results, unasked, reason } = lib.bannedAsk(
+    ['a', 'b', 'c', 'd'],
+    (_request, i) => {
+      asked.push(i);
+      clock += 200_000;
+      return { asked: true, answers: {} };
+    },
+    { deadlineMs: 400_000, now: () => clock },
+  );
+  expect(asked).toEqual([0, 1]);
+  expect(results).toHaveLength(2);
+  expect(unasked).toBe(2);
+  expect(reason).toBe('the stage’s 400 s for asking Jev ran out');
+});
+test('bannedAsk stops at the first failed ask and asks every request when none fails', () => {
+  const failing = lib.bannedAsk([1, 2, 3], (_r, i) => (i === 0 ? { asked: false, failed: true, note: 'down' } : {}));
+  expect(failing).toMatchObject({ unasked: 2, reason: 'down' });
+  expect(failing.results).toHaveLength(1);
+  const all = lib.bannedAsk([1, 2, 3], () => ({ asked: true, answers: {} }));
+  expect(all).toMatchObject({ unasked: 0, reason: '' });
+  expect(all.results).toHaveLength(3);
+});

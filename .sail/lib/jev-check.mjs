@@ -569,6 +569,32 @@ export function bannedRequests(candidates) {
   close();
   return { requests, asked, oversized };
 }
+/**
+ * How long the banned-words stage asks Jev for, in ms: under the script kind's 600 s default, by more than one ask's
+ * worst case (three 10 s attempts and their pauses), so a large change ends with a note rather than a timeout.
+ */
+export const BANNED_ASK_MS = 480_000;
+/**
+ * Asks each request in turn with `ask(request, i)`, stopping after the first whose result is `failed` (Jev unreachable
+ * or refusing, as the next would be too) and before any once `deadlineMs` has passed since the first:
+ * `{ results, unasked, reason }`, `unasked` counting the requests not asked and `reason` saying why.
+ */
+export function bannedAsk(requests, ask, { deadlineMs = BANNED_ASK_MS, now = Date.now } = {}) {
+  const start = now();
+  const results = [];
+  for (let i = 0; i < requests.length; i++) {
+    if (i > 0 && now() - start >= deadlineMs)
+      return {
+        results,
+        unasked: requests.length - i,
+        reason: `the stage’s ${Math.round(deadlineMs / 1000)} s for asking Jev ran out`,
+      };
+    const result = ask(requests[i], i);
+    results.push(result);
+    if (result.failed === true) return { results, unasked: requests.length - i - 1, reason: result.note ?? '' };
+  }
+  return { results, unasked: 0, reason: '' };
+}
 export function bannedQuestions(candidates, start = 0) {
   return Object.fromEntries(
     candidates.map((candidate, i) => [

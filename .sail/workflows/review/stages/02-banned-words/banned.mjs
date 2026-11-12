@@ -1,4 +1,4 @@
-// Find added uses of CONTEXT.md's avoided words; Jev judges every candidate in requests of 16, leaving out a JS keyword on a code line and repeats of a word in one file, and counting what it didn't ask.
+// Find added uses of CONTEXT.md's avoided words; Jev judges every candidate in requests of 16, stopping at a failed request or its time limit, leaving out a JS keyword on a code line and repeats of a word in one file, and counting what it didn't ask.
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
@@ -11,6 +11,7 @@ const {
   bannedCandidates,
   bannedSelect,
   bannedRequests,
+  bannedAsk,
   askNouls,
   yesses,
   git,
@@ -26,10 +27,11 @@ const lines = [
 const allCandidates = bannedCandidates(lines, entries);
 const { selected, keyword, repeat } = bannedSelect(allCandidates);
 const { requests, asked, oversized } = bannedRequests(selected);
-const results = requests.map(({ state, questions }, i) =>
+const { results, unasked, reason } = bannedAsk(requests, ({ state, questions }, i) =>
   askNouls(questions, state, process.env.STAGE_OUT, i === 0 ? 'jev-request.json' : `jev-request-${i + 1}.json`),
 );
 const refused = results.filter((result) => !result.asked);
+const notAskedRequests = refused.length + unasked;
 const answer = !requests.length
   ? { asked: false, note: allCandidates.length ? '' : present ? 'no avoided word on an added line' : 'no CONTEXT.md' }
   : refused.length === results.length
@@ -37,7 +39,9 @@ const answer = !requests.length
     : {
         asked: true,
         answers: Object.assign({}, ...results.map((result) => result.answers ?? {})),
-        note: refused.length ? `${refused.length} of ${results.length} requests not asked: ${refused[0].note}` : '',
+        note: notAskedRequests
+          ? `${notAskedRequests} of ${requests.length} requests not asked: ${refused[0]?.note ?? reason}`
+          : '',
       };
 const note = oversized ? `${oversized} candidates omitted (request limits)` : '';
 const hits = [];
