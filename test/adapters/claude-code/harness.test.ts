@@ -1170,3 +1170,16 @@ test('whereYouWork lists a line for each of $TMPDIR, $TMP and $TEMP of the reque
   expect(lines.map((found) => found.length)).toEqual([1, 1, 1]);
   expect(lines[0]?.[0]).toContain(req.env.TMPDIR ?? '<none>');
 });
+
+test('whereYouWork names the working temp-file forms for a session with a shell and a scratch folder, and none otherwise', () => {
+  const scratched = whereYouWork(withScratch(request()), true);
+  expect(scratched).toContain('A temporary file goes in `$TMPDIR`, which is removed when the step ends.');
+  expect(scratched).toContain('mktemp "$TMPDIR/name.XXXXXX"');
+  expect(scratched).toContain('"$TMPDIR/name"');
+  expect(scratched).toContain('in one command and use the path it prints in the next');
+  expect(scratched).toContain('`f=$(mktemp); echo ok > "$f"`');
+  expect(scratched).toContain('is denied');
+  expect(whereYouWork(withScratch(request()), false)).not.toContain('mktemp');
+  expect(whereYouWork(request(), true)).not.toContain('mktemp');
+  expect(whereYouWork({ ...request(), env: { ...request().env, TMPDIR: '' } }, true)).not.toContain('mktemp');
+});

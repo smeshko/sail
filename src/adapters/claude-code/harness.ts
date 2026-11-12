@@ -120,6 +120,18 @@ export function whereYouWork(request: HarnessRequest, hasShell: boolean): string
         `Your working directory is the workspace, ${request.cwd}. You have no shell, so you can't read environment`,
         'variables: where a prompt names one of these, it means the value given.',
       ];
+  const temporary =
+    hasShell && (request.env.TMPDIR ?? '') !== ''
+      ? [
+          '',
+          [
+            'A temporary file goes in `$TMPDIR`, which is removed when the step ends. Run `mktemp` (or `mktemp -d`) in one',
+            'command and use the path it prints in the next, or name the file yourself: `mktemp "$TMPDIR/name.XXXXXX"` or',
+            '`"$TMPDIR/name"`. A command that writes to a variable set from `$(mktemp)`, as in',
+            '`f=$(mktemp); echo ok > "$f"`, is denied: its path can\'t be read before it runs.',
+          ].join(' '),
+        ]
+      : [];
   return [
     '## Where you work',
     '',
@@ -129,6 +141,7 @@ export function whereYouWork(request: HarnessRequest, hasShell: boolean): string
     '',
     'A file the step produces goes straight into `$STAGE_OUT` under its own name, as `$STAGE_OUT/<name>`, not into a',
     'directory below it.',
+    ...temporary,
   ].join('\n');
 }
 
