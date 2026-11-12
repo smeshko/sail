@@ -412,3 +412,24 @@ test("descendantGroups names the groups below a leader, never the leader's own o
     reap(leader.pid);
   }
 });
+
+test('a stop ends a process group a descendant starts during the grace period', async () => {
+  const s = scratch();
+  const ready = join(s.dir, 'ready');
+  const pidFile = join(s.dir, 'late.pid');
+  // The leader traps SIGTERM, and once its first own-group child is stopped it starts another group, in the grace.
+  const run = s.script(
+    'late-group.sh',
+    `trap : TERM\nset -m\nsleep 30 &\nfirst=$!\ntouch "${ready}"\nwait $first\nsleep 30 &\necho $! > "${pidFile}.tmp"\nmv "${pidFile}.tmp" "${pidFile}"\nwait`,
+  );
+  const { end } = await stoppedWhenReady(s.options([run], { graceMs: 1500 }), ready);
+  expect(existsSync(pidFile)).toBe(true);
+  const late = pidIn(pidFile);
+  const deadline = performance.now() + 2_000;
+  while (alive(late) && performance.now() < deadline) await Bun.sleep(20);
+  const stillAlive = alive(late);
+  reap(late);
+  expect(end).toMatchObject({ started: true, signal: 'SIGKILL', aborted: true });
+  expect(stillAlive).toBe(false);
+  expect(liveGroups()).toEqual([]);
+});
