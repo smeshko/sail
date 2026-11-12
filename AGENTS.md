@@ -92,8 +92,10 @@ Settled once: apply them rather than asking. A ticket's own Rulings section over
   The bin shim `src/cli/main.ts` is the one exception.
 - Type tests live in `test/types/`. Each `// @ts-expect-error TSnnnn: <why>` names the code its next line fails with,
   and `test/types/expect-error.test.ts` proves it on a temp copy, so cases import only `sail` and `sail/intakes`.
-- Every `src/` file needs 80% line coverage on its own: Bun applies the threshold per file. Reach it by testing the
-  branch. A file that genuinely can't goes in `coveragePathIgnorePatterns` in `bunfig.toml`, where review sees it.
+- Every `src/` file needs 80% line coverage on its own: Bun applies the threshold per file. The gate checks lines
+  only: `bunfig.toml` sets the function threshold to 0, so an uncovered callback alone fails nothing. Reach the line
+  threshold by testing the branch. A file that genuinely can't goes in `coveragePathIgnorePatterns` in `bunfig.toml`,
+  where review sees it.
 
 ## Done means demonstrated
 
