@@ -13,6 +13,12 @@ interface Finding {
   title: string;
   detail: string;
 }
+interface Nit {
+  lens: string;
+  file: string;
+  title: string;
+  detail: string;
+}
 interface Record {
   findings: Finding[];
   judgement: { summary: string; thin: { lens: string; why: string }[]; decisions: object[] } | null;
@@ -20,7 +26,7 @@ interface Record {
   resolved: boolean;
   thin: { lens: string; why: string }[];
   open: { finding: string; detail: string }[];
-  nits: string[];
+  nits: Nit[];
 }
 
 const LIMIT = 60_000;
@@ -48,7 +54,7 @@ function record(
   verdict: (finding: Finding) => string,
   open: string[] = [],
   summary = SUMMARY,
-  nits: string[] = [],
+  nits: Nit[] = [],
 ): Record {
   return {
     findings,
@@ -202,44 +208,54 @@ test('a record that is not resolved still takes the label off after the comment'
   expect(result.stdout).toBe('{"unlabelled":true}');
 });
 
-const low = (n: number): Finding => ({ ...bug(n), severity: 'low' });
+const nit = (lens: string, title: string, file = 'notes.txt', detail = 'y'): Nit => ({ lens, file, title, detail });
 
-test('a mergeable record with nits says they were not fixed, and shows each with the verdict nit', async () => {
-  const value = record([low(1), bug(2)], (finding) => (finding.id === 'R1' ? 'fix' : 'drop'), [], SUMMARY, ['R1']);
-  value.rounds = [];
+test('a record with two nits lists both under Nits and keeps its headline', async () => {
+  const value = record([bug(1)], () => 'drop', [], SUMMARY, [
+    nit('conventions', 'a stray space'),
+    nit('bugs', 'a | pipe', 'src/a.ts', 'line one\nline two'),
+  ]);
   const result = await report(value);
   expect(result.code).toBe(0);
   expect(result.comment).toBe(result.full);
-  expect(result.full).toContain(
-    'No finding at medium or above is left to fix, and validation passes. 1 low finding is listed as a nit, not fixed: a fix pass starts only for a finding at medium or above.',
-  );
-  expect(result.full).toContain('| R1 A bug 1 | bugs | low | nit | Because. |');
-  expect(result.full).toContain('| R2 A bug 2 | bugs | medium | drop | Because. |');
-  expect(result.calls).toHaveLength(1);
-  expect(result.calls[0]).toContain('codehost comment');
-});
-
-test('a record with no nits keeps its headline', async () => {
-  const result = await report(record([bug(1)], () => 'drop'));
+  expect(result.full).toContain('### Nits\n\nNamed by the reviewers, below medium: not judged and not fixed.\n\n');
+  expect(result.full).toContain('- conventions: a stray space (notes.txt): y\n');
+  expect(result.full).toContain('- bugs: a \\| pipe (src/a.ts): line one line two\n');
   expect(result.full).toContain('Every finding to fix is fixed, and validation passes.');
   expect(result.full).not.toContain('| nit |');
 });
 
-test('a shortened report counts nits under the verdict nit', async () => {
-  const findings = Array.from({ length: 4000 }, (_, i) => low(i + 1));
+test('a record with no nits has no Nits section', async () => {
+  const result = await report(record([bug(1)], () => 'drop'));
+  expect(result.full).not.toContain('### Nits');
+});
+
+test('a nit with no file prints no parentheses', async () => {
+  const result = await report(record([bug(1)], () => 'drop', [], SUMMARY, [nit('tests', 'a gap', '')]));
+  expect(result.full).toContain('- tests: a gap: y\n');
+});
+
+test('a record with no findings and one nit says no reviewer found anything at medium or above', async () => {
+  const result = await report(record([], () => 'drop', [], SUMMARY, [nit('tests', 'a gap')]));
+  expect(result.full).toContain('no reviewer found anything at medium or above.');
+  expect(result.full).toContain('- tests: a gap (notes.txt): y');
+});
+
+test('a report shortened to level 4 fits the comment limit and counts its nits, the full one listing them all', async () => {
+  const long = 'x'.repeat(200_000);
+  const findings = Array.from({ length: 4000 }, (_, i) => bug(i + 1, long));
+  const nits = Array.from({ length: 15 }, (_, i) => nit('bugs', `nit ${i + 1} ${long}`));
   const result = await report(
     record(
       findings,
       () => 'fix',
-      [],
-      SUMMARY,
       findings.map((finding) => finding.id),
+      SUMMARY,
+      nits,
     ),
   );
   expect(result.code).toBe(0);
   expect(size(result.comment)).toBeLessThanOrEqual(LIMIT);
-  expect(result.comment).toContain('| bugs |  | nit | 4000 |');
-  expect(result.comment).toContain('4000 low findings are listed as nits, not fixed');
-  for (const finding of findings)
-    expect(result.full).toContain(`| ${finding.id} A bug ${finding.id.slice(1)} | bugs | low | nit |`);
+  expect(result.comment).toContain('15 nits: see the full report.');
+  for (let n = 1; n <= 15; n++) expect(result.full).toContain(`- bugs: nit ${n} x`);
 });

@@ -179,12 +179,6 @@
               "type": "bug",
               "trigger": "`sail runs` in a repository whose runs cost fractions of a cent"
             }
-          },
-          {
-            "finding": "R4",
-            "verdict": "drop",
-            "rationale": "Taste: the name is local to one function.",
-            "ticket": null
           }
         ],
         "thin": []
@@ -453,12 +447,12 @@
           {
             "what": "Names",
             "how": "`tot` in show.ts",
-            "status": "finding"
+            "status": "holds"
           }
         ],
-        "findings": [
+        "findings": [],
+        "nits": [
           {
-            "severity": "low",
             "file": "src/cli/commands/show.ts",
             "title": "`tot` is a terse name",
             "detail": "`tot` reads as a typo; `total` matches the rest of the file."

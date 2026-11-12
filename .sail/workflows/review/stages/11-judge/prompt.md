@@ -3,12 +3,11 @@ request is described at `{{brief}}`, and what it should do at `{{requirements}}`
 
 **Nobody stands between you and the merge.** Once the findings you send to `fix` are fixed and validation passes, the
 pull request merges into `staging` on its own. A finding you `drop` ships as it is, and a review you trust is the only
-look that part of the change gets. A `fix` at low severity is fixed only when a finding at medium or above starts a fix
-pass; otherwise it ships as it is, listed in the review as a nit.
+look that part of the change gets.
 
 `$STAGE_IN/findings.json` holds every finding, numbered: `V1` when validation (`bun run gate`) failed, `L<n>` for each
 tracker-key prefix or denylist term the leak check found, with its count and example locations, and for each line its Jev pass flagged, `B<n>` for each avoided word the banned-words check flagged, `D<n>` for each acceptance criterion the demonstration couldn't show, and `R<n>` from the
-five reviewers, each with the reviewer it came from. `$STAGE_IN/evidence.json` holds how each check went as a whole:
+five reviewers at medium or above, each with the reviewer it came from. `$STAGE_IN/evidence.json` holds how each check went as a whole:
 validation's output, the demonstration's criteria and transcript, and each reviewer's summary and coverage: what it
 checked, how, and with what result.
 
@@ -71,7 +70,7 @@ workflow. File one only when doing it changes something a person would notice: a
 through a real path, a behaviour someone asked for, or a measured cost. Never file hardening against a misuse no caller
 makes or an input no path produces, a tidy-up with no behaviour behind it (a rename, a move, a shared helper, a
 comment, an unused field), a test for code with no reported failure, or anything smaller than writing it up. A
-low-severity finding is never filed, and a run files at most two tickets, bugs first.
+run files at most two tickets, bugs first.
 
 For a `ticket`, write the ticket: a title, a description a reader can act on without this run (the files, what is
 wrong), the `trigger` (the command, input or code path that reaches the problem), and its type: `bug`, `feature` or
