@@ -462,10 +462,17 @@ export function bannedPattern(word) {
   const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '[\\s-]+');
   return new RegExp(`(?<![A-Za-z0-9_])${escaped}s?(?![A-Za-z0-9_]|-\\d)`, 'i');
 }
-/** Whether the pattern matches the text as written, or with a space put at each camelCase boundary. */
+const UPPER_SNAKE = /(?<![A-Za-z0-9_])[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+(?![A-Za-z0-9_])/g;
+/**
+ * Whether the pattern matches the text as written, or with a space put at each camelCase boundary and at each `_` of an
+ * `UPPER_SNAKE` identifier (`SAIL_GATE_LOCK_HOLDER`); a lower-case `snake_case` name is another system's and stays unmatched.
+ */
 export function bannedMatches(pattern, text) {
   if (pattern.test(text)) return true;
-  const spaced = text.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/([A-Z])([A-Z][a-z])/g, '$1 $2');
+  const spaced = text
+    .replace(UPPER_SNAKE, (token) => token.replaceAll('_', ' '))
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z])([A-Z][a-z])/g, '$1 $2');
   return spaced !== text && pattern.test(spaced);
 }
 export function bannedCandidates(lines, glossary) {

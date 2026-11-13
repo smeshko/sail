@@ -388,6 +388,23 @@ test('bannedCandidates matches an avoided word as a camelCase part, a kebab part
   expect(words('axb')).toEqual([]);
   for (const text of ['ADW-387', 'navigate', 'canvas', 'nav_counts', 'noticed']) expect(words(text)).toEqual([]);
 });
+test('bannedCandidates matches an avoided word inside an UPPER_SNAKE identifier only', () => {
+  const glossary = [
+    { term: 'T', definition: 'D.', avoid: ['nav', 'lock', 'stage run'] },
+    { term: 'Kind', definition: 'D.', avoid: ['type'] },
+  ];
+  const words = (text: string) => lib.bannedCandidates([{ ...line, text }], glossary).map((c) => c.word);
+  expect(words('SAIL_GATE_LOCK_HOLDER')).toEqual(['lock']);
+  expect(words('NAV_COUNTS')).toEqual(['nav']);
+  expect(words('STAGE_RUN')).toEqual(['stage run']);
+  expect(words('LOCKS_HELD')).toEqual(['lock']);
+  for (const text of ['nav_counts', 'Nav_Counts', 'GATE_LOCKED', 'BLOCK_SIZE']) expect(words(text)).toEqual([]);
+  const selected = lib.bannedSelect(
+    lib.bannedCandidates([{ file: 'a.ts', line: 1, text: 'const STEP_TYPE = 1;', context: [] }], glossary),
+  );
+  expect(selected).toMatchObject({ keyword: 0 });
+  expect(selected.selected).toHaveLength(1);
+});
 test('bannedCandidates keeps one candidate per word and entry, even for repeated words', () => {
   expect(
     lib
