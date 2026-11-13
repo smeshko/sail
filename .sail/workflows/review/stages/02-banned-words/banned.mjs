@@ -1,4 +1,4 @@
-// Find added uses of CONTEXT.md's avoided words; Jev judges every candidate in requests of 16, stopping at a failed request or its time limit, leaving out a JS keyword on a code line and repeats of a word in one file, and counting what it didn't ask.
+// Find added uses of CONTEXT.md's avoided words; Jev judges every candidate in requests of 16, stopping at a failed request or its time limit, leaving out a JS keyword on a code line outside its string literals and comments and repeats of a word in one file, and counting what it didn't ask.
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 

@@ -1,6 +1,6 @@
 // banned-words: Jev judges whether added lines and commit messages use CONTEXT.md's avoided words in the forbidden sense.
 // Each hit reaches the review's judge as a finding; without candidates it asks Jev nothing.
-// It skips a JS keyword on a code line and a repeat of a word in one file, and counts both in `jev.skipped`.
+// It skips a JS keyword on a code line outside its string literals and comments and a repeat of a word in one file, and counts both in `jev.skipped`.
 import { file, script, value, z } from 'sail';
 
 export const Banned = z.object({
