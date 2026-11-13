@@ -22,9 +22,10 @@ type Answered =
   | { asked: false; note: string };
 interface Lib {
   BASE: string;
+  TASKS_MAX_REQUEST_BYTES: number;
   git: Run;
   yesses(answers: Record<string, unknown>, ids: string[]): { id: string; yes: number }[];
-  askNouls(questions: object, state: object, out: string): Answered;
+  askNouls(questions: object, state: object, out: string, name?: string, limit?: number): Answered;
   parseTasks(planText: string): Task[];
   tasksState(tasks: Task[], run: Run): object;
   taskQuestions(tasks: Task[]): object;
@@ -137,7 +138,10 @@ export function collect(runDir: string, lib: Lib, out: string, notes: string[]):
         join(runDir, dirname(entry.resultPath), 'in'),
         run,
       );
-      asked = lib.askNouls(questions, state, out);
+      asked =
+        entry.stage === 'check-tasks'
+          ? lib.askNouls(questions, state, out, 'jev-request.json', lib.TASKS_MAX_REQUEST_BYTES)
+          : lib.askNouls(questions, state, out);
     } catch (error) {
       notes.push(`${entry.key} in ${runDir}: ${error instanceof Error ? error.message : error}`);
       continue;

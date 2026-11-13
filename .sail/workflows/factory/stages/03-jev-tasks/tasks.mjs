@@ -22,10 +22,9 @@ if (plan.length === 0) {
   asked.note = 'every task was reported with no commit: nothing to ask Jev';
   asked.checked = { tasks: plan.map(accepted) };
 } else {
-  const state = lib.tasksState(tasks);
-  const result = lib.askNouls(lib.taskQuestions(tasks), state, process.env.STAGE_OUT);
+  const result = lib.askTasks(tasks, process.env.STAGE_OUT);
   const unchanged = lib
-    .unchangedTests(state)
+    .unchangedTests(result.state)
     .map((each) => `${each.id} names test files with no change on the branch: ${each.paths.join(', ')}`);
   if (!result.asked) {
     asked.note = [...unchanged, result.note].join('; ');

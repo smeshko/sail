@@ -15,9 +15,16 @@ interface Asked {
 interface Lib {
   MAX_DIFF: number;
   MAX_REQUEST_BYTES: number;
+  TASKS_MAX_REQUEST_BYTES: number;
   cut(text: string): string;
   git(args: string[]): string;
-  askNouls(questions: Record<string, unknown>, state: Record<string, unknown>, out: string): Asked;
+  askNouls(
+    questions: Record<string, unknown>,
+    state: Record<string, unknown>,
+    out: string,
+    name?: string,
+    limit?: number,
+  ): Asked;
 }
 const ROOT = join(import.meta.dir, '..', '..');
 const lib = (await import(join(ROOT, '.sail', 'lib', 'jev-check.mjs'))) as Lib;
@@ -79,6 +86,23 @@ test('askNouls does not send a request over MAX_REQUEST_BYTES, and notes its siz
     written: true,
     sent: false,
   });
+});
+
+test('the limits are 64,000 bytes for every check and 76,000 for the tasks request', () => {
+  expect([lib.MAX_REQUEST_BYTES, lib.TASKS_MAX_REQUEST_BYTES]).toEqual([64_000, 76_000]);
+});
+
+test('askNouls with a limit sends a request between 64,000 and 76,000 bytes, and refuses one over it naming that limit', () => {
+  const out = stubSail(`echo '{"model":"jev-1","answers":{}}'`);
+  const between = lib.askNouls({}, { text: 'x'.repeat(70_000) }, out, 'jev-request.json', 76_000);
+  expect(between).toEqual({ asked: true, model: 'jev-1', answers: {} });
+  const bytes = Buffer.byteLength(JSON.stringify({ state: { text: 'x'.repeat(80_000) }, questions: {} }));
+  const over = lib.askNouls({}, { text: 'x'.repeat(80_000) }, out, 'jev-request.json', 76_000);
+  expect(over).toEqual({
+    asked: false,
+    note: `the request is ${bytes} bytes, over the 76000-byte limit Jev accepts`,
+  });
+  expect(lib.askNouls({}, { text: 'x'.repeat(70_000) }, out).asked).toBe(false);
 });
 
 test('askNouls marks a request over MAX_REQUEST_BYTES, which it never sent, as not failed', () => {

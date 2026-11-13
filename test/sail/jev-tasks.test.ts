@@ -2,7 +2,7 @@
 // the stage run as a script on the fake Jev. The helpers are `.sail/lib/jev-check.mjs`, which the stage and the agreement
 // script share.
 import { expect, test } from 'bun:test';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { nouls, writeOwnSail } from '../helpers/own-sail';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
@@ -16,6 +16,18 @@ interface Lib {
   CLEAR_YES: number;
   MAX_DIFF: number;
   MAX_REQUEST_BYTES: number;
+  TASKS_MAX_REQUEST_BYTES: number;
+  cutLongest(state: { files: Record<string, string>; whole?: string }): boolean;
+  askTasks(
+    tasks: Task[],
+    out: string,
+    run: (args: string[]) => string,
+  ): {
+    asked: boolean;
+    note?: string;
+    answers?: Record<string, unknown>;
+    state: { files: Record<string, string> };
+  };
   parseTasks(plan: string): Task[];
   resolveTasks(tasks: Task[], changed: string[]): Task[];
   unchangedTests(state: {
@@ -171,19 +183,31 @@ test('tasksState cuts the largest diffs first, with a marker, until the request 
     small: state.files['src/small.ts'] === small,
     marked: marker !== null,
     accounted: marker ? cutBig.length - marker[0].length + Number(marker[1]) : -1,
-    fits: requestBytes(state, tasks) <= lib.MAX_REQUEST_BYTES,
+    fits: requestBytes(state, tasks) <= lib.TASKS_MAX_REQUEST_BYTES,
   }).toEqual({ small: true, marked: true, accounted: big.length, fits: true });
+});
+
+test('tasksState leaves a 70,000-byte request uncut and cuts a larger one to at most 76,000 bytes', () => {
+  const tasks: Task[] = [{ id: 'TASK-001', text: 'one', paths: ['src/a.ts'] }];
+  const run = (size: number) => (args: string[]) =>
+    args[0] === 'diff' && !args.includes('--name-only') ? 'd'.repeat(size) : '';
+  const fits = lib.tasksState(tasks, run(70_000 - 1_500));
+  expect(fits.files['src/a.ts']).not.toContain('… cut:');
+  expect(requestBytes(fits, tasks)).toBeGreaterThan(64_000);
+  const cut = lib.tasksState(tasks, run(200_000));
+  expect(cut.files['src/a.ts']).toContain('… cut:');
+  expect(requestBytes(cut, tasks)).toBeLessThanOrEqual(76_000);
 });
 
 test('tasksState stops cutting when the task text alone is over the budget', () => {
   const tasks: Task[] = [
-    { id: 'TASK-001', text: 'x'.repeat(lib.MAX_REQUEST_BYTES + 10), paths: ['src/a.ts'] },
+    { id: 'TASK-001', text: 'x'.repeat(lib.TASKS_MAX_REQUEST_BYTES + 10), paths: ['src/a.ts'] },
     { id: 'TASK-002', text: 'two', paths: [] },
   ];
   const state = lib.tasksState(tasks, (args) => (args[0] === 'diff' ? 'd'.repeat(5_000) : ''));
   expect(state.files['src/a.ts']).toContain('… cut:');
   expect(state.whole).toContain('… cut:');
-  expect(requestBytes(state, tasks)).toBeGreaterThan(lib.MAX_REQUEST_BYTES);
+  expect(requestBytes(state, tasks)).toBeGreaterThan(lib.TASKS_MAX_REQUEST_BYTES);
 });
 
 test('a git that fails gives an empty diff', () => {
@@ -528,3 +552,118 @@ test('the stage, with a no-commit task and an unclear answer for another, has no
     ]);
   });
 }, 60_000);
+
+const MARKER = /\n… cut: (\d+) more characters$/;
+
+test('cutLongest halves the longest diff with one marker counting what it removed, and says it cut', () => {
+  const state: { files: Record<string, string>; whole?: string } = {
+    files: { 'src/a.ts': 'a'.repeat(1_000), 'src/b.ts': 'b'.repeat(10_000) },
+  };
+  expect(lib.cutLongest(state)).toBe(true);
+  const cut = state.files['src/b.ts'] ?? '';
+  const marker = MARKER.exec(cut);
+  expect(cut.length).toBeLessThanOrEqual(5_000);
+  expect(marker).not.toBeNull();
+  expect(cut.length - (marker?.[0].length ?? 0) + Number(marker?.[1])).toBe(10_000);
+  expect(state.files['src/a.ts']).toBe('a'.repeat(1_000));
+});
+
+test('cutLongest cuts the whole diff when it is the longest', () => {
+  const state: { files: Record<string, string>; whole?: string } = {
+    files: { 'src/a.ts': 'a'.repeat(100) },
+    whole: 'w'.repeat(4_000),
+  };
+  expect(lib.cutLongest(state)).toBe(true);
+  expect(state.whole).toContain('… cut:');
+  expect(state.files['src/a.ts']).toBe('a'.repeat(100));
+});
+
+test('cutLongest on a diff already cut writes one marker whose count is the earlier count plus what it removed', () => {
+  const body = 'c'.repeat(8_000);
+  const state = { files: { 'src/a.ts': `${body}\n… cut: 500 more characters` } };
+  expect(lib.cutLongest(state)).toBe(true);
+  const cut = state.files['src/a.ts'];
+  expect(cut.match(/… cut:/g)).toHaveLength(1);
+  const marker = MARKER.exec(cut);
+  const kept = cut.length - (marker?.[0].length ?? 0);
+  expect(kept).toBeLessThan(8_000);
+  expect(Number(marker?.[1])).toBe(500 + (8_000 - kept));
+});
+
+test('cutLongest with nothing to cut says so', () => {
+  expect(lib.cutLongest({ files: { 'src/a.ts': '' } })).toBe(false);
+});
+
+/** A `sail` on the PATH that counts its calls in `count` beside it and answers call n with `replies[n - 1]` (the last one repeats). */
+function stubCounting(repo: TempRepo, replies: string[]): string {
+  const cases = replies.map((reply, at) => `${at + 1}) ${reply};;`).join('\n');
+  const body = `#!/bin/sh
+count="${repo.home}/count"
+n=$(( $(cat "$count" 2>/dev/null || echo 0) + 1 ))
+echo $n > "$count"
+case $n in
+${cases}
+*) ${replies.at(-1)};;
+esac
+`;
+  writeFileSync(join(repo.home, 'sail'), body, { mode: 0o755 });
+  chmodSync(join(repo.home, 'sail'), 0o755);
+  return join(repo.home, 'count');
+}
+
+const ANSWER = `echo '{"model":"jev-1","answers":{"TASK-001":{"type":"noul","noul":0.9}}}'`;
+const REFUSED = `echo "sail port: TypeSafe answered 400 Bad Request: max_tokens_exceeded (invalid)" >&2; exit 1`;
+
+const askTasksIn = (repo: TempRepo, replies: string[]) => {
+  const count = stubCounting(repo, replies);
+  const out = join(repo.home, 'ask-out');
+  mkdirSync(out);
+  const tasks: Task[] = [{ id: 'TASK-001', text: 'one', paths: ['src/a.ts', 'src/b.ts'] }];
+  const run = (args: string[]) => {
+    if (args.includes('--name-only')) return 'src/a.ts\nsrc/b.ts\n';
+    if (args[0] !== 'diff') return '';
+    return args.at(-1) === 'src/a.ts' ? 'a'.repeat(30_000) : 'b'.repeat(20_000);
+  };
+  const saved = process.env.PATH;
+  process.env.PATH = `${repo.home}:${saved}`;
+  try {
+    const result = lib.askTasks(tasks, out, run);
+    return { result, calls: Number(readFileSync(count, 'utf8')), out };
+  } finally {
+    process.env.PATH = saved;
+  }
+};
+
+test('askTasks, refused once for max_tokens_exceeded, cuts the longest diff to half and asks once more', async () => {
+  await withTempRepo(async (repo) => {
+    const { result, calls, out } = askTasksIn(repo, [REFUSED, ANSWER]);
+    expect(calls).toBe(2);
+    expect(result.asked).toBe(true);
+    expect(result.answers).toEqual({ 'TASK-001': { type: 'noul', noul: 0.9 } });
+    const first = JSON.parse(readFileSync(join(out, 'jev-request.json'), 'utf8')).state.files;
+    const second = JSON.parse(readFileSync(join(out, 'jev-request-2.json'), 'utf8')).state.files;
+    expect(first['src/a.ts']).toBe('a'.repeat(30_000));
+    expect(second['src/a.ts'].length).toBeLessThanOrEqual(15_000);
+    expect(second['src/a.ts'].match(/… cut:/g)).toHaveLength(1);
+    expect(second['src/b.ts']).toBe('b'.repeat(20_000));
+    expect(result.state.files['src/a.ts']).toBe(second['src/a.ts']);
+  });
+});
+
+test('askTasks, refused twice, asks twice and notes the second refusal after cutting again', async () => {
+  await withTempRepo(async (repo) => {
+    const { result, calls } = askTasksIn(repo, [REFUSED]);
+    expect(calls).toBe(2);
+    expect(result.asked).toBe(false);
+    expect(result.note).toStartWith('after cutting the longest diff again: ');
+    expect(result.note).toContain('max_tokens_exceeded');
+  });
+});
+
+test('askTasks, refused for another reason, asks once and returns that note', async () => {
+  await withTempRepo(async (repo) => {
+    const { result, calls } = askTasksIn(repo, ['echo "sail port: unavailable" >&2; exit 1']);
+    expect(calls).toBe(1);
+    expect(result).toMatchObject({ asked: false, note: 'sail port: unavailable' });
+  });
+});
