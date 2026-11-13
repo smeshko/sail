@@ -525,6 +525,47 @@ test('bannedSelect lets a keyword line not take the place of a later comment lin
   expect(result.selected.map((c) => c.text)).toEqual(['// the type of it']);
   expect(result.keyword).toBe(1);
 });
+test('bannedSelect keeps a keyword used as prose in a string literal or a trailing comment', () => {
+  const lines = [
+    "throw new Error('unknown type of step');",
+    'const x = 1; // the type of the stage',
+    'return `no such type`;',
+    'fail("no such type");',
+    'type A = 1; /* the type of it */',
+    "type A = 'the \\'type\\' of it';",
+  ];
+  for (const text of lines) {
+    const result = select(['a.ts', text]);
+    expect({ text, selected: result.selected.length, keyword: result.keyword }).toEqual({
+      text,
+      selected: 1,
+      keyword: 0,
+    });
+  }
+});
+test('bannedSelect leaves out a keyword in code beside a string or a comment that lacks the word', () => {
+  for (const text of ["type Foo = 'x'; // done", 'type Foo = "x";', "const s = 'it\\'s'; type X = 1;"]) {
+    expect({ text, ...select(['a.ts', text]) }).toMatchObject({ text, selected: [], keyword: 1 });
+  }
+});
+test('the stage asks about a keyword in a string, a trailing comment and a template literal', async () => {
+  await withTempRepo((repo) => {
+    setup(repo, { 'word-1': 0.97, 'word-2': 0.97, 'word-3': 0.97 });
+    writeFileSync(join(repo.dir, 'CONTEXT.md'), '**Kind**:\nWhat a step is.\n_Avoid_: type\n');
+    const diff =
+      "+++ b/a.ts\n@@ -0,0 +1,1 @@\n+throw new Error('unknown type of step');\n" +
+      '+++ b/b.ts\n@@ -0,0 +1,1 @@\n+const x = 1; // the type of the stage\n' +
+      '+++ b/c.ts\n@@ -0,0 +1,1 @@\n+return `no such type`;\n';
+    const out = join(repo.home, 'out');
+    const result = stage(repo, diff);
+    expect(Object.keys(JSON.parse(readFileSync(join(out, 'jev-request.json'), 'utf8')).questions)).toEqual([
+      'word-1',
+      'word-2',
+      'word-3',
+    ]);
+    expect(result.output.jev).toMatchObject({ candidates: 3, skipped: { keyword: 0, repeat: 0, oversized: 0 } });
+  });
+});
 test('the stage asks one question for three lines of a TypeScript file and reports the two skipped', async () => {
   await withTempRepo((repo) => {
     setup(repo, { 'word-1': 0.97 });

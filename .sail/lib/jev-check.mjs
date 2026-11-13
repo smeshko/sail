@@ -510,16 +510,51 @@ export const JS_KEYWORDS = new Set(
 );
 const JS_FILE = /\.(js|jsx|ts|tsx|mjs|cjs|mts|cts)$/;
 
+/** Splits a line into `{ code, text }` parts: code, and the string literals and comments, which run to the line's end when unterminated. */
+function proseParts(text) {
+  const parts = [];
+  let start = 0;
+  let i = 0;
+  const push = (end, code) => {
+    if (end > start) parts.push({ code, text: text.slice(start, end) });
+    start = end;
+  };
+  while (i < text.length) {
+    const c = text[i];
+    const next = text[i + 1];
+    if (c === '/' && (next === '/' || next === '*')) {
+      push(i, true);
+      const close = next === '*' ? text.indexOf('*/', i + 2) : -1;
+      i = next === '/' || close < 0 ? text.length : close + 2;
+      push(i, false);
+    } else if (c === "'" || c === '"' || c === '`') {
+      push(i, true);
+      i++;
+      while (i < text.length && text[i] !== c) i += text[i] === '\\' ? 2 : 1;
+      i = Math.min(i + 1, text.length);
+      push(i, false);
+    } else i++;
+  }
+  push(text.length, true);
+  return parts;
+}
+
 function isKeyword({ word, file, text }) {
   if (!JS_FILE.test(file) || /^(\/\/|\/\*|\*)/.test(text.trim())) return false;
   const forms = [word, `${word}s`].filter((form) => JS_KEYWORDS.has(form));
   if (!forms.length) return false;
   const standalone = new RegExp(`(?<![\\w$-])(?:${forms.join('|')})(?![\\w$-])`, 'g');
-  return !bannedMatches(bannedPattern(word), text.replace(standalone, ' '));
+  return !bannedMatches(
+    bannedPattern(word),
+    proseParts(text)
+      .map((part) => (part.code ? part.text.replace(standalone, ' ') : part.text))
+      .join(''),
+  );
 }
 
 /**
- * Leaves out a candidate that is only a JS keyword on a non-comment line of a JS or TypeScript file (`keyword`), then
+ * Leaves out a candidate whose word is a JS keyword only in the code of a line of a JS or TypeScript file, outside its
+ * string literals and comments (`keyword`), then
  * every one after the first of the same word, entry and file (`repeat`): `{ selected, keyword, repeat }`.
  */
 export function bannedSelect(candidates) {
