@@ -29,6 +29,10 @@ interface Lib {
   bannedState(candidates: Candidate[], start?: number): unknown;
   BANNED_BATCH: number;
   JS_KEYWORDS: Set<string>;
+  bannedHits(
+    asked: Candidate[],
+    answers: Record<string, unknown>,
+  ): { file: string; line: number; word: string; term: string; yes: number }[];
   bannedRemoved(diff: string): Set<string>;
   bannedSelect(
     candidates: Candidate[],
@@ -506,70 +510,68 @@ test('bannedSelect keeps an identifier, a comment, a doc line that hold the word
   expect(select(['a.ts', '// which type of step']).selected).toHaveLength(1);
   expect(select(['note.md', 'type Foo = string;']).selected).toHaveLength(1);
 });
-test('bannedSelect asks one candidate per word, entry and file, the first', () => {
+test('bannedSelect asks the first three candidates per word, entry and file', () => {
   const result = select(
     ['a.ts', 'invocation one'],
     ['a.ts', 'invocation two'],
     ['a.ts', 'invocation three'],
+    ['a.ts', 'invocation four'],
+    ['a.ts', 'invocation five'],
     ['b.ts', 'invocation one'],
   );
   expect(result.selected.map((c) => [c.file, c.text])).toEqual([
     ['a.ts', 'invocation one'],
+    ['a.ts', 'invocation two'],
+    ['a.ts', 'invocation three'],
     ['b.ts', 'invocation one'],
   ]);
   expect(result.repeat).toBe(2);
 });
-test('bannedRemoved holds every removed line of every file, trimmed and with whitespace runs made one space', () => {
-  const diff = [
-    'diff --git a/a.md b/a.md',
-    '--- a/a.md',
-    '+++ b/a.md',
-    '@@ -1,3 +1,1 @@',
-    ' keep',
-    '-\t  Each   invocation of a stage  ',
-    '-}',
-    '+added',
-    'diff --git a/b.json b/b.json',
-    '--- a/b.json',
-    '+++ b/b.json',
-    '@@ -1,2 +1,1 @@',
-    '-"invocation": 1,',
-    '--- x',
-    '+y',
-    '',
-  ].join('\n');
-  expect([...lib.bannedRemoved(diff)].sort()).toEqual(['"invocation": 1,', '-- x', 'Each invocation of a stage']);
+const asked = (rows: [string, number][]) =>
+  rows.map(([file, n]) => ({ ...line, ...entry, word: 'invocation', file, line: n }));
+const noulAnswer = (noul: number) => ({ type: 'noul', noul });
+test('bannedHits flags a file once, on its highest-scoring flagged line, the earlier on a tie', () => {
+  const rows = asked([
+    ['a.md', 1],
+    ['a.md', 2],
+    ['a.md', 3],
+  ]);
+  const answers = { 'word-1': noulAnswer(0.85), 'word-2': noulAnswer(0.97), 'word-3': noulAnswer(0.9) };
+  expect(lib.bannedHits(rows, answers)).toEqual([
+    { file: 'a.md', line: 2, word: 'invocation', term: 'Call', yes: 0.97 },
+  ]);
+  expect(lib.bannedHits(rows, { 'word-1': noulAnswer(0.9), 'word-2': noulAnswer(0.9) })).toEqual([
+    { file: 'a.md', line: 1, word: 'invocation', term: 'Call', yes: 0.9 },
+  ]);
 });
-test('bannedSelect counts a line the diff only moved or re-indented as moved, and asks one that differs in a word', () => {
-  const removed = new Set(['Each invocation of a stage']);
-  const moved = selectRemoving(removed, ['new.md', '    Each  invocation of a stage']);
-  expect(moved).toMatchObject({ selected: [], moved: 1, keyword: 0, repeat: 0 });
-  const changed = selectRemoving(removed, ['new.md', 'Each invocation of a step']);
-  expect(changed.selected).toHaveLength(1);
-  expect(changed.moved).toBe(0);
+test('bannedHits makes a hit for each file, and for each entry of one word and file', () => {
+  const rows = [
+    ...asked([
+      ['a.md', 1],
+      ['b.md', 1],
+    ]),
+    { ...(asked([['a.md', 4]])[0] as Candidate), term: 'Try' },
+  ];
+  const answers = { 'word-1': noulAnswer(0.9), 'word-2': noulAnswer(0.9), 'word-3': noulAnswer(0.9) };
+  expect(lib.bannedHits(rows, answers).map((h) => [h.file, h.term])).toEqual([
+    ['a.md', 'Call'],
+    ['b.md', 'Call'],
+    ['a.md', 'Try'],
+  ]);
 });
-test('bannedSelect counts a keyword line as keyword, not moved', () => {
-  const result = selectRemoving(new Set(['type Foo = string;']), ['a.ts', 'type Foo = string;']);
-  expect(result).toMatchObject({ selected: [], keyword: 1, moved: 0 });
-});
-test('the stage does not ask a line removed from another file and counts it moved', async () => {
-  await withTempRepo((repo) => {
-    setup(repo, { 'word-1': 0.97 });
-    const diff =
-      '+++ b/old.md\n@@ -1 +0,0 @@\n-Each invocation of a stage\n' +
-      '+++ b/new.md\n@@ -0,0 +1,2 @@\n+    Each invocation of a stage\n+Another invocation here\n';
-    const result = stage(repo, diff);
-    const asked = JSON.parse(readFileSync(result.request, 'utf8'));
-    expect(Object.values(asked.state.lines).map((l) => (l as { text: string }).text)).toEqual([
-      'Another invocation here',
-    ]);
-    expect(result.output.jev).toMatchObject({
-      candidates: 2,
-      requests: 1,
-      skipped: { keyword: 0, moved: 1, repeat: 0, oversized: 0 },
-    });
-    expect(result.stderr).toContain('not asked: 1 moved');
-  });
+test('bannedHits ignores a missing or non-noul answer, and flags at 0.8 but not at 0.799', () => {
+  const rows = asked([
+    ['a.md', 1],
+    ['b.md', 1],
+    ['c.md', 1],
+    ['d.md', 1],
+  ]);
+  const answers = {
+    'word-1': noulAnswer(0.8),
+    'word-2': noulAnswer(0.799),
+    'word-3': { type: 'choice', choice: 'x' },
+  };
+  expect(lib.bannedHits(rows, answers).map((h) => h.file)).toEqual(['a.md']);
 });
 test('bannedSelect lets a keyword line not take the place of a later comment line', () => {
   const result = select(['a.ts', 'type Foo = string;'], ['a.ts', '// the type of it']);
@@ -620,15 +622,18 @@ test('the stage asks about a keyword in a string, a trailing comment and a templ
     });
   });
 });
-test('the stage asks one question for three lines of a TypeScript file and reports the two skipped', async () => {
+test('the stage asks the comment line and the identifier line, skips the keyword line, and flags the file once', async () => {
   await withTempRepo((repo) => {
-    setup(repo, { 'word-1': 0.97 });
+    setup(repo, { 'word-1': 0.85, 'word-2': 0.97 });
     writeFileSync(join(repo.dir, 'CONTEXT.md'), '**Kind**:\nWhat a step is.\n_Avoid_: type\n');
     const diff = '+++ b/a.ts\n@@ -0,0 +1,3 @@\n+type Foo = string;\n+// which type of step\n+const stepType = 1;\n';
     const out = join(repo.home, 'out');
     const result = stage(repo, diff);
-    expect(Object.keys(JSON.parse(readFileSync(join(out, 'jev-request.json'), 'utf8')).questions)).toEqual(['word-1']);
-    expect(result.output.hits).toEqual([{ file: 'a.ts', line: 2, word: 'type', term: 'Kind', yes: 0.97 }]);
+    expect(Object.keys(JSON.parse(readFileSync(join(out, 'jev-request.json'), 'utf8')).questions)).toEqual([
+      'word-1',
+      'word-2',
+    ]);
+    expect(result.output.hits).toEqual([{ file: 'a.ts', line: 3, word: 'type', term: 'Kind', yes: 0.97 }]);
     expect(result.output.jev).toEqual({
       asked: true,
       failed: false,
@@ -636,9 +641,22 @@ test('the stage asks one question for three lines of a TypeScript file and repor
       threshold: 0.8,
       candidates: 3,
       requests: 1,
-      skipped: { keyword: 1, moved: 0, repeat: 1, oversized: 0 },
+      skipped: { keyword: 1, moved: 0, repeat: 0, oversized: 0 },
     });
-    expect(result.stderr).toContain('not asked: 1 keyword, 1 repeat');
+    expect(result.stderr).toContain('not asked: 1 keyword');
+  });
+});
+test('the stage asks three of five lines of one word in one file and counts two as repeats', async () => {
+  await withTempRepo((repo) => {
+    setup(repo, { 'word-1': 0.05, 'word-2': 0.05, 'word-3': 0.05 });
+    const diff = `+++ b/a.md\n@@ -0,0 +1,5 @@\n${Array.from({ length: 5 }, (_, i) => `+invocation ${i}\n`).join('')}`;
+    const result = stage(repo, diff);
+    expect(Object.keys(JSON.parse(readFileSync(result.request, 'utf8')).questions)).toEqual([
+      'word-1',
+      'word-2',
+      'word-3',
+    ]);
+    expect(result.output.jev).toMatchObject({ candidates: 5, skipped: { repeat: 2 } });
   });
 });
 /**

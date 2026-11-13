@@ -351,6 +351,8 @@ export function leakRequests(lines) {
 /** Measured on real requests: it stays 0.8, in requests of BANNED_BATCH candidates. */
 export const BANNED_YES = 0.8;
 export const BANNED_CONTEXT = 3;
+/** The most occurrences of a word, entry and file asked about. */
+export const BANNED_OCCURRENCES = 3;
 /**
  * Candidates to a request. The same real lines score 0.55-0.60 in a request of 64 and 0.85-0.86 in one of 16, and
  * requests of 4 or 1 flag more wrong lines at 1.5 to 2.5 times the tokens.
@@ -580,10 +582,10 @@ export function bannedRemoved(diffText) {
 /**
  * Leaves out a candidate whose word is a JS keyword only in the code of a line of a JS or TypeScript file, outside its
  * string literals and comments (`keyword`), then one whose text is a line `removed` holds (`moved`), then
- * every one after the first of the same word, entry and file (`repeat`): `{ selected, keyword, moved, repeat }`.
+ * every one after the BANNED_OCCURRENCES-th of the same word, entry and file (`repeat`): `{ selected, keyword, moved, repeat }`.
  */
 export function bannedSelect(candidates, removed = new Set()) {
-  const seen = new Set();
+  const seen = new Map();
   const selected = [];
   let keyword = 0;
   let moved = 0;
@@ -598,13 +600,35 @@ export function bannedSelect(candidates, removed = new Set()) {
       continue;
     }
     const key = JSON.stringify([candidate.word, candidate.term, candidate.file]);
-    if (seen.has(key)) repeat++;
+    const count = seen.get(key) ?? 0;
+    if (count >= BANNED_OCCURRENCES) repeat++;
     else {
-      seen.add(key);
+      seen.set(key, count + 1);
       selected.push(candidate);
     }
   }
   return { selected, keyword, moved, repeat };
+}
+
+/**
+ * The hits of the asked candidates (`asked[n - 1]` is `word-<n>`): each whose `word-<n>` answer is a noul at or above
+ * BANNED_YES, then one per word, entry and file, the highest `yes` and the earlier candidate on a tie, in candidate order:
+ * `[{ file, line, word, term, yes }]`.
+ */
+export function bannedHits(asked, answers) {
+  const best = new Map();
+  asked.forEach((candidate, i) => {
+    const answer = answers[`word-${i + 1}`];
+    if (answer?.type !== 'noul' || typeof answer.noul !== 'number' || answer.noul < BANNED_YES) return;
+    const key = JSON.stringify([candidate.word, candidate.term, candidate.file]);
+    if (!best.has(key) || answer.noul > best.get(key).yes) best.set(key, { index: i, yes: answer.noul });
+  });
+  return [...best.values()]
+    .sort((a, b) => a.index - b.index)
+    .map(({ index, yes }) => {
+      const { file, line, word, term } = asked[index];
+      return { file, line, word, term, yes };
+    });
 }
 
 const bannedBytes = (candidates, start) =>

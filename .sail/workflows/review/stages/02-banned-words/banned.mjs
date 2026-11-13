@@ -1,4 +1,4 @@
-// Find added uses of CONTEXT.md's avoided words on the diff's added lines, never in commit messages; Jev judges every candidate in requests of 16, stopping at a failed request or its time limit, leaving out a line the diff also removes (moved or re-wrapped), a JS keyword on a code line outside its string literals and comments and repeats of a word in one file, and counting what it didn't ask.
+// Find added uses of CONTEXT.md's avoided words on the diff's added lines, never in commit messages; Jev judges every candidate in requests of 16, stopping at a failed request or its time limit, leaving out a line the diff also removes (moved or re-wrapped), a JS keyword on a code line outside its string literals and comments and occurrences after the third of a word in one file (one hit per file, on its highest-scoring line), and counting what it didn't ask.
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
@@ -9,10 +9,10 @@ const {
   bannedCandidates,
   bannedSelect,
   bannedRemoved,
+  bannedHits,
   bannedRequests,
   bannedAsk,
   askNouls,
-  yesses,
 } = await import(join(dirname(process.env.SAIL_CONFIG), 'lib', 'jev-check.mjs'));
 const present = existsSync('CONTEXT.md');
 const entries = present ? parseGlossary(readFileSync('CONTEXT.md', 'utf8')) : [];
@@ -38,17 +38,7 @@ const answer = !requests.length
           : '',
       };
 const note = oversized ? `${oversized} candidates omitted (request limits)` : '';
-const hits = [];
-if (answer.asked) {
-  for (const { id, yes } of yesses(
-    answer.answers,
-    asked.map((_, i) => `word-${i + 1}`),
-  )) {
-    if (yes < BANNED_YES) continue;
-    const { file, line, word, term } = asked[Number(id.slice(5)) - 1];
-    hits.push({ file, line, word, term, yes });
-  }
-}
+const hits = answer.asked ? bannedHits(asked, answer.answers) : [];
 const glossary = { entries: entries.length, words: entries.reduce((sum, entry) => sum + entry.avoid.length, 0) };
 const jev = {
   asked: answer.asked,
