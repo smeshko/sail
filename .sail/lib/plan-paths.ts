@@ -5,17 +5,19 @@
 // only `sail`, as this does.
 import { matchesGlob, type Validator } from 'sail';
 
+const PATH_SHAPE = /^[\w.@+*-]+(\/[\w.@+*-]+)*\/?$/;
 const KNOWN_EXTENSION = /\.(ts|tsx|js|mjs|json|md|yaml|yml|sh|css|html)$/;
 
 /**
  * The paths a Files block names: its backticked tokens, without a `:line` suffix. As `jev-check.mjs` reads them, only
- * those with a `/` or a known extension; with `every`, all of them, so a root file such as `.python-version` counts.
+ * those shaped like a repository path with a `/` or a known extension; with `every`, all of them, so a root file such as `.python-version` counts.
  */
 function pathsOf(block: string, every = false): string[] {
   const paths: string[] = [];
   for (const [, token] of block.matchAll(/`([^`\s]+)`/g)) {
     const path = (token as string).replace(/:\d+(-\d+)?$/, '');
-    if ((every || path.includes('/') || KNOWN_EXTENSION.test(path)) && !paths.includes(path)) paths.push(path);
+    const wanted = every || (PATH_SHAPE.test(path) && (path.includes('/') || KNOWN_EXTENSION.test(path)));
+    if (wanted && !paths.includes(path)) paths.push(path);
   }
   return paths;
 }

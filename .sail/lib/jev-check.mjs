@@ -610,12 +610,19 @@ export function bannedQuestions(candidates, start = 0) {
 
 // --- jev-tasks: is each task of the plan implemented?
 
-/** The paths a Files block names: the backticked tokens that look like files. */
+/**
+ * The paths a Files block names: the backticked tokens, without a `:line` suffix, that are shaped like a repository path
+ * (word characters, `.`, `@`, `+`, `*` and `-` in segments joined by `/`) and have a `/` or a known extension. Markup,
+ * regexes, routes with a leading `/`, `$VAR/x` and `~/x` are not paths.
+ */
 function pathsOf(block) {
   const paths = [];
   for (const [, token] of block.matchAll(/`([^`\s]+)`/g)) {
     const path = token.replace(/:\d+(-\d+)?$/, '');
-    if (/\//.test(path) || /\.(ts|tsx|js|mjs|json|md|yaml|yml|sh|css|html)$/.test(path)) {
+    if (
+      /^[\w.@+*-]+(\/[\w.@+*-]+)*\/?$/.test(path) &&
+      (/\//.test(path) || /\.(ts|tsx|js|mjs|json|md|yaml|yml|sh|css|html)$/.test(path))
+    ) {
       if (!paths.includes(path)) paths.push(path);
     }
   }

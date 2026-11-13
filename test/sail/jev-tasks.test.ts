@@ -349,3 +349,21 @@ test('the stage, with a plan that holds no task details, does not ask Jev and sa
     expect(output.note).toContain('no task details');
   });
 }, 60_000);
+
+test('parseTasks keeps only path-shaped tokens of a Files block', () => {
+  const plan = `# Plan
+
+## Tasks
+
+- [ ] TASK-001: First
+
+## Task details
+
+### TASK-001: First
+
+Files:
+- \`>copy</button>\`, \`/^a\\/b$/\`, \`/api/runs/:id\`, \`$STAGE_OUT/plan.md\`
+- \`src/a.ts:12\`, \`test/fixtures/runs/\` and \`foo.json\`
+`;
+  expect(lib.parseTasks(plan).map((task) => task.paths)).toEqual([['src/a.ts', 'test/fixtures/runs/', 'foo.json']]);
+});

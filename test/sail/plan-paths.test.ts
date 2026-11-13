@@ -95,7 +95,7 @@ test('check and derives name the validator', () => {
 
 test('taskPaths agrees with the paths jev-tasks finds on the same plan', () => {
   const text = plan(
-    '`src/a.ts:12`, `src/a.ts:30-40` and `bun`, `evals/x.py`, `foo.json`',
+    '`src/a.ts:12`, `src/a.ts:30-40` and `bun`, `evals/x.py`, `foo.json`, `>copy</button>`, `/api/runs/:id`, `$STAGE_OUT/x.md`',
     '`test/a.test.ts`, `adapters.jev`',
   );
   expect(lib.taskPaths(text)).toEqual([
