@@ -1,4 +1,4 @@
-// Find added uses of CONTEXT.md's avoided words on the diff's added lines, never in commit messages; Jev judges every candidate in a request of its own, with two nouls, four requests at a time, stopping at a failed request or its time limit, leaving out a line the diff also removes (moved or re-wrapped), a JS keyword on a code line outside its string literals and comments and occurrences after the third of a word in one file (one hit per file, on its highest-scoring line), and counting what it didn't ask.
+// Find added uses of CONTEXT.md's avoided words on the diff's added lines, never in commit messages; Jev judges every candidate in a request of its own, with two nouls, four requests at a time, stopping at a failed request or its time limit, leaving out a line the diff also removes (moved or re-wrapped), a JS keyword on a code line outside its string literals and comments and occurrences after the third of a word, entry and file (one hit per word, entry and file, on its highest-scoring line), and counting what it didn't ask.
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
