@@ -1,6 +1,7 @@
 // demonstrate: shows the pull request's change working the way a user would see it, in a demo repository on fake
 // ports, from the Demonstration section its body carries, or from its requirements when it has none. It reports what
-// it saw for each criterion and judges nothing: the judge weighs a criterion it couldn't show.
+// it saw for each criterion and judges nothing: the judge weighs a criterion it couldn't show. The workflow doesn't call
+// it when the body's Demonstration section says there is no surface (`Surface: none`).
 import { agent, file, value, z } from 'sail';
 import { readonly } from '../../../../lib/permissions';
 import { Demonstrated } from '../../schemas';

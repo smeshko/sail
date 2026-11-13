@@ -1,5 +1,6 @@
 // review: a factory-labelled pull request in, merged out. Validation, the leak check (including its Jev pass), the
-// banned-words check, the demonstration and five reviewers look at it at once; Jev triages clear findings, then a judge
+// banned-words check, the demonstration and five reviewers look at it at once (no demonstrate agent starts when the body's
+// Demonstration section says `Surface: none`: the judge and the ticket read why nothing was shown); Jev triages clear findings, then a judge
 // decides what each finding becomes (fixed here, filed as a ticket, or dropped)
 // and which reviews are too thin to trust. Up to three fix passes follow, each checked by the agent, with Jev's answers as its hint, beside fresh
 // validation; a pass that commits nothing and leaves the same findings open ends them early. A pass starts only for a
@@ -19,7 +20,8 @@ import { pr } from 'sail/intakes';
 import type { FollowUp } from '../../stages/file-follow-ups/stage';
 import { fileFollowUps } from '../../stages/file-follow-ups/stage';
 import { redTests, validate } from '../../stages/validate/stage';
-import type { Judgement, Lens, NumberedFinding, Reviewed, ReviewRecord, Triaged } from './schemas';
+import { NO_SURFACE, noSurface } from './demonstration';
+import type { Demonstrated, Judgement, Lens, NumberedFinding, Reviewed, ReviewRecord, Triaged } from './schemas';
 import { FixFeedback } from './schemas';
 import { requirements } from './stages/01-requirements/stage';
 import { bannedWords } from './stages/02-banned-words/stage';
@@ -68,7 +70,7 @@ export default workflow(
   'review',
   {
     intake: pr,
-    version: 13,
+    version: 14,
     watch: { every: '5m' },
     // Two pull requests at a time, though each merge moves the base the other is being reviewed against.
     maxConcurrentRuns: 2,
@@ -88,19 +90,35 @@ export default workflow(
     const req = await run.stage(requirements, { ticketKey: ticketKey ?? '' });
     const reading = { brief, requirements: req.files['requirements.md'], base };
 
-    // Everything that looks at the pull request, at once. The reviewers come last, in LENSES' order.
-    const [validated, leaks, banned, shown, ...reviews] = await run.all([
+    // Everything that looks at the pull request, at once. The reviewers come last, in LENSES' order. The demonstrate agent
+    // joins them unless the body's Demonstration section says there is no surface: that is decided here, once.
+    const skipped = noSurface(run.input.body);
+    const checks = [
       [validate],
       [leakCheck, { diff: run.intake.files['diff.patch'], base }],
       [bannedWords, { diff: run.intake.files['diff.patch'], base }],
-      [demonstrate, reading],
+    ] as const;
+    const reviewers = [
       [reviewRequirements, reading],
       [reviewArchitecture, reading],
       [reviewBugs, reading],
       [reviewTests, reading],
       [reviewConventions, reading],
-    ]);
-    if (shown.outcome === 'blocked') return handOff(`demonstrate blocked: ${shown.reason}`);
+    ] as const;
+    let demonstration: z.infer<typeof Demonstrated>;
+    let validated: Awaited<ReturnType<typeof run.all<typeof checks>>>[0];
+    let leaks: Awaited<ReturnType<typeof run.all<typeof checks>>>[1];
+    let banned: Awaited<ReturnType<typeof run.all<typeof checks>>>[2];
+    let reviews: Awaited<ReturnType<typeof run.all<typeof reviewers>>>;
+    if (skipped !== null) {
+      [validated, leaks, banned, ...reviews] = await run.all([...checks, ...reviewers]);
+      demonstration = { criteria: [], skipped, transcript: '' };
+    } else {
+      const [first, second, third, shown, ...rest] = await run.all([...checks, [demonstrate, reading], ...reviewers]);
+      if (shown.outcome === 'blocked') return handOff(`demonstrate blocked: ${shown.reason}`);
+      [validated, leaks, banned, reviews] = [first, second, third, rest];
+      demonstration = shown.output;
+    }
     if (validated.outcome === 'failed' && validated.output.baseRed) {
       return run.fail(`staging is red: ${redTests(validated.output)}`);
     }
@@ -179,6 +197,7 @@ export default workflow(
     }
 
     // The demonstration is evidence for the judge, not a source of findings: the judge may raise a criterion it didn't show.
+    // A skip reaches it as NO_SURFACE: the body's words are untrusted, and the brief holds them wrapped.
     // The judge decides what each finding becomes, and which reviews it can't trust. It runs with no findings too: a
     // clean review is only as good as what its coverage says it checked.
     const triaged = await run.stage(jevTriage, { findings: { findings }, diff: run.intake.files['diff.patch'] });
@@ -188,7 +207,11 @@ export default workflow(
       brief,
       requirements: reading.requirements,
       findings: { findings },
-      evidence: { validation: validated.output, demonstration: shown.output, reviews: summaries },
+      evidence: {
+        validation: validated.output,
+        demonstration: skipped === null ? demonstration : { ...demonstration, skipped: NO_SURFACE },
+        reviews: summaries,
+      },
     });
     if (judged.outcome === 'blocked') return handOff(`judge blocked: ${judged.reason}`);
     // A criterion the judge raised: the demonstration didn't show it and no test does. Each is a high finding the fix pass
@@ -337,7 +360,7 @@ export default workflow(
       });
     }
     if (ticketKey !== undefined) {
-      await run.stage(attachDemonstration, { demonstration: shown.output, ticketKey, pr: pullRequest });
+      await run.stage(attachDemonstration, { demonstration, ticketKey, pr: pullRequest });
     }
     await run.stage(report, {
       record: {
