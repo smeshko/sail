@@ -448,3 +448,50 @@ test('collect never counts as skippable a call with a task whose named test file
     expect(table('check-tasks', changed.calls)[1]).toContain('skippable 1/1');
   });
 });
+
+test('collect asks check-tasks through askTasks, with its 76,000-byte limit, and check-fix through askNouls with no limit', async () => {
+  await withTempRepo(async (repo) => {
+    const { base, first, second } = commitTasks(repo);
+    const fixed = { fixes: [{ finding: 'R1', commit: second, note: 'fixed' }] };
+    const runDir = writeRun(repo, base, [
+      { key: 'implement#1', output: implemented(first, second) },
+      CHECKED,
+      { key: 'fix#1', output: fixed },
+      {
+        key: 'check-fix#1',
+        output: { items: [{ finding: 'R1', resolved: true }] },
+        inFiles: {
+          'findings.json': JSON.stringify({ findings: [{ id: 'R1', title: 'broken' }] }),
+          'fixed.json': JSON.stringify(fixed),
+          since: 'review-sha\n',
+        },
+      },
+    ]);
+    const lib = (await import(join(ROOT, '.sail/lib/jev-check.mjs'))) as Lib & { TASKS_MAX_REQUEST_BYTES: number };
+    expect(lib.TASKS_MAX_REQUEST_BYTES).toBe(76_000);
+    const asks: { via: string; args: number }[] = [];
+    const notes: string[] = [];
+    collect(
+      runDir,
+      {
+        ...lib,
+        git: () => '',
+        askNouls: (...args: unknown[]) => {
+          asks.push({ via: 'askNouls', args: args.length });
+          return { asked: true, answers: {} };
+        },
+        askTasks: (tasks, _out, run) => {
+          asks.push({ via: 'askTasks', args: 3 });
+          return { asked: true, answers: {}, state: lib.tasksState(tasks, run) };
+        },
+      } as Lib,
+      repo.home,
+      notes,
+    );
+    expect(notes).toEqual([]);
+    expect(asks).toEqual([
+      { via: 'askTasks', args: 3 },
+      { via: 'askNouls', args: 3 },
+    ]);
+  });
+});
