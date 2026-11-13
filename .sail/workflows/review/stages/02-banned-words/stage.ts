@@ -1,6 +1,6 @@
 // banned-words: Jev judges whether the diff's added lines (never commit messages) use CONTEXT.md's avoided words in the forbidden sense.
 // The `base` binding is kept for the workflow's call but the script no longer reads it.
-// Each candidate is asked alone in its own request, with two nouls.
+// Each candidate is asked alone in its own request, with two nouls, four requests at a time.
 // Each hit reaches the review's judge as a finding; without candidates it asks Jev nothing.
 // It skips a line the diff also removes (`moved`), a JS keyword on a code line outside its string literals and comments and a repeat, an occurrence after the third of a word in one file, flagging the file once, and counts both in `jev.skipped`.
 import { file, script, value, z } from 'sail';

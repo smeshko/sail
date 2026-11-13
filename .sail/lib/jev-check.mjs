@@ -4,7 +4,7 @@
 // The fix check never skips its agent: check-fix always runs, with Jev's answers as its hint.
 // Leak-check instead asks whether added lines name other projects and forwards individual LEAK_YES hits to the judge,
 // with no agent fallback. The agreement script uses these same state builders.
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -53,6 +53,34 @@ export function noul(instructions, yes, no) {
   return { type: 'noul', instructions, criteria: { true: yes, false: no } };
 }
 
+/** Writes the request as `name` in `out`: its file, and the result of a request over `limit` bytes, which is never sent. */
+function writeRequest(questions, state, out, name, limit) {
+  const file = join(out, name);
+  const body = JSON.stringify({ state, questions });
+  writeFileSync(file, body);
+  const bytes = Buffer.byteLength(body);
+  if (bytes <= limit) return { file };
+  return {
+    file,
+    refused: { asked: false, note: `the request is ${bytes} bytes, over the ${limit}-byte limit Jev accepts` },
+  };
+}
+
+/** What `sail port jev ask` left as the result askNouls returns: `error`, `status`, `stdout` and `stderr` of its process. */
+function readAnswer({ error, status, stdout, stderr }) {
+  if (error) return { asked: false, failed: true, note: `sail port jev ask did not start: ${error.message}` };
+  if (status !== 0) {
+    const last = stderr.trim().split('\n').at(-1) || `exited ${status}`;
+    return { asked: false, failed: true, note: last };
+  }
+  try {
+    const answered = JSON.parse(stdout.trim().split('\n').at(-1));
+    return { asked: true, model: answered.model, answers: answered.answers ?? {} };
+  } catch {
+    return { asked: false, failed: true, note: 'sail port jev ask printed no JSON answer' };
+  }
+}
+
 /**
  * Asks Jev `questions` about `state` through `sail port jev ask`, the request kept as `name` in `out`.
  * `{ asked: true, model, answers }`, or `{ asked: false, note }` when the request is over `limit` bytes, which was
@@ -60,31 +88,39 @@ export function noul(instructions, yes, no) {
  * non-zero or printed no JSON.
  */
 export function askNouls(questions, state, out, name = 'jev-request.json', limit = MAX_REQUEST_BYTES) {
-  const file = join(out, name);
-  const body = JSON.stringify({ state, questions });
-  writeFileSync(file, body);
-  const bytes = Buffer.byteLength(body);
-  if (bytes > limit)
-    return {
-      asked: false,
-      note: `the request is ${bytes} bytes, over the ${limit}-byte limit Jev accepts`,
+  const { file, refused } = writeRequest(questions, state, out, name, limit);
+  if (refused) return refused;
+  return readAnswer(
+    spawnSync('sail', ['port', 'jev', 'ask', '--body-file', file], {
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+    }),
+  );
+}
+
+/** askNouls without blocking: the same arguments and the same three results, as a promise. */
+export function askNoulsAsync(questions, state, out, name = 'jev-request.json', limit = MAX_REQUEST_BYTES) {
+  const { file, refused } = writeRequest(questions, state, out, name, limit);
+  if (refused) return Promise.resolve(refused);
+  return new Promise((resolve) => {
+    let stdout = '';
+    let stderr = '';
+    let done = false;
+    const finish = (result) => {
+      if (done) return;
+      done = true;
+      resolve(readAnswer(result));
     };
-  const result = spawnSync('sail', ['port', 'jev', 'ask', '--body-file', file], {
-    encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024,
+    const child = spawn('sail', ['port', 'jev', 'ask', '--body-file', file], { stdio: ['ignore', 'pipe', 'pipe'] });
+    child.stdout.setEncoding('utf8').on('data', (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.setEncoding('utf8').on('data', (chunk) => {
+      stderr += chunk;
+    });
+    child.on('error', (error) => finish({ error, status: null, stdout, stderr }));
+    child.on('close', (status) => finish({ status, stdout, stderr }));
   });
-  if (result.error)
-    return { asked: false, failed: true, note: `sail port jev ask did not start: ${result.error.message}` };
-  if (result.status !== 0) {
-    const last = result.stderr.trim().split('\n').at(-1) || `exited ${result.status}`;
-    return { asked: false, failed: true, note: last };
-  }
-  try {
-    const answered = JSON.parse(result.stdout.trim().split('\n').at(-1));
-    return { asked: true, model: answered.model, answers: answered.answers ?? {} };
-  } catch {
-    return { asked: false, failed: true, note: 'sail port jev ask printed no JSON answer' };
-  }
 }
 
 /** Jev's probability of yes for each id in `ids` it answered, in that order. */
@@ -668,26 +704,44 @@ export function bannedRequests(candidates) {
  * worst case (three 10 s attempts and their pauses), so a large change ends with a note rather than a timeout.
  */
 export const BANNED_ASK_MS = 480_000;
+/** Requests asked at once. */
+export const BANNED_CONCURRENCY = 4;
 /**
- * Asks each request in turn with `ask(request, i)`, stopping after the first whose result is `failed` (Jev unreachable
- * or refusing, as the next would be too) and before any once `deadlineMs` has passed since the first:
- * `{ results, unasked, reason }`, `unasked` counting the requests not asked and `reason` saying why.
+ * Asks the requests with `ask(request, i)`, started in order and never more than `concurrency` at once. It starts none
+ * after a result that is `failed` (Jev unreachable or refusing, as the next would be too) and none once `deadlineMs` has
+ * passed since the first, and waits for those in flight: `{ results, unasked, reason }`. The started requests are a
+ * prefix, `results` holds theirs in request order, `unasked` counts the rest, and `reason` is the note of the first
+ * failed result, else the deadline's sentence, else an empty text.
  */
-export function bannedAsk(requests, ask, { deadlineMs = BANNED_ASK_MS, now = Date.now } = {}) {
+export async function bannedAsk(
+  requests,
+  ask,
+  { deadlineMs = BANNED_ASK_MS, now = Date.now, concurrency = BANNED_CONCURRENCY } = {},
+) {
   const start = now();
   const results = [];
-  for (let i = 0; i < requests.length; i++) {
-    if (i > 0 && now() - start >= deadlineMs)
-      return {
-        results,
-        unasked: requests.length - i,
-        reason: `the stage’s ${Math.round(deadlineMs / 1000)} s for asking Jev ran out`,
-      };
-    const result = ask(requests[i], i);
-    results.push(result);
-    if (result.failed === true) return { results, unasked: requests.length - i - 1, reason: result.note ?? '' };
-  }
-  return { results, unasked: 0, reason: '' };
+  let next = 0;
+  let failed = false;
+  let late = false;
+  const worker = async () => {
+    while (!failed && next < requests.length) {
+      if (next > 0 && now() - start >= deadlineMs) {
+        late = true;
+        return;
+      }
+      const i = next++;
+      results[i] = await ask(requests[i], i);
+      if (results[i].failed === true) failed = true;
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, requests.length) }, worker));
+  const first = results.find((result) => result.failed === true);
+  const reason = first
+    ? (first.note ?? '')
+    : late
+      ? `the stage’s ${Math.round(deadlineMs / 1000)} s for asking Jev ran out`
+      : '';
+  return { results, unasked: requests.length - next, reason };
 }
 /** Two nouls per candidate: `word-<n>`, whether the word is used in the sense the entry forbids, and `word-<n>:refers`, whether it refers to what the entry defines. */
 export function bannedQuestions(candidates, start = 0) {

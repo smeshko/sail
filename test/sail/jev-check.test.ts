@@ -25,6 +25,13 @@ interface Lib {
     name?: string,
     limit?: number,
   ): Asked;
+  askNoulsAsync(
+    questions: Record<string, unknown>,
+    state: Record<string, unknown>,
+    out: string,
+    name?: string,
+    limit?: number,
+  ): Promise<Asked>;
 }
 const ROOT = join(import.meta.dir, '..', '..');
 const lib = (await import(join(ROOT, '.sail', 'lib', 'jev-check.mjs'))) as Lib;
@@ -132,5 +139,52 @@ test('askNouls answers nothing when sail prints no JSON, or does not start', () 
   }).toEqual({
     garbled: { asked: false, failed: true, note: 'sail port jev ask printed no JSON answer' },
     missing: { asked: false, failed: true, note: 'sail port jev ask did not start' },
+  });
+});
+
+test('askNoulsAsync answers as askNouls does: an answer, a failed exit, no JSON and a request over the limit', async () => {
+  const out = stubSail(`echo "asking"\necho '{"model":"jev-1","answers":{"TASK-001":{"type":"noul","noul":0.97}}}'`);
+  expect(await lib.askNoulsAsync({ 'TASK-001': { type: 'noul' } }, { commits: 'abc' }, out)).toEqual({
+    asked: true,
+    model: 'jev-1',
+    answers: { 'TASK-001': { type: 'noul', noul: 0.97 } },
+  });
+  expect(JSON.parse(readFileSync(join(out, 'jev-request.json'), 'utf8'))).toEqual({
+    state: { commits: 'abc' },
+    questions: { 'TASK-001': { type: 'noul' } },
+  });
+  expect(await lib.askNoulsAsync({}, {}, stubSail('echo "first" >&2\necho "jev: no key" >&2\nexit 3'))).toEqual({
+    asked: false,
+    failed: true,
+    note: 'jev: no key',
+  });
+  expect(await lib.askNoulsAsync({}, {}, stubSail('exit 4'))).toEqual({
+    asked: false,
+    failed: true,
+    note: 'exited 4',
+  });
+  expect(await lib.askNoulsAsync({}, {}, stubSail('echo "not json"'))).toEqual({
+    asked: false,
+    failed: true,
+    note: 'sail port jev ask printed no JSON answer',
+  });
+});
+
+test('askNoulsAsync writes a request over the limit and starts nothing, and reports a sail that does not start', async () => {
+  const marker = join(tmpdir(), `sail-test-jev-check-async-marker-${process.pid}`);
+  const out = stubSail(`touch ${marker}\necho '{"model":"jev-1","answers":{}}'`);
+  const over = await lib.askNoulsAsync({}, { text: 'x'.repeat(80_000) }, out, 'jev-request.json', 76_000);
+  expect(over.asked).toBe(false);
+  expect(over.failed).toBeUndefined();
+  expect(over.note).toContain('over the 76000-byte limit');
+  expect(existsSync(join(out, 'jev-request.json'))).toBe(true);
+  expect(existsSync(marker)).toBe(false);
+  process.env.PATH = out;
+  rmSync(join(out, 'sail'));
+  const missing = await lib.askNoulsAsync({}, {}, out);
+  expect({ asked: missing.asked, failed: missing.failed, note: missing.note?.split(':')[0] }).toEqual({
+    asked: false,
+    failed: true,
+    note: 'sail port jev ask did not start',
   });
 });

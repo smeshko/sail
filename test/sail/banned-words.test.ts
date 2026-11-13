@@ -28,6 +28,7 @@ interface Lib {
   bannedMatches(pattern: RegExp, text: string): boolean;
   bannedState(candidates: Candidate[], start?: number): unknown;
   BANNED_REFERS: number;
+  BANNED_CONCURRENCY: number;
   JS_KEYWORDS: Set<string>;
   bannedHits(
     asked: Candidate[],
@@ -44,11 +45,11 @@ interface Lib {
     oversized: number;
   };
   bannedQuestions(candidates: Candidate[], start?: number): Record<string, { type: string; instructions: string }>;
-  bannedAsk<R, A extends { asked?: boolean; failed?: boolean; note?: string }>(
+  bannedAsk<R, A extends { asked?: boolean; failed?: boolean; note?: string; answers?: Record<string, unknown> }>(
     requests: R[],
-    ask: (request: R, i: number) => A,
-    options?: { deadlineMs?: number; now?: () => number },
-  ): { results: A[]; unasked: number; reason: string };
+    ask: (request: R, i: number) => Promise<A>,
+    options?: { deadlineMs?: number; now?: () => number; concurrency?: number },
+  ): Promise<{ results: A[]; unasked: number; reason: string }>;
 }
 const lib = (await import(join(import.meta.dir, '../../.sail/lib/jev-check.mjs'))) as Lib;
 const entry = { term: 'Call', definition: 'One invocation.', avoid: ['invocation'] };
@@ -741,33 +742,87 @@ test('the stage stops starting requests once Jev fails one, leaving the rest not
     setup(repo, low(6, { 'word-1': 0.97, 'word-6': 0.97 }));
     const jev = failingJev(repo, [2]);
     const result = stage(repo, candidateFiles(6), undefined, jev.dir);
+    expect(jev.asks()).toBeGreaterThanOrEqual(2);
     expect(jev.asks()).toBeLessThan(6);
     expect(result.output.hits).toEqual([{ file: 'f1.md', line: 1, word: 'invocation', term: 'Call', yes: 0.97 }]);
     expect(result.output.jev.note).toMatch(NOT_ASKED);
   });
 }, 120_000);
-test('bannedAsk asks no request once its deadline has passed, and counts the rest not asked', () => {
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+test('bannedAsk asks no request once its deadline has passed, and counts the rest not asked', async () => {
   let clock = 0;
   const asked: number[] = [];
-  const { results, unasked, reason } = lib.bannedAsk(
+  const { results, unasked, reason } = await lib.bannedAsk(
     ['a', 'b', 'c', 'd'],
-    (_request, i) => {
+    async (_request, i) => {
       asked.push(i);
       clock += 200_000;
       return { asked: true, answers: {} };
     },
-    { deadlineMs: 400_000, now: () => clock },
+    { deadlineMs: 400_000, now: () => clock, concurrency: 1 },
   );
   expect(asked).toEqual([0, 1]);
   expect(results).toHaveLength(2);
   expect(unasked).toBe(2);
   expect(reason).toBe('the stage’s 400 s for asking Jev ran out');
 });
-test('bannedAsk stops at the first failed ask and asks every request when none fails', () => {
-  const failing = lib.bannedAsk([1, 2, 3], (_r, i) => (i === 0 ? { asked: false, failed: true, note: 'down' } : {}));
-  expect(failing).toMatchObject({ unasked: 2, reason: 'down' });
-  expect(failing.results).toHaveLength(1);
-  const all = lib.bannedAsk([1, 2, 3], () => ({ asked: true, answers: {} }));
+test('bannedAsk stops at the first failed ask and asks every request when none fails', async () => {
+  const failing = await lib.bannedAsk([1, 2, 3], async (_r, i) =>
+    i === 0 ? { asked: false, failed: true, note: 'down' } : {},
+  );
+  expect(failing).toMatchObject({ reason: 'down' });
+  expect(failing.results.length + failing.unasked).toBe(3);
+  const single = await lib.bannedAsk([1, 2, 3], async () => ({ asked: false, failed: true, note: 'down' }), {
+    concurrency: 1,
+  });
+  expect(single).toMatchObject({ unasked: 2, reason: 'down' });
+  expect(single.results).toHaveLength(1);
+  const all = await lib.bannedAsk([1, 2, 3], async () => ({ asked: true, answers: {} }));
   expect(all).toMatchObject({ unasked: 0, reason: '' });
   expect(all.results).toHaveLength(3);
+});
+test('bannedAsk has at most four asks in flight and returns results in request order', async () => {
+  let flying = 0;
+  let most = 0;
+  const { results, unasked } = await lib.bannedAsk(
+    Array.from({ length: 10 }, (_, i) => i),
+    async (request) => {
+      flying++;
+      most = Math.max(most, flying);
+      await sleep((10 - request) * 4);
+      flying--;
+      return { asked: true, answers: { [`word-${request}`]: request } };
+    },
+  );
+  expect(lib.BANNED_CONCURRENCY).toBe(4);
+  expect(most).toBe(4);
+  expect(unasked).toBe(0);
+  expect(results.map((r) => Object.keys(r.answers ?? {})[0])).toEqual(
+    Array.from({ length: 10 }, (_, i) => `word-${i}`),
+  );
+});
+test('bannedAsk starts no request after a failed result, waits for those in flight and returns the started prefix', async () => {
+  const started: number[] = [];
+  const finished: number[] = [];
+  const { results, unasked, reason } = await lib.bannedAsk(
+    [0, 1, 2, 3, 4, 5],
+    async (_request, i) => {
+      started.push(i);
+      if (i === 1) {
+        await sleep(25);
+        finished.push(i);
+        return { asked: false, failed: true, note: 'down' };
+      }
+      await sleep(i === 0 ? 5 : 60);
+      finished.push(i);
+      return { asked: true, answers: {} };
+    },
+    { concurrency: 2 },
+  );
+  expect(started).toEqual([0, 1, 2]);
+  expect(finished).toEqual([0, 1, 2]);
+  expect(results).toHaveLength(3);
+  expect(results[1]).toMatchObject({ failed: true });
+  expect(unasked).toBe(3);
+  expect(reason).toBe('down');
 });

@@ -1,4 +1,4 @@
-// Find added uses of CONTEXT.md's avoided words on the diff's added lines, never in commit messages; Jev judges every candidate in a request of its own, with two nouls, stopping at a failed request or its time limit, leaving out a line the diff also removes (moved or re-wrapped), a JS keyword on a code line outside its string literals and comments and occurrences after the third of a word in one file (one hit per file, on its highest-scoring line), and counting what it didn't ask.
+// Find added uses of CONTEXT.md's avoided words on the diff's added lines, never in commit messages; Jev judges every candidate in a request of its own, with two nouls, four requests at a time, stopping at a failed request or its time limit, leaving out a line the diff also removes (moved or re-wrapped), a JS keyword on a code line outside its string literals and comments and occurrences after the third of a word in one file (one hit per file, on its highest-scoring line), and counting what it didn't ask.
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
@@ -13,7 +13,7 @@ const {
   bannedHits,
   bannedRequests,
   bannedAsk,
-  askNouls,
+  askNoulsAsync,
 } = await import(join(dirname(process.env.SAIL_CONFIG), 'lib', 'jev-check.mjs'));
 const present = existsSync('CONTEXT.md');
 const entries = present ? parseGlossary(readFileSync('CONTEXT.md', 'utf8')) : [];
@@ -22,8 +22,8 @@ const lines = bannedLines(diff);
 const allCandidates = bannedCandidates(lines, entries);
 const { selected, keyword, moved, repeat } = bannedSelect(allCandidates, bannedRemoved(diff));
 const { requests, asked, oversized } = bannedRequests(selected);
-const { results, unasked, reason } = bannedAsk(requests, ({ state, questions }, i) =>
-  askNouls(questions, state, process.env.STAGE_OUT, i === 0 ? 'jev-request.json' : `jev-request-${i + 1}.json`),
+const { results, unasked, reason } = await bannedAsk(requests, ({ state, questions }, i) =>
+  askNoulsAsync(questions, state, process.env.STAGE_OUT, i === 0 ? 'jev-request.json' : `jev-request-${i + 1}.json`),
 );
 const refused = results.filter((result) => !result.asked);
 const notAskedRequests = refused.length + unasked;
