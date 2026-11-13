@@ -2,7 +2,7 @@
 // the stage run as a script on the fake Jev. The helpers are `.sail/lib/jev-check.mjs`, which the stage and the agreement
 // script share.
 import { expect, test } from 'bun:test';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { nouls, writeOwnSail } from '../helpers/own-sail';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
@@ -219,6 +219,7 @@ function runStage(
   repo: TempRepo,
   plan: string,
   port?: string,
+  verified: string[] = [],
 ): { code: number; stderr: string; output: Asked; out: string } {
   if (port) writeFileSync(join(repo.home, 'sail'), port, { mode: 0o755 });
   const stageDir = join(repo.dir, '.sail', 'workflows', 'factory', 'stages', '03-jev-tasks');
@@ -226,6 +227,8 @@ function runStage(
   mkdirSync(out);
   const planFile = join(repo.home, 'plan.md');
   writeFileSync(planFile, plan);
+  const verifiedFile = join(repo.home, 'verified.json');
+  writeFileSync(verifiedFile, JSON.stringify(verified));
   const child = Bun.spawnSync([join(stageDir, 'run.sh')], {
     cwd: repo.dir,
     env: {
@@ -234,6 +237,7 @@ function runStage(
       SAIL_BUN: process.execPath,
       SAIL_CONFIG: join(repo.dir, '.sail', 'project.yaml'),
       INPUT_PLAN: planFile,
+      INPUT_VERIFIED: verifiedFile,
       STAGE_OUT: out,
     },
   });
@@ -478,3 +482,49 @@ test('unchangedTests reports a test file with an empty diff, and nothing for an 
 test('CLEAR_YES is 0.8', () => {
   expect(lib.CLEAR_YES).toBe(0.8);
 });
+
+test('the stage, with TASK-003 reported with no commit, asks about the other two and lists all three as implemented', async () => {
+  await withTempRepo(async (repo) => {
+    writeOwnSail(repo, { jev: seed() });
+    changeFiles(repo, 'test/a.test.ts');
+    const { code, output, out } = runStage(repo, PLAN, undefined, ['TASK-003']);
+    expect(code).toBe(0);
+    const request = JSON.parse(readFileSync(join(out, 'jev-request.json'), 'utf8'));
+    expect(Object.keys(request.questions)).toEqual(['TASK-001', 'TASK-002']);
+    expect(Object.keys(request.state.tasks)).toEqual(['TASK-001', 'TASK-002']);
+    expect(output.asked).toBe(true);
+    expect(output.answers).toEqual([
+      { id: 'TASK-001', yes: 0.99 },
+      { id: 'TASK-002', yes: 0.99 },
+    ]);
+    expect(output.checked?.tasks.map((task) => [task.id, task.implemented])).toEqual(ALL.map((id) => [id, true]));
+    expect(output.checked?.tasks[2]?.evidence).toBe("no commit: accepted on implement's evidence");
+  });
+}, 60_000);
+
+test('the stage, with every task reported with no commit, asks nothing and lists every task as implemented', async () => {
+  await withTempRepo(async (repo) => {
+    writeOwnSail(repo, { jev: seed() });
+    const { code, output, out } = runStage(repo, PLAN, undefined, ALL);
+    expect(code).toBe(0);
+    expect(existsSync(join(out, 'jev-request.json'))).toBe(false);
+    expect(output.asked).toBe(false);
+    expect(output.answers).toEqual([]);
+    expect(output.note).toBe('every task was reported with no commit: nothing to ask Jev');
+    expect(output.checked?.tasks.map((task) => [task.id, task.implemented])).toEqual(ALL.map((id) => [id, true]));
+  });
+}, 60_000);
+
+test('the stage, with a no-commit task and an unclear answer for another, has no checked', async () => {
+  await withTempRepo(async (repo) => {
+    writeOwnSail(repo, { jev: seed({ 'TASK-002': 0.6 }) });
+    changeFiles(repo, 'test/a.test.ts');
+    const { code, output } = runStage(repo, PLAN, undefined, ['TASK-003']);
+    expect(code).toBe(0);
+    expect(output.checked).toBeNull();
+    expect(output.answers).toEqual([
+      { id: 'TASK-001', yes: 0.99 },
+      { id: 'TASK-002', yes: 0.6 },
+    ]);
+  });
+}, 60_000);

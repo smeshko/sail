@@ -383,6 +383,26 @@ test('a plan with a task that changes no file reaches open: check-tasks answerin
   });
 }, 120_000);
 
+test('a plan with a task that changes no file, with Jev clear on the other, asks only about the other and skips check-tasks', async () => {
+  await withTempRepo(async (repo) => {
+    seedChecklistPlan(repo, writeOwnSail(repo, { jev: nouls({ 'TASK-001': 0.99 }) }), [false, false], [false, false]);
+    const { code, stderr, keys, dir } = await factory(repo);
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    expect(keys.filter((key) => key.startsWith('check-tasks#'))).toEqual([]);
+    expect(keys.slice(keys.indexOf('jev-tasks#1'))).toEqual([
+      'jev-tasks#1',
+      'verification#1',
+      'open#1',
+      'file-follow-ups#1',
+    ]);
+    expect(stageIn(dir, 'jev-tasks', 1, 'verified.json')).toEqual(['TASK-002']);
+    const request = JSON.parse(
+      readFileSync(join(callDir(dir, 'jev-tasks'), 'call-1', 'out', 'jev-request.json'), 'utf8'),
+    );
+    expect(Object.keys(request.questions)).toEqual(['TASK-001']);
+  });
+}, 120_000);
+
 test('a task with no commit is listed as implemented in the feedback of a pass another task sent back', async () => {
   await withTempRepo(async (repo) => {
     seedChecklistPlan(repo, writeOwnSail(repo), [false, false], [true, false]);

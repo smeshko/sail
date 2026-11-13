@@ -28,7 +28,7 @@ export default workflow(
   'factory',
   {
     intake: ticket,
-    version: 11,
+    version: 12,
     watch: { every: '5m' },
     // One at a time: two factory runs beside the reviews load the machine until every gate turns flaky (ADW-444).
     maxConcurrentRuns: 1,
@@ -84,8 +84,9 @@ export default workflow(
         iteration.fail({ validation: v.output, tasks: null });
         continue;
       }
-      // Jev first: when it answers every task with a clear yes the agent's session is not paid for.
-      const asked = await run.stage(jevTasks, { plan: planFile });
+      // Jev first: when it answers every task with a clear yes the agent's session is not paid for. The tasks implement
+      // reported with no commit are not asked about: Jev has no diff to judge them on.
+      const asked = await run.stage(jevTasks, { plan: planFile, verified: verified.map((task) => task.id) });
       let tasks = asked.output.checked;
       if (tasks === null) {
         const checked = await run.stage(checkTasks, {
