@@ -375,7 +375,7 @@ test('several thousand tracker keys of one prefix reach the judge as one finding
     });
     expect(leak.detail).toContain('git diff');
     expect(leak.detail).toContain('\\bCIR-\\d+\\b');
-    expect(leak.detail.match(/keys\.ts:\d+/g)).toHaveLength(20);
+    expect(leak.detail.match(/keys\.ts:\d+/g)).toHaveLength(5);
     const comments = (await pullRequest(repo)).comments;
     const title = 'A tracker key other than ADW: prefix CIR, 3000 occurrences in 1 file';
     expect(comments.join('\n').split(title)).toHaveLength(2);
