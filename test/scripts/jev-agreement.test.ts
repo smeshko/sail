@@ -173,6 +173,7 @@ async function recordGit(runDir: string, repo: TempRepo, notes: string[] = []) {
         return 'evidence';
       },
       askNouls: () => ({ asked: true, answers: {} }),
+      askTasks: (tasks, _out, run) => ({ asked: true, answers: {}, state: lib.tasksState(tasks, run) }),
     },
     repo.home,
     notes,
@@ -210,6 +211,7 @@ test('collect rebuilds tasks against the base of workspace:created and the imple
     const { args, notes } = await recordGit(runDir, repo);
     expect(notes).toEqual([]);
     expect(args).toEqual([
+      ['diff', '--name-only', `${base}...${second}`],
       ['log', `${base}..${second}`, '--format=%h %s'],
       ['diff', `${base}...${second}`],
     ]);
@@ -227,6 +229,7 @@ test('collect takes the head from the earlier implement call when the nearest on
     const { args, notes } = await recordGit(runDir, repo);
     expect(notes).toEqual([]);
     expect(args).toEqual([
+      ['diff', '--name-only', `${base}...${second}`],
       ['log', `${base}..${second}`, '--format=%h %s'],
       ['diff', `${base}...${second}`],
     ]);
@@ -242,7 +245,7 @@ test('collect takes the last implement call before the check, not an implement c
       { key: 'implement#2', output: implemented(first, second) },
     ]);
     const { args } = await recordGit(runDir, repo);
-    expect(args[0]).toEqual(['log', `${base}..${first}`, '--format=%h %s']);
+    expect(args[1]).toEqual(['log', `${base}..${first}`, '--format=%h %s']);
   });
 });
 
@@ -361,4 +364,134 @@ test("sail's own project.yaml, with adapters.jev, validates against sail.project
   };
   expect(config.adapters.jev).toEqual({ use: 'typesafe', model: 'jev-1.14.0' });
   expect(validateDocument('sail.project.v1', config)).toEqual([]);
+});
+
+/** PLAN with TASK-001 naming `test/one.test.ts` in its Files block. */
+const PLAN_WITH_TEST = PLAN.replace(
+  '### TASK-001: One\n\nType: impl\n',
+  '### TASK-001: One\n\nType: impl\n\nFiles: `test/one.test.ts`\n',
+);
+
+type Lib = Parameters<typeof collect>[1];
+
+/** collect over `runDir` with git answering `diff` for every diff, and askTasks answering yes at 0.99 for each task it gets. */
+async function collectTasks(runDir: string, repo: TempRepo, diff = 'evidence') {
+  const lib = (await import(join(ROOT, '.sail/lib/jev-check.mjs'))) as Lib;
+  const asked: string[][] = [];
+  const notes: string[] = [];
+  const git: Lib['git'] = (args) => (args[0] === 'diff' && args[1] !== '--name-only' ? diff : '');
+  const calls = collect(
+    runDir,
+    {
+      ...lib,
+      git,
+      askNouls: () => {
+        throw new Error('check-tasks asks through askTasks');
+      },
+      askTasks: (tasks, _out, run) => {
+        asked.push(tasks.map((task) => task.id));
+        return {
+          asked: true,
+          answers: Object.fromEntries(tasks.map((task) => [task.id, { type: 'noul', noul: 0.99 }])),
+          state: lib.tasksState(tasks, run),
+        };
+      },
+    },
+    repo.home,
+    notes,
+  );
+  return { asked, calls, notes };
+}
+
+test('collect asks through askTasks about the tasks not in the call’s verified.json, as jev-tasks does', async () => {
+  await withTempRepo(async (repo) => {
+    const { base, first, second } = commitTasks(repo);
+    const runDir = writeRun(repo, base, [
+      { key: 'implement#1', output: implemented(first, second) },
+      { ...CHECKED, inFiles: { 'plan.md': PLAN, 'verified.json': '["TASK-002"]' } },
+    ]);
+    const { asked, calls, notes } = await collectTasks(runDir, repo);
+    expect(notes).toEqual([]);
+    expect(asked).toEqual([['TASK-001']]);
+    expect(calls[0]?.items).toEqual([{ id: 'TASK-001', agent: true, yes: 0.99 }]);
+    expect(table('check-tasks', calls)[1]).toContain('skippable 1/1');
+  });
+});
+
+test('collect counts a call whose every task is in verified.json as skipped, asking nothing', async () => {
+  await withTempRepo(async (repo) => {
+    const { base, first, second } = commitTasks(repo);
+    const runDir = writeRun(repo, base, [
+      { key: 'implement#1', output: implemented(first, second) },
+      { ...CHECKED, inFiles: { 'plan.md': PLAN, 'verified.json': '["TASK-001","TASK-002"]' } },
+    ]);
+    const { asked, calls, notes } = await collectTasks(runDir, repo);
+    expect(notes).toEqual([]);
+    expect(asked).toEqual([]);
+    expect(table('check-tasks', calls)[5]).toBe(
+      '  0.99  agreement 0/0  false yeses 0  false noes 0  skippable 1/1  saves $0.70 and 0.5 min',
+    );
+  });
+});
+
+test('collect never counts as skippable a call with a task whose named test file is unchanged, whatever Jev says', async () => {
+  await withTempRepo(async (repo) => {
+    const { base, first, second } = commitTasks(repo);
+    const runDir = writeRun(repo, base, [
+      { key: 'implement#1', output: implemented(first, second) },
+      { ...CHECKED, inFiles: { 'plan.md': PLAN_WITH_TEST } },
+    ]);
+    const unchanged = await collectTasks(runDir, repo, '');
+    expect(unchanged.asked).toEqual([['TASK-001', 'TASK-002']]);
+    for (const line of table('check-tasks', unchanged.calls).slice(1)) expect(line).toContain('skippable 0/1');
+    const changed = await collectTasks(runDir, repo);
+    expect(table('check-tasks', changed.calls)[1]).toContain('skippable 1/1');
+  });
+});
+
+test('collect asks check-tasks through askTasks, with its 76,000-byte limit, and check-fix through askNouls with no limit', async () => {
+  await withTempRepo(async (repo) => {
+    const { base, first, second } = commitTasks(repo);
+    const fixed = { fixes: [{ finding: 'R1', commit: second, note: 'fixed' }] };
+    const runDir = writeRun(repo, base, [
+      { key: 'implement#1', output: implemented(first, second) },
+      CHECKED,
+      { key: 'fix#1', output: fixed },
+      {
+        key: 'check-fix#1',
+        output: { items: [{ finding: 'R1', resolved: true }] },
+        inFiles: {
+          'findings.json': JSON.stringify({ findings: [{ id: 'R1', title: 'broken' }] }),
+          'fixed.json': JSON.stringify(fixed),
+          since: 'review-sha\n',
+        },
+      },
+    ]);
+    const lib = (await import(join(ROOT, '.sail/lib/jev-check.mjs'))) as Lib & { TASKS_MAX_REQUEST_BYTES: number };
+    expect(lib.TASKS_MAX_REQUEST_BYTES).toBe(76_000);
+    const asks: { via: string; args: number }[] = [];
+    const notes: string[] = [];
+    collect(
+      runDir,
+      {
+        ...lib,
+        git: () => '',
+        askNouls: (...args: unknown[]) => {
+          asks.push({ via: 'askNouls', args: args.length });
+          return { asked: true, answers: {} };
+        },
+        askTasks: (tasks, _out, run) => {
+          asks.push({ via: 'askTasks', args: 3 });
+          return { asked: true, answers: {}, state: lib.tasksState(tasks, run) };
+        },
+      } as Lib,
+      repo.home,
+      notes,
+    );
+    expect(notes).toEqual([]);
+    expect(asks).toEqual([
+      { via: 'askTasks', args: 3 },
+      { via: 'askNouls', args: 3 },
+    ]);
+  });
 });

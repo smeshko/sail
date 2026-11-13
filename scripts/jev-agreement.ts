@@ -2,8 +2,11 @@
 // directory>...`, from a repository holding the branches those runs reviewed. For each journaled `check-tasks` and
 // `check-fix` call that is done, it rebuilds the state the jev-tasks and jev-fix stages ask Jev about, at the commit the
 // call saw (the run's `workspace:created` base, and the head of the implement or fix call before it), asks through `sail port jev ask`, and prints per stage how Jev's answers agree with the agent's at each
-// threshold, and what the calls Jev could have answered alone would have saved.
-import { mkdtempSync, readFileSync } from 'node:fs';
+// threshold, and what the calls Jev could have answered alone would have saved. As jev-tasks does, a check-tasks call
+// leaves out the tasks its `verified.json` lists, asks through askTasks (its limit, and its retry after
+// `max_tokens_exceeded`), skips the agent when that leaves no task, and sends a call with a task whose named test files
+// are unchanged to the agent whatever Jev answers.
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { readJournal } from '../src/engine/journal';
@@ -25,34 +28,42 @@ interface Lib {
   git: Run;
   yesses(answers: Record<string, unknown>, ids: string[]): { id: string; yes: number }[];
   askNouls(questions: object, state: object, out: string): Answered;
+  askTasks(tasks: Task[], out: string, run: Run): Answered & { state: object };
+  unchangedTests(state: object): { id: string; paths: string[] }[];
   parseTasks(planText: string): Task[];
   tasksState(tasks: Task[], run: Run): object;
-  taskQuestions(tasks: Task[]): object;
   fixState(findings: Finding[], fixed: object, since: string, run: Run): object;
   fixQuestions(findings: Finding[]): object;
 }
 
-/** One agent call with Jev's answer for each item the agent judged. */
+/**
+ * One agent call with Jev's answer for each item the agent judged. `route` is what the stage does whatever Jev answers:
+ * `agent` when a task names test files with no change, `skip` when it asked about no task.
+ */
 interface Call {
   stage: string;
   items: { id: string; agent: boolean; yes: number }[];
+  route?: 'agent' | 'skip';
   costUsd: number;
   minutes: number;
 }
 
 const read = (...parts: string[]) => readFileSync(join(...parts), 'utf8');
 
-function questionsAndState(lib: Lib, stage: string, inDir: string, run: Run): { questions: object; state: object } {
+/** Asks Jev about the call as its jev stage would: Answered, with `route` when the stage's decision is not Jev's. */
+function ask(lib: Lib, stage: string, inDir: string, run: Run, out: string): Answered & { route?: Call['route'] } {
   if (stage === 'check-tasks') {
-    const tasks = lib.parseTasks(read(inDir, 'plan.md'));
-    return { questions: lib.taskQuestions(tasks), state: lib.tasksState(tasks, run) };
+    const verified = new Set(
+      existsSync(join(inDir, 'verified.json')) ? (JSON.parse(read(inDir, 'verified.json')) as string[]) : [],
+    );
+    const tasks = lib.parseTasks(read(inDir, 'plan.md')).filter((task) => !verified.has(task.id));
+    if (tasks.length === 0) return { asked: true, answers: {}, route: 'skip' };
+    const { state, ...asked } = lib.askTasks(tasks, out, run);
+    return lib.unchangedTests(state).length > 0 ? { ...asked, route: 'agent' } : asked;
   }
   const { findings } = JSON.parse(read(inDir, 'findings.json')) as { findings: Finding[] };
   const fixed = JSON.parse(read(inDir, 'fixed.json')) as object;
-  return {
-    questions: lib.fixQuestions(findings),
-    state: lib.fixState(findings, fixed, read(inDir, 'since').trim(), run),
-  };
+  return lib.askNouls(lib.fixQuestions(findings), lib.fixState(findings, fixed, read(inDir, 'since').trim(), run), out);
 }
 
 /** What the agent concluded per id: a task's `implemented`, a finding's `resolved`. */
@@ -129,15 +140,9 @@ export function collect(runDir: string, lib: Lib, out: string, notes: string[]):
       continue;
     }
     const run: Run = (args) => lib.git(args.map((arg) => arg.replace(lib.BASE, baseSha).replace(/HEAD$/, sha)));
-    let asked: Answered;
+    let asked: ReturnType<typeof ask>;
     try {
-      const { questions, state } = questionsAndState(
-        lib,
-        entry.stage,
-        join(runDir, dirname(entry.resultPath), 'in'),
-        run,
-      );
-      asked = lib.askNouls(questions, state, out);
+      asked = ask(lib, entry.stage, join(runDir, dirname(entry.resultPath), 'in'), run, out);
     } catch (error) {
       notes.push(`${entry.key} in ${runDir}: ${error instanceof Error ? error.message : error}`);
       continue;
@@ -155,6 +160,7 @@ export function collect(runDir: string, lib: Lib, out: string, notes: string[]):
     calls.push({
       stage: entry.stage,
       items,
+      ...(asked.route ? { route: asked.route } : {}),
       costUsd: result.usage?.costUsd ?? 0,
       minutes: (result.durationMs ?? 0) / 60_000,
     });
@@ -171,7 +177,9 @@ export function table(stage: string, calls: Call[]): string[] {
     const agreed = items.filter((item) => said(item) === item.agent).length;
     const falseYes = items.filter((item) => said(item) && !item.agent).length;
     const falseNo = items.filter((item) => !said(item) && item.agent).length;
-    const skippable = calls.filter((call) => call.items.length > 0 && call.items.every(said));
+    const skippable = calls.filter(
+      (call) => call.route === 'skip' || (call.route !== 'agent' && call.items.length > 0 && call.items.every(said)),
+    );
     const cost = skippable.reduce((sum, call) => sum + call.costUsd, 0);
     const minutes = skippable.reduce((sum, call) => sum + call.minutes, 0);
     lines.push(

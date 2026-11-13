@@ -2,7 +2,7 @@
 // the stage run as a script on the fake Jev. The helpers are `.sail/lib/jev-check.mjs`, which the stage and the agreement
 // script share.
 import { expect, test } from 'bun:test';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { nouls, writeOwnSail } from '../helpers/own-sail';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
@@ -16,7 +16,24 @@ interface Lib {
   CLEAR_YES: number;
   MAX_DIFF: number;
   MAX_REQUEST_BYTES: number;
+  TASKS_MAX_REQUEST_BYTES: number;
+  cutLongest(state: { files: Record<string, string>; whole?: string }): boolean;
+  askTasks(
+    tasks: Task[],
+    out: string,
+    run: (args: string[]) => string,
+  ): {
+    asked: boolean;
+    note?: string;
+    answers?: Record<string, unknown>;
+    state: { files: Record<string, string> };
+  };
   parseTasks(plan: string): Task[];
+  resolveTasks(tasks: Task[], changed: string[]): Task[];
+  unchangedTests(state: {
+    files: Record<string, string>;
+    tasks: Record<string, { files: string[] }>;
+  }): { id: string; paths: string[] }[];
   tasksState(
     tasks: Task[],
     run: (args: string[]) => string,
@@ -89,6 +106,7 @@ test('tasksState diffs each file once, the whole diff for a task that names none
   const run = (args: string[]) => {
     calls.push(args);
     if (args[0] === 'log') return 'abc1234 feat: first\n';
+    if (args.includes('--name-only')) return '';
     return args.includes('--') ? `diff of ${args.slice(args.indexOf('--') + 1).join(' ')}` : 'the whole diff';
   };
   const state = lib.tasksState(lib.parseTasks(PLAN), run);
@@ -108,14 +126,17 @@ test('tasksState diffs each file once, the whole diff for a task that names none
     },
   });
   expect(calls.filter((args) => args[0] === 'log')).toHaveLength(1);
-  expect(calls.filter((args) => args[0] === 'diff')).toHaveLength(4);
+  expect(calls.filter((args) => args[0] === 'diff' && !args.includes('--name-only'))).toHaveLength(4);
+  expect(calls.filter((args) => args.includes('--name-only'))).toEqual([
+    ['diff', '--name-only', 'origin/staging...HEAD'],
+  ]);
 });
 
 test('tasksState stores a file two tasks name once', () => {
   const calls: string[][] = [];
   const run = (args: string[]) => {
     calls.push(args);
-    return args[0] === 'diff' ? 'shared diff' : '';
+    return args[0] === 'diff' && !args.includes('--name-only') ? 'shared diff' : '';
   };
   const tasks: Task[] = [
     { id: 'TASK-001', text: 'one', paths: ['src/shared.ts'] },
@@ -126,7 +147,7 @@ test('tasksState stores a file two tasks name once', () => {
   expect(state.whole).toBeUndefined();
   expect(state.tasks['TASK-001']?.files).toEqual(['src/shared.ts']);
   expect(state.tasks['TASK-002']?.files).toEqual(['src/shared.ts', 'src/own.ts']);
-  expect(calls.filter((args) => args[0] === 'diff')).toHaveLength(2);
+  expect(calls.filter((args) => args[0] === 'diff' && !args.includes('--name-only'))).toHaveLength(2);
 });
 
 test('taskQuestions tell Jev the state is untrusted data, not instructions', () => {
@@ -162,19 +183,31 @@ test('tasksState cuts the largest diffs first, with a marker, until the request 
     small: state.files['src/small.ts'] === small,
     marked: marker !== null,
     accounted: marker ? cutBig.length - marker[0].length + Number(marker[1]) : -1,
-    fits: requestBytes(state, tasks) <= lib.MAX_REQUEST_BYTES,
+    fits: requestBytes(state, tasks) <= lib.TASKS_MAX_REQUEST_BYTES,
   }).toEqual({ small: true, marked: true, accounted: big.length, fits: true });
+});
+
+test('tasksState leaves a 70,000-byte request uncut and cuts a larger one to at most 76,000 bytes', () => {
+  const tasks: Task[] = [{ id: 'TASK-001', text: 'one', paths: ['src/a.ts'] }];
+  const run = (size: number) => (args: string[]) =>
+    args[0] === 'diff' && !args.includes('--name-only') ? 'd'.repeat(size) : '';
+  const fits = lib.tasksState(tasks, run(70_000 - 1_500));
+  expect(fits.files['src/a.ts']).not.toContain('… cut:');
+  expect(requestBytes(fits, tasks)).toBeGreaterThan(64_000);
+  const cut = lib.tasksState(tasks, run(200_000));
+  expect(cut.files['src/a.ts']).toContain('… cut:');
+  expect(requestBytes(cut, tasks)).toBeLessThanOrEqual(76_000);
 });
 
 test('tasksState stops cutting when the task text alone is over the budget', () => {
   const tasks: Task[] = [
-    { id: 'TASK-001', text: 'x'.repeat(lib.MAX_REQUEST_BYTES + 10), paths: ['src/a.ts'] },
+    { id: 'TASK-001', text: 'x'.repeat(lib.TASKS_MAX_REQUEST_BYTES + 10), paths: ['src/a.ts'] },
     { id: 'TASK-002', text: 'two', paths: [] },
   ];
   const state = lib.tasksState(tasks, (args) => (args[0] === 'diff' ? 'd'.repeat(5_000) : ''));
   expect(state.files['src/a.ts']).toContain('… cut:');
   expect(state.whole).toContain('… cut:');
-  expect(requestBytes(state, tasks)).toBeGreaterThan(lib.MAX_REQUEST_BYTES);
+  expect(requestBytes(state, tasks)).toBeGreaterThan(lib.TASKS_MAX_REQUEST_BYTES);
 });
 
 test('a git that fails gives an empty diff', () => {
@@ -210,6 +243,7 @@ function runStage(
   repo: TempRepo,
   plan: string,
   port?: string,
+  verified: string[] = [],
 ): { code: number; stderr: string; output: Asked; out: string } {
   if (port) writeFileSync(join(repo.home, 'sail'), port, { mode: 0o755 });
   const stageDir = join(repo.dir, '.sail', 'workflows', 'factory', 'stages', '03-jev-tasks');
@@ -217,6 +251,8 @@ function runStage(
   mkdirSync(out);
   const planFile = join(repo.home, 'plan.md');
   writeFileSync(planFile, plan);
+  const verifiedFile = join(repo.home, 'verified.json');
+  writeFileSync(verifiedFile, JSON.stringify(verified));
   const child = Bun.spawnSync([join(stageDir, 'run.sh')], {
     cwd: repo.dir,
     env: {
@@ -225,6 +261,7 @@ function runStage(
       SAIL_BUN: process.execPath,
       SAIL_CONFIG: join(repo.dir, '.sail', 'project.yaml'),
       INPUT_PLAN: planFile,
+      INPUT_VERIFIED: verifiedFile,
       STAGE_OUT: out,
     },
   });
@@ -254,6 +291,7 @@ test.each(['#### TASK-002: Second', '### TASK-002 Second', ''])(
 test('partial task answers retain asked true, available answers and an unanswered note', async () => {
   await withTempRepo(async (repo) => {
     writeOwnSail(repo);
+    changeFiles(repo, 'test/a.test.ts');
     const { output } = runStage(repo, PLAN, `#!/bin/sh\necho '{"answers":{"TASK-001":{"type":"noul","noul":1}}}'\n`);
     expect(output).toMatchObject({
       asked: true,
@@ -292,9 +330,21 @@ const ALL = ['TASK-001', 'TASK-002', 'TASK-003'];
 const seed = (overrides: Record<string, number> = {}) =>
   nouls(Object.fromEntries(ALL.map((id) => [id, overrides[id] ?? 0.99])));
 
+/** Makes `origin/staging` the head, then commits a change to each of `files`, so their diffs on the branch are not empty. */
+function changeFiles(repo: TempRepo, ...files: string[]) {
+  repo.git('update-ref', 'refs/remotes/origin/staging', 'HEAD');
+  for (const file of files) {
+    mkdirSync(join(repo.dir, file, '..'), { recursive: true });
+    writeFileSync(join(repo.dir, file), `changed ${file}\n`);
+  }
+  repo.git('add', ...files);
+  repo.git('commit', '-m', 'feat: change the files');
+}
+
 test('the stage, with Jev answering every task a clear yes, outputs the TasksChecked with every task implemented', async () => {
   await withTempRepo(async (repo) => {
     writeOwnSail(repo, { jev: seed() });
+    changeFiles(repo, 'test/a.test.ts');
     const { code, stderr, output } = runStage(repo, PLAN);
     expect({ code, stderr }).toEqual({ code: 0, stderr: '' });
     expect(output.asked).toBe(true);
@@ -313,6 +363,7 @@ test.each([
   async (_name, yes) => {
     await withTempRepo(async (repo) => {
       writeOwnSail(repo, { jev: seed({ 'TASK-002': yes }) });
+      changeFiles(repo, 'test/a.test.ts');
       const { code, output } = runStage(repo, PLAN);
       expect(code).toBe(0);
       expect(output.asked).toBe(true);
@@ -349,3 +400,270 @@ test('the stage, with a plan that holds no task details, does not ask Jev and sa
     expect(output.note).toContain('no task details');
   });
 }, 60_000);
+
+test('parseTasks keeps only path-shaped tokens of a Files block', () => {
+  const plan = `# Plan
+
+## Tasks
+
+- [ ] TASK-001: First
+
+## Task details
+
+### TASK-001: First
+
+Files:
+- \`>copy</button>\`, \`/^a\\/b$/\`, \`/api/runs/:id\`, \`$STAGE_OUT/plan.md\`
+- \`src/a.ts:12\`, \`test/fixtures/runs/\` and \`foo.json\`
+`;
+  expect(lib.parseTasks(plan).map((task) => task.paths)).toEqual([['src/a.ts', 'test/fixtures/runs/', 'foo.json']]);
+});
+
+const task = (id: string, ...paths: string[]): Task => ({ id, text: id, paths });
+
+test('resolveTasks turns a bare file name into the one changed file of that name', () => {
+  const [resolved] = lib.resolveTasks([task('TASK-001', 'show.ts')], ['src/cli/commands/show.ts', 'src/a.ts']);
+  expect(resolved?.paths).toEqual(['src/cli/commands/show.ts']);
+});
+
+test('resolveTasks leaves a bare name two changed files share, and one no changed file has, as written', () => {
+  const changed = ['src/a/index.ts', 'src/b/index.ts'];
+  const [resolved] = lib.resolveTasks([task('TASK-001', 'index.ts', 'gone.ts')], changed);
+  expect(resolved?.paths).toEqual(['index.ts', 'gone.ts']);
+});
+
+test('resolveTasks keeps a bare name that is itself a changed path', () => {
+  const [resolved] = lib.resolveTasks([task('TASK-001', 'a.ts')], ['a.ts', 'src/a.ts']);
+  expect(resolved?.paths).toEqual(['a.ts']);
+});
+
+test('resolveTasks drops an extensionless token that is no changed file or directory, and keeps the ones that are', () => {
+  const changed = ['bin/sail', 'src/engine/run.ts'];
+  const [resolved] = lib.resolveTasks(
+    [task('TASK-001', 'read/write', 'origin/staging', 'bin/sail', 'src/engine', 'test/helpers', 'src/a.ts')],
+    changed,
+  );
+  expect(resolved?.paths).toEqual(['bin/sail', 'src/engine', 'test/helpers', 'src/a.ts']);
+});
+
+test('resolveTasks leaves no duplicate when two names resolve to one file', () => {
+  const [resolved] = lib.resolveTasks([task('TASK-001', 'show.ts', 'src/show.ts')], ['src/show.ts']);
+  expect(resolved?.paths).toEqual(['src/show.ts']);
+});
+
+test('tasksState diffs the changed file a bare name resolves to and drops a token that is no file', () => {
+  const calls: string[][] = [];
+  const run = (args: string[]) => {
+    calls.push(args);
+    if (args.includes('--name-only')) return 'src/cli/commands/show.ts\n';
+    if (args[0] === 'diff') return `diff of ${args.at(-1)}`;
+    return '';
+  };
+  const state = lib.tasksState([task('TASK-001', 'show.ts', 'read/write')], run);
+  expect(state.files).toEqual({ 'src/cli/commands/show.ts': 'diff of src/cli/commands/show.ts' });
+  expect(state.tasks['TASK-001']?.files).toEqual(['src/cli/commands/show.ts']);
+});
+
+test('tasksState reads a task whose paths were all dropped as whole', () => {
+  const run = (args: string[]) => (args[0] === 'diff' && !args.includes('--name-only') ? 'the whole diff' : '');
+  const state = lib.tasksState([task('TASK-001', 'read/write')], run);
+  expect(state.tasks['TASK-001']?.files).toEqual([]);
+  expect(state.whole).toBe('the whole diff');
+  expect(state.files).toEqual({});
+});
+
+test('the stage, with Jev at 0.95 for every task and test/a.test.ts unchanged, has no checked and names the task and the file', async () => {
+  await withTempRepo(async (repo) => {
+    writeOwnSail(repo, { jev: seed(Object.fromEntries(ALL.map((id) => [id, 0.95]))) });
+    changeFiles(repo, 'src/a.ts');
+    const { code, output } = runStage(repo, PLAN);
+    expect(code).toBe(0);
+    expect(output.asked).toBe(true);
+    expect(output.threshold).toBe(0.8);
+    expect(output.answers).toEqual(ALL.map((id) => ({ id, yes: 0.95 })));
+    expect(output.checked).toBeNull();
+    expect(output.note).toContain('TASK-001 names test files with no change on the branch: test/a.test.ts');
+  });
+}, 60_000);
+
+test('unchangedTests reports a test file with an empty diff, and nothing for an unchanged source file or a cut test diff', () => {
+  const state = {
+    files: {
+      'src/x.test.ts': '  \n',
+      'src/a.ts': '',
+      'test/cut.test.ts': `${'d'.repeat(10)}\n… cut: 5 more characters`,
+      'test/changed.ts': 'diff',
+    },
+    tasks: {
+      'TASK-001': { files: ['src/x.test.ts', 'src/a.ts'] },
+      'TASK-002': { files: ['src/a.ts', 'test/cut.test.ts', 'test/changed.ts'] },
+      'TASK-003': { files: [] },
+    },
+  };
+  expect(lib.unchangedTests(state)).toEqual([{ id: 'TASK-001', paths: ['src/x.test.ts'] }]);
+});
+
+test('CLEAR_YES is 0.8', () => {
+  expect(lib.CLEAR_YES).toBe(0.8);
+});
+
+test('the stage, with TASK-003 reported with no commit, asks about the other two and lists all three as implemented', async () => {
+  await withTempRepo(async (repo) => {
+    writeOwnSail(repo, { jev: seed() });
+    changeFiles(repo, 'test/a.test.ts');
+    const { code, output, out } = runStage(repo, PLAN, undefined, ['TASK-003']);
+    expect(code).toBe(0);
+    const request = JSON.parse(readFileSync(join(out, 'jev-request.json'), 'utf8'));
+    expect(Object.keys(request.questions)).toEqual(['TASK-001', 'TASK-002']);
+    expect(Object.keys(request.state.tasks)).toEqual(['TASK-001', 'TASK-002']);
+    expect(output.asked).toBe(true);
+    expect(output.answers).toEqual([
+      { id: 'TASK-001', yes: 0.99 },
+      { id: 'TASK-002', yes: 0.99 },
+    ]);
+    expect(output.checked?.tasks.map((task) => [task.id, task.implemented])).toEqual(ALL.map((id) => [id, true]));
+    expect(output.checked?.tasks[2]?.evidence).toBe("no commit: accepted on implement's evidence");
+  });
+}, 60_000);
+
+test('the stage, with every task reported with no commit, asks nothing and lists every task as implemented', async () => {
+  await withTempRepo(async (repo) => {
+    writeOwnSail(repo, { jev: seed() });
+    const { code, output, out } = runStage(repo, PLAN, undefined, ALL);
+    expect(code).toBe(0);
+    expect(existsSync(join(out, 'jev-request.json'))).toBe(false);
+    expect(output.asked).toBe(false);
+    expect(output.answers).toEqual([]);
+    expect(output.note).toBe('every task was reported with no commit: nothing to ask Jev');
+    expect(output.checked?.tasks.map((task) => [task.id, task.implemented])).toEqual(ALL.map((id) => [id, true]));
+  });
+}, 60_000);
+
+test('the stage, with a no-commit task and an unclear answer for another, has no checked', async () => {
+  await withTempRepo(async (repo) => {
+    writeOwnSail(repo, { jev: seed({ 'TASK-002': 0.6 }) });
+    changeFiles(repo, 'test/a.test.ts');
+    const { code, output } = runStage(repo, PLAN, undefined, ['TASK-003']);
+    expect(code).toBe(0);
+    expect(output.checked).toBeNull();
+    expect(output.answers).toEqual([
+      { id: 'TASK-001', yes: 0.99 },
+      { id: 'TASK-002', yes: 0.6 },
+    ]);
+  });
+}, 60_000);
+
+const MARKER = /\n… cut: (\d+) more characters$/;
+
+test('cutLongest halves the longest diff with one marker counting what it removed, and says it cut', () => {
+  const state: { files: Record<string, string>; whole?: string } = {
+    files: { 'src/a.ts': 'a'.repeat(1_000), 'src/b.ts': 'b'.repeat(10_000) },
+  };
+  expect(lib.cutLongest(state)).toBe(true);
+  const cut = state.files['src/b.ts'] ?? '';
+  const marker = MARKER.exec(cut);
+  expect(cut.length).toBeLessThanOrEqual(5_000);
+  expect(marker).not.toBeNull();
+  expect(cut.length - (marker?.[0].length ?? 0) + Number(marker?.[1])).toBe(10_000);
+  expect(state.files['src/a.ts']).toBe('a'.repeat(1_000));
+});
+
+test('cutLongest cuts the whole diff when it is the longest', () => {
+  const state: { files: Record<string, string>; whole?: string } = {
+    files: { 'src/a.ts': 'a'.repeat(100) },
+    whole: 'w'.repeat(4_000),
+  };
+  expect(lib.cutLongest(state)).toBe(true);
+  expect(state.whole).toContain('… cut:');
+  expect(state.files['src/a.ts']).toBe('a'.repeat(100));
+});
+
+test('cutLongest on a diff already cut writes one marker whose count is the earlier count plus what it removed', () => {
+  const body = 'c'.repeat(8_000);
+  const state = { files: { 'src/a.ts': `${body}\n… cut: 500 more characters` } };
+  expect(lib.cutLongest(state)).toBe(true);
+  const cut = state.files['src/a.ts'];
+  expect(cut.match(/… cut:/g)).toHaveLength(1);
+  const marker = MARKER.exec(cut);
+  const kept = cut.length - (marker?.[0].length ?? 0);
+  expect(kept).toBeLessThan(8_000);
+  expect(Number(marker?.[1])).toBe(500 + (8_000 - kept));
+});
+
+test('cutLongest with nothing to cut says so', () => {
+  expect(lib.cutLongest({ files: { 'src/a.ts': '' } })).toBe(false);
+});
+
+/** A `sail` on the PATH that counts its calls in `count` beside it and answers call n with `replies[n - 1]` (the last one repeats). */
+function stubCounting(repo: TempRepo, replies: string[]): string {
+  const cases = replies.map((reply, at) => `${at + 1}) ${reply};;`).join('\n');
+  const body = `#!/bin/sh
+count="${repo.home}/count"
+n=$(( $(cat "$count" 2>/dev/null || echo 0) + 1 ))
+echo $n > "$count"
+case $n in
+${cases}
+*) ${replies.at(-1)};;
+esac
+`;
+  writeFileSync(join(repo.home, 'sail'), body, { mode: 0o755 });
+  chmodSync(join(repo.home, 'sail'), 0o755);
+  return join(repo.home, 'count');
+}
+
+const ANSWER = `echo '{"model":"jev-1","answers":{"TASK-001":{"type":"noul","noul":0.9}}}'`;
+const REFUSED = `echo "sail port: TypeSafe answered 400 Bad Request: max_tokens_exceeded (invalid)" >&2; exit 1`;
+
+const askTasksIn = (repo: TempRepo, replies: string[]) => {
+  const count = stubCounting(repo, replies);
+  const out = join(repo.home, 'ask-out');
+  mkdirSync(out);
+  const tasks: Task[] = [{ id: 'TASK-001', text: 'one', paths: ['src/a.ts', 'src/b.ts'] }];
+  const run = (args: string[]) => {
+    if (args.includes('--name-only')) return 'src/a.ts\nsrc/b.ts\n';
+    if (args[0] !== 'diff') return '';
+    return args.at(-1) === 'src/a.ts' ? 'a'.repeat(30_000) : 'b'.repeat(20_000);
+  };
+  const saved = process.env.PATH;
+  process.env.PATH = `${repo.home}:${saved}`;
+  try {
+    const result = lib.askTasks(tasks, out, run);
+    return { result, calls: Number(readFileSync(count, 'utf8')), out };
+  } finally {
+    process.env.PATH = saved;
+  }
+};
+
+test('askTasks, refused once for max_tokens_exceeded, cuts the longest diff to half and asks once more', async () => {
+  await withTempRepo(async (repo) => {
+    const { result, calls, out } = askTasksIn(repo, [REFUSED, ANSWER]);
+    expect(calls).toBe(2);
+    expect(result.asked).toBe(true);
+    expect(result.answers).toEqual({ 'TASK-001': { type: 'noul', noul: 0.9 } });
+    const first = JSON.parse(readFileSync(join(out, 'jev-request.json'), 'utf8')).state.files;
+    const second = JSON.parse(readFileSync(join(out, 'jev-request-2.json'), 'utf8')).state.files;
+    expect(first['src/a.ts']).toBe('a'.repeat(30_000));
+    expect(second['src/a.ts'].length).toBeLessThanOrEqual(15_000);
+    expect(second['src/a.ts'].match(/… cut:/g)).toHaveLength(1);
+    expect(second['src/b.ts']).toBe('b'.repeat(20_000));
+    expect(result.state.files['src/a.ts']).toBe(second['src/a.ts']);
+  });
+});
+
+test('askTasks, refused twice, asks twice and notes the second refusal after cutting again', async () => {
+  await withTempRepo(async (repo) => {
+    const { result, calls } = askTasksIn(repo, [REFUSED]);
+    expect(calls).toBe(2);
+    expect(result.asked).toBe(false);
+    expect(result.note).toStartWith('after cutting the longest diff again: ');
+    expect(result.note).toContain('max_tokens_exceeded');
+  });
+});
+
+test('askTasks, refused for another reason, asks once and returns that note', async () => {
+  await withTempRepo(async (repo) => {
+    const { result, calls } = askTasksIn(repo, ['echo "sail port: unavailable" >&2; exit 1']);
+    expect(calls).toBe(1);
+    expect(result).toMatchObject({ asked: false, note: 'sail port: unavailable' });
+  });
+});
