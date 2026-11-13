@@ -548,19 +548,53 @@ function isKeyword({ word, file, text }) {
   );
 }
 
+const normal = (text) => text.trim().replace(/\s+/g, ' ');
+
+/**
+ * Every removed line of the diff, in any file, trimmed and with each whitespace run made one space, that holds a word
+ * character. Each hunk's lines are counted from its `@@` header, so a removed line starting `-- ` is no file header.
+ */
+export function bannedRemoved(diffText) {
+  const removed = new Set();
+  let oldRemaining = 0;
+  let newRemaining = 0;
+  for (const text of diffText.split('\n')) {
+    if ((oldRemaining > 0 || newRemaining > 0) && /^[ +\\-]/.test(text)) {
+      if (text[0] === ' ' || text[0] === '-') oldRemaining--;
+      if (text[0] === ' ' || text[0] === '+') newRemaining--;
+      if (text[0] === '-') {
+        const line = normal(text.slice(1));
+        if (/\w/.test(line)) removed.add(line);
+      }
+      continue;
+    }
+    const header = /^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@/.exec(text);
+    if (header) {
+      oldRemaining = Number(header[1] ?? 1);
+      newRemaining = Number(header[2] ?? 1);
+    }
+  }
+  return removed;
+}
+
 /**
  * Leaves out a candidate whose word is a JS keyword only in the code of a line of a JS or TypeScript file, outside its
- * string literals and comments (`keyword`), then
- * every one after the first of the same word, entry and file (`repeat`): `{ selected, keyword, repeat }`.
+ * string literals and comments (`keyword`), then one whose text is a line `removed` holds (`moved`), then
+ * every one after the first of the same word, entry and file (`repeat`): `{ selected, keyword, moved, repeat }`.
  */
-export function bannedSelect(candidates) {
+export function bannedSelect(candidates, removed = new Set()) {
   const seen = new Set();
   const selected = [];
   let keyword = 0;
+  let moved = 0;
   let repeat = 0;
   for (const candidate of candidates) {
     if (isKeyword(candidate)) {
       keyword++;
+      continue;
+    }
+    if (removed.has(normal(candidate.text))) {
+      moved++;
       continue;
     }
     const key = JSON.stringify([candidate.word, candidate.term, candidate.file]);
@@ -570,7 +604,7 @@ export function bannedSelect(candidates) {
       selected.push(candidate);
     }
   }
-  return { selected, keyword, repeat };
+  return { selected, keyword, moved, repeat };
 }
 
 const bannedBytes = (candidates, start) =>

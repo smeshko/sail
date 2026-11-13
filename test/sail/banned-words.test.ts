@@ -29,7 +29,11 @@ interface Lib {
   bannedState(candidates: Candidate[], start?: number): unknown;
   BANNED_BATCH: number;
   JS_KEYWORDS: Set<string>;
-  bannedSelect(candidates: Candidate[]): { selected: Candidate[]; keyword: number; repeat: number };
+  bannedRemoved(diff: string): Set<string>;
+  bannedSelect(
+    candidates: Candidate[],
+    removed?: Set<string>,
+  ): { selected: Candidate[]; keyword: number; moved: number; repeat: number };
   bannedRequests(candidates: Candidate[]): {
     requests: { candidates: Candidate[]; state: unknown; questions: Record<string, unknown> }[];
     asked: Candidate[];
@@ -92,7 +96,7 @@ test('the stage, with Jev answering word-1 0.97, reports the hit with its word a
         threshold: 0.8,
         candidates: 1,
         requests: 1,
-        skipped: { keyword: 0, repeat: 0, oversized: 0 },
+        skipped: { keyword: 0, moved: 0, repeat: 0, oversized: 0 },
       },
     });
   });
@@ -130,7 +134,7 @@ test('the stage asks 40 candidates in requests of 16, 16 and 8 numbered across t
       threshold: 0.8,
       candidates: 40,
       requests: 3,
-      skipped: { keyword: 0, repeat: 0, oversized: 0 },
+      skipped: { keyword: 0, moved: 0, repeat: 0, oversized: 0 },
     });
     expect(result.output.hits).toEqual([{ file: 'f33.md', line: 1, word: 'invocation', term: 'Call', yes: 0.97 }]);
   });
@@ -188,7 +192,7 @@ test('the stage asks Jev nothing when no added line holds an avoided word', asyn
       threshold: 0.8,
       candidates: 0,
       requests: 0,
-      skipped: { keyword: 0, repeat: 0, oversized: 0 },
+      skipped: { keyword: 0, moved: 0, repeat: 0, oversized: 0 },
     });
     expect(existsSync(result.request)).toBe(false);
   });
@@ -264,7 +268,7 @@ test('the stage with no CONTEXT.md makes no Jev request', async () => {
       threshold: 0.8,
       candidates: 0,
       requests: 0,
-      skipped: { keyword: 0, repeat: 0, oversized: 0 },
+      skipped: { keyword: 0, moved: 0, repeat: 0, oversized: 0 },
     });
     expect(result.output.glossary).toEqual({ entries: 0, words: 0 });
     expect(existsSync(result.request)).toBe(false);
@@ -283,7 +287,7 @@ test('the stage with no glossary entries makes no Jev request', async () => {
       threshold: 0.8,
       candidates: 0,
       requests: 0,
-      skipped: { keyword: 0, repeat: 0, oversized: 0 },
+      skipped: { keyword: 0, moved: 0, repeat: 0, oversized: 0 },
     });
     expect(existsSync(result.request)).toBe(false);
   });
@@ -485,10 +489,13 @@ const kinds: Entry[] = [
   { term: 'Call', definition: 'D.', avoid: ['invocation'] },
 ];
 function select(...rows: [string, string][]) {
+  return selectRemoving(new Set(), ...rows);
+}
+function selectRemoving(removed: Set<string>, ...rows: [string, string][]) {
   const candidates = rows.flatMap(([file, text]) =>
     lib.bannedCandidates([{ file, line: 1, text, context: [] }], kinds),
   );
-  return lib.bannedSelect(candidates);
+  return lib.bannedSelect(candidates, removed);
 }
 test('bannedSelect leaves out a JS keyword on a code line of a TypeScript file', () => {
   expect(select(['a.ts', 'type Foo = string;'])).toMatchObject({ selected: [], keyword: 1, repeat: 0 });
@@ -511,6 +518,58 @@ test('bannedSelect asks one candidate per word, entry and file, the first', () =
     ['b.ts', 'invocation one'],
   ]);
   expect(result.repeat).toBe(2);
+});
+test('bannedRemoved holds every removed line of every file, trimmed and with whitespace runs made one space', () => {
+  const diff = [
+    'diff --git a/a.md b/a.md',
+    '--- a/a.md',
+    '+++ b/a.md',
+    '@@ -1,3 +1,1 @@',
+    ' keep',
+    '-\t  Each   invocation of a stage  ',
+    '-}',
+    '+added',
+    'diff --git a/b.json b/b.json',
+    '--- a/b.json',
+    '+++ b/b.json',
+    '@@ -1,2 +1,1 @@',
+    '-"invocation": 1,',
+    '--- x',
+    '+y',
+    '',
+  ].join('\n');
+  expect([...lib.bannedRemoved(diff)].sort()).toEqual(['"invocation": 1,', '-- x', 'Each invocation of a stage']);
+});
+test('bannedSelect counts a line the diff only moved or re-indented as moved, and asks one that differs in a word', () => {
+  const removed = new Set(['Each invocation of a stage']);
+  const moved = selectRemoving(removed, ['new.md', '    Each  invocation of a stage']);
+  expect(moved).toMatchObject({ selected: [], moved: 1, keyword: 0, repeat: 0 });
+  const changed = selectRemoving(removed, ['new.md', 'Each invocation of a step']);
+  expect(changed.selected).toHaveLength(1);
+  expect(changed.moved).toBe(0);
+});
+test('bannedSelect counts a keyword line as keyword, not moved', () => {
+  const result = selectRemoving(new Set(['type Foo = string;']), ['a.ts', 'type Foo = string;']);
+  expect(result).toMatchObject({ selected: [], keyword: 1, moved: 0 });
+});
+test('the stage does not ask a line removed from another file and counts it moved', async () => {
+  await withTempRepo((repo) => {
+    setup(repo, { 'word-1': 0.97 });
+    const diff =
+      '+++ b/old.md\n@@ -1 +0,0 @@\n-Each invocation of a stage\n' +
+      '+++ b/new.md\n@@ -0,0 +1,2 @@\n+    Each invocation of a stage\n+Another invocation here\n';
+    const result = stage(repo, diff);
+    const asked = JSON.parse(readFileSync(result.request, 'utf8'));
+    expect(Object.values(asked.state.lines).map((l) => (l as { text: string }).text)).toEqual([
+      'Another invocation here',
+    ]);
+    expect(result.output.jev).toMatchObject({
+      candidates: 2,
+      requests: 1,
+      skipped: { keyword: 0, moved: 1, repeat: 0, oversized: 0 },
+    });
+    expect(result.stderr).toContain('not asked: 1 moved');
+  });
 });
 test('bannedSelect lets a keyword line not take the place of a later comment line', () => {
   const result = select(['a.ts', 'type Foo = string;'], ['a.ts', '// the type of it']);
@@ -555,7 +614,10 @@ test('the stage asks about a keyword in a string, a trailing comment and a templ
       'word-2',
       'word-3',
     ]);
-    expect(result.output.jev).toMatchObject({ candidates: 3, skipped: { keyword: 0, repeat: 0, oversized: 0 } });
+    expect(result.output.jev).toMatchObject({
+      candidates: 3,
+      skipped: { keyword: 0, moved: 0, repeat: 0, oversized: 0 },
+    });
   });
 });
 test('the stage asks one question for three lines of a TypeScript file and reports the two skipped', async () => {
@@ -574,7 +636,7 @@ test('the stage asks one question for three lines of a TypeScript file and repor
       threshold: 0.8,
       candidates: 3,
       requests: 1,
-      skipped: { keyword: 1, repeat: 1, oversized: 0 },
+      skipped: { keyword: 1, moved: 0, repeat: 1, oversized: 0 },
     });
     expect(result.stderr).toContain('not asked: 1 keyword, 1 repeat');
   });

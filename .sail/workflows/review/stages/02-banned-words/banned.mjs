@@ -1,4 +1,4 @@
-// Find added uses of CONTEXT.md's avoided words on the diff's added lines, never in commit messages; Jev judges every candidate in requests of 16, stopping at a failed request or its time limit, leaving out a JS keyword on a code line outside its string literals and comments and repeats of a word in one file, and counting what it didn't ask.
+// Find added uses of CONTEXT.md's avoided words on the diff's added lines, never in commit messages; Jev judges every candidate in requests of 16, stopping at a failed request or its time limit, leaving out a line the diff also removes (moved or re-wrapped), a JS keyword on a code line outside its string literals and comments and repeats of a word in one file, and counting what it didn't ask.
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
@@ -8,6 +8,7 @@ const {
   bannedLines,
   bannedCandidates,
   bannedSelect,
+  bannedRemoved,
   bannedRequests,
   bannedAsk,
   askNouls,
@@ -18,7 +19,7 @@ const entries = present ? parseGlossary(readFileSync('CONTEXT.md', 'utf8')) : []
 const diff = readFileSync(process.env.INPUT_DIFF, 'utf8');
 const lines = bannedLines(diff);
 const allCandidates = bannedCandidates(lines, entries);
-const { selected, keyword, repeat } = bannedSelect(allCandidates);
+const { selected, keyword, moved, repeat } = bannedSelect(allCandidates, bannedRemoved(diff));
 const { requests, asked, oversized } = bannedRequests(selected);
 const { results, unasked, reason } = bannedAsk(requests, ({ state, questions }, i) =>
   askNouls(questions, state, process.env.STAGE_OUT, i === 0 ? 'jev-request.json' : `jev-request-${i + 1}.json`),
@@ -56,10 +57,11 @@ const jev = {
   threshold: BANNED_YES,
   candidates: allCandidates.length,
   requests: requests.length,
-  skipped: { keyword, repeat, oversized },
+  skipped: { keyword, moved, repeat, oversized },
 };
 const notAsked = [
   keyword && `${keyword} keyword`,
+  moved && `${moved} moved`,
   repeat && `${repeat} repeat`,
   oversized && `${oversized} over the request limit`,
 ]
