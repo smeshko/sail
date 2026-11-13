@@ -531,6 +531,59 @@ test('bannedSelect asks the first three candidates per word, entry and file', ()
   ]);
   expect(result.repeat).toBe(2);
 });
+test('bannedRemoved holds every removed line of every file, trimmed and with whitespace runs made one space', () => {
+  const diff = [
+    'diff --git a/a.md b/a.md',
+    '--- a/a.md',
+    '+++ b/a.md',
+    '@@ -1,3 +1,1 @@',
+    ' keep',
+    '-\t  Each   invocation of a stage  ',
+    '-}',
+    '+added',
+    'diff --git a/b.json b/b.json',
+    '--- a/b.json',
+    '+++ b/b.json',
+    '@@ -1,2 +1,1 @@',
+    '-"invocation": 1,',
+    '--- x',
+    '+y',
+    '',
+  ].join('\n');
+  expect([...lib.bannedRemoved(diff)].sort()).toEqual(['"invocation": 1,', '-- x', 'Each invocation of a stage']);
+});
+test('bannedSelect counts a line the diff only moved or re-indented as moved, and asks one that differs in a word', () => {
+  const removed = new Set(['Each invocation of a stage']);
+  const moved = selectRemoving(removed, ['new.md', '    Each  invocation of a stage']);
+  expect(moved).toMatchObject({ selected: [], moved: 1, keyword: 0, repeat: 0 });
+  const changed = selectRemoving(removed, ['new.md', 'Each invocation of a step']);
+  expect(changed.selected).toHaveLength(1);
+  expect(changed.moved).toBe(0);
+});
+test('bannedSelect counts a keyword line as keyword, not moved', () => {
+  const result = selectRemoving(new Set(['type Foo = string;']), ['a.ts', 'type Foo = string;']);
+  expect(result).toMatchObject({ selected: [], keyword: 1, moved: 0 });
+});
+test('the stage does not ask a line removed from another file and counts it moved', async () => {
+  await withTempRepo((repo) => {
+    setup(repo, { 'word-1': 0.97 });
+    const diff =
+      '+++ b/old.md\n@@ -1 +0,0 @@\n-Each invocation of a stage\n' +
+      '+++ b/new.md\n@@ -0,0 +1,2 @@\n+    Each invocation of a stage\n+Another invocation here\n';
+    const result = stage(repo, diff);
+    const asked = JSON.parse(readFileSync(result.request, 'utf8'));
+    expect(Object.values(asked.state.lines).map((l) => (l as { text: string }).text)).toEqual([
+      'Another invocation here',
+    ]);
+    expect(existsSync(join(repo.home, 'out', 'jev-request-2.json'))).toBe(false);
+    expect(result.output.jev).toMatchObject({
+      candidates: 2,
+      requests: 1,
+      skipped: { keyword: 0, moved: 1, repeat: 0, oversized: 0 },
+    });
+    expect(result.stderr).toContain('not asked: 1 moved');
+  });
+});
 const asked = (rows: [string, number][]) =>
   rows.map(([file, n]) => ({ ...line, ...entry, word: 'invocation', file, line: n }));
 const noulAnswer = (noul: number) => ({ type: 'noul', noul });
