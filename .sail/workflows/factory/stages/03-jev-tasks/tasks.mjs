@@ -12,14 +12,19 @@ const asked = { asked: false, note: '', threshold: lib.CLEAR_YES, answers: [], c
 if (tasks.length === 0) {
   asked.note = 'the plan holds no task details to ask about';
 } else {
-  const result = lib.askNouls(lib.taskQuestions(tasks), lib.tasksState(tasks), process.env.STAGE_OUT);
+  const state = lib.tasksState(tasks);
+  const result = lib.askNouls(lib.taskQuestions(tasks), state, process.env.STAGE_OUT);
+  const unchanged = lib
+    .unchangedTests(state)
+    .map((each) => `${each.id} names test files with no change on the branch: ${each.paths.join(', ')}`);
   if (!result.asked) {
-    asked.note = result.note;
+    asked.note = [...unchanged, result.note].join('; ');
   } else {
     const ids = tasks.map((task) => task.id);
     asked.asked = true;
     asked.answers = lib.yesses(result.answers, ids);
-    if (asked.answers.length < ids.length) asked.note = 'Jev left a task unanswered';
+    if (asked.answers.length < ids.length) asked.note = [...unchanged, 'Jev left a task unanswered'].join('; ');
+    else if (unchanged.length > 0) asked.note = unchanged.join('; ');
     else if (lib.clearYes(result.answers, ids)) {
       const commits = lib
         .git(['log', `${lib.BASE}..HEAD`, '--format=%h'])
@@ -33,7 +38,7 @@ if (tasks.length === 0) {
           evidence: `Jev answers yes at ${each.yes} (clear from ${lib.CLEAR_YES}); branch commits: ${commits.join(', ') || 'none found'}.`,
         })),
       };
-    } else asked.note = `not every task is a clear yes (from ${lib.CLEAR_YES})`;
+    } else asked.note = [...unchanged, `not every task is a clear yes (from ${lib.CLEAR_YES})`].join('; ');
   }
 }
 console.log(JSON.stringify(asked));

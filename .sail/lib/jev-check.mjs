@@ -11,7 +11,9 @@ import { join } from 'node:path';
  * The probability of yes at or above which an answer is clear: just above Jev's highest yes on a task the check agent
  * found not implemented, and never below 0.8 (ADW-396). On 51 live check-tasks calls (123 tasks) the agent said no
  * once, where Jev's yes was 0.58, so the floor holds: no false yeses, and 23 of the 51 calls Jev could have answered.
- * Measure again as noes come in.
+ * A replay on `jev-1.14.0` (199 calls, 561 tasks) skipped 158 calls with 0 wrong against the agent. But with a task's
+ * test diffs emptied, 13 of 245 tasks were still at 0.8 or more and 4 at 0.95, so no threshold closes that hole: the
+ * test check (`unchangedTests`) does. And 8 of 60 requests flip across 0.8 over 5 repeats. Measure again as noes come in.
  */
 export const CLEAR_YES = 0.8;
 /** The most characters of one diff in a request, so a large change can't make it unaskable. */
@@ -694,6 +696,17 @@ export function resolveTasks(tasks, changed) {
     ...task,
     paths: [...new Set(task.paths.map(resolve).filter((path) => path !== null))],
   }));
+}
+
+/**
+ * The tasks of `state` that list a test file (see isTestPath) whose diff on the branch is empty: `[{ id, paths }]`. A
+ * cut diff always ends with its marker, so it is never empty.
+ */
+export function unchangedTests(state) {
+  return Object.entries(state.tasks).flatMap(([id, task]) => {
+    const paths = task.files.filter((path) => isTestPath(path) && (state.files[path] ?? '').trim() === '');
+    return paths.length > 0 ? [{ id, paths }] : [];
+  });
 }
 
 /** Bytes the cut marker adds, with room to spare, so a cut that removes the excess still leaves the request under. */

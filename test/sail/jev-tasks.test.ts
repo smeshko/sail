@@ -18,6 +18,10 @@ interface Lib {
   MAX_REQUEST_BYTES: number;
   parseTasks(plan: string): Task[];
   resolveTasks(tasks: Task[], changed: string[]): Task[];
+  unchangedTests(state: {
+    files: Record<string, string>;
+    tasks: Record<string, { files: string[] }>;
+  }): { id: string; paths: string[] }[];
   tasksState(
     tasks: Task[],
     run: (args: string[]) => string,
@@ -259,6 +263,7 @@ test.each(['#### TASK-002: Second', '### TASK-002 Second', ''])(
 test('partial task answers retain asked true, available answers and an unanswered note', async () => {
   await withTempRepo(async (repo) => {
     writeOwnSail(repo);
+    changeFiles(repo, 'test/a.test.ts');
     const { output } = runStage(repo, PLAN, `#!/bin/sh\necho '{"answers":{"TASK-001":{"type":"noul","noul":1}}}'\n`);
     expect(output).toMatchObject({
       asked: true,
@@ -297,9 +302,21 @@ const ALL = ['TASK-001', 'TASK-002', 'TASK-003'];
 const seed = (overrides: Record<string, number> = {}) =>
   nouls(Object.fromEntries(ALL.map((id) => [id, overrides[id] ?? 0.99])));
 
+/** Makes `origin/staging` the head, then commits a change to each of `files`, so their diffs on the branch are not empty. */
+function changeFiles(repo: TempRepo, ...files: string[]) {
+  repo.git('update-ref', 'refs/remotes/origin/staging', 'HEAD');
+  for (const file of files) {
+    mkdirSync(join(repo.dir, file, '..'), { recursive: true });
+    writeFileSync(join(repo.dir, file), `changed ${file}\n`);
+  }
+  repo.git('add', ...files);
+  repo.git('commit', '-m', 'feat: change the files');
+}
+
 test('the stage, with Jev answering every task a clear yes, outputs the TasksChecked with every task implemented', async () => {
   await withTempRepo(async (repo) => {
     writeOwnSail(repo, { jev: seed() });
+    changeFiles(repo, 'test/a.test.ts');
     const { code, stderr, output } = runStage(repo, PLAN);
     expect({ code, stderr }).toEqual({ code: 0, stderr: '' });
     expect(output.asked).toBe(true);
@@ -318,6 +335,7 @@ test.each([
   async (_name, yes) => {
     await withTempRepo(async (repo) => {
       writeOwnSail(repo, { jev: seed({ 'TASK-002': yes }) });
+      changeFiles(repo, 'test/a.test.ts');
       const { code, output } = runStage(repo, PLAN);
       expect(code).toBe(0);
       expect(output.asked).toBe(true);
@@ -424,4 +442,39 @@ test('tasksState reads a task whose paths were all dropped as whole', () => {
   expect(state.tasks['TASK-001']?.files).toEqual([]);
   expect(state.whole).toBe('the whole diff');
   expect(state.files).toEqual({});
+});
+
+test('the stage, with Jev at 0.95 for every task and test/a.test.ts unchanged, has no checked and names the task and the file', async () => {
+  await withTempRepo(async (repo) => {
+    writeOwnSail(repo, { jev: seed(Object.fromEntries(ALL.map((id) => [id, 0.95]))) });
+    changeFiles(repo, 'src/a.ts');
+    const { code, output } = runStage(repo, PLAN);
+    expect(code).toBe(0);
+    expect(output.asked).toBe(true);
+    expect(output.threshold).toBe(0.8);
+    expect(output.answers).toEqual(ALL.map((id) => ({ id, yes: 0.95 })));
+    expect(output.checked).toBeNull();
+    expect(output.note).toContain('TASK-001 names test files with no change on the branch: test/a.test.ts');
+  });
+}, 60_000);
+
+test('unchangedTests reports a test file with an empty diff, and nothing for an unchanged source file or a cut test diff', () => {
+  const state = {
+    files: {
+      'src/x.test.ts': '  \n',
+      'src/a.ts': '',
+      'test/cut.test.ts': `${'d'.repeat(10)}\n… cut: 5 more characters`,
+      'test/changed.ts': 'diff',
+    },
+    tasks: {
+      'TASK-001': { files: ['src/x.test.ts', 'src/a.ts'] },
+      'TASK-002': { files: ['src/a.ts', 'test/cut.test.ts', 'test/changed.ts'] },
+      'TASK-003': { files: [] },
+    },
+  };
+  expect(lib.unchangedTests(state)).toEqual([{ id: 'TASK-001', paths: ['src/x.test.ts'] }]);
+});
+
+test('CLEAR_YES is 0.8', () => {
+  expect(lib.CLEAR_YES).toBe(0.8);
 });
