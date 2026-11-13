@@ -1,5 +1,6 @@
 // groom's contracts, shared by its intake, stages and workflow: the ticket it reads, what each check finds, what the
-// judge decides, what the planner wrote, which ticket's plan overlaps it, and what the act step did.
+// judge decides, what the planner wrote, which ticket's plan overlaps it, what the act step did, and whether the
+// rulings stage found the ticket's rulings to answer every earlier open question (Ruled).
 import { untrusted, z } from 'sail';
 import { PlanOutput } from '../../lib/plan';
 
@@ -14,6 +15,20 @@ export const GroomInput = z.object({
   kept: z.array(z.string()),
   /** True when the ticket carries `code-review`: a review filed it, not a person, so groom cancels it more readily. */
   fromReview: z.boolean(),
+});
+
+/**
+ * Whether the duplicates, worth and questions checks can be skipped: the ticket's `## Rulings` answer every open
+ * question the last grooming asked. `asked` says whether Jev answered, `note` why not skipped, `questions` how many
+ * earlier questions were found, and `answers` Jev's probability of yes for each.
+ */
+export const Ruled = z.object({
+  skip: z.boolean(),
+  asked: z.boolean(),
+  note: z.string(),
+  threshold: z.number(),
+  questions: z.number(),
+  answers: z.array(z.object({ id: z.string(), yes: z.number() })),
 });
 
 /** The open tickets Jev ranks closest to the groomed one, each with its score. */

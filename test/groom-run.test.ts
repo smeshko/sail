@@ -28,8 +28,9 @@ test('a groom run on fakes reads FAKE-2 unclaimed, comments the report and swaps
     expect(readStatus(dir)).toEqual({ status: 'completed' });
     const keys = readJournal(dir).entries.map((entry) => entry.key);
     expect(keys[0]).toBe('intake#1');
-    expect(keys.slice(1, 3).sort()).toEqual(['duplicates#1', 'worth#1']);
-    expect(keys.slice(3)).toEqual(['questions#1', 'decide#1', 'act#1']);
+    expect(keys[1]).toBe('rulings#1');
+    expect(keys.slice(2, 4).sort()).toEqual(['duplicates#1', 'worth#1']);
+    expect(keys.slice(4)).toEqual(['questions#1', 'decide#1', 'act#1']);
     expect(keys).not.toContain('staleness#1');
     expect(duplicatesCall(dir).output).toEqual({
       candidates: [{ ticketKey: 'FAKE-1', confidence: 0.6, why: 'ranked 1 of 1 by Jev, score 0.60' }],
@@ -559,7 +560,7 @@ test('groom plans a ticket with no open question: attaches plan.md with its trai
     expect(
       readJournal(dir)
         .entries.map((entry) => entry.key)
-        .slice(4),
+        .slice(5),
     ).toEqual(['decide#1', 'plan#1', 'overlap#1', 'act#1']);
     const planned = readEvents(dir).find((event) => event.type === 'prompt:rendered' && event.key === 'plan#1');
     expect((planned as { conventions?: string[] } | undefined)?.conventions).toEqual(['AGENTS.md', 'CONTEXT.md']);
@@ -568,7 +569,7 @@ test('groom plans a ticket with no open question: attaches plan.md with its trai
       'CONTEXT.md',
     ]);
     // The planner plans the ticket as the applied actions leave it: here, the judge's title edit.
-    const actions = JSON.parse(readFileSync(join(dir, '05-plan', 'call-1', 'in', 'actions.json'), 'utf8'));
+    const actions = JSON.parse(readFileSync(join(dir, '06-plan', 'call-1', 'in', 'actions.json'), 'utf8'));
     expect(actions).toEqual([{ kind: 'edit', title: NEW_TITLE }]);
 
     const ticket = fakeTicket(repo.dir, 'FAKE-2');
@@ -1102,7 +1103,7 @@ test('groom rules a ticket manual: labels it manual, plans nothing, and still ap
 
     const dir = onlyRun(repo.dir);
     const keys = readJournal(dir).entries.map((entry) => entry.key);
-    expect(keys.slice(4)).toEqual(['decide#1', 'act#1']);
+    expect(keys.slice(5)).toEqual(['decide#1', 'act#1']);
     const ticket = fakeTicket(repo.dir, 'FAKE-2');
     expect(ticket.labels).toEqual(['manual']);
     expect(ticket.attachments).toEqual([]);

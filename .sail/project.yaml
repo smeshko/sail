@@ -20,9 +20,11 @@ adapters:
   # clone's docs/ Markdown (ADRs, plans, epics) in for agents to read; git ignores the copy. The guard is for a branch
   # from before scripts/workspace-docs.ts, which lacks it.
   workspace: { use: git-worktree, setup: 'bun install --frozen-lockfile && { [ ! -f scripts/workspace-docs.ts ] || bun scripts/workspace-docs.ts; }' }
-  # Jev answers check-tasks and check-fix before their agents run, checks a filer's follow-ups, and ranks the closest open
-  # tickets in groom's duplicates stage. Without TYPESAFE_API_KEY the check agents run as before, follow-ups are filed
-  # unchecked, and groom's decide runs with no candidates.
+  # Jev answers check-tasks and check-fix before their agents run, checks a filer's follow-ups, ranks the closest open
+  # tickets in groom's duplicates stage, and in groom's rulings stage says whether a ticket's rulings answer each of its
+  # earlier open questions, which skips the duplicates, worth and questions checks. Without TYPESAFE_API_KEY, or when
+  # Jev can't be asked, the check agents run as before, follow-ups are filed unchecked, groom takes its full path with
+  # every check, and its decide runs with no candidates.
   # The model is pinned because the Jev thresholds (CLEAR_YES, LEAK_YES, BANNED_YES and the triage ones in
   # .sail/lib/jev-check.mjs) were tuned on that version, so they are measured again before it moves.
   jev: { use: typesafe, model: jev-1.14.0 }

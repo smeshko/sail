@@ -1,7 +1,8 @@
 // groom: a groom-labelled ticket in, one comment out, and for a ticket worth doing, its plan. The ticket is read without
 // a claim, so it stays where it is unless groom cancels it, merges it into another, or marks it a duplicate. Two agent
 // checks and a Jev ranking look at it (duplicates and worth at once, worth also asking whether it is stale; then open
-// questions, only when worth keeps the ticket); a judge writes the report, chooses actions
+// questions, only when worth keeps the ticket; none of the three runs on a ticket whose `## Rulings` answer every open
+// question the last grooming asked, as the rulings stage finds by asking Jev); a judge writes the report, chooses actions
 // from a fixed set and confirms the open questions. A ticket that survives them with none open is planned, as the
 // factory's plan stage did, and a plan that leaves no question open is attached to the ticket. Before it is, the overlap
 // stage reads the plans of the other open `planned` tickets, and the ticket is blocked by the one whose plan changes a
@@ -16,6 +17,7 @@ import { workflow, type z } from 'sail';
 import { handOverTicket } from '../../stages/hand-over-ticket/stage';
 import { readTicket } from './intake';
 import type { Decision, Findings, Verdict } from './schemas';
+import { rulings } from './stages/00-rulings/stage';
 import { duplicates } from './stages/01-duplicates/stage';
 import { worth } from './stages/02-worth/stage';
 import { questions } from './stages/04-questions/stage';
@@ -34,6 +36,23 @@ const LABEL = 'groom';
  */
 const CANCEL = { cancel: 0.6, keep: 0.6 };
 const REVIEW_CANCEL = { cancel: 0.5, keep: 0.7 };
+
+/**
+ * What `decide` and `limit()` see when the rulings stage skipped the three checks: no candidates, a `keep` at full
+ * confidence that is not stale, and no questions. With no evidence for it, a cancel, a merge and a duplicate are all held.
+ */
+const SKIPPED: z.infer<typeof Findings> = {
+  duplicates: { candidates: [] },
+  worth: {
+    verdict: 'keep',
+    confidence: 1,
+    why: "The duplicates, worth and questions checks were skipped: the ticket's rulings answer every open question the last grooming asked.",
+    merges: [],
+    stale: false,
+    staleEvidence: '',
+  },
+  questions: { questions: [] },
+};
 
 /** The confidence the worth check must name another ticket at for a `merge` with it to pass. */
 const MERGE_CONFIDENCE = 0.65;
@@ -222,7 +241,7 @@ export default workflow(
   'groom',
   {
     intake: readTicket,
-    version: 4,
+    version: 5,
     watch: { every: '15m', label: LABEL },
     // One at a time, so two judgments of duplicates or merges never race each other.
     maxConcurrentRuns: 1,
@@ -240,25 +259,29 @@ export default workflow(
       return run.fail(reason);
     };
 
-    const [dup, earned] = await run.all([
-      [duplicates, { ticket: run.intake.files['ticket.json'], others: run.intake.files['others.json'] }],
-      [worth, { brief, others }],
-    ]);
-    if (earned.outcome === 'blocked') return handOff(`worth blocked: ${earned.reason}`);
+    const ruled = await run.stage(rulings, { ticket: run.intake.files['ticket.json'] });
+    let findings: z.infer<typeof Findings> = SKIPPED;
+    if (!ruled.output.skip) {
+      const [dup, earned] = await run.all([
+        [duplicates, { ticket: run.intake.files['ticket.json'], others: run.intake.files['others.json'] }],
+        [worth, { brief, others }],
+      ]);
+      if (earned.outcome === 'blocked') return handOff(`worth blocked: ${earned.reason}`);
 
-    // A ticket worth would cancel needs no questions asked of it: decide sees none.
-    let open: z.infer<typeof Findings>['questions'] = { questions: [] };
-    if (earned.output.verdict === 'keep') {
-      const asked = await run.stage(questions, { brief, others });
-      if (asked.outcome === 'blocked') return handOff(`questions blocked: ${asked.reason}`);
-      open = asked.output;
+      // A ticket worth would cancel needs no questions asked of it: decide sees none.
+      let open: z.infer<typeof Findings>['questions'] = { questions: [] };
+      if (earned.output.verdict === 'keep') {
+        const asked = await run.stage(questions, { brief, others });
+        if (asked.outcome === 'blocked') return handOff(`questions blocked: ${asked.reason}`);
+        open = asked.output;
+      }
+
+      findings = {
+        duplicates: dup.output,
+        worth: earned.output,
+        questions: open,
+      };
     }
-
-    const findings = {
-      duplicates: dup.output,
-      worth: earned.output,
-      questions: open,
-    };
     const decided = await run.stage(decide, { brief, others, findings });
     if (decided.outcome === 'blocked') return handOff(`decide blocked: ${decided.reason}`);
     const report = decided.files['report.md'];
