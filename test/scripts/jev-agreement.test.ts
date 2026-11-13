@@ -210,6 +210,7 @@ test('collect rebuilds tasks against the base of workspace:created and the imple
     const { args, notes } = await recordGit(runDir, repo);
     expect(notes).toEqual([]);
     expect(args).toEqual([
+      ['diff', '--name-only', `${base}...${second}`],
       ['log', `${base}..${second}`, '--format=%h %s'],
       ['diff', `${base}...${second}`],
     ]);
@@ -227,6 +228,7 @@ test('collect takes the head from the earlier implement call when the nearest on
     const { args, notes } = await recordGit(runDir, repo);
     expect(notes).toEqual([]);
     expect(args).toEqual([
+      ['diff', '--name-only', `${base}...${second}`],
       ['log', `${base}..${second}`, '--format=%h %s'],
       ['diff', `${base}...${second}`],
     ]);
@@ -242,7 +244,7 @@ test('collect takes the last implement call before the check, not an implement c
       { key: 'implement#2', output: implemented(first, second) },
     ]);
     const { args } = await recordGit(runDir, repo);
-    expect(args[0]).toEqual(['log', `${base}..${first}`, '--format=%h %s']);
+    expect(args[1]).toEqual(['log', `${base}..${first}`, '--format=%h %s']);
   });
 });
 

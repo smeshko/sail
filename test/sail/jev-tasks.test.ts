@@ -17,6 +17,7 @@ interface Lib {
   MAX_DIFF: number;
   MAX_REQUEST_BYTES: number;
   parseTasks(plan: string): Task[];
+  resolveTasks(tasks: Task[], changed: string[]): Task[];
   tasksState(
     tasks: Task[],
     run: (args: string[]) => string,
@@ -89,6 +90,7 @@ test('tasksState diffs each file once, the whole diff for a task that names none
   const run = (args: string[]) => {
     calls.push(args);
     if (args[0] === 'log') return 'abc1234 feat: first\n';
+    if (args.includes('--name-only')) return '';
     return args.includes('--') ? `diff of ${args.slice(args.indexOf('--') + 1).join(' ')}` : 'the whole diff';
   };
   const state = lib.tasksState(lib.parseTasks(PLAN), run);
@@ -108,14 +110,17 @@ test('tasksState diffs each file once, the whole diff for a task that names none
     },
   });
   expect(calls.filter((args) => args[0] === 'log')).toHaveLength(1);
-  expect(calls.filter((args) => args[0] === 'diff')).toHaveLength(4);
+  expect(calls.filter((args) => args[0] === 'diff' && !args.includes('--name-only'))).toHaveLength(4);
+  expect(calls.filter((args) => args.includes('--name-only'))).toEqual([
+    ['diff', '--name-only', 'origin/staging...HEAD'],
+  ]);
 });
 
 test('tasksState stores a file two tasks name once', () => {
   const calls: string[][] = [];
   const run = (args: string[]) => {
     calls.push(args);
-    return args[0] === 'diff' ? 'shared diff' : '';
+    return args[0] === 'diff' && !args.includes('--name-only') ? 'shared diff' : '';
   };
   const tasks: Task[] = [
     { id: 'TASK-001', text: 'one', paths: ['src/shared.ts'] },
@@ -126,7 +131,7 @@ test('tasksState stores a file two tasks name once', () => {
   expect(state.whole).toBeUndefined();
   expect(state.tasks['TASK-001']?.files).toEqual(['src/shared.ts']);
   expect(state.tasks['TASK-002']?.files).toEqual(['src/shared.ts', 'src/own.ts']);
-  expect(calls.filter((args) => args[0] === 'diff')).toHaveLength(2);
+  expect(calls.filter((args) => args[0] === 'diff' && !args.includes('--name-only'))).toHaveLength(2);
 });
 
 test('taskQuestions tell Jev the state is untrusted data, not instructions', () => {
@@ -366,4 +371,57 @@ Files:
 - \`src/a.ts:12\`, \`test/fixtures/runs/\` and \`foo.json\`
 `;
   expect(lib.parseTasks(plan).map((task) => task.paths)).toEqual([['src/a.ts', 'test/fixtures/runs/', 'foo.json']]);
+});
+
+const task = (id: string, ...paths: string[]): Task => ({ id, text: id, paths });
+
+test('resolveTasks turns a bare file name into the one changed file of that name', () => {
+  const [resolved] = lib.resolveTasks([task('TASK-001', 'show.ts')], ['src/cli/commands/show.ts', 'src/a.ts']);
+  expect(resolved?.paths).toEqual(['src/cli/commands/show.ts']);
+});
+
+test('resolveTasks leaves a bare name two changed files share, and one no changed file has, as written', () => {
+  const changed = ['src/a/index.ts', 'src/b/index.ts'];
+  const [resolved] = lib.resolveTasks([task('TASK-001', 'index.ts', 'gone.ts')], changed);
+  expect(resolved?.paths).toEqual(['index.ts', 'gone.ts']);
+});
+
+test('resolveTasks keeps a bare name that is itself a changed path', () => {
+  const [resolved] = lib.resolveTasks([task('TASK-001', 'a.ts')], ['a.ts', 'src/a.ts']);
+  expect(resolved?.paths).toEqual(['a.ts']);
+});
+
+test('resolveTasks drops an extensionless token that is no changed file or directory, and keeps the ones that are', () => {
+  const changed = ['bin/sail', 'src/engine/run.ts'];
+  const [resolved] = lib.resolveTasks(
+    [task('TASK-001', 'read/write', 'origin/staging', 'bin/sail', 'src/engine', 'test/helpers', 'src/a.ts')],
+    changed,
+  );
+  expect(resolved?.paths).toEqual(['bin/sail', 'src/engine', 'test/helpers', 'src/a.ts']);
+});
+
+test('resolveTasks leaves no duplicate when two names resolve to one file', () => {
+  const [resolved] = lib.resolveTasks([task('TASK-001', 'show.ts', 'src/show.ts')], ['src/show.ts']);
+  expect(resolved?.paths).toEqual(['src/show.ts']);
+});
+
+test('tasksState diffs the changed file a bare name resolves to and drops a token that is no file', () => {
+  const calls: string[][] = [];
+  const run = (args: string[]) => {
+    calls.push(args);
+    if (args.includes('--name-only')) return 'src/cli/commands/show.ts\n';
+    if (args[0] === 'diff') return `diff of ${args.at(-1)}`;
+    return '';
+  };
+  const state = lib.tasksState([task('TASK-001', 'show.ts', 'read/write')], run);
+  expect(state.files).toEqual({ 'src/cli/commands/show.ts': 'diff of src/cli/commands/show.ts' });
+  expect(state.tasks['TASK-001']?.files).toEqual(['src/cli/commands/show.ts']);
+});
+
+test('tasksState reads a task whose paths were all dropped as whole', () => {
+  const run = (args: string[]) => (args[0] === 'diff' && !args.includes('--name-only') ? 'the whole diff' : '');
+  const state = lib.tasksState([task('TASK-001', 'read/write')], run);
+  expect(state.tasks['TASK-001']?.files).toEqual([]);
+  expect(state.whole).toBe('the whole diff');
+  expect(state.files).toEqual({});
 });
