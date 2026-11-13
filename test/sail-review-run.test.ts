@@ -181,20 +181,20 @@ test('a banned-words Jev hit reaches the judge as B1', async () => {
   });
 }, 120_000);
 
-test('the review asks all 65 banned-words candidates in five requests and posts no incomplete line', async () => {
+test('the review asks all 20 banned-words candidates in 20 requests and posts no incomplete line', async () => {
   await withTempRepo(async (repo) => {
     const answers = seed() as { answers: Record<string, unknown> };
-    for (let i = 1; i <= 65; i++) answers.answers[`word-${i}`] = { type: 'noul', noul: 0.05 };
+    for (let i = 1; i <= 20; i++) answers.answers[`word-${i}`] = { type: 'noul', noul: 0.05 };
     setUp(
       repo,
       answers,
-      Array.from({ length: 65 }, (_, i) => `**Edit ${i}**:\nAn alteration.\n_Avoid_: change\n`).join(''),
+      Array.from({ length: 20 }, (_, i) => `**Edit ${i}**:\nAn alteration.\n_Avoid_: change\n`).join(''),
     );
     const { code, dir } = await review(repo);
     expect(code).toBe(0);
     const pr = await pullRequest(repo);
     expect(pr.comments.find((body) => body.includes('## sail review'))).not.toContain('Banned-words check incomplete');
-    expect(asked(dir, 'banned-words#1')).toHaveLength(5);
+    expect(asked(dir, 'banned-words#1')).toHaveLength(20);
   });
 }, 120_000);
 
@@ -375,7 +375,7 @@ test('several thousand tracker keys of one prefix reach the judge as one finding
     });
     expect(leak.detail).toContain('git diff');
     expect(leak.detail).toContain('\\bCIR-\\d+\\b');
-    expect(leak.detail.match(/keys\.ts:\d+/g)).toHaveLength(5);
+    expect(leak.detail.match(/keys\.ts:\d+/g)).toHaveLength(20);
     const comments = (await pullRequest(repo)).comments;
     const title = 'A tracker key other than ADW: prefix CIR, 3000 occurrences in 1 file';
     expect(comments.join('\n').split(title)).toHaveLength(2);

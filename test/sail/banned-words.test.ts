@@ -27,7 +27,7 @@ interface Lib {
   bannedPattern(word: string): RegExp;
   bannedMatches(pattern: RegExp, text: string): boolean;
   bannedState(candidates: Candidate[], start?: number): unknown;
-  BANNED_BATCH: number;
+  BANNED_REFERS: number;
   JS_KEYWORDS: Set<string>;
   bannedHits(
     asked: Candidate[],
@@ -116,54 +116,49 @@ test('the stage reports no hit for an allowed shell invocation when Jev answers 
     );
   });
 });
-function requestFiles(out: string) {
-  return [1, 2, 3, 4, 5, 6].map((n) => join(out, n === 1 ? 'jev-request.json' : `jev-request-${n}.json`));
+/** The question names of each of the first `n` request files in `out`. */
+function requestQuestions(out: string, n: number) {
+  return Array.from({ length: n }, (_, i) =>
+    Object.keys(
+      JSON.parse(readFileSync(join(out, i === 0 ? 'jev-request.json' : `jev-request-${i + 1}.json`), 'utf8')).questions,
+    ),
+  );
 }
-test('the stage asks 40 candidates in requests of 16, 16 and 8 numbered across them', async () => {
+test('the stage asks six candidates in six requests of their own, each with a second noul', async () => {
   await withTempRepo((repo) => {
-    setup(repo, Object.fromEntries(Array.from({ length: 40 }, (_, i) => [`word-${i + 1}`, i === 32 ? 0.97 : 0.05])));
-    const files = Array.from({ length: 40 }, (_, i) => `+++ b/f${i + 1}.md\n@@ -0,0 +1 @@\n+invocation\n`).join('');
+    setup(repo, Object.fromEntries(Array.from({ length: 6 }, (_, i) => [`word-${i + 1}`, i === 4 ? 0.97 : 0.05])));
+    const files = Array.from({ length: 6 }, (_, i) => `+++ b/f${i + 1}.md\n@@ -0,0 +1 @@\n+invocation\n`).join('');
     const result = stage(repo, files);
-    const [one, two, three, four] = requestFiles(join(repo.home, 'out'));
-    expect(existsSync(one as string) && existsSync(two as string) && existsSync(three as string)).toBe(true);
-    expect(existsSync(four as string)).toBe(false);
-    const names = [one, two, three].map((f) => Object.keys(JSON.parse(readFileSync(f as string, 'utf8')).questions));
-    expect(names[0]).toEqual(Array.from({ length: 16 }, (_, i) => `word-${i + 1}`));
-    expect(names[1]).toEqual(Array.from({ length: 16 }, (_, i) => `word-${i + 17}`));
-    expect(names[2]).toEqual(Array.from({ length: 8 }, (_, i) => `word-${i + 33}`));
+    const out = join(repo.home, 'out');
+    expect(existsSync(join(out, 'jev-request-7.json'))).toBe(false);
+    for (let n = 1; n <= 6; n++) {
+      const request = JSON.parse(
+        readFileSync(join(out, n === 1 ? 'jev-request.json' : `jev-request-${n}.json`), 'utf8'),
+      );
+      expect(Object.keys(request.questions)).toEqual([`word-${n}`, `word-${n}:refers`]);
+      expect(Object.keys(request.state.entries)).toEqual(['Call']);
+      expect(Object.keys(request.state.lines)).toEqual(['line-1']);
+      expect(request.state.lines['line-1'].file).toBe(`f${n}.md`);
+      expect(Object.keys(request.state.candidates)).toEqual([`word-${n}`]);
+    }
     expect(result.output.jev).toEqual({
       asked: true,
       failed: false,
       note: '',
       threshold: 0.8,
-      candidates: 40,
-      requests: 3,
+      candidates: 6,
+      requests: 6,
       skipped: { keyword: 0, moved: 0, repeat: 0, oversized: 0 },
     });
-    expect(result.output.hits).toEqual([{ file: 'f33.md', line: 1, word: 'invocation', term: 'Call', yes: 0.97 }]);
+    expect(result.output.hits).toEqual([{ file: 'f5.md', line: 1, word: 'invocation', term: 'Call', yes: 0.97 }]);
   });
 }, 120_000);
-test('the stage splits long multibyte lines into requests under the byte limit and asks them all', async () => {
+test('the stage flags no line whose word Jev does not read as referring to the entry', async () => {
   await withTempRepo((repo) => {
-    setup(repo, Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`word-${i + 1}`, 0.05])));
-    const files = Array.from(
-      { length: 30 },
-      (_, i) => `+++ b/f${i + 1}.md\n@@ -0,0 +1 @@\n+invocation ${'界'.repeat(2000)}\n`,
-    ).join('');
-    const result = stage(repo, files);
-    const present = requestFiles(join(repo.home, 'out')).filter((f) => existsSync(f));
-    const names: string[] = [];
-    for (const f of present) {
-      const text = readFileSync(f, 'utf8');
-      expect(Buffer.byteLength(text)).toBeLessThanOrEqual(64_000);
-      const keys = Object.keys(JSON.parse(text).questions);
-      expect(keys.length).toBeLessThan(16);
-      names.push(...keys);
-    }
-    expect(names).toEqual(Array.from({ length: 30 }, (_, i) => `word-${i + 1}`));
-    expect(result.output.jev.note).toBe('');
+    setup(repo, { 'word-1': 0.97, 'word-1:refers': 0.2 });
+    expect(stage(repo, doc).output.hits).toEqual([]);
   });
-}, 120_000);
+});
 test('Jev state includes a repeated definition and line context only once', () => {
   const candidates = lib.bannedCandidates(
     [{ ...line, text: 'invocation execution' }],
@@ -451,25 +446,28 @@ test('bannedLines skips glossary, generated and data paths and preserves new-sid
     { file: 'a.ts', line: 9, text: 'other', context: [] },
   ]);
 });
-test('bannedRequests makes requests of 16, numbering word-n across them', () => {
+test('bannedRequests makes a request of one candidate each, numbering word-n across them', () => {
   const small = { ...line, ...entry, word: 'invocation' };
-  const result = lib.bannedRequests(Array.from({ length: 17 }, () => small));
-  expect(result.requests.map((r) => r.candidates.length)).toEqual([lib.BANNED_BATCH, 1]);
-  expect(Object.keys(result.requests[1]?.questions ?? {})).toEqual(['word-17']);
-  expect(result.asked).toHaveLength(17);
+  const result = lib.bannedRequests([small, small, small]);
+  expect(result.requests.map((r) => r.candidates.length)).toEqual([1, 1, 1]);
+  expect(Object.keys(result.requests[2]?.questions ?? {})).toEqual(['word-3', 'word-3:refers']);
+  expect(result.asked).toHaveLength(3);
   expect(result.oversized).toBe(0);
 });
-test('bannedRequests leaves out a candidate too large for any request and keeps the rest in one', () => {
+test('bannedRequests leaves out a candidate too large for any request and keeps the rest', () => {
   const small = { ...line, ...entry, word: 'invocation' };
   const huge = { ...small, text: 'x'.repeat(100_000) };
   const result = lib.bannedRequests([small, huge, small]);
   expect(result.oversized).toBe(1);
-  expect(result.requests).toHaveLength(1);
-  expect(Object.keys(result.requests[0]?.questions ?? {})).toEqual(['word-1', 'word-2']);
+  expect(result.requests).toHaveLength(2);
+  expect(result.requests.map((r) => Object.keys(r.questions))).toEqual([
+    ['word-1', 'word-1:refers'],
+    ['word-2', 'word-2:refers'],
+  ]);
 });
 test('bannedQuestions with a start names the candidates from word-<start + 1>', () => {
   const candidate = { ...line, ...entry, word: 'invocation' };
-  expect(Object.keys(lib.bannedQuestions([candidate], 16))).toEqual(['word-17']);
+  expect(Object.keys(lib.bannedQuestions([candidate], 16))).toEqual(['word-17', 'word-17:refers']);
 });
 test('bannedState and bannedQuestions name each candidate word-n with a noul and glossary sense', () => {
   const candidate = { ...line, ...entry, word: 'invocation' };
@@ -479,8 +477,13 @@ test('bannedState and bannedQuestions name each candidate word-n with a noul and
     candidates: { 'word-1': { word: 'invocation', entry: 'Call', location: 'line-1' } },
   });
   const questions = lib.bannedQuestions([candidate, candidate]);
-  expect(Object.keys(questions)).toEqual(['word-1', 'word-2']);
+  expect(Object.keys(questions)).toEqual(['word-1', 'word-1:refers', 'word-2', 'word-2:refers']);
   expect(questions['word-1']?.type).toBe('noul');
+  expect(questions['word-2:refers']?.type).toBe('noul');
+  expect(questions['word-2:refers']?.instructions).toBe(
+    'In candidates.word-2, read its location in lines and its glossary entry in entries. Does "invocation" on that line refer to the thing the "Call" entry defines?',
+  );
+  expect(lib.BANNED_REFERS).toBe(0.5);
   expect(questions['word-2']?.instructions).toBe(
     'In candidates.word-2, read its location in lines and its glossary entry in entries (including avoidText). Is "invocation" used in the sense that entry forbids, where "Call" should be used instead?',
   );
@@ -530,6 +533,15 @@ test('bannedSelect asks the first three candidates per word, entry and file', ()
 const asked = (rows: [string, number][]) =>
   rows.map(([file, n]) => ({ ...line, ...entry, word: 'invocation', file, line: n }));
 const noulAnswer = (noul: number) => ({ type: 'noul', noul });
+/** `word-<n>` answers, each with a `word-<n>:refers` of 1. */
+const refering = (answers: Record<string, unknown>) => ({
+  ...answers,
+  ...Object.fromEntries(
+    Object.keys(answers)
+      .filter((id) => !id.includes(':'))
+      .map((id) => [`${id}:refers`, noulAnswer(1)]),
+  ),
+});
 test('bannedHits flags a file once, on its highest-scoring flagged line, the earlier on a tie', () => {
   const rows = asked([
     ['a.md', 1],
@@ -537,10 +549,10 @@ test('bannedHits flags a file once, on its highest-scoring flagged line, the ear
     ['a.md', 3],
   ]);
   const answers = { 'word-1': noulAnswer(0.85), 'word-2': noulAnswer(0.97), 'word-3': noulAnswer(0.9) };
-  expect(lib.bannedHits(rows, answers)).toEqual([
+  expect(lib.bannedHits(rows, refering(answers))).toEqual([
     { file: 'a.md', line: 2, word: 'invocation', term: 'Call', yes: 0.97 },
   ]);
-  expect(lib.bannedHits(rows, { 'word-1': noulAnswer(0.9), 'word-2': noulAnswer(0.9) })).toEqual([
+  expect(lib.bannedHits(rows, refering({ 'word-1': noulAnswer(0.9), 'word-2': noulAnswer(0.9) }))).toEqual([
     { file: 'a.md', line: 1, word: 'invocation', term: 'Call', yes: 0.9 },
   ]);
 });
@@ -553,7 +565,7 @@ test('bannedHits makes a hit for each file, and for each entry of one word and f
     { ...(asked([['a.md', 4]])[0] as Candidate), term: 'Try' },
   ];
   const answers = { 'word-1': noulAnswer(0.9), 'word-2': noulAnswer(0.9), 'word-3': noulAnswer(0.9) };
-  expect(lib.bannedHits(rows, answers).map((h) => [h.file, h.term])).toEqual([
+  expect(lib.bannedHits(rows, refering(answers)).map((h) => [h.file, h.term])).toEqual([
     ['a.md', 'Call'],
     ['b.md', 'Call'],
     ['a.md', 'Try'],
@@ -571,7 +583,19 @@ test('bannedHits ignores a missing or non-noul answer, and flags at 0.8 but not 
     'word-2': noulAnswer(0.799),
     'word-3': { type: 'choice', choice: 'x' },
   };
-  expect(lib.bannedHits(rows, answers).map((h) => h.file)).toEqual(['a.md']);
+  expect(lib.bannedHits(rows, refering(answers)).map((h) => h.file)).toEqual(['a.md']);
+});
+test('bannedHits needs the first noul at 0.8 and the second at 0.5', () => {
+  const rows = asked([['a.md', 1]]);
+  const hits = (yes: number, refers?: number) =>
+    lib.bannedHits(rows, {
+      'word-1': noulAnswer(yes),
+      ...(refers === undefined ? {} : { 'word-1:refers': noulAnswer(refers) }),
+    }).length;
+  expect(hits(0.8, 0.5)).toBe(1);
+  expect(hits(0.8, 0.49)).toBe(0);
+  expect(hits(0.79, 1)).toBe(0);
+  expect(hits(0.97)).toBe(0);
 });
 test('bannedSelect lets a keyword line not take the place of a later comment line', () => {
   const result = select(['a.ts', 'type Foo = string;'], ['a.ts', '// the type of it']);
@@ -611,10 +635,10 @@ test('the stage asks about a keyword in a string, a trailing comment and a templ
       '+++ b/c.ts\n@@ -0,0 +1,1 @@\n+return `no such type`;\n';
     const out = join(repo.home, 'out');
     const result = stage(repo, diff);
-    expect(Object.keys(JSON.parse(readFileSync(join(out, 'jev-request.json'), 'utf8')).questions)).toEqual([
-      'word-1',
-      'word-2',
-      'word-3',
+    expect(requestQuestions(out, 3)).toEqual([
+      ['word-1', 'word-1:refers'],
+      ['word-2', 'word-2:refers'],
+      ['word-3', 'word-3:refers'],
     ]);
     expect(result.output.jev).toMatchObject({
       candidates: 3,
@@ -629,9 +653,9 @@ test('the stage asks the comment line and the identifier line, skips the keyword
     const diff = '+++ b/a.ts\n@@ -0,0 +1,3 @@\n+type Foo = string;\n+// which type of step\n+const stepType = 1;\n';
     const out = join(repo.home, 'out');
     const result = stage(repo, diff);
-    expect(Object.keys(JSON.parse(readFileSync(join(out, 'jev-request.json'), 'utf8')).questions)).toEqual([
-      'word-1',
-      'word-2',
+    expect(requestQuestions(out, 2)).toEqual([
+      ['word-1', 'word-1:refers'],
+      ['word-2', 'word-2:refers'],
     ]);
     expect(result.output.hits).toEqual([{ file: 'a.ts', line: 3, word: 'type', term: 'Kind', yes: 0.97 }]);
     expect(result.output.jev).toEqual({
@@ -640,7 +664,7 @@ test('the stage asks the comment line and the identifier line, skips the keyword
       note: '',
       threshold: 0.8,
       candidates: 3,
-      requests: 1,
+      requests: 2,
       skipped: { keyword: 1, moved: 0, repeat: 0, oversized: 0 },
     });
     expect(result.stderr).toContain('not asked: 1 keyword');
@@ -651,35 +675,34 @@ test('the stage asks three of five lines of one word in one file and counts two 
     setup(repo, { 'word-1': 0.05, 'word-2': 0.05, 'word-3': 0.05 });
     const diff = `+++ b/a.md\n@@ -0,0 +1,5 @@\n${Array.from({ length: 5 }, (_, i) => `+invocation ${i}\n`).join('')}`;
     const result = stage(repo, diff);
-    expect(Object.keys(JSON.parse(readFileSync(result.request, 'utf8')).questions)).toEqual([
-      'word-1',
-      'word-2',
-      'word-3',
-    ]);
+    expect(requestQuestions(join(repo.home, 'out'), 3).map(([first]) => first)).toEqual(['word-1', 'word-2', 'word-3']);
+    expect(existsSync(join(repo.home, 'out', 'jev-request-4.json'))).toBe(false);
     expect(result.output.jev).toMatchObject({ candidates: 5, skipped: { repeat: 2 } });
   });
 });
 /**
- * A `sail` ahead of the checkout's on the PATH that fails its `failing`-th `port jev ask`, as an unreachable Jev does,
- * and passes every other call through; `asks()` counts the asks it saw.
+ * A `sail` ahead of the checkout's on the PATH that fails the `port jev ask` of each request numbered in `failing` (the
+ * request file's name, `jev-request.json` being 1), as an unreachable Jev does, and passes every other call through;
+ * `asks()` counts the asks it saw.
  */
 function failingJev(repo: TempRepo, failing: number[]) {
   const dir = join(repo.home, 'failing-jev');
   mkdirSync(dir);
-  const count = join(dir, 'count');
+  const log = join(dir, 'log');
+  const names = failing.map((n) => (n === 1 ? '*/jev-request.json' : `*/jev-request-${n}.json`)).join('|');
   writeFileSync(
     join(dir, 'sail'),
     [
       '#!/bin/sh',
-      `n=$(($(cat '${count}' 2>/dev/null || echo 0) + 1))`,
-      `echo "$n" > '${count}'`,
-      `case " ${failing.join(' ')} " in *" $n "*) echo "jev ask: Jev could not be reached" >&2; exit 1;; esac`,
+      'for last; do :; done',
+      `echo "$last" >> '${log}'`,
+      `case "$last" in ${names}) echo "jev ask: Jev could not be reached" >&2; exit 1;; esac`,
       `exec '${join(import.meta.dir, '../../bin/sail')}' "$@"`,
       '',
     ].join('\n'),
     { mode: 0o755 },
   );
-  return { dir, asks: () => Number(readFileSync(count, 'utf8').trim()) };
+  return { dir, asks: () => readFileSync(log, 'utf8').trim().split('\n').length };
 }
 const low = (n: number, high: Record<string, number>) => ({
   ...Object.fromEntries(Array.from({ length: n }, (_, i) => [`word-${i + 1}`, 0.05])),
@@ -687,23 +710,23 @@ const low = (n: number, high: Record<string, number>) => ({
 });
 const candidateFiles = (n: number) =>
   Array.from({ length: n }, (_, i) => `+++ b/f${i + 1}.md\n@@ -0,0 +1 @@\n+invocation\n`).join('');
-test('the stage keeps the first request’s hits and notes the second, refused, as not asked', async () => {
+const NOT_ASKED = /^\d+ of \d+ requests not asked: jev ask: Jev could not be reached$/;
+test('the stage keeps the first request’s hit and notes the refused second as not asked', async () => {
   await withTempRepo((repo) => {
-    setup(repo, low(17, { 'word-2': 0.97, 'word-17': 0.97 }));
+    setup(repo, low(3, { 'word-1': 0.97 }));
     const jev = failingJev(repo, [2]);
-    const result = stage(repo, candidateFiles(17), undefined, jev.dir);
+    const result = stage(repo, candidateFiles(3), undefined, jev.dir);
     expect(result.code).toBe(0);
-    expect(jev.asks()).toBe(2);
-    expect(result.output.hits).toEqual([{ file: 'f2.md', line: 1, word: 'invocation', term: 'Call', yes: 0.97 }]);
-    expect(result.output.jev).toMatchObject({ asked: true, failed: false, requests: 2 });
-    expect(result.output.jev.note).toBe('1 of 2 requests not asked: jev ask: Jev could not be reached');
+    expect(result.output.hits).toEqual([{ file: 'f1.md', line: 1, word: 'invocation', term: 'Call', yes: 0.97 }]);
+    expect(result.output.jev).toMatchObject({ asked: true, failed: false, requests: 3 });
+    expect(result.output.jev.note).toMatch(NOT_ASKED);
   });
 }, 120_000);
 test('the stage reports a failed check when every request it asked was refused', async () => {
   await withTempRepo((repo) => {
-    setup(repo, low(17, { 'word-1': 0.97 }));
-    const jev = failingJev(repo, [1, 2]);
-    const result = stage(repo, candidateFiles(17), undefined, jev.dir);
+    setup(repo, low(3, { 'word-1': 0.97 }));
+    const jev = failingJev(repo, [1, 2, 3]);
+    const result = stage(repo, candidateFiles(3), undefined, jev.dir);
     expect(result.code).toBe(0);
     expect(result.output.hits).toEqual([]);
     expect(result.output.jev).toMatchObject({
@@ -713,14 +736,14 @@ test('the stage reports a failed check when every request it asked was refused',
     });
   });
 }, 120_000);
-test('the stage stops asking at the first request Jev fails, leaving the rest not asked', async () => {
+test('the stage stops starting requests once Jev fails one, leaving the rest not asked', async () => {
   await withTempRepo((repo) => {
-    setup(repo, low(40, { 'word-1': 0.97, 'word-40': 0.97 }));
+    setup(repo, low(6, { 'word-1': 0.97, 'word-6': 0.97 }));
     const jev = failingJev(repo, [2]);
-    const result = stage(repo, candidateFiles(40), undefined, jev.dir);
-    expect(jev.asks()).toBe(2);
+    const result = stage(repo, candidateFiles(6), undefined, jev.dir);
+    expect(jev.asks()).toBeLessThan(6);
     expect(result.output.hits).toEqual([{ file: 'f1.md', line: 1, word: 'invocation', term: 'Call', yes: 0.97 }]);
-    expect(result.output.jev.note).toBe('2 of 3 requests not asked: jev ask: Jev could not be reached');
+    expect(result.output.jev.note).toMatch(NOT_ASKED);
   });
 }, 120_000);
 test('bannedAsk asks no request once its deadline has passed, and counts the rest not asked', () => {

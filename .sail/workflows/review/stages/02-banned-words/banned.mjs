@@ -1,9 +1,10 @@
-// Find added uses of CONTEXT.md's avoided words on the diff's added lines, never in commit messages; Jev judges every candidate in requests of 16, stopping at a failed request or its time limit, leaving out a line the diff also removes (moved or re-wrapped), a JS keyword on a code line outside its string literals and comments and occurrences after the third of a word in one file (one hit per file, on its highest-scoring line), and counting what it didn't ask.
+// Find added uses of CONTEXT.md's avoided words on the diff's added lines, never in commit messages; Jev judges every candidate in a request of its own, with two nouls, stopping at a failed request or its time limit, leaving out a line the diff also removes (moved or re-wrapped), a JS keyword on a code line outside its string literals and comments and occurrences after the third of a word in one file (one hit per file, on its highest-scoring line), and counting what it didn't ask.
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 const {
   BANNED_YES,
+  BANNED_REFERS,
   parseGlossary,
   bannedLines,
   bannedCandidates,
@@ -58,6 +59,6 @@ const notAsked = [
   .filter(Boolean)
   .join(', ');
 process.stderr.write(
-  `${hits.length} hits; glossary: ${glossary.entries} entries, ${glossary.words} words; jev: ${answer.asked ? `${asked.length} asked in ${requests.length} request(s), ${hits.length} over ${BANNED_YES}${notAsked ? `; not asked: ${notAsked}` : ''}${answer.note ? `; ${answer.note}` : ''}` : `not asked (${jev.note})`}\n`,
+  `${hits.length} hits; glossary: ${glossary.entries} entries, ${glossary.words} words; jev: ${answer.asked ? `${asked.length} asked in ${requests.length} request(s), ${hits.length} flagged (${BANNED_YES} and ${BANNED_REFERS})${notAsked ? `; not asked: ${notAsked}` : ''}${answer.note ? `; ${answer.note}` : ''}` : `not asked (${jev.note})`}\n`,
 );
 console.log(JSON.stringify({ hits, glossary, jev }));

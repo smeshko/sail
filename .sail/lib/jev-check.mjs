@@ -348,16 +348,17 @@ export function leakRequests(lines) {
 
 // --- banned-words: is each avoided word used in the sense the glossary forbids?
 
-/** Measured on real requests: it stays 0.8, in requests of BANNED_BATCH candidates. */
+/**
+ * Applied to a candidate asked alone in its request, with BANNED_REFERS. Measured on 17 lines a judge sent to fix and 53
+ * it dropped: 0.8 alone flags 11 of the 17 and 10 of the 53; with the second noul at 0.5, 10 of 17 and 9 of 53; and 5 of
+ * 500 random history candidates.
+ */
 export const BANNED_YES = 0.8;
+/** The probability of yes of `word-<n>:refers`, whether the word refers to the thing the entry defines, at or above which a line is flagged. */
+export const BANNED_REFERS = 0.5;
 export const BANNED_CONTEXT = 3;
 /** The most occurrences of a word, entry and file asked about. */
 export const BANNED_OCCURRENCES = 3;
-/**
- * Candidates to a request. The same real lines score 0.55-0.60 in a request of 64 and 0.85-0.86 in one of 16, and
- * requests of 4 or 1 flag more wrong lines at 1.5 to 2.5 times the tokens.
- */
-export const BANNED_BATCH = 16;
 export const BANNED_MAX_REQUEST_BYTES = MAX_REQUEST_BYTES;
 
 export function parseGlossary(text) {
@@ -612,14 +613,16 @@ export function bannedSelect(candidates, removed = new Set()) {
 
 /**
  * The hits of the asked candidates (`asked[n - 1]` is `word-<n>`): each whose `word-<n>` answer is a noul at or above
- * BANNED_YES, then one per word, entry and file, the highest `yes` and the earlier candidate on a tie, in candidate order:
+ * BANNED_YES and whose `word-<n>:refers` answer is one at or above BANNED_REFERS, then one per word, entry and file, the highest `yes` and the earlier candidate on a tie, in candidate order:
  * `[{ file, line, word, term, yes }]`.
  */
 export function bannedHits(asked, answers) {
   const best = new Map();
   asked.forEach((candidate, i) => {
     const answer = answers[`word-${i + 1}`];
+    const refers = answers[`word-${i + 1}:refers`];
     if (answer?.type !== 'noul' || typeof answer.noul !== 'number' || answer.noul < BANNED_YES) return;
+    if (refers?.type !== 'noul' || typeof refers.noul !== 'number' || refers.noul < BANNED_REFERS) return;
     const key = JSON.stringify([candidate.word, candidate.term, candidate.file]);
     if (!best.has(key) || answer.noul > best.get(key).yes) best.set(key, { index: i, yes: answer.noul });
   });
@@ -637,35 +640,27 @@ const bannedBytes = (candidates, start) =>
   );
 
 /**
- * Every candidate in requests of at most BANNED_BATCH that each fit BANNED_MAX_REQUEST_BYTES, numbered `word-<n>`
- * across them: `{ requests: [{ candidates, state, questions }], asked, oversized }`. A candidate too large to fit a
- * request alone is in none and counted in `oversized`; `asked[n - 1]` is `word-<n>`.
+ * Every candidate in a request of its own, each fitting BANNED_MAX_REQUEST_BYTES, numbered `word-<n>` across them:
+ * `{ requests: [{ candidates, state, questions }], asked, oversized }`. A candidate too large to fit a request alone is
+ * in none and counted in `oversized`; `asked[n - 1]` is `word-<n>`.
  */
 export function bannedRequests(candidates) {
   const requests = [];
   const asked = [];
   let oversized = 0;
-  let open = [];
-  const close = () => {
-    if (!open.length) return;
-    const start = asked.length;
-    requests.push({ candidates: open, state: bannedState(open, start), questions: bannedQuestions(open, start) });
-    asked.push(...open);
-    open = [];
-  };
   for (const candidate of candidates) {
     if (bannedBytes([candidate], asked.length) > BANNED_MAX_REQUEST_BYTES) {
       oversized++;
       continue;
     }
-    if (
-      open.length >= BANNED_BATCH ||
-      (open.length && bannedBytes([...open, candidate], asked.length) > BANNED_MAX_REQUEST_BYTES)
-    )
-      close();
-    open.push(candidate);
+    const start = asked.length;
+    requests.push({
+      candidates: [candidate],
+      state: bannedState([candidate], start),
+      questions: bannedQuestions([candidate], start),
+    });
+    asked.push(candidate);
   }
-  close();
   return { requests, asked, oversized };
 }
 /**
@@ -694,16 +689,30 @@ export function bannedAsk(requests, ask, { deadlineMs = BANNED_ASK_MS, now = Dat
   }
   return { results, unasked: 0, reason: '' };
 }
+/** Two nouls per candidate: `word-<n>`, whether the word is used in the sense the entry forbids, and `word-<n>:refers`, whether it refers to what the entry defines. */
 export function bannedQuestions(candidates, start = 0) {
   return Object.fromEntries(
-    candidates.map((candidate, i) => [
-      `word-${start + i + 1}`,
-      noul(
-        `In candidates.word-${start + i + 1}, read its location in lines and its glossary entry in entries (including avoidText). Is "${candidate.word}" used in the sense that entry forbids, where "${candidate.term}" should be used instead?`,
-        'The word names what the glossary entry defines, so the entry’s term belongs there.',
-        'The word means something else, is mentioned as a word, or is a name the line cannot change, such as a language keyword or another system’s API.',
-      ),
-    ]),
+    candidates.flatMap((candidate, i) => {
+      const id = `word-${start + i + 1}`;
+      return [
+        [
+          id,
+          noul(
+            `In candidates.${id}, read its location in lines and its glossary entry in entries (including avoidText). Is "${candidate.word}" used in the sense that entry forbids, where "${candidate.term}" should be used instead?`,
+            'The word names what the glossary entry defines, so the entry’s term belongs there.',
+            'The word means something else, is mentioned as a word, or is a name the line cannot change, such as a language keyword or another system’s API.',
+          ),
+        ],
+        [
+          `${id}:refers`,
+          noul(
+            `In candidates.${id}, read its location in lines and its glossary entry in entries. Does "${candidate.word}" on that line refer to the thing the "${candidate.term}" entry defines?`,
+            'The word refers to the thing the entry defines.',
+            'The word refers to something else, or is not used to refer to anything.',
+          ),
+        ],
+      ];
+    }),
   );
 }
 
