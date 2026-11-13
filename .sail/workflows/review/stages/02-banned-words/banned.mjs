@@ -1,4 +1,4 @@
-// Find added uses of CONTEXT.md's avoided words; Jev judges every candidate in requests of 16, stopping at a failed request or its time limit, leaving out a JS keyword on a code line outside its string literals and comments and repeats of a word in one file, and counting what it didn't ask.
+// Find added uses of CONTEXT.md's avoided words on the diff's added lines, never in commit messages; Jev judges every candidate in requests of 16, stopping at a failed request or its time limit, leaving out a JS keyword on a code line outside its string literals and comments and repeats of a word in one file, and counting what it didn't ask.
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
@@ -6,24 +6,17 @@ const {
   BANNED_YES,
   parseGlossary,
   bannedLines,
-  messageContext,
-  commitLines,
   bannedCandidates,
   bannedSelect,
   bannedRequests,
   bannedAsk,
   askNouls,
   yesses,
-  git,
 } = await import(join(dirname(process.env.SAIL_CONFIG), 'lib', 'jev-check.mjs'));
 const present = existsSync('CONTEXT.md');
 const entries = present ? parseGlossary(readFileSync('CONTEXT.md', 'utf8')) : [];
 const diff = readFileSync(process.env.INPUT_DIFF, 'utf8');
-const base = readFileSync(process.env.INPUT_BASE, 'utf8').trim();
-const lines = [
-  ...bannedLines(diff),
-  ...messageContext(commitLines(git(['log', '--format=%h%x00%B%x1e', `${base}..HEAD`]))),
-];
+const lines = bannedLines(diff);
 const allCandidates = bannedCandidates(lines, entries);
 const { selected, keyword, repeat } = bannedSelect(allCandidates);
 const { requests, asked, oversized } = bannedRequests(selected);

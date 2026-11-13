@@ -446,17 +446,6 @@ export function bannedLines(diffText) {
   return lines;
 }
 
-export function messageContext(lines) {
-  return lines.map((each) => ({
-    ...each,
-    context: lines
-      .filter(
-        (other) => other !== each && other.file === each.file && Math.abs(other.line - each.line) <= BANNED_CONTEXT,
-      )
-      .map(({ line, text }) => ({ line, text })),
-  }));
-}
-
 /** An avoided word, with an optional plural s, that touches no letter, digit or `_`, and is no ticket key (`ADW-387`). */
 export function bannedPattern(word) {
   const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '[\\s-]+');

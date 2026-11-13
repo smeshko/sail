@@ -23,7 +23,6 @@ interface Lib {
   BANNED_YES: number;
   parseGlossary(text: string): Entry[];
   bannedLines(diff: string): Line[];
-  messageContext(lines: Omit<Line, 'context'>[]): Line[];
   bannedCandidates(lines: Line[], glossary: Entry[]): Candidate[];
   bannedPattern(word: string): RegExp;
   bannedMatches(pattern: RegExp, text: string): boolean;
@@ -194,15 +193,15 @@ test('the stage asks Jev nothing when no added line holds an avoided word', asyn
     expect(existsSync(result.request)).toBe(false);
   });
 });
-test('the stage scans commit messages since the base', async () => {
+test('the stage makes no candidate of a commit message and asks Jev nothing', async () => {
   await withTempRepo((repo) => {
     setup(repo, { 'word-1': 0.97 });
     const base = repo.git('rev-parse', 'HEAD').trim();
     repo.git('commit', '--allow-empty', '-m', 'invocation');
-    const sha = repo.git('rev-parse', '--short', 'HEAD').trim();
-    expect(stage(repo, '', base).output.hits).toEqual([
-      { file: `commit ${sha}`, line: 1, word: 'invocation', term: 'Call', yes: 0.97 },
-    ]);
+    const result = stage(repo, '', base);
+    expect(result.output.hits).toEqual([]);
+    expect(result.output.jev).toMatchObject({ candidates: 0, asked: false });
+    expect(existsSync(result.request)).toBe(false);
   });
 });
 test('the stage, with a Jev answering 402, exits 0 and reports the port failure with the credits message', async () => {
@@ -444,29 +443,6 @@ test('bannedLines skips glossary, generated and data paths and preserves new-sid
     { file: 'a.ts', line: 9, text: 'other', context: [] },
   ]);
 });
-test('messageContext uses only nearby lines from the same commit', () => {
-  expect(
-    lib.messageContext([
-      { file: 'commit abc', line: 1, text: 'subject' },
-      { file: 'commit abc', line: 3, text: 'body' },
-      { file: 'commit abc', line: 6, text: 'far' },
-      { file: 'commit def', line: 1, text: 'other' },
-    ]),
-  ).toEqual([
-    { file: 'commit abc', line: 1, text: 'subject', context: [{ line: 3, text: 'body' }] },
-    {
-      file: 'commit abc',
-      line: 3,
-      text: 'body',
-      context: [
-        { line: 1, text: 'subject' },
-        { line: 6, text: 'far' },
-      ],
-    },
-    { file: 'commit abc', line: 6, text: 'far', context: [{ line: 3, text: 'body' }] },
-    { file: 'commit def', line: 1, text: 'other', context: [] },
-  ]);
-});
 test('bannedRequests makes requests of 16, numbering word-n across them', () => {
   const small = { ...line, ...entry, word: 'invocation' };
   const result = lib.bannedRequests(Array.from({ length: 17 }, () => small));
@@ -518,11 +494,10 @@ test('bannedSelect leaves out a JS keyword on a code line of a TypeScript file',
   expect(select(['a.ts', 'type Foo = string;'])).toMatchObject({ selected: [], keyword: 1, repeat: 0 });
   expect(select(['a.ts', 'class A extends B {}'])).toMatchObject({ selected: [], keyword: 1 });
 });
-test('bannedSelect keeps an identifier, a comment, a doc line and a commit message that hold the word', () => {
+test('bannedSelect keeps an identifier, a comment, a doc line that hold the word', () => {
   expect(select(['a.ts', 'const stepType = 1;']).selected).toHaveLength(1);
   expect(select(['a.ts', '// which type of step']).selected).toHaveLength(1);
   expect(select(['note.md', 'type Foo = string;']).selected).toHaveLength(1);
-  expect(select(['commit abc1234', 'return type;']).selected).toHaveLength(1);
 });
 test('bannedSelect asks one candidate per word, entry and file, the first', () => {
   const result = select(
